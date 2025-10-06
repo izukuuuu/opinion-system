@@ -43,9 +43,15 @@
             <span v-else>点击或拖拽文件到此处</span>
           </label>
           <div class="upload-form__actions">
-            <button type="submit" :disabled="!canUpload">
+            <button type="submit" :disabled="uploading">
               {{ uploading ? '上传中…' : '上传并归档' }}
             </button>
+            <p
+              v-if="uploadHelper && !uploadError && !uploadSuccess"
+              class="upload-form__message upload-form__message--hint"
+            >
+              {{ uploadHelper }}
+            </p>
             <p v-if="uploadError" class="upload-form__message upload-form__message--error">{{ uploadError }}</p>
             <p v-if="uploadSuccess" class="upload-form__message upload-form__message--success">{{ uploadSuccess }}</p>
           </div>
@@ -115,9 +121,12 @@ const uploading = ref(false)
 const uploadError = ref('')
 const uploadSuccess = ref('')
 
-const canUpload = computed(
-  () => Boolean(selectedProject.value && uploadFile.value && !uploading.value)
-)
+const uploadHelper = computed(() => {
+  if (uploading.value) return ''
+  if (!selectedProject.value) return '请先在左侧选择一个项目'
+  if (!uploadFile.value) return '请选择需要上传的表格文件'
+  return ''
+})
 
 const fetchProjects = async () => {
   projectLoading.value = true
@@ -173,8 +182,13 @@ const handleFileChange = (event) => {
 }
 
 const uploadDataset = async () => {
-  if (!canUpload.value) {
-    uploadError.value = '请选择项目和文件'
+  if (!selectedProject.value) {
+    uploadError.value = '请选择一个项目'
+    return
+  }
+
+  if (!uploadFile.value) {
+    uploadError.value = '请选择需要上传的文件'
     return
   }
 
@@ -439,6 +453,10 @@ onMounted(fetchProjects)
 
 .upload-form__message--success {
   color: #059669;
+}
+
+.upload-form__message--hint {
+  color: #1d4ed8;
 }
 
 .data-manager__placeholder {
