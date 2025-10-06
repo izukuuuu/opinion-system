@@ -16,9 +16,12 @@ LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SRC_DIR = PROJECT_ROOT / "backend" / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+BACKEND_DIR = PROJECT_ROOT / "backend"
+SRC_DIR = BACKEND_DIR / "src"
+
+for path in (BACKEND_DIR, SRC_DIR):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from src.project import get_project_manager  # type: ignore
 from src.project.storage import (  # type: ignore
