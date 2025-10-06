@@ -72,14 +72,24 @@ def _is_project_root(path: Path) -> bool:
 
 def get_data_root() -> Path:
     """
-    获取数据根目录
-    
+    获取数据根目录。
+
+    优先使用 backend/data 目录，以便与仓库分离管理。如果 backend
+    目录不存在，则回退到项目根目录下的 data 目录。
+
     Returns:
         Path: 数据根目录路径
     """
-    # 使用项目根目录下的data文件夹
     project_root = get_project_root()
-    return project_root / "data"
+    backend_dir = project_root / "backend"
+    if backend_dir.exists():
+        backend_data = backend_dir / "data"
+        backend_data.mkdir(parents=True, exist_ok=True)
+        return backend_data
+
+    data_dir = project_root / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
 
 
 def get_logs_root() -> Path:
