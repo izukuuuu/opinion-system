@@ -3,11 +3,12 @@
     <h2>{{ msg }}</h2>
     <p>
       你可以在 <code>frontend</code> 目录中开发 Vue 3 前端，并通过环境变量或接口地址与后端交互。
+      当前版本提供了项目面板与项目数据归档两大模块。
     </p>
     <ul>
-      <li>运行 <code>npm install</code> 安装依赖</li>
+      <li>运行 <code>npm install</code> 安装依赖（已包含 @heroicons/vue）</li>
       <li>执行 <code>npm run dev</code> 启动开发服务器</li>
-      <li>使用 <code>npm run build</code> 构建生产包</li>
+      <li>前往“项目数据”上传 Excel/CSV，即可生成对应的 PKL 与 JSON</li>
     </ul>
   </section>
 </template>

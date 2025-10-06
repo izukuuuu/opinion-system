@@ -21,6 +21,10 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from src.project import get_project_manager  # type: ignore
+from src.project.storage import (  # type: ignore
+    list_project_datasets,
+    store_uploaded_dataset,
+)
 
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 PROJECT_MANAGER = get_project_manager()
@@ -327,6 +331,60 @@ def create_project():
     return jsonify({"status": "ok", "project": project})
 
 
+@app.get("/api/projects/<string:name>/datasets")
+def project_datasets(name: str):
+    try:
+        datasets = list_project_datasets(name)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except Exception:  # pragma: no cover - defensive logging
+        LOGGER.exception("Failed to read dataset manifest for project %s", name)
+        return jsonify({"status": "error", "message": "无法读取项目数据清单"}), 500
+    return jsonify({"status": "ok", "datasets": datasets})
+
+
+@app.post("/api/projects/<string:name>/datasets")
+def upload_project_dataset(name: str):
+    file = request.files.get("file")
+    if not file or not getattr(file, "filename", ""):
+        return jsonify({"status": "error", "message": "请选择需要上传的表格文件"}), 400
+
+    try:
+        dataset = store_uploaded_dataset(name, file)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except Exception:  # pragma: no cover - defensive logging
+        LOGGER.exception("Failed to store dataset for project %s", name)
+        try:
+            PROJECT_MANAGER.log_operation(
+                name,
+                "import_dataset",
+                params={"source": "api"},
+                success=False,
+            )
+        except Exception:  # pragma: no cover - avoid cascading failures
+            LOGGER.debug("Unable to persist failed dataset log for project %s", name, exc_info=True)
+        return jsonify({"status": "error", "message": "数据集保存失败"}), 500
+
+    try:
+        PROJECT_MANAGER.log_operation(
+            name,
+            "import_dataset",
+            params={
+                "dataset_id": dataset.get("id"),
+                "filename": dataset.get("display_name"),
+                "rows": dataset.get("rows"),
+                "columns": dataset.get("column_count"),
+                "source": "api",
+            },
+            success=True,
+        )
+    except Exception:  # pragma: no cover - logging should not break API
+        LOGGER.debug("Failed to persist dataset upload log for project %s", name, exc_info=True)
+
+    return jsonify({"status": "ok", "dataset": dataset}), 201
+
+
 @app.route("/")
 def root():
     return jsonify({"message": "OpinionSystem API", "endpoints": [
@@ -341,6 +399,7 @@ def root():
         "/api/analyze",
         "/api/projects",
         "/api/projects/<name>",
+        "/api/projects/<name>/datasets",
     ]})
 
 
