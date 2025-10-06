@@ -223,7 +223,22 @@ def main() -> None:
     host = backend_cfg.get("host", "127.0.0.1")
     port = int(backend_cfg.get("port", 8000))
     LOGGER.info("Starting OpinionSystem backend on %s:%s", host, port)
-    app.run(host=host, port=port)
+    try:
+        app.run(host=host, port=port)
+    except OSError as exc:  # pragma: no cover - defensive handling for production issues
+        # Windows reports WinError 10013 when a port is blocked by permissions/firewall rules.
+        # On Unix the equivalent errno is typically 13 (EACCES) or 98 (EADDRINUSE).
+        winerror = getattr(exc, "winerror", None)
+        if winerror == 10013 or exc.errno in {13, 98, 10013}:  # type: ignore[arg-type]
+            LOGGER.error(
+                "Unable to bind OpinionSystem backend to %s:%s. "
+                "The port is either already in use or blocked by your operating system. "
+                "Please choose a different port in config.yaml or free the existing one.",
+                host,
+                port,
+            )
+            raise SystemExit(1) from exc
+        raise
 
 
 if __name__ == "__main__":
