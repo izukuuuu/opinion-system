@@ -62,11 +62,15 @@ python main.py AnalyzePipeline --topic 示例专题 --start 2025-01-01 --end 202
 
 ```bash
 cd frontend
-npm install
+# 如需手动安装依赖，可运行（根据你的 Node 架构自行选择镜像源）：
+npm install vue@^3.4.21 vue-router@^4.5.1 @vitejs/plugin-vue@^5.0.4 vite@^5.2.0
+# 安装完成后即可启动或构建
 npm run dev       # 启动开发服务器（默认 5173 端口）
 npm run build     # 生成生产构建
 npm run preview   # 预览生产构建
 ```
+
+> **提示**：如需避免 ARM64 与 x86_64 之间的二进制差异，可以在自己的分支或部署仓库中忽略 `package.json`、`package-lock.json`，仅保留上述安装指令。若需要锁定依赖版本，可在本地运行 `npm install --package-lock-only` 生成锁定文件。
 
 你可以在 `frontend/src` 中新增页面、组件或接口封装，随后与后端接口联调。当前示例页面包含一个欢迎组件，方便快速验证运行环境。
 
