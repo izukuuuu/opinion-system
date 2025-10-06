@@ -1,0 +1,19 @@
+---
+alwaysApply: true
+---
+
+Project Structure & Management
+- Keep a clean separation of source code, tests, data, docs and configuration into dedicated directories.
+- Provide a single Python “paths” module that is executed at build-time; every import or file reference must be a relative path rooted at the project folder—no hard-coded absolute paths.
+- Create a dedicated logging package at start-up and inject the same logger instance into every feature module; all printing and persistence go through this logger.
+
+Code & Style Rules
+- Every Python file must open with a triple-quoted header that states its single-sentence purpose.
+- Type-annotate every function and class; supply a descriptive docstring for each, following PEP 257. Update docstrings immediately when behaviour changes.
+- Console / log output format:  
+  [module]-success|fail (masked green|red) + concise action description  
+  Example: [data_loader]-success (green) Loaded 42 records in 0.12 s
+
+Design & Robustness
+- Modular layout: models/, services/, controllers/, utils/ must live in separate files; cross-module communication only through clearly defined interfaces—no circular imports.
+- Wrap any block that can raise in try/except; log the full traceback at the lowest level that can handle the error. Silent except: blocks are forbidden; either recover, re-raise, or abort with an explicit message.

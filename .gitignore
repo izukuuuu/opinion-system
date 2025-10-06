@@ -1,0 +1,115 @@
+# OpinionSystem .gitignore
+
+# 数据文件
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.svg
+*.ico
+
+# 文档文件
+*.html
+*.htm
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 虚拟环境
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 日志文件
+*.log
+logs/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# 数据目录（可选，根据需求调整）
+# data/
+# data/*/warehouse/
+# data/*/processed/
+# data/*/reports/
+# data/*/results/
+
+# 但保留数据目录结构
+!data/
+!data/*/
+!data/*/*/
+
+# 配置文件（保留）
+!configs/
+!configs/*.yaml
+!configs/*.yml
+!configs/*.txt
+
+# 模板文件（保留）
+!templates/
+!templates/*.j2
+
+# 源代码（保留）
+!src/
+!src/**/*.py
+
+# 项目文件（保留）
+!requirements.txt
+!README.md
+!cli.py
+!test_*.py
