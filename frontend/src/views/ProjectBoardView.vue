@@ -116,19 +116,20 @@ onMounted(fetchProjects)
 .layout {
   display: grid;
   grid-template-columns: 320px 1fr;
-  min-height: 100vh;
-  background: linear-gradient(180deg, #f6f8fb 0%, #ffffff 100%);
-  color: #1f2933;
+  gap: 2.5rem;
+  color: #0f172a;
   font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .layout__sidebar {
-  padding: 2.5rem 2rem;
-  background: rgba(248, 250, 252, 0.75);
-  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 2.25rem 2rem;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 28px;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 25px 55px -22px rgba(30, 64, 175, 0.3);
 }
 
 .layout__title {
@@ -178,31 +179,33 @@ onMounted(fetchProjects)
   gap: 0.75rem;
   flex: 1;
   overflow-y: auto;
+  max-height: 60vh;
+  padding-right: 0.35rem;
 }
 
 .layout__project-item button {
   width: 100%;
   border: none;
-  background: #f8fafc;
-  border-radius: 12px;
-  padding: 0.9rem 1rem;
+  background: rgba(248, 250, 252, 0.9);
+  border-radius: 16px;
+  padding: 0.95rem 1.1rem;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.35rem;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
   text-align: left;
 }
 
 .layout__project-item button:hover {
-  background: #eef2ff;
   transform: translateX(4px);
+  box-shadow: 0 18px 45px rgba(37, 99, 235, 0.18);
 }
 
 .layout__project-item--active button {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(124, 58, 237, 0.12));
-  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(14, 165, 233, 0.3));
+  box-shadow: 0 24px 50px rgba(37, 99, 235, 0.28);
 }
 
 .project-name {
@@ -230,7 +233,26 @@ onMounted(fetchProjects)
 }
 
 .layout__main {
-  padding: 2.5rem 3rem;
+  padding: 0;
+}
+
+@media (max-width: 1024px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .layout__sidebar {
+    padding: 2rem;
+    border-radius: 24px;
+  }
+
+  .layout__project-list {
+    max-height: none;
+  }
+
+  .layout__main {
+    padding: 0;
+  }
 }
 
 .loading,
@@ -245,13 +267,8 @@ onMounted(fetchProjects)
 }
 
 @media (max-width: 960px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-
   .layout__sidebar {
-    border-right: none;
-    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    padding: 1.75rem 1.5rem;
   }
 }
 </style>
