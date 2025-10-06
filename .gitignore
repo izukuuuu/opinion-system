@@ -1,7 +1,8 @@
 # Python
 backend/venv/
 backend/configs/
-backend/data/
+backend/data/*
+!backend/data/.gitkeep
 __pycache__/
 *.py[cod]
 *.pyo
@@ -14,6 +15,9 @@ frontend/node_modules/
 frontend/dist/
 /frontend/package.json
 /frontend/package-lock.json
+
+backend/store/*
+!backend/store/.gitkeep
 
 # OS
 .DS_Store
