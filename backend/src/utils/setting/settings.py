@@ -5,7 +5,7 @@ import os
 import yaml
 from pathlib import Path
 from typing import Any, Dict, List
-from .paths import get_configs_root, get_project_root
+from .paths import get_configs_root, get_data_root, get_project_root
 
 
 class Settings:
@@ -48,10 +48,11 @@ class Settings:
         
         # 添加项目路径信息
         project_root = get_project_root()
+        data_root = get_data_root()
         self.configs['paths'] = {
             'project_root': str(project_root),
             'configs_dir': str(get_configs_root()),
-            'data_dir': str(project_root / 'data'),
+            'data_dir': str(data_root),
             'logs_dir': str(project_root / 'logs'),
             'templates_dir': str(project_root / 'templates')
         }

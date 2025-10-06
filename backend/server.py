@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import yaml
 from flask import Flask, jsonify, request
@@ -20,7 +20,10 @@ SRC_DIR = PROJECT_ROOT / "backend" / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from src.project import get_project_manager  # type: ignore
+
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+PROJECT_MANAGER = get_project_manager()
 
 
 def _load_config() -> Dict[str, Any]:
@@ -57,9 +60,38 @@ def _serialise_result(value: Any) -> Any:
         return str(value)
 
 
-def _execute_operation(operation: str, caller: Callable[..., Any], *args: Any, **kwargs: Any) -> Tuple[Dict[str, Any], int]:
+def _evaluate_success(result: Any) -> bool:
+    if isinstance(result, bool):
+        return result
+    if result is None:
+        return False
+    return True
+
+
+def _log_with_context(operation: str, success: bool, context: Optional[Dict[str, Any]]) -> None:
+    if not context:
+        return
+    project = context.get("project")
+    if not project:
+        return
+    params = context.get("params") or {}
+    try:
+        PROJECT_MANAGER.log_operation(project, operation, params=params, success=success)
+    except Exception:  # pragma: no cover - logging失败不影响接口
+        LOGGER.warning("Failed to persist project log for operation %s", operation, exc_info=True)
+
+
+def _execute_operation(
+    operation: str,
+    caller: Callable[..., Any],
+    *args: Any,
+    log_context: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Tuple[Dict[str, Any], int]:
     try:
         result = caller(*args, **kwargs)
+        success = _evaluate_success(result)
+        _log_with_context(operation, success, log_context)
         return {
             "status": "ok",
             "operation": operation,
@@ -67,6 +99,7 @@ def _execute_operation(operation: str, caller: Callable[..., Any], *args: Any, *
         }, 200
     except Exception as exc:  # pragma: no cover - defensive: surface backend errors
         LOGGER.exception("Error while executing operation %s", operation)
+        _log_with_context(operation, False, log_context)
         return {
             "status": "error",
             "operation": operation,
@@ -115,7 +148,16 @@ def merge_endpoint():
 
     from src.merge import run_merge  # type: ignore
 
-    response, code = _execute_operation("merge", run_merge, payload["topic"], payload["date"])
+    response, code = _execute_operation(
+        "merge",
+        run_merge,
+        payload["topic"],
+        payload["date"],
+        log_context={
+            "project": payload["topic"],
+            "params": {"date": payload["date"], "source": "api"},
+        },
+    )
     return jsonify(response), code
 
 
@@ -128,7 +170,16 @@ def clean_endpoint():
 
     from src.clean import run_clean  # type: ignore
 
-    response, code = _execute_operation("clean", run_clean, payload["topic"], payload["date"])
+    response, code = _execute_operation(
+        "clean",
+        run_clean,
+        payload["topic"],
+        payload["date"],
+        log_context={
+            "project": payload["topic"],
+            "params": {"date": payload["date"], "source": "api"},
+        },
+    )
     return jsonify(response), code
 
 
@@ -141,7 +192,16 @@ def filter_endpoint():
 
     from src.filter import run_filter  # type: ignore
 
-    response, code = _execute_operation("filter", run_filter, payload["topic"], payload["date"])
+    response, code = _execute_operation(
+        "filter",
+        run_filter,
+        payload["topic"],
+        payload["date"],
+        log_context={
+            "project": payload["topic"],
+            "params": {"date": payload["date"], "source": "api"},
+        },
+    )
     return jsonify(response), code
 
 
@@ -154,7 +214,16 @@ def upload_endpoint():
 
     from src.update import run_update  # type: ignore
 
-    response, code = _execute_operation("upload", run_update, payload["topic"], payload["date"])
+    response, code = _execute_operation(
+        "upload",
+        run_update,
+        payload["topic"],
+        payload["date"],
+        log_context={
+            "project": payload["topic"],
+            "params": {"date": payload["date"], "source": "api"},
+        },
+    )
     return jsonify(response), code
 
 
@@ -162,7 +231,11 @@ def upload_endpoint():
 def query_endpoint():
     from src.query import run_query  # type: ignore
 
-    response, code = _execute_operation("query", run_query)
+    response, code = _execute_operation(
+        "query",
+        run_query,
+        log_context={"project": "GLOBAL", "params": {"source": "api"}},
+    )
     return jsonify(response), code
 
 
@@ -176,7 +249,19 @@ def fetch_endpoint():
     from src.fetch import run_fetch  # type: ignore
 
     response, code = _execute_operation(
-        "fetch", run_fetch, payload["topic"], payload["start"], payload["end"]
+        "fetch",
+        run_fetch,
+        payload["topic"],
+        payload["start"],
+        payload["end"],
+        log_context={
+            "project": payload["topic"],
+            "params": {
+                "start": payload["start"],
+                "end": payload["end"],
+                "source": "api",
+            },
+        },
     )
     return jsonify(response), code
 
@@ -199,8 +284,47 @@ def analyze_endpoint():
         payload["start"],
         end_date=payload["end"],
         only_function=func,
+        log_context={
+            "project": payload["topic"],
+            "params": {
+                "start": payload["start"],
+                "end": payload["end"],
+                "function": func,
+                "source": "api",
+            },
+        },
     )
     return jsonify(response), code
+
+
+@app.get("/api/projects")
+def list_projects():
+    return jsonify({"status": "ok", "projects": PROJECT_MANAGER.list_projects()})
+
+
+@app.get("/api/projects/<string:name>")
+def project_detail(name: str):
+    project = PROJECT_MANAGER.get_project(name)
+    if not project:
+        return jsonify({"status": "error", "message": "Project not found"}), 404
+    return jsonify({"status": "ok", "project": project})
+
+
+@app.post("/api/projects")
+def create_project():
+    payload = request.get_json(silent=True) or {}
+    name = payload.get("name")
+    if not name:
+        return jsonify({"status": "error", "message": "Missing required field: name"}), 400
+
+    description = payload.get("description")
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None
+    project = PROJECT_MANAGER.create_or_update_project(
+        name,
+        description=description,
+        metadata=metadata,
+    )
+    return jsonify({"status": "ok", "project": project})
 
 
 @app.route("/")
@@ -215,6 +339,8 @@ def root():
         "/api/query",
         "/api/fetch",
         "/api/analyze",
+        "/api/projects",
+        "/api/projects/<name>",
     ]})
 
 
