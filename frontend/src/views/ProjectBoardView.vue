@@ -84,11 +84,8 @@
         </div>
 
         <ul class="project-list">
-          <li
-            v-for="project in projects"
-            :key="project.name"
-            :class="['project-tile', { 'project-tile--active': project.name === selectedProjectName }]"
-          >
+          <li v-for="project in projects" :key="project.name"
+            :class="['project-tile', { 'project-tile--active': project.name === selectedProjectName }]">
             <button class="project-tile__body" type="button" @click="openProject(project.name)">
               <span class="project-tile__avatar">{{ project.name.slice(0, 1).toUpperCase() }}</span>
               <div class="project-tile__info">
@@ -101,22 +98,12 @@
                 {{ statusLabel(project.status) }}
               </span>
               <div class="project-tile__actions">
-                <button
-                  type="button"
-                  class="project-tile__menu-button"
-                  @click.stop="toggleProjectMenu(project.name)"
-                  :aria-expanded="openActionMenu === project.name"
-                  title="更多操作"
-                >
+                <button type="button" class="project-tile__menu-button" @click.stop="toggleProjectMenu(project.name)"
+                  :aria-expanded="openActionMenu === project.name" title="更多操作">
                   <EllipsisHorizontalIcon aria-hidden="true" />
                 </button>
                 <transition name="dropdown-fade">
-                  <ul
-                    v-if="openActionMenu === project.name"
-                    class="project-tile__menu"
-                    role="menu"
-                    @click.stop
-                  >
+                  <ul v-if="openActionMenu === project.name" class="project-tile__menu" role="menu" @click.stop>
                     <li>
                       <button type="button" role="menuitem" @click="handleMenuView(project.name)">
                         查看项目
@@ -128,13 +115,8 @@
                       </button>
                     </li>
                     <li>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        class="project-tile__menu-danger"
-                        @click="handleMenuDelete(project.name)"
-                        :disabled="isDeleting"
-                      >
+                      <button type="button" role="menuitem" class="project-tile__menu-danger"
+                        @click="handleMenuDelete(project.name)" :disabled="isDeleting">
                         删除项目
                       </button>
                     </li>
@@ -150,14 +132,8 @@
       </aside>
 
       <main class="board__main">
-        <ProjectDashboard
-          :project="displayedProject"
-          :loading="loading"
-          :error="error"
-          :mode="viewMode"
-          @project-created="handleProjectCreated"
-          @cancel="handleDashboardCancel"
-        />
+        <ProjectDashboard :project="displayedProject" :loading="loading" :error="error" :mode="viewMode"
+          @project-created="handleProjectCreated" @cancel="handleDashboardCancel" />
       </main>
     </div>
 
@@ -173,14 +149,8 @@
               ✕
             </button>
           </header>
-          <ProjectDashboard
-            :project="null"
-            :loading="false"
-            :error="error"
-            mode="create"
-            @project-created="handleProjectCreated"
-            @cancel="handleCreateCancelled"
-          />
+          <ProjectDashboard :project="null" :loading="false" :error="error" mode="create"
+            @project-created="handleProjectCreated" @cancel="handleCreateCancelled" />
         </div>
       </div>
     </transition>
