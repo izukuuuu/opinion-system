@@ -34,33 +34,38 @@
         <span class="app-shell__brand-mark" aria-hidden="true">OS</span>
         <span class="sr-only">Opinion System 舆情监测系统</span>
       </RouterLink>
-      <nav v-if="!sidebarCollapsed" class="app-shell__nav app-shell__nav--expanded">
-        <RouterLink
-          v-for="link in navigationLinks"
-          :key="link.label"
-          :to="link.to"
-          class="app-shell__link"
-        >
-          <component :is="link.icon" class="app-shell__icon" />
-          <div class="app-shell__link-text">
-            <span class="app-shell__link-label">{{ link.label }}</span>
-            <span class="app-shell__link-description">{{ link.description }}</span>
-          </div>
-        </RouterLink>
-      </nav>
-      <nav v-else class="app-shell__nav app-shell__nav--compact">
-        <RouterLink
-          v-for="link in navigationLinks"
-          :key="link.label"
-          :to="link.to"
-          class="app-shell__link app-shell__link--compact"
-          :title="link.label"
-          :aria-label="link.label"
-        >
-          <component :is="link.icon" class="app-shell__icon app-shell__icon--compact" />
-          <span class="sr-only">{{ link.label }}</span>
-        </RouterLink>
-      </nav>
+      <div
+        class="app-shell__nav-wrapper"
+        :class="sidebarCollapsed ? 'app-shell__nav-wrapper--collapsed' : 'app-shell__nav-wrapper--expanded'"
+      >
+        <nav v-if="!sidebarCollapsed" class="app-shell__nav app-shell__nav--expanded">
+          <RouterLink
+            v-for="link in navigationLinks"
+            :key="link.label"
+            :to="link.to"
+            class="app-shell__link"
+          >
+            <component :is="link.icon" class="app-shell__icon" />
+            <div class="app-shell__link-text">
+              <span class="app-shell__link-label">{{ link.label }}</span>
+              <span class="app-shell__link-description">{{ link.description }}</span>
+            </div>
+          </RouterLink>
+        </nav>
+        <nav v-else class="app-shell__nav app-shell__nav--compact">
+          <RouterLink
+            v-for="link in navigationLinks"
+            :key="link.label"
+            :to="link.to"
+            class="app-shell__link app-shell__link--compact"
+            :title="link.label"
+            :aria-label="link.label"
+          >
+            <component :is="link.icon" class="app-shell__icon app-shell__icon--compact" />
+            <span class="sr-only">{{ link.label }}</span>
+          </RouterLink>
+        </nav>
+      </div>
     </aside>
     <div class="app-shell__main">
       <header class="app-shell__header">
@@ -91,6 +96,7 @@ import {
   BriefcaseIcon,
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
+  Cog6ToothIcon,
   DocumentArrowUpIcon,
   Squares2X2Icon
 } from '@heroicons/vue/24/outline'
@@ -114,6 +120,12 @@ const navigationLinks = [
     description: 'API调用测试',
     to: { name: 'test' },
     icon: BeakerIcon
+  },
+  {
+    label: '系统设置',
+    description: '配置数据库与模型参数',
+    to: { name: 'settings' },
+    icon: Cog6ToothIcon
   }
 ]
 
@@ -263,6 +275,17 @@ const sidebarToggleLabel = computed(() =>
   display: flex;
   flex-direction: column;
   width: 100%;
+}
+
+.app-shell__nav-wrapper {
+  margin-top: auto;
+  width: 100%;
+  display: flex;
+  justify-content: stretch;
+}
+
+.app-shell__nav-wrapper--collapsed {
+  justify-content: center;
 }
 
 .app-shell__nav--expanded {
