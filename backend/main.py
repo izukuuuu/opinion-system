@@ -24,6 +24,11 @@ def _as_success(result) -> bool:
 
     if isinstance(result, bool):
         return result
+    if isinstance(result, dict):
+        status = result.get("status")
+        if status is not None:
+            return status != "error"
+        return True
     return result is not None
 
 
@@ -66,7 +71,7 @@ def trs_merge(topic, date):
 
     result = run_merge(topic, date)
     _log_project_event(topic, "merge", {"date": date, "source": "cli"}, _as_success(result))
-    if not result:
+    if not _as_success(result):
         print(f"合并失败: {topic} - {date}")
 
 
@@ -81,7 +86,7 @@ def clean(topic, date):
 
     result = run_clean(topic, date)
     _log_project_event(topic, "clean", {"date": date, "source": "cli"}, _as_success(result))
-    if not result:
+    if not _as_success(result):
         print(f"清洗失败: {topic} - {date}")
 
 
@@ -96,7 +101,7 @@ def ai_filter(topic, date):
 
     result = run_filter(topic, date)
     _log_project_event(topic, "filter", {"date": date, "source": "cli"}, _as_success(result))
-    if not result:
+    if not _as_success(result):
         print(f"筛选失败: {topic} - {date}")
 
 
@@ -111,7 +116,7 @@ def upload(topic, date):
 
     result = run_update(topic, date)
     _log_project_event(topic, "upload", {"date": date, "source": "cli"}, _as_success(result))
-    if not result:
+    if not _as_success(result):
         print(f"上传失败: {topic} - {date}")
 
 
@@ -124,7 +129,7 @@ def query():
 
     result = run_query()
     _log_project_event("GLOBAL", "query", {"source": "cli"}, _as_success(result))
-    if not result:
+    if not _as_success(result):
         print("查询失败")
 
 
@@ -145,7 +150,7 @@ def fetch(topic, start, end):
         {"start": start, "end": end, "source": "cli"},
         _as_success(result),
     )
-    if not result:
+    if not _as_success(result):
         print(f"提取失败: {topic} - {start} 到 {end}")
 
 
@@ -167,7 +172,7 @@ def analyze(topic, start, end, func):
         {"start": start, "end": end, "function": func, "source": "cli"},
         _as_success(result),
     )
-    if not result:
+    if not _as_success(result):
         print(f"分析失败: {topic} - {start} 到 {end}")
 
 
