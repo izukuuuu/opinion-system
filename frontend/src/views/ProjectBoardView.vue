@@ -9,7 +9,9 @@
           <p>集中浏览与调度专题流程，保持与团队工具一致的现代体验。</p>
         </div>
         <button class="hero__action" type="button" @click="startNewProject">
-          <span class="hero__action-icon" aria-hidden="true">+</span>
+          <span class="hero__action-icon" aria-hidden="true">
+            <PlusIcon />
+          </span>
           新建项目
         </button>
       </div>
@@ -21,12 +23,7 @@
             <h2 class="hero__current-title">{{ activeProject.name }}</h2>
           </div>
           <button class="hero__current-edit" type="button" @click="startEditProject(activeProject.name)">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M16.6 4.2a2 2 0 0 1 2.8 2.8l-9.4 9.4-3.3.6.6-3.3 9.3-9.5ZM5 19a1 1 0 1 0 0 2h14a1 1 0 1 0 0-2H5Z"
-                fill="currentColor"
-              />
-            </svg>
+            <PencilSquareIcon aria-hidden="true" />
             编辑
           </button>
         </div>
@@ -62,12 +59,7 @@
             <p>浏览所有项目并快速切换。</p>
           </div>
           <button class="sidebar__refresh" type="button" @click="refreshProjects" :disabled="isRefreshing">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M5 12a7 7 0 0 1 11.9-4.9l1.5-1.5a1 1 0 1 1 1.4 1.4l-3.3 3.3H16a1 1 0 0 1-1-1V7.9A5 5 0 1 0 17 16a1 1 0 0 1 1.7 1A7 7 0 0 1 5 12Z"
-                fill="currentColor"
-              />
-            </svg>
+            <ArrowPathIcon aria-hidden="true" />
             {{ isRefreshing ? '刷新中…' : '刷新' }}
           </button>
         </header>
@@ -116,12 +108,7 @@
                   :aria-expanded="openActionMenu === project.name"
                   title="更多操作"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M5 12a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm5.5 0a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm5.5 0a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Z"
-                      fill="currentColor"
-                    />
-                  </svg>
+                  <EllipsisHorizontalIcon aria-hidden="true" />
                 </button>
                 <transition name="dropdown-fade">
                   <ul
@@ -202,6 +189,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ArrowPathIcon, EllipsisHorizontalIcon, PencilSquareIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import ProjectDashboard from '../components/ProjectDashboard.vue'
 import { useActiveProject } from '../composables/useActiveProject'
 
@@ -541,6 +529,11 @@ watch(activeProjectName, (name) => {
   font-weight: 700;
 }
 
+.hero__action-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+
 .hero__current {
   position: relative;
   margin-top: 0.5rem;
@@ -861,6 +854,11 @@ watch(activeProjectName, (name) => {
   justify-content: center;
   cursor: pointer;
   transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.project-tile__menu-button svg {
+  width: 1.15rem;
+  height: 1.15rem;
 }
 
 .project-tile__menu-button:hover {
