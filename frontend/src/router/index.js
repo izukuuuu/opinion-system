@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import ProjectBoardView from '../views/ProjectBoardView.vue'
 import ProjectDataView from '../views/ProjectDataView.vue'
+import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
 import TestView from '../views/TestView.vue'
 import SettingsView from '../views/SettingsView.vue'
 
@@ -20,6 +21,14 @@ export const routes = [
     component: ProjectDataView,
     meta: {
       title: '项目数据管理'
+    }
+  },
+  {
+    path: '/database',
+    name: 'database',
+    component: DatabaseOverviewView,
+    meta: {
+      title: '数据库查询'
     }
   },
   {
