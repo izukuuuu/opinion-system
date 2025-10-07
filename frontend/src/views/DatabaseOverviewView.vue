@@ -160,19 +160,6 @@ const formatPreviewValue = (value) => {
 
 const tabs = [
   { key: 'overview', label: '数据概览' },
-  { key: 'table', label: '表格视图' },
-  { key: 'preview', label: '数据预览' },
-  { key: 'raw', label: '原始 JSON' }
-]
-
-const setActiveTab = (key) => {
-  if (tabs.some((tab) => tab.key === key)) {
-    activeTab.value = key
-  }
-}
-
-const tabs = [
-  { key: 'overview', label: '数据概览' },
   { key: 'raw', label: '原始 JSON' }
 ]
 
@@ -217,16 +204,6 @@ const summaryStats = computed(() => {
 })
 
 const databases = computed(() => payload.value?.databases ?? [])
-const tableViewDatabases = computed(() =>
-  databases.value.map((database) => ({
-    ...database,
-    tables: [...(database.tables ?? [])].sort((a, b) => {
-      const aValue = Number.isFinite(Number(a.record_count)) ? Number(a.record_count) : 0
-      const bValue = Number.isFinite(Number(b.record_count)) ? Number(b.record_count) : 0
-      return bValue - aValue
-    })
-  }))
-)
 const hasData = computed(() => (databases.value?.length ?? 0) > 0)
 const hasPayload = computed(() => !!payload.value)
 const rawPayload = computed(() => {
