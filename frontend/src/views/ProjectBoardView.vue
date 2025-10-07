@@ -58,9 +58,14 @@
             <h3>项目列表</h3>
             <p>浏览所有项目并快速切换。</p>
           </div>
-          <button class="sidebar__refresh" type="button" @click="refreshProjects" :disabled="isRefreshing">
+          <button
+            :class="['sidebar__refresh', { 'sidebar__refresh--refreshing': isRefreshing }]"
+            type="button"
+            @click="refreshProjects"
+            :disabled="isRefreshing"
+            aria-label="刷新项目"
+          >
             <ArrowPathIcon aria-hidden="true" />
-            {{ isRefreshing ? '刷新中…' : '刷新' }}
           </button>
         </header>
 
@@ -652,19 +657,19 @@ watch(activeProjectName, (name) => {
   border: 1px solid transparent;
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 1.05rem;
+  justify-content: center;
+  padding: 0.55rem;
   border-radius: 999px;
   background: #e0e7ff;
   color: #4338ca;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+  transition: background 0.3s ease, transform 0.2s ease, border-color 0.2s ease, color 0.3s ease;
 }
 
 .sidebar__refresh svg {
-  width: 1rem;
-  height: 1rem;
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
 .sidebar__refresh:hover:not(:disabled) {
@@ -674,8 +679,44 @@ watch(activeProjectName, (name) => {
 }
 
 .sidebar__refresh:disabled {
-  opacity: 0.6;
   cursor: not-allowed;
+}
+
+.sidebar__refresh--refreshing {
+  background: linear-gradient(135deg, #e2e8f0, #cbd5f5, #e2e8f0);
+  background-size: 200% 200%;
+  color: #1f2937;
+  animation: sidebar-refresh-gradient 1.8s ease-in-out infinite;
+  border-color: transparent;
+}
+
+.sidebar__refresh--refreshing:disabled {
+  cursor: wait;
+}
+
+.sidebar__refresh--refreshing svg {
+  animation: sidebar-refresh-spin 0.9s linear infinite;
+}
+
+@keyframes sidebar-refresh-gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes sidebar-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .sidebar__stats {
