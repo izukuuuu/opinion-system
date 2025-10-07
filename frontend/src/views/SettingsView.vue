@@ -276,6 +276,20 @@ const parseResponseData = (response) => {
   return payload
 }
 
+const toNormalizedInteger = (value, fallback, minimum) => {
+  if (value === null || value === undefined || value === '') {
+    return fallback
+  }
+
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return fallback
+  }
+
+  const rounded = Math.round(numeric)
+  return rounded < minimum ? minimum : rounded
+}
+
 const databaseState = reactive({
   connections: [],
   active: '',
@@ -481,9 +495,23 @@ const submitLlmFilter = async () => {
   llmState.message = ''
 
   try {
+    const payload = {
+      provider: (llmState.filter.provider || '').trim(),
+      model: (llmState.filter.model || '').trim(),
+      qps: toNormalizedInteger(llmState.filter.qps, 0, 0),
+      batch_size: toNormalizedInteger(llmState.filter.batch_size, 1, 1),
+      truncation: toNormalizedInteger(llmState.filter.truncation, 0, 0)
+    }
+
+    llmState.filter.provider = payload.provider
+    llmState.filter.model = payload.model
+    llmState.filter.qps = payload.qps
+    llmState.filter.batch_size = payload.batch_size
+    llmState.filter.truncation = payload.truncation
+
     await apiRequest('/api/settings/llm/filter', {
       method: 'PUT',
-      body: llmState.filter
+      body: payload
     })
     llmState.message = '筛选模型配置已保存'
     await loadLlmConfig()
