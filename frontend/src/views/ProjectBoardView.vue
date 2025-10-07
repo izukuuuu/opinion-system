@@ -22,10 +22,24 @@
             <span class="hero__current-label">当前项目</span>
             <h2 class="hero__current-title">{{ activeProject.name }}</h2>
           </div>
-          <button class="hero__current-edit" type="button" @click="startEditProject(activeProject.name)">
-            <PencilSquareIcon aria-hidden="true" />
-            编辑
-          </button>
+          <div class="hero__current-actions">
+            <button
+              class="hero__current-button hero__current-button--view"
+              type="button"
+              @click="startViewProject(activeProject.name)"
+            >
+              <EyeIcon aria-hidden="true" />
+              查看
+            </button>
+            <button
+              class="hero__current-button hero__current-button--edit"
+              type="button"
+              @click="startEditProject(activeProject.name)"
+            >
+              <PencilSquareIcon aria-hidden="true" />
+              编辑
+            </button>
+          </div>
         </div>
         <div class="hero__current-meta">
           <div class="meta-block">
@@ -39,8 +53,10 @@
             <span class="meta-block__value">{{ formatTimestamp(activeProject.updated_at) }}</span>
           </div>
           <div class="meta-block">
-            <span class="meta-block__label">当前模式</span>
-            <span class="meta-block__value">{{ modeLabel }}</span>
+            <span class="meta-block__label">执行记录</span>
+            <span class="meta-block__value">
+              {{ activeProject.operations?.length ? `${activeProject.operations.length} 条` : '暂无' }}
+            </span>
           </div>
         </div>
       </div>
@@ -137,8 +153,56 @@
       </aside>
 
       <main class="board__main">
-        <ProjectDashboard :project="displayedProject" :loading="loading" :error="error" :mode="viewMode"
-          @project-created="handleProjectCreated" @cancel="handleDashboardCancel" />
+        <section v-if="activeProject" class="overview-card">
+          <header class="overview-card__header">
+            <div>
+              <h3>{{ activeProject.name }}</h3>
+              <p>最近更新：{{ formatTimestamp(activeProject.updated_at) }}</p>
+            </div>
+            <div class="overview-card__actions">
+              <button type="button" class="overview-card__button" @click="startViewProject(activeProject.name)">
+                查看详情
+              </button>
+              <button
+                type="button"
+                class="overview-card__button overview-card__button--primary"
+                @click="startEditProject(activeProject.name)"
+              >
+                编辑项目
+              </button>
+            </div>
+          </header>
+          <div class="overview-card__body">
+            <p v-if="activeProject.description" class="overview-card__description">{{ activeProject.description }}</p>
+            <dl class="overview-card__stats">
+              <div>
+                <dt>状态</dt>
+                <dd :data-status="activeProject.status">{{ statusLabel(activeProject.status) }}</dd>
+              </div>
+              <div>
+                <dt>创建时间</dt>
+                <dd>{{ formatTimestamp(activeProject.created_at) }}</dd>
+              </div>
+              <div>
+                <dt>执行记录</dt>
+                <dd>{{ activeProject.operations?.length ? `${activeProject.operations.length} 条` : '暂无' }}</dd>
+              </div>
+            </dl>
+            <div v-if="hasActiveMetadata" class="overview-card__metadata">
+              <h4>附加信息</h4>
+              <ul>
+                <li v-for="(value, key) in activeProject.metadata" :key="key">
+                  <strong>{{ key }}：</strong>{{ formatMetadataValue(value) }}
+                </li>
+              </ul>
+            </div>
+          </div>
+        </section>
+        <section v-else class="overview-placeholder">
+          <h3>欢迎使用项目工作台</h3>
+          <p>从左侧选择一个项目，或点击上方按钮快速创建新项目。</p>
+          <p v-if="error" class="overview-placeholder__error">{{ error }}</p>
+        </section>
       </main>
     </div>
 
@@ -155,7 +219,25 @@
             </button>
           </header>
           <ProjectDashboard :project="null" :loading="false" :error="error" mode="create"
-            @project-created="handleProjectCreated" @cancel="handleCreateCancelled" />
+            @project-created="handleProjectSaved" @cancel="handleCreateCancelled" />
+        </div>
+      </div>
+    </transition>
+
+    <transition name="modal-fade">
+      <div v-if="showProjectModal" class="modal" @click.self="handleProjectModalCancelled">
+        <div class="modal__panel modal__panel--wide">
+          <header class="modal__header">
+            <div>
+              <p class="modal__eyebrow">{{ projectModalEyebrow }}</p>
+              <h2>{{ projectModalTitle }}</h2>
+            </div>
+            <button class="modal__close" type="button" @click="handleProjectModalCancelled" aria-label="关闭">
+              ✕
+            </button>
+          </header>
+          <ProjectDashboard :project="activeProject" :loading="loading" :error="error"
+            :mode="projectModalMode" @project-created="handleProjectSaved" @cancel="handleProjectModalCancelled" />
         </div>
       </div>
     </transition>
@@ -164,7 +246,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowPathIcon, EllipsisHorizontalIcon, PencilSquareIcon, PlusIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, EllipsisHorizontalIcon, EyeIcon, PencilSquareIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import ProjectDashboard from '../components/ProjectDashboard.vue'
 import { useActiveProject } from '../composables/useActiveProject'
 
@@ -175,9 +257,10 @@ const loading = ref(false)
 const error = ref('')
 const isRefreshing = ref(false)
 const isDeleting = ref(false)
-const viewMode = ref('view')
 const lastSelectedProject = ref('')
 const showCreateModal = ref(false)
+const showProjectModal = ref(false)
+const projectModalMode = ref('view')
 const openActionMenu = ref('')
 
 const { activeProjectName, setActiveProject, clearActiveProject } = useActiveProject()
@@ -232,8 +315,6 @@ const activeProject = computed(() =>
   projects.value.find((project) => project.name === selectedProjectName.value) || null
 )
 
-const displayedProject = computed(() => activeProject.value)
-
 const totalProjects = computed(() => projects.value.length)
 const completedProjects = computed(() =>
   projects.value.filter((project) => project.status === 'success').length
@@ -245,12 +326,18 @@ const activeProjectsCount = computed(() =>
   projects.value.filter((project) => project.status !== 'success').length
 )
 
-const modeLabel = computed(() => {
-  if (showCreateModal.value) return '新建'
-  if (viewMode.value === 'edit') return '编辑'
-  if (viewMode.value === 'view' && activeProject.value) return '查看'
-  return '浏览'
+const hasActiveMetadata = computed(() => {
+  const metadata = activeProject.value?.metadata
+  return metadata && Object.keys(metadata).length > 0
 })
+
+const projectModalTitle = computed(() =>
+  projectModalMode.value === 'edit' ? '编辑项目' : '查看项目信息'
+)
+
+const projectModalEyebrow = computed(() =>
+  projectModalMode.value === 'edit' ? '更新信息' : '项目详情'
+)
 
 const startNewProject = () => {
   lastSelectedProject.value = selectedProjectName.value
@@ -272,7 +359,6 @@ const openProject = (name) => {
   selectedProjectName.value = name
   const project = projects.value.find((item) => item.name === name)
   setActiveProject(project || name)
-  viewMode.value = 'view'
   error.value = ''
   closeProjectMenu()
 }
@@ -293,20 +379,23 @@ const startEditProject = (name = selectedProjectName.value) => {
     setActiveProject(projects.value[0])
   }
   lastSelectedProject.value = selectedProjectName.value
-  viewMode.value = 'edit'
+  projectModalMode.value = 'edit'
+  showProjectModal.value = true
   closeProjectMenu()
 }
 
-const handleDashboardCancel = () => {
-  if (viewMode.value === 'edit') {
-    if (lastSelectedProject.value) {
-      const exists = projects.value.some((project) => project.name === lastSelectedProject.value)
-      if (exists) {
-        selectedProjectName.value = lastSelectedProject.value
-      }
-    }
-    viewMode.value = projects.value.length ? 'view' : 'view'
+const startViewProject = (name = selectedProjectName.value) => {
+  error.value = ''
+  if (!projects.value.length) return
+  if (name) {
+    selectedProjectName.value = name
+    const project = projects.value.find((item) => item.name === name)
+    setActiveProject(project || name)
   }
+  if (!activeProject.value) return
+  projectModalMode.value = 'view'
+  showProjectModal.value = true
+  closeProjectMenu()
 }
 
 const confirmDeleteProject = async (name = selectedProjectName.value) => {
@@ -326,13 +415,12 @@ const confirmDeleteProject = async (name = selectedProjectName.value) => {
     projects.value = projects.value.filter((project) => project.name !== name)
     if (projects.value.length) {
       selectedProjectName.value = projects.value[0].name
-      viewMode.value = 'view'
       setActiveProject(projects.value[0])
     } else {
       selectedProjectName.value = ''
-      viewMode.value = 'view'
       clearActiveProject()
     }
+    closeProjectModal()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '删除项目时出现问题'
   } finally {
@@ -340,7 +428,12 @@ const confirmDeleteProject = async (name = selectedProjectName.value) => {
   }
 }
 
-const handleProjectCreated = (project) => {
+const closeProjectModal = () => {
+  showProjectModal.value = false
+  projectModalMode.value = 'view'
+}
+
+const handleProjectSaved = (project) => {
   const existingIndex = projects.value.findIndex((item) => item.name === project.name)
   if (existingIndex === -1) {
     projects.value = [project, ...projects.value]
@@ -349,8 +442,8 @@ const handleProjectCreated = (project) => {
   }
   selectedProjectName.value = project.name
   lastSelectedProject.value = project.name
-  viewMode.value = 'view'
   showCreateModal.value = false
+  closeProjectModal()
   error.value = ''
   setActiveProject(project)
   closeProjectMenu()
@@ -361,7 +454,7 @@ const handleCreateCancelled = () => {
 }
 
 const handleMenuView = (name) => {
-  openProject(name)
+  startViewProject(name)
 }
 
 const handleMenuEdit = (name) => {
@@ -387,6 +480,22 @@ const statusLabel = (status) => {
   if (status === 'success') return '成功'
   if (status === 'error') return '失败'
   return '进行中'
+}
+
+const formatMetadataValue = (value) => {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch (err) {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
+const handleProjectModalCancelled = () => {
+  closeProjectModal()
 }
 
 onMounted(() => {
@@ -548,26 +657,45 @@ watch(activeProjectName, (name) => {
   color: #1f2937;
 }
 
-.hero__current-edit {
+.hero__current-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.hero__current-button {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
   padding: 0.5rem 1.1rem;
   border-radius: 999px;
   border: none;
-  background: #e0e7ff;
-  color: #4338ca;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease;
+  transition: background 0.2s ease, transform 0.2s ease, color 0.2s ease;
 }
 
-.hero__current-edit svg {
+.hero__current-button svg {
   width: 1rem;
   height: 1rem;
 }
 
-.hero__current-edit:hover {
+.hero__current-button--view {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.hero__current-button--view:hover {
+  background: #bae6fd;
+  transform: translateY(-1px);
+}
+
+.hero__current-button--edit {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.hero__current-button--edit:hover {
   background: #c7d2fe;
   transform: translateY(-1px);
 }
@@ -633,6 +761,155 @@ watch(activeProjectName, (name) => {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+}
+
+.overview-card {
+  background: #ffffff;
+  border-radius: 24px;
+  padding: 1.75rem 1.8rem 2rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.overview-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.overview-card__header h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.4rem;
+  color: #1f2937;
+}
+
+.overview-card__header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.overview-card__actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.overview-card__button {
+  padding: 0.5rem 1.2rem;
+  border-radius: 999px;
+  border: 1px solid #cbd5f5;
+  background: #f8fafc;
+  color: #1f2937;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.overview-card__button:hover {
+  background: #e2e8f0;
+  border-color: #cbd5f5;
+  transform: translateY(-1px);
+}
+
+.overview-card__button--primary {
+  background: #4338ca;
+  border-color: #4338ca;
+  color: #ffffff;
+}
+
+.overview-card__button--primary:hover {
+  background: #3730a3;
+  border-color: #3730a3;
+}
+
+.overview-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.overview-card__description {
+  margin: 0;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.overview-card__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+.overview-card__stats dt {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 0.25rem;
+}
+
+.overview-card__stats dd {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.overview-card__stats dd[data-status='success'] {
+  color: #047857;
+}
+
+.overview-card__stats dd[data-status='error'] {
+  color: #b91c1c;
+}
+
+.overview-card__metadata {
+  background: #f8fafc;
+  border-radius: 16px;
+  padding: 1rem 1.25rem;
+  border: 1px solid #e2e8f0;
+}
+
+.overview-card__metadata h4 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  color: #1f2937;
+}
+
+.overview-card__metadata ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+  color: #475569;
+}
+
+.overview-placeholder {
+  background: #ffffff;
+  border-radius: 24px;
+  padding: 2.25rem 2rem;
+  border: 1px dashed #cbd5f5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  color: #475569;
+}
+
+.overview-placeholder h3 {
+  margin: 0;
+  font-size: 1.35rem;
+  color: #1f2937;
+}
+
+.overview-placeholder__error {
+  color: #b91c1c;
+  margin: 0;
 }
 
 .sidebar__header {
@@ -988,6 +1265,10 @@ watch(activeProjectName, (name) => {
   gap: 1.5rem;
 }
 
+.modal__panel--wide {
+  width: min(920px, 100%);
+}
+
 .modal__header {
   display: flex;
   align-items: center;
@@ -1042,6 +1323,17 @@ watch(activeProjectName, (name) => {
   .board__sidebar {
     order: 1;
   }
+
+  .overview-card__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .overview-card__button,
+  .overview-card__button--primary {
+    width: 100%;
+    text-align: center;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1082,6 +1374,10 @@ watch(activeProjectName, (name) => {
   }
 
   .modal__panel {
+    padding: 1.5rem;
+  }
+
+  .modal__panel--wide {
     padding: 1.5rem;
   }
 }
