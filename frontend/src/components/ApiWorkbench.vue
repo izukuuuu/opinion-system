@@ -21,13 +21,12 @@
 
       <section class="card">
         <header>
-          <h2>数据库查询</h2>
-          <p>执行默认查询以验证数据库连接。</p>
+          <h2>数据库概览</h2>
+          <p>在专属页面中查看数据库结构与连接状态。</p>
         </header>
-        <button type="button" class="card__action" @click="runQuery" :disabled="loading.query">
-          {{ loading.query ? '执行中…' : '查询数据' }}
-        </button>
-        <pre>{{ queryResult }}</pre>
+        <RouterLink :to="{ name: 'database' }" class="card__link">
+          前往数据库页面
+        </RouterLink>
       </section>
     </div>
 
@@ -119,22 +118,20 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
-const API_BASE_FALLBACK = 'http://127.0.0.1:8000'
+import { useBackendClient } from '../composables/useBackendClient'
 
-const backendBase = ref(API_BASE_FALLBACK)
-const configLoaded = ref(false)
+const { callApi } = useBackendClient()
 
 const loading = reactive({
   status: false,
-  query: false,
   pipeline: false,
   fetch: false,
   analyze: false
 })
 
 const statusResult = ref('等待调用...')
-const queryResult = ref('等待调用...')
 const pipelineResult = ref('等待调用...')
 const fetchResult = ref('等待调用...')
 const analyzeResult = ref('等待调用...')
@@ -165,37 +162,6 @@ const errorPayload = (error) => ({
   message: error instanceof Error ? error.message : String(error)
 })
 
-const ensureConfig = async () => {
-  if (configLoaded.value) return
-  try {
-    const response = await fetch(`${backendBase.value}/api/config`)
-    if (!response.ok) throw new Error(`配置获取失败: ${response.status}`)
-    const config = await response.json()
-    if (config.backend?.base_url) {
-      backendBase.value = config.backend.base_url
-    } else if (config.backend?.host && config.backend?.port) {
-      backendBase.value = `http://${config.backend.host}:${config.backend.port}`
-    }
-  } catch (error) {
-    console.warn('加载配置失败，使用默认后端地址', error)
-  } finally {
-    configLoaded.value = true
-  }
-}
-
-const callApi = async (path, options = {}) => {
-  await ensureConfig()
-  const response = await fetch(`${backendBase.value}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options
-  })
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `请求失败: ${response.status}`)
-  }
-  return response.json()
-}
-
 const withLoading = async (key, fn, onSuccess) => {
   if (loading[key]) return
   loading[key] = true
@@ -212,11 +178,6 @@ const withLoading = async (key, fn, onSuccess) => {
 const checkStatus = () =>
   withLoading('status', () => callApi('/api/status', { method: 'GET' }), (value) => {
     statusResult.value = value
-  })
-
-const runQuery = () =>
-  withLoading('query', () => callApi('/api/query', { method: 'POST', body: JSON.stringify({}) }), (value) => {
-    queryResult.value = value
   })
 
 const runPipeline = () =>
@@ -350,20 +311,23 @@ checkStatus()
   color: #475569;
 }
 
-.card__action {
+.card__link {
   align-self: flex-start;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   background: rgba(37, 99, 235, 0.12);
   color: #1d4ed8;
   font-weight: 600;
   padding: 0.65rem 1.1rem;
   border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.2s ease;
+  text-decoration: none;
+  transition: background 0.2s ease, transform 0.2s ease;
 }
 
-.card__action:hover {
+.card__link:hover {
   background: rgba(37, 99, 235, 0.2);
+  transform: translateY(-1px);
 }
 
 .card--wide pre {

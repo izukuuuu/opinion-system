@@ -81,6 +81,7 @@ import {
   BeakerIcon,
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
+  CircleStackIcon,
   DocumentArrowUpIcon,
   Squares2X2Icon
 } from '@heroicons/vue/24/outline'
@@ -97,6 +98,12 @@ const navigationLinks = [
     description: '导入 Excel 并生成数据存档',
     to: { name: 'project-data' },
     icon: DocumentArrowUpIcon
+  },
+  {
+    label: '数据库',
+    description: '查看库表与连接状态',
+    to: { name: 'database' },
+    icon: CircleStackIcon
   },
   {
     label: '测试页面',
