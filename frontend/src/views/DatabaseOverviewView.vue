@@ -12,79 +12,231 @@
       </button>
     </header>
 
+    <nav class="database-view__tabs" role="tablist" aria-label="数据库信息视图">
+      <button
+        v-for="tab in tabs"
+        :key="tab.key"
+        class="database-view__tab"
+        :class="{ 'database-view__tab--active': activeTab === tab.key }"
+        type="button"
+        role="tab"
+        :id="`database-tab-${tab.key}`"
+        :aria-selected="activeTab === tab.key"
+        :aria-controls="`database-panel-${tab.key}`"
+        @click="setActiveTab(tab.key)"
+      >
+        {{ tab.label }}
+      </button>
+    </nav>
+
     <section v-if="error" class="database-view__alert" role="alert">
       <p>{{ error }}</p>
       <p class="database-view__alert-hint">请检查后端服务与数据库配置，稍后再试。</p>
     </section>
 
-    <section v-if="hasData" class="database-view__overview">
-      <article class="card">
-        <header>
-          <h2>连接信息</h2>
-          <p>从配置文件推断出的数据库连接要素。</p>
-        </header>
-        <dl class="database-view__details">
-          <div v-for="detail in connectionDetails" :key="detail.label">
-            <dt>{{ detail.label }}</dt>
-            <dd>{{ detail.value }}</dd>
+    <section
+      v-if="activeTab === 'overview'"
+      class="database-view__panel"
+      role="tabpanel"
+      id="database-panel-overview"
+      aria-labelledby="database-tab-overview"
+    >
+      <section v-if="hasData" class="database-view__overview">
+        <article class="card">
+          <header>
+            <h2>连接信息</h2>
+            <p>从配置文件推断出的数据库连接要素。</p>
+          </header>
+          <dl class="database-view__details">
+            <div v-for="detail in connectionDetails" :key="detail.label">
+              <dt>{{ detail.label }}</dt>
+              <dd>{{ detail.value }}</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="card">
+          <header>
+            <h2>数据量统计</h2>
+            <p>帮助快速了解业务数据规模。</p>
+          </header>
+          <ul class="database-view__stats">
+            <li>
+              <span class="database-view__stats-label">业务数据库</span>
+              <strong>{{ summaryStats.databaseCount }}</strong>
+            </li>
+            <li>
+              <span class="database-view__stats-label">总表数</span>
+              <strong>{{ summaryStats.tableCount }}</strong>
+            </li>
+            <li>
+              <span class="database-view__stats-label">已统计行数</span>
+              <strong>{{ summaryStats.rowCount }}</strong>
+            </li>
+          </ul>
+          <footer class="database-view__footer" v-if="queriedAt">
+            <ServerStackIcon class="database-view__footer-icon" />
+            <span>最近一次查询：{{ queriedAt }}</span>
+          </footer>
+        </article>
+      </section>
+
+      <section v-if="loading" class="database-view__skeleton">
+        <div class="database-view__skeleton-card" v-for="index in 2" :key="index"></div>
+      </section>
+
+      <section v-if="hasData" class="database-view__databases">
+        <article v-for="database in databases" :key="database.name" class="database-card">
+          <header class="database-card__header">
+            <h3>{{ database.name }}</h3>
+            <p>{{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行</p>
+          </header>
+          <ul class="database-card__tables">
+            <li
+              v-for="table in database.tables"
+              :key="table.name"
+              :class="['database-card__table', { 'database-card__table--error': table.error }]"
+            >
+              <span class="database-card__table-name">{{ table.name }}</span>
+              <span v-if="table.error" class="database-card__table-error">{{ table.error }}</span>
+              <span v-else class="database-card__table-count">{{ formatNumber(table.record_count) }} 行</span>
+            </li>
+          </ul>
+          <p v-if="!database.tables.length" class="database-card__empty">该库暂无业务表。</p>
+        </article>
+      </section>
+
+      <p v-if="!loading && !hasData && !error" class="database-view__empty">
+        未检索到业务数据库，请确认配置是否正确。
+      </p>
+    </section>
+
+    <section
+      v-else-if="activeTab === 'table'"
+      class="database-view__panel"
+      role="tabpanel"
+      id="database-panel-table"
+      aria-labelledby="database-tab-table"
+    >
+      <section v-if="loading" class="database-view__skeleton">
+        <div class="database-view__skeleton-card" v-for="index in 2" :key="index"></div>
+      </section>
+
+      <section v-if="hasData" class="database-view__table-grid">
+        <article v-for="database in tableViewDatabases" :key="database.name" class="database-table-card">
+          <header class="database-table-card__header">
+            <h3>{{ database.name }}</h3>
+            <p>{{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行</p>
+          </header>
+
+          <table class="database-table" role="grid">
+            <thead>
+              <tr>
+                <th scope="col">表名</th>
+                <th scope="col" class="database-table__count">数据量</th>
+                <th scope="col" class="database-table__status">状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="table in database.tables" :key="table.name">
+                <th scope="row">{{ table.name }}</th>
+                <td class="database-table__count">
+                  {{ table.error ? '—' : formatNumber(table.record_count) }}
+                </td>
+                <td class="database-table__status">
+                  <span v-if="table.error" class="database-table__status--error">{{ table.error }}</span>
+                  <span v-else class="database-table__status--success">正常</span>
+                </td>
+              </tr>
+              <tr v-if="!database.tables.length">
+                <td colspan="3" class="database-table__empty">该库暂无业务表。</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+      </section>
+
+      <p v-if="!loading && !hasData && !error" class="database-view__empty">
+        未检索到业务数据库，请确认配置是否正确。
+      </p>
+    </section>
+
+    <section
+      v-else-if="activeTab === 'preview'"
+      class="database-view__panel"
+      role="tabpanel"
+      id="database-panel-preview"
+      aria-labelledby="database-tab-preview"
+    >
+      <section v-if="loading" class="database-view__skeleton">
+        <div class="database-view__skeleton-card" v-for="index in 2" :key="index"></div>
+      </section>
+
+      <section v-if="hasData" class="database-view__preview">
+        <article v-for="database in tableViewDatabases" :key="database.name" class="database-preview-card">
+          <header class="database-preview-card__header">
+            <h3>{{ database.name }}</h3>
+            <p>{{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行</p>
+          </header>
+          <p class="database-preview-card__hint">预览最近 5 条数据，快速确认字段与内容是否正确。</p>
+
+          <div v-for="table in database.tables" :key="table.name" class="table-preview">
+            <header class="table-preview__header">
+              <h4>{{ table.name }}</h4>
+              <span class="table-preview__meta">
+                {{ table.error ? '查询失败' : `${formatNumber(table.record_count)} 行` }}
+              </span>
+            </header>
+            <p v-if="table.error" class="table-preview__error">{{ table.error }}</p>
+            <p v-else-if="table.preview_error" class="table-preview__error">{{ table.preview_error }}</p>
+            <p v-else-if="!table.preview || !table.preview.rows.length" class="table-preview__empty">
+              暂无可预览的数据。
+            </p>
+            <div v-else class="table-preview__table-wrapper">
+              <table class="table-preview__table">
+                <thead>
+                  <tr>
+                    <th v-for="column in table.preview.columns" :key="column" scope="col">
+                      {{ column }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, rowIndex) in table.preview.rows" :key="rowIndex">
+                    <td v-for="column in table.preview.columns" :key="column">
+                      {{ formatPreviewValue(row[column]) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-        </dl>
-      </article>
+        </article>
+      </section>
 
-      <article class="card">
-        <header>
-          <h2>数据量统计</h2>
-          <p>帮助快速了解业务数据规模。</p>
+      <p v-if="!loading && !hasData && !error" class="database-view__empty">
+        未检索到业务数据库，请确认配置是否正确。
+      </p>
+    </section>
+
+    <section
+      v-else
+      class="database-view__panel"
+      role="tabpanel"
+      id="database-panel-raw"
+      aria-labelledby="database-tab-raw"
+    >
+      <div class="database-view__raw" v-if="hasPayload">
+        <header class="database-view__raw-header">
+          <h2>原始响应数据</h2>
+          <p>以下内容展示了后端返回的完整 JSON，便于对照排查。</p>
         </header>
-        <ul class="database-view__stats">
-          <li>
-            <span class="database-view__stats-label">业务数据库</span>
-            <strong>{{ summaryStats.databaseCount }}</strong>
-          </li>
-          <li>
-            <span class="database-view__stats-label">总表数</span>
-            <strong>{{ summaryStats.tableCount }}</strong>
-          </li>
-          <li>
-            <span class="database-view__stats-label">已统计行数</span>
-            <strong>{{ summaryStats.rowCount }}</strong>
-          </li>
-        </ul>
-        <footer class="database-view__footer" v-if="queriedAt">
-          <ServerStackIcon class="database-view__footer-icon" />
-          <span>最近一次查询：{{ queriedAt }}</span>
-        </footer>
-      </article>
+        <pre class="database-view__raw-code">{{ rawPayload }}</pre>
+      </div>
+      <p v-else class="database-view__raw-placeholder">
+        暂无可展示的数据，请先点击上方的“刷新数据”按钮获取最新结果。
+      </p>
     </section>
-
-    <section v-if="loading" class="database-view__skeleton">
-      <div class="database-view__skeleton-card" v-for="index in 2" :key="index"></div>
-    </section>
-
-    <section v-if="hasData" class="database-view__databases">
-      <article v-for="database in databases" :key="database.name" class="database-card">
-        <header class="database-card__header">
-          <h3>{{ database.name }}</h3>
-          <p>{{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行</p>
-        </header>
-        <ul class="database-card__tables">
-          <li
-            v-for="table in database.tables"
-            :key="table.name"
-            :class="['database-card__table', { 'database-card__table--error': table.error }]"
-          >
-            <span class="database-card__table-name">{{ table.name }}</span>
-            <span v-if="table.error" class="database-card__table-error">{{ table.error }}</span>
-            <span v-else class="database-card__table-count">{{ formatNumber(table.record_count) }} 行</span>
-          </li>
-        </ul>
-        <p v-if="!database.tables.length" class="database-card__empty">该库暂无业务表。</p>
-      </article>
-    </section>
-
-    <p v-if="!loading && !hasData && !error" class="database-view__empty">
-      未检索到业务数据库，请确认配置是否正确。
-    </p>
   </section>
 </template>
 
@@ -99,11 +251,32 @@ const { callApi } = useBackendClient()
 const loading = ref(false)
 const error = ref('')
 const payload = ref(null)
+const activeTab = ref('overview')
 
 const numberFormatter = new Intl.NumberFormat('zh-CN')
 const formatNumber = (value) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—'
   return numberFormatter.format(Number(value))
+}
+const formatPreviewValue = (value) => {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'number') return numberFormatter.format(value)
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+const tabs = [
+  { key: 'overview', label: '数据概览' },
+  { key: 'table', label: '表格视图' },
+  { key: 'preview', label: '数据预览' },
+  { key: 'raw', label: '原始 JSON' }
+]
+
+const setActiveTab = (key) => {
+  if (tabs.some((tab) => tab.key === key)) {
+    activeTab.value = key
+  }
 }
 
 const queriedAt = computed(() => {
@@ -141,7 +314,26 @@ const summaryStats = computed(() => {
 })
 
 const databases = computed(() => payload.value?.databases ?? [])
+const tableViewDatabases = computed(() =>
+  databases.value.map((database) => ({
+    ...database,
+    tables: [...(database.tables ?? [])].sort((a, b) => {
+      const aValue = Number.isFinite(Number(a.record_count)) ? Number(a.record_count) : 0
+      const bValue = Number.isFinite(Number(b.record_count)) ? Number(b.record_count) : 0
+      return bValue - aValue
+    })
+  }))
+)
 const hasData = computed(() => (databases.value?.length ?? 0) > 0)
+const hasPayload = computed(() => !!payload.value)
+const rawPayload = computed(() => {
+  if (!payload.value) return ''
+  try {
+    return JSON.stringify(payload.value, null, 2)
+  } catch (err) {
+    return String(payload.value)
+  }
+})
 
 const refresh = async () => {
   loading.value = true
@@ -176,6 +368,38 @@ onMounted(refresh)
   display: flex;
   align-items: center;
   gap: 1.75rem;
+}
+
+.database-view__tabs {
+  display: inline-flex;
+  background: rgba(15, 23, 42, 0.04);
+  border-radius: 999px;
+  padding: 0.35rem;
+  width: fit-content;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06);
+  margin: -0.75rem 0 0.75rem;
+}
+
+.database-view__tab {
+  border: none;
+  background: transparent;
+  padding: 0.4rem 1.2rem;
+  border-radius: 999px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.database-view__tab:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
+.database-view__tab--active {
+  background: #fff;
+  color: #1f2937;
+  box-shadow: 0 8px 20px -10px rgba(15, 23, 42, 0.35);
 }
 
 .database-view__icon {
@@ -312,6 +536,12 @@ onMounted(refresh)
   height: 1.25rem;
 }
 
+.database-view__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
 .database-view__skeleton {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -329,6 +559,17 @@ onMounted(refresh)
 .database-view__databases {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.75rem;
+}
+
+.database-view__table-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 1.75rem;
+}
+.database-view__preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
   gap: 1.75rem;
 }
 
@@ -400,10 +641,213 @@ onMounted(refresh)
   font-style: italic;
 }
 
+.database-table-card {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 22px 48px -28px rgba(15, 23, 42, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.database-table-card__header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.database-table-card__header p {
+  margin: 0.35rem 0 0;
+  color: #475569;
+}
+
+.database-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+  color: #1f2937;
+}
+
+.database-table thead tr {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.database-table th,
+.database-table td {
+  padding: 0.75rem 0.5rem;
+  text-align: left;
+}
+
+.database-table__count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.database-table__status {
+  text-align: right;
+  width: 110px;
+}
+
+.database-table__status--success {
+  color: #0f766e;
+  font-weight: 600;
+}
+
+.database-table__status--error {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.database-table tbody tr + tr {
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.database-table__empty {
+  padding: 1.25rem 0.5rem;
+  text-align: center;
+  color: #64748b;
+  font-style: italic;
+}
+.database-preview-card {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 22px 48px -28px rgba(15, 23, 42, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.database-preview-card__header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+.database-preview-card__header p {
+  margin: 0.35rem 0 0;
+  color: #475569;
+}
+.database-preview-card__hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+.table-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+}
+.table-preview:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+.table-preview__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+.table-preview__header h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.table-preview__meta {
+  font-size: 0.85rem;
+  color: #475569;
+}
+.table-preview__error {
+  margin: 0;
+  color: #b91c1c;
+  font-weight: 500;
+}
+.table-preview__empty {
+  margin: 0;
+  color: #64748b;
+  font-style: italic;
+}
+.table-preview__table-wrapper {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.9);
+  position: relative;
+  overflow-x: auto;
+}
+.table-preview__table-wrapper::after {
+  content: '仅显示前 5 行';
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+.table-preview__table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 360px;
+}
+.table-preview__table thead {
+  background: rgba(226, 232, 240, 0.6);
+}
+.table-preview__table th,
+.table-preview__table td {
+  padding: 0.65rem 0.9rem;
+  text-align: left;
+  font-size: 0.9rem;
+  color: #1f2937;
+}
+.table-preview__table td {
+  font-variant-numeric: tabular-nums;
+}
+.table-preview__table tbody tr + tr {
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
 .database-view__empty {
   margin: 0;
   text-align: center;
   color: #64748b;
+}
+
+.database-view__raw {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.database-view__raw-header h2 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.database-view__raw-header p {
+  margin: 0.35rem 0 0;
+  color: #475569;
+}
+
+.database-view__raw-code {
+  margin: 0;
+  padding: 1.25rem 1.5rem;
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: 18px;
+  color: #e2e8f0;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Source Code Pro', monospace;
+  font-size: 0.95rem;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+
+.database-view__raw-placeholder {
+  margin: 0;
+  text-align: center;
+  color: #64748b;
+  font-style: italic;
 }
 
 @keyframes shimmer {
@@ -437,6 +881,15 @@ onMounted(refresh)
 
   .database-view__refresh {
     margin-left: 0;
+  }
+
+  .database-view__tabs {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .database-view__table-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
