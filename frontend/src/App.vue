@@ -22,7 +22,7 @@
         class="app-shell__brand app-shell__brand--expanded"
       >
         <span class="app-shell__logo">Opinion System</span>
-        <span class="app-shell__tagline">项目制舆情工作台</span>
+        <span class="app-shell__tagline">舆情监测系统</span>
       </RouterLink>
       <RouterLink
         v-else
@@ -32,7 +32,7 @@
         title="Opinion System"
       >
         <span class="app-shell__brand-mark" aria-hidden="true">OS</span>
-        <span class="sr-only">Opinion System 项目制舆情工作台</span>
+        <span class="sr-only">Opinion System 舆情监测系统</span>
       </RouterLink>
       <nav v-if="!sidebarCollapsed" class="app-shell__nav app-shell__nav--expanded">
         <RouterLink
@@ -88,7 +88,7 @@ import {
 const navigationLinks = [
   {
     label: '项目面板',
-    description: '查看项目整体进度与执行记录',
+    description: '查看项目记录',
     to: { name: 'projects' },
     icon: Squares2X2Icon
   },
