@@ -438,7 +438,6 @@ watch(activeProjectName, (name) => {
 .board {
   min-height: 100vh;
   padding: 2.5rem 3rem 3.5rem;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 40%, #e0e7ff 100%);
   color: #0f172a;
 }
 
