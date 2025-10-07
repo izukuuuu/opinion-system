@@ -243,6 +243,39 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+
+const resolveApiUrl = (path) => {
+  if (!path) return API_BASE_URL || ''
+  if (/^https?:\/\//i.test(path)) {
+    return path
+  }
+
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+
+  if (!API_BASE_URL) {
+    return normalizedPath
+  }
+
+  if (API_BASE_URL.endsWith('/api') && normalizedPath.startsWith('/api')) {
+    const trimmed = normalizedPath.replace(/^\/api/, '') || ''
+    return `${API_BASE_URL}${trimmed}`
+  }
+
+  return `${API_BASE_URL}${normalizedPath}`
+}
+
+const parseResponseData = (response) => {
+  if (!response || typeof response !== 'object') {
+    return {}
+  }
+  const payload = response.data
+  if (!payload || typeof payload !== 'object') {
+    return {}
+  }
+  return payload
+}
+
 const databaseState = reactive({
   connections: [],
   active: '',
@@ -298,8 +331,10 @@ const apiRequest = async (url, options = {}) => {
     init.body = JSON.stringify(init.body)
   }
 
-  const response = await fetch(url, init)
-  const data = await response.json().catch(() => ({}))
+  const response = await fetch(resolveApiUrl(url), init)
+  const data = await response.json().catch(() => {
+    throw new Error('无法解析服务器返回的数据')
+  })
 
   if (!response.ok || data.status === 'error') {
     const message = data.message || `请求失败（${response.status}）`
@@ -313,9 +348,9 @@ const loadDatabaseConnections = async () => {
   databaseState.loading = true
   databaseState.error = ''
   try {
-    const { data } = await apiRequest('/api/settings/databases')
-    databaseState.connections = data.connections || []
-    databaseState.active = data.active || ''
+    const payload = parseResponseData(await apiRequest('/api/settings/databases'))
+    databaseState.connections = Array.isArray(payload.connections) ? payload.connections : []
+    databaseState.active = typeof payload.active === 'string' ? payload.active : payload.active || ''
   } catch (error) {
     databaseState.error = error.message
   } finally {
@@ -425,15 +460,15 @@ const loadLlmConfig = async () => {
   llmState.loading = true
   llmState.error = ''
   try {
-    const { data } = await apiRequest('/api/settings/llm')
+    const payload = parseResponseData(await apiRequest('/api/settings/llm'))
     llmState.filter = {
-      provider: data.filter_llm?.provider || '',
-      model: data.filter_llm?.model || '',
-      qps: data.filter_llm?.qps ?? 0,
-      batch_size: data.filter_llm?.batch_size ?? 1,
-      truncation: data.filter_llm?.truncation ?? 0
+      provider: payload.filter_llm?.provider || '',
+      model: payload.filter_llm?.model || '',
+      qps: payload.filter_llm?.qps ?? 0,
+      batch_size: payload.filter_llm?.batch_size ?? 1,
+      truncation: payload.filter_llm?.truncation ?? 0
     }
-    llmState.presets = data.presets || []
+    llmState.presets = Array.isArray(payload.presets) ? payload.presets : []
   } catch (error) {
     llmState.error = error.message
   } finally {
