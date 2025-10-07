@@ -64,7 +64,16 @@
     </aside>
     <div class="app-shell__main">
       <header class="app-shell__header">
-        <p class="app-shell__breadcrumbs">项目制控制台</p>
+        <div class="app-shell__header-bar">
+          <p class="app-shell__breadcrumbs">项目制控制台</p>
+          <div class="app-shell__active-project" role="status" aria-live="polite">
+            <BriefcaseIcon class="app-shell__active-project-icon" aria-hidden="true" />
+            <span class="app-shell__active-project-label">当前项目</span>
+            <span class="app-shell__active-project-name">
+              {{ activeProjectName || '未选择项目' }}
+            </span>
+          </div>
+        </div>
         <h1 class="app-shell__title">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
       </header>
       <main class="app-shell__content">
@@ -79,11 +88,13 @@ import { computed, ref } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   BeakerIcon,
+  BriefcaseIcon,
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
   DocumentArrowUpIcon,
   Squares2X2Icon
 } from '@heroicons/vue/24/outline'
+import { useActiveProject } from './composables/useActiveProject'
 
 const navigationLinks = [
   {
@@ -109,6 +120,8 @@ const navigationLinks = [
 const route = useRoute()
 
 const pageTitle = computed(() => route.meta?.title ?? '')
+
+const { activeProjectName } = useActiveProject()
 
 const sidebarCollapsed = ref(false)
 
@@ -350,7 +363,15 @@ const sidebarToggleLabel = computed(() =>
   padding: 2.5rem 3rem 2rem;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.9rem;
+}
+
+.app-shell__header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .app-shell__breadcrumbs {
@@ -359,6 +380,32 @@ const sidebarToggleLabel = computed(() =>
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #64748b;
+}
+
+.app-shell__active-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.08);
+  color: #1d4ed8;
+  font-size: 0.9rem;
+}
+
+.app-shell__active-project-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.app-shell__active-project-label {
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.app-shell__active-project-name {
+  font-weight: 600;
+  color: #1e3a8a;
 }
 
 .app-shell__title {
@@ -426,6 +473,11 @@ const sidebarToggleLabel = computed(() =>
 
   .app-shell__header {
     padding: 1.5rem 1.25rem 1.25rem;
+  }
+
+  .app-shell__active-project {
+    width: 100%;
+    justify-content: center;
   }
 
   .app-shell__content {
