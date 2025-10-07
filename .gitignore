@@ -17,7 +17,10 @@ frontend/dist/
 /frontend/package-lock.json
 
 backend/store/*
+backend/logs/*
 !backend/store/.gitkeep
+
+.idea
 
 # OS
 .DS_Store
