@@ -2,13 +2,23 @@
   <div class="dashboard">
     <section class="card">
       <header class="card__header">
-        <h2>创建或更新项目</h2>
-        <p>可先行创建专题，后续后端流程执行时会自动追加执行记录。</p>
+        <div>
+          <h2>{{ formTitle }}</h2>
+          <p>{{ formSubtitle }}</p>
+        </div>
+        <p v-if="isReadOnly" class="card__hint">当前为查看模式，点击左侧“编辑项目”按钮即可修改信息。</p>
       </header>
-      <form class="form" @submit.prevent="submit">
+      <form class="form" :class="{ 'form--readonly': isReadOnly }" @submit.prevent="submit">
         <div class="form__row">
           <label for="name">项目名称</label>
-          <input id="name" v-model="form.name" type="text" placeholder="例如：专题_2024" required />
+          <input
+            id="name"
+            v-model="form.name"
+            type="text"
+            placeholder="例如：专题_2024"
+            :readonly="isReadOnly"
+            required
+          />
         </div>
         <div class="form__row">
           <label for="description">项目描述</label>
@@ -17,6 +27,7 @@
             v-model="form.description"
             rows="2"
             placeholder="用于说明项目背景或目的"
+            :readonly="isReadOnly"
           ></textarea>
         </div>
         <div class="form__row">
@@ -26,11 +37,15 @@
             v-model="form.metadata"
             rows="3"
             placeholder='{"owner": "张三", "priority": "高"}'
+            :readonly="isReadOnly"
           ></textarea>
         </div>
         <div class="form__actions">
-          <button type="submit" :disabled="submitting">
-            {{ submitting ? '保存中…' : '保存项目' }}
+          <button v-if="!isReadOnly" type="button" class="form__secondary" @click="cancelEdit">
+            取消
+          </button>
+          <button type="submit" :disabled="submitting || isReadOnly">
+            {{ submitLabel }}
           </button>
         </div>
         <p v-if="formError" class="form__message form__message--error">{{ formError }}</p>
@@ -80,8 +95,8 @@
         </section>
       </div>
     </section>
-    <section class="placeholder" v-else-if="!loading">
-      <p>选择左侧的项目以查看详情，或创建一个新项目。</p>
+    <section class="placeholder" v-else-if="!loading && !isCreateMode">
+      <p>从左侧列表选择一个项目即可浏览详情，或使用上方按钮快速创建。</p>
       <p v-if="props.error" class="placeholder__error">{{ props.error }}</p>
     </section>
   </div>
@@ -102,10 +117,14 @@ const props = defineProps({
   error: {
     type: String,
     default: ''
+  },
+  mode: {
+    type: String,
+    default: 'view'
   }
 })
 
-const emit = defineEmits(['project-created'])
+const emit = defineEmits(['project-created', 'cancel'])
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
@@ -119,21 +138,52 @@ const submitting = ref(false)
 const formError = ref('')
 const formSuccess = ref('')
 
+const formMode = computed(() => props.mode || 'view')
+const isCreateMode = computed(() => formMode.value === 'create')
+const isEditMode = computed(() => formMode.value === 'edit')
+const isReadOnly = computed(() => formMode.value === 'view' && !!props.project)
+
+const formTitle = computed(() => {
+  if (isCreateMode.value) return '新建项目'
+  if (isEditMode.value) return '编辑项目'
+  if (props.project) return '查看项目信息'
+  return '创建或更新项目'
+})
+
+const formSubtitle = computed(() => {
+  if (isCreateMode.value) return '填写基础信息后保存，即可开始跟踪专题。'
+  if (isEditMode.value) return '更新项目信息并保存，系统会同步记录最新描述与附加信息。'
+  return '可先行创建专题，后续后端流程执行时会自动追加执行记录。'
+})
+
+const submitLabel = computed(() => {
+  if (submitting.value) return '保存中…'
+  if (isCreateMode.value) return '创建项目'
+  if (isEditMode.value) return '保存修改'
+  return '保存项目'
+})
+
 const hasMetadata = computed(
   () => props.project && props.project.metadata && Object.keys(props.project.metadata).length > 0
 )
 
+const resetForm = () => {
+  form.name = ''
+  form.description = ''
+  form.metadata = ''
+}
+
 watch(
-  () => props.project,
-  (project) => {
-    if (project) {
+  [() => props.project, () => props.mode],
+  ([project, mode]) => {
+    if (mode === 'create') {
+      resetForm()
+    } else if (project) {
       form.name = project.name
       form.description = project.description || ''
       form.metadata = project.metadata ? JSON.stringify(project.metadata, null, 2) : ''
     } else {
-      form.name = ''
-      form.description = ''
-      form.metadata = ''
+      resetForm()
     }
     formSuccess.value = ''
     formError.value = ''
@@ -160,6 +210,11 @@ const parseMetadata = () => {
 }
 
 const submit = async () => {
+  if (isReadOnly.value) {
+    formError.value = '当前为查看模式，请先点击左侧的“编辑项目”按钮'
+    return
+  }
+
   if (!form.name.trim()) {
     formError.value = '请输入项目名称'
     return
@@ -191,7 +246,7 @@ const submit = async () => {
     const data = await response.json()
     if (data?.project) {
       emit('project-created', data.project)
-      formSuccess.value = '项目信息已保存'
+      formSuccess.value = isCreateMode.value ? '新项目已创建' : '项目信息已更新'
     } else {
       formSuccess.value = '操作完成，但未返回项目信息'
     }
@@ -200,6 +255,10 @@ const submit = async () => {
   } finally {
     submitting.value = false
   }
+}
+
+const cancelEdit = () => {
+  emit('cancel')
 }
 
 const formatTimestamp = (timestamp) => {
@@ -261,6 +320,10 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   gap: 1.25rem;
 }
 
+.form--readonly {
+  opacity: 0.85;
+}
+
 .form__row {
   display: flex;
   flex-direction: column;
@@ -288,6 +351,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 .form__actions {
   display: flex;
   justify-content: flex-end;
+  gap: 0.75rem;
 }
 
 .form__actions button {
@@ -299,6 +363,17 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   cursor: pointer;
   font-weight: 600;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form__actions button.form__secondary {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4c1d95;
+}
+
+.form__actions button.form__secondary:hover {
+  box-shadow: none;
+  transform: none;
+  background: rgba(99, 102, 241, 0.18);
 }
 
 .form__actions button:disabled {
@@ -322,6 +397,19 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 
 .form__message--success {
   color: #059669;
+}
+
+.card__hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: #6366f1;
+}
+
+.form__row input[readonly],
+.form__row textarea[readonly] {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: not-allowed;
 }
 
 .card__body {

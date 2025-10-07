@@ -334,6 +334,13 @@ def create_project():
     return jsonify({"status": "ok", "project": project})
 
 
+@app.delete("/api/projects/<string:name>")
+def delete_project(name: str):
+    if not PROJECT_MANAGER.delete_project(name):
+        return jsonify({"status": "error", "message": "Project not found"}), 404
+    return jsonify({"status": "ok", "message": "Project deleted"})
+
+
 @app.get("/api/projects/<string:name>/datasets")
 def project_datasets(name: str):
     try:
