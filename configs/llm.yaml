@@ -1,0 +1,13 @@
+# Large language model configuration for Opinion System
+filter_llm:
+  provider: ""
+  model: ""
+  qps: 10
+  batch_size: 16
+  truncation: 512
+presets:
+  - id: "default"
+    name: "默认预设"
+    provider: ""
+    model: ""
+    description: "默认的LLM配置占位符"

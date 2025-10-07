@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import ProjectBoardView from '../views/ProjectBoardView.vue'
 import ProjectDataView from '../views/ProjectDataView.vue'
 import TestView from '../views/TestView.vue'
+import SettingsView from '../views/SettingsView.vue'
 
 export const routes = [
   {
@@ -27,6 +28,14 @@ export const routes = [
     component: TestView,
     meta: {
       title: '测试界面'
+    }
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: SettingsView,
+    meta: {
+      title: '系统设置'
     }
   },
   {

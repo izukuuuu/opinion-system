@@ -3,8 +3,7 @@
 """
 import os
 import yaml
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 from .paths import get_configs_root, get_data_root, get_project_root
 
 
@@ -32,13 +31,17 @@ class Settings:
         config_dir = get_configs_root()
         
         # 加载YAML配置文件
+        self.configs.clear()
+
         yaml_files = list(config_dir.glob("*.yaml"))
         for config_file in yaml_files:
             try:
                 with open(config_file, 'r', encoding='utf-8') as f:
                     self.configs[config_file.stem] = yaml.safe_load(f)
             except Exception as e:
-                pass
+                if logger:
+                    logger.warning("Failed to load config %s: %s", config_file, e)
+                continue
         
         # 加载环境变量配置
         self.configs['env'] = {}
@@ -57,6 +60,10 @@ class Settings:
             'templates_dir': str(project_root / 'templates')
         }
     
+    def reload(self, logger=None) -> None:
+        """Reload configuration files from disk."""
+        self._load_configs(logger)
+
     def get(self, key: str, default: Any = None) -> Any:
         """
         获取配置值，支持点号分隔的嵌套键
