@@ -244,6 +244,20 @@ class ProjectManager:
         self._save_to_disk()
         return record.to_dict()
 
+    def delete_project(self, name: str) -> bool:
+        """Delete a project from storage.
+
+        Returns ``True`` if a project with the given name existed and was removed.
+        ``False`` is returned when the project could not be found.
+        """
+
+        if name not in self._projects:
+            return False
+
+        self._projects.pop(name, None)
+        self._save_to_disk()
+        return True
+
 
 # A lightweight global accessor that avoids repeated disk reads when imported
 _project_manager: Optional[ProjectManager] = None
