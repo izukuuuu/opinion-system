@@ -74,6 +74,11 @@ def _evaluate_success(result: Any) -> bool:
         return result
     if result is None:
         return False
+    if isinstance(result, dict):
+        status = result.get("status")
+        if status is not None:
+            return status != "error"
+        return True
     return True
 
 
@@ -101,11 +106,26 @@ def _execute_operation(
         result = caller(*args, **kwargs)
         success = _evaluate_success(result)
         _log_with_context(operation, success, log_context)
+        serialised = _serialise_result(result)
+        if success:
+            return {
+                "status": "ok",
+                "operation": operation,
+                "data": serialised,
+            }, 200
+
+        message = "操作执行失败"
+        if isinstance(serialised, dict):
+            message = serialised.get("message") or serialised.get("error") or message
+        elif isinstance(serialised, str):
+            message = serialised
+
         return {
-            "status": "ok",
+            "status": "error",
             "operation": operation,
-            "data": _serialise_result(result),
-        }, 200
+            "message": message,
+            "data": serialised,
+        }, 500
     except Exception as exc:  # pragma: no cover - defensive: surface backend errors
         LOGGER.exception("Error while executing operation %s", operation)
         _log_with_context(operation, False, log_context)
