@@ -103,13 +103,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useActiveProject } from '../composables/useActiveProject'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
 const projects = ref([])
 const projectLoading = ref(false)
-const selectedProject = ref('')
 
 const datasets = ref([])
 const datasetLoading = ref(false)
@@ -121,9 +121,12 @@ const uploading = ref(false)
 const uploadError = ref('')
 const uploadSuccess = ref('')
 
+const { activeProject, activeProjectName, setActiveProject, clearActiveProject } = useActiveProject()
+const selectedProject = computed(() => activeProjectName.value)
+
 const uploadHelper = computed(() => {
   if (uploading.value) return ''
-  if (!selectedProject.value) return '请先在左侧选择一个项目'
+  if (!activeProjectName.value) return '请先在左侧选择一个项目'
   if (!uploadFile.value) return '请选择需要上传的表格文件'
   return ''
 })
@@ -137,13 +140,20 @@ const fetchProjects = async () => {
     }
     const data = await response.json()
     projects.value = Array.isArray(data.projects) ? data.projects : []
-    if (!selectedProject.value && projects.value.length) {
-      selectedProject.value = projects.value[0].name
-      await fetchDatasets(selectedProject.value)
+    if (!projects.value.length) {
+      clearActiveProject()
+    } else {
+      const currentName = activeProjectName.value
+      const matched = currentName
+        ? projects.value.find((project) => project.name === currentName)
+        : null
+      const targetProject = matched || projects.value[0]
+      setActiveProject(targetProject)
     }
   } catch (err) {
     console.error(err)
     projects.value = []
+    clearActiveProject()
   } finally {
     projectLoading.value = false
   }
@@ -169,9 +179,9 @@ const fetchDatasets = async (projectName) => {
 }
 
 const selectProject = async (projectName) => {
-  if (selectedProject.value === projectName) return
-  selectedProject.value = projectName
-  await fetchDatasets(projectName)
+  if (activeProjectName.value === projectName) return
+  const project = projects.value.find((item) => item.name === projectName)
+  setActiveProject(project || projectName)
 }
 
 const handleFileChange = (event) => {
@@ -182,7 +192,7 @@ const handleFileChange = (event) => {
 }
 
 const uploadDataset = async () => {
-  if (!selectedProject.value) {
+  if (!activeProjectName.value) {
     uploadError.value = '请选择一个项目'
     return
   }
@@ -201,7 +211,7 @@ const uploadDataset = async () => {
     formData.append('file', uploadFile.value)
 
     const response = await fetch(
-      `${API_BASE_URL}/projects/${encodeURIComponent(selectedProject.value)}/datasets`,
+      `${API_BASE_URL}/projects/${encodeURIComponent(activeProjectName.value)}/datasets`,
       {
         method: 'POST',
         body: formData
@@ -219,7 +229,7 @@ const uploadDataset = async () => {
     if (fileInput.value) {
       fileInput.value.value = ''
     }
-    await fetchDatasets(selectedProject.value)
+    await fetchDatasets(activeProjectName.value)
   } catch (err) {
     uploadError.value = err instanceof Error ? err.message : '上传失败'
   } finally {
@@ -237,6 +247,18 @@ const formatTimestamp = (timestamp) => {
 }
 
 onMounted(fetchProjects)
+
+watch(
+  activeProject,
+  async (project) => {
+    if (project?.name) {
+      await fetchDatasets(project.name)
+    } else {
+      datasets.value = []
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>

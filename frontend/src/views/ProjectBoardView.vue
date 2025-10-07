@@ -201,13 +201,13 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ProjectDashboard from '../components/ProjectDashboard.vue'
+import { useActiveProject } from '../composables/useActiveProject'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
 const projects = ref([])
-const selectedProjectName = ref('')
 const loading = ref(false)
 const error = ref('')
 const isRefreshing = ref(false)
@@ -216,6 +216,9 @@ const viewMode = ref('view')
 const lastSelectedProject = ref('')
 const showCreateModal = ref(false)
 const openActionMenu = ref('')
+
+const { activeProjectName, setActiveProject, clearActiveProject } = useActiveProject()
+const selectedProjectName = ref(activeProjectName.value || '')
 
 const closeProjectMenu = () => {
   openActionMenu.value = ''
@@ -237,11 +240,15 @@ const fetchProjects = async () => {
     projects.value = Array.isArray(data.projects) ? data.projects : []
     if (!projects.value.length) {
       selectedProjectName.value = ''
-    } else if (!selectedProjectName.value) {
-      selectedProjectName.value = projects.value[0].name
-    }
-    if (selectedProjectName.value && !projects.value.some((project) => project.name === selectedProjectName.value)) {
-      selectedProjectName.value = projects.value[0]?.name || ''
+      clearActiveProject()
+    } else {
+      const currentName = activeProjectName.value || selectedProjectName.value
+      const matched = currentName
+        ? projects.value.find((project) => project.name === currentName)
+        : null
+      const targetProject = matched || projects.value[0]
+      selectedProjectName.value = targetProject.name
+      setActiveProject(targetProject)
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '未知错误'
@@ -300,6 +307,8 @@ const closeCreateModal = () => {
 const openProject = (name) => {
   if (!name) return
   selectedProjectName.value = name
+  const project = projects.value.find((item) => item.name === name)
+  setActiveProject(project || name)
   viewMode.value = 'view'
   error.value = ''
   closeProjectMenu()
@@ -313,9 +322,12 @@ const startEditProject = (name = selectedProjectName.value) => {
   }
   if (name) {
     selectedProjectName.value = name
+    const project = projects.value.find((item) => item.name === name)
+    setActiveProject(project || name)
   }
   if (!selectedProjectName.value && projects.value.length) {
     selectedProjectName.value = projects.value[0].name
+    setActiveProject(projects.value[0])
   }
   lastSelectedProject.value = selectedProjectName.value
   viewMode.value = 'edit'
@@ -352,9 +364,11 @@ const confirmDeleteProject = async (name = selectedProjectName.value) => {
     if (projects.value.length) {
       selectedProjectName.value = projects.value[0].name
       viewMode.value = 'view'
+      setActiveProject(projects.value[0])
     } else {
       selectedProjectName.value = ''
       viewMode.value = 'view'
+      clearActiveProject()
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '删除项目时出现问题'
@@ -375,6 +389,7 @@ const handleProjectCreated = (project) => {
   viewMode.value = 'view'
   showCreateModal.value = false
   error.value = ''
+  setActiveProject(project)
   closeProjectMenu()
 }
 
@@ -418,6 +433,16 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeProjectMenu)
+})
+
+watch(activeProjectName, (name) => {
+  if (!name) {
+    selectedProjectName.value = ''
+    return
+  }
+  if (selectedProjectName.value !== name) {
+    selectedProjectName.value = name
+  }
 })
 </script>
 
