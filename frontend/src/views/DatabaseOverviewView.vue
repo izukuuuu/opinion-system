@@ -12,79 +12,123 @@
       </button>
     </header>
 
+    <nav class="database-view__tabs" role="tablist" aria-label="数据库信息视图">
+      <button
+        v-for="tab in tabs"
+        :key="tab.key"
+        class="database-view__tab"
+        :class="{ 'database-view__tab--active': activeTab === tab.key }"
+        type="button"
+        role="tab"
+        :id="`database-tab-${tab.key}`"
+        :aria-selected="activeTab === tab.key"
+        :aria-controls="`database-panel-${tab.key}`"
+        @click="setActiveTab(tab.key)"
+      >
+        {{ tab.label }}
+      </button>
+    </nav>
+
     <section v-if="error" class="database-view__alert" role="alert">
       <p>{{ error }}</p>
       <p class="database-view__alert-hint">请检查后端服务与数据库配置，稍后再试。</p>
     </section>
 
-    <section v-if="hasData" class="database-view__overview">
-      <article class="card">
-        <header>
-          <h2>连接信息</h2>
-          <p>从配置文件推断出的数据库连接要素。</p>
-        </header>
-        <dl class="database-view__details">
-          <div v-for="detail in connectionDetails" :key="detail.label">
-            <dt>{{ detail.label }}</dt>
-            <dd>{{ detail.value }}</dd>
-          </div>
-        </dl>
-      </article>
+    <section
+      v-if="activeTab === 'overview'"
+      class="database-view__panel"
+      role="tabpanel"
+      id="database-panel-overview"
+      aria-labelledby="database-tab-overview"
+    >
+      <section v-if="hasData" class="database-view__overview">
+        <article class="card">
+          <header>
+            <h2>连接信息</h2>
+            <p>从配置文件推断出的数据库连接要素。</p>
+          </header>
+          <dl class="database-view__details">
+            <div v-for="detail in connectionDetails" :key="detail.label">
+              <dt>{{ detail.label }}</dt>
+              <dd>{{ detail.value }}</dd>
+            </div>
+          </dl>
+        </article>
 
-      <article class="card">
-        <header>
-          <h2>数据量统计</h2>
-          <p>帮助快速了解业务数据规模。</p>
-        </header>
-        <ul class="database-view__stats">
-          <li>
-            <span class="database-view__stats-label">业务数据库</span>
-            <strong>{{ summaryStats.databaseCount }}</strong>
-          </li>
-          <li>
-            <span class="database-view__stats-label">总表数</span>
-            <strong>{{ summaryStats.tableCount }}</strong>
-          </li>
-          <li>
-            <span class="database-view__stats-label">已统计行数</span>
-            <strong>{{ summaryStats.rowCount }}</strong>
-          </li>
-        </ul>
-        <footer class="database-view__footer" v-if="queriedAt">
-          <ServerStackIcon class="database-view__footer-icon" />
-          <span>最近一次查询：{{ queriedAt }}</span>
-        </footer>
-      </article>
+        <article class="card">
+          <header>
+            <h2>数据量统计</h2>
+            <p>帮助快速了解业务数据规模。</p>
+          </header>
+          <ul class="database-view__stats">
+            <li>
+              <span class="database-view__stats-label">业务数据库</span>
+              <strong>{{ summaryStats.databaseCount }}</strong>
+            </li>
+            <li>
+              <span class="database-view__stats-label">总表数</span>
+              <strong>{{ summaryStats.tableCount }}</strong>
+            </li>
+            <li>
+              <span class="database-view__stats-label">已统计行数</span>
+              <strong>{{ summaryStats.rowCount }}</strong>
+            </li>
+          </ul>
+          <footer class="database-view__footer" v-if="queriedAt">
+            <ServerStackIcon class="database-view__footer-icon" />
+            <span>最近一次查询：{{ queriedAt }}</span>
+          </footer>
+        </article>
+      </section>
+
+      <section v-if="loading" class="database-view__skeleton">
+        <div class="database-view__skeleton-card" v-for="index in 2" :key="index"></div>
+      </section>
+
+      <section v-if="hasData" class="database-view__databases">
+        <article v-for="database in databases" :key="database.name" class="database-card">
+          <header class="database-card__header">
+            <h3>{{ database.name }}</h3>
+            <p>{{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行</p>
+          </header>
+          <ul class="database-card__tables">
+            <li
+              v-for="table in database.tables"
+              :key="table.name"
+              :class="['database-card__table', { 'database-card__table--error': table.error }]"
+            >
+              <span class="database-card__table-name">{{ table.name }}</span>
+              <span v-if="table.error" class="database-card__table-error">{{ table.error }}</span>
+              <span v-else class="database-card__table-count">{{ formatNumber(table.record_count) }} 行</span>
+            </li>
+          </ul>
+          <p v-if="!database.tables.length" class="database-card__empty">该库暂无业务表。</p>
+        </article>
+      </section>
+
+      <p v-if="!loading && !hasData && !error" class="database-view__empty">
+        未检索到业务数据库，请确认配置是否正确。
+      </p>
     </section>
 
-    <section v-if="loading" class="database-view__skeleton">
-      <div class="database-view__skeleton-card" v-for="index in 2" :key="index"></div>
-    </section>
-
-    <section v-if="hasData" class="database-view__databases">
-      <article v-for="database in databases" :key="database.name" class="database-card">
-        <header class="database-card__header">
-          <h3>{{ database.name }}</h3>
-          <p>{{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行</p>
+    <section
+      v-else
+      class="database-view__panel"
+      role="tabpanel"
+      id="database-panel-raw"
+      aria-labelledby="database-tab-raw"
+    >
+      <div class="database-view__raw" v-if="hasPayload">
+        <header class="database-view__raw-header">
+          <h2>原始响应数据</h2>
+          <p>以下内容展示了后端返回的完整 JSON，便于对照排查。</p>
         </header>
-        <ul class="database-card__tables">
-          <li
-            v-for="table in database.tables"
-            :key="table.name"
-            :class="['database-card__table', { 'database-card__table--error': table.error }]"
-          >
-            <span class="database-card__table-name">{{ table.name }}</span>
-            <span v-if="table.error" class="database-card__table-error">{{ table.error }}</span>
-            <span v-else class="database-card__table-count">{{ formatNumber(table.record_count) }} 行</span>
-          </li>
-        </ul>
-        <p v-if="!database.tables.length" class="database-card__empty">该库暂无业务表。</p>
-      </article>
+        <pre class="database-view__raw-code">{{ rawPayload }}</pre>
+      </div>
+      <p v-else class="database-view__raw-placeholder">
+        暂无可展示的数据，请先点击上方的“刷新数据”按钮获取最新结果。
+      </p>
     </section>
-
-    <p v-if="!loading && !hasData && !error" class="database-view__empty">
-      未检索到业务数据库，请确认配置是否正确。
-    </p>
   </section>
 </template>
 
@@ -99,11 +143,23 @@ const { callApi } = useBackendClient()
 const loading = ref(false)
 const error = ref('')
 const payload = ref(null)
+const activeTab = ref('overview')
 
 const numberFormatter = new Intl.NumberFormat('zh-CN')
 const formatNumber = (value) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—'
   return numberFormatter.format(Number(value))
+}
+
+const tabs = [
+  { key: 'overview', label: '数据概览' },
+  { key: 'raw', label: '原始 JSON' }
+]
+
+const setActiveTab = (key) => {
+  if (tabs.some((tab) => tab.key === key)) {
+    activeTab.value = key
+  }
 }
 
 const queriedAt = computed(() => {
@@ -142,6 +198,15 @@ const summaryStats = computed(() => {
 
 const databases = computed(() => payload.value?.databases ?? [])
 const hasData = computed(() => (databases.value?.length ?? 0) > 0)
+const hasPayload = computed(() => !!payload.value)
+const rawPayload = computed(() => {
+  if (!payload.value) return ''
+  try {
+    return JSON.stringify(payload.value, null, 2)
+  } catch (err) {
+    return String(payload.value)
+  }
+})
 
 const refresh = async () => {
   loading.value = true
@@ -176,6 +241,38 @@ onMounted(refresh)
   display: flex;
   align-items: center;
   gap: 1.75rem;
+}
+
+.database-view__tabs {
+  display: inline-flex;
+  background: rgba(15, 23, 42, 0.04);
+  border-radius: 999px;
+  padding: 0.35rem;
+  width: fit-content;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06);
+  margin: -0.75rem 0 0.75rem;
+}
+
+.database-view__tab {
+  border: none;
+  background: transparent;
+  padding: 0.4rem 1.2rem;
+  border-radius: 999px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.database-view__tab:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
+.database-view__tab--active {
+  background: #fff;
+  color: #1f2937;
+  box-shadow: 0 8px 20px -10px rgba(15, 23, 42, 0.35);
 }
 
 .database-view__icon {
@@ -312,6 +409,12 @@ onMounted(refresh)
   height: 1.25rem;
 }
 
+.database-view__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
 .database-view__skeleton {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -406,6 +509,41 @@ onMounted(refresh)
   color: #64748b;
 }
 
+.database-view__raw {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.database-view__raw-header h2 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.database-view__raw-header p {
+  margin: 0.35rem 0 0;
+  color: #475569;
+}
+
+.database-view__raw-code {
+  margin: 0;
+  padding: 1.25rem 1.5rem;
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: 18px;
+  color: #e2e8f0;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Source Code Pro', monospace;
+  font-size: 0.95rem;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+
+.database-view__raw-placeholder {
+  margin: 0;
+  text-align: center;
+  color: #64748b;
+  font-style: italic;
+}
+
 @keyframes shimmer {
   0% {
     background-position: -200% 0;
@@ -437,6 +575,11 @@ onMounted(refresh)
 
   .database-view__refresh {
     margin-left: 0;
+  }
+
+  .database-view__tabs {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>
