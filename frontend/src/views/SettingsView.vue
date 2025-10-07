@@ -346,9 +346,21 @@ const apiRequest = async (url, options = {}) => {
   }
 
   const response = await fetch(resolveApiUrl(url), init)
-  const data = await response.json().catch(() => {
-    throw new Error('无法解析服务器返回的数据')
-  })
+  const rawText = await response.text()
+  let data
+
+  if (!rawText.trim()) {
+    data = {}
+  } else {
+    try {
+      data = JSON.parse(rawText)
+    } catch (error) {
+      const statusLabel = `${response.status} ${response.statusText || ''}`.trim()
+      const preview = rawText.slice(0, 120).replace(/\s+/g, ' ')
+      const detail = preview ? `：${preview}` : ''
+      throw new Error(`无法解析服务器返回的数据（${statusLabel || '未知状态'}）${detail}`)
+    }
+  }
 
   if (!response.ok || data.status === 'error') {
     const message = data.message || `请求失败（${response.status}）`
