@@ -266,6 +266,8 @@ watch(
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: 2.5rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .data-manager__projects {

@@ -26,6 +26,8 @@ import ApiWorkbench from '../components/ApiWorkbench.vue'
   border-radius: 28px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   box-shadow: 0 25px 60px -30px rgba(15, 23, 42, 0.35);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .test-view__header {

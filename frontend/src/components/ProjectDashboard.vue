@@ -53,23 +53,69 @@
       </form>
     </section>
 
-    <section class="card" v-if="project">
-      <header class="card__header">
-        <h2>{{ project.name }}</h2>
-        <p>最近更新：{{ formatTimestamp(project.updated_at) }}</p>
+    <section class="card card--project" v-if="project">
+      <header class="card__header card__header--project">
+        <div>
+          <h2>{{ project.name }}</h2>
+          <p>最近更新：{{ formatTimestamp(project.updated_at) }}</p>
+        </div>
       </header>
-      <div class="card__body">
-        <article class="details">
+      <section class="project-card__summary" aria-label="项目摘要">
+        <div class="summary-grid">
+          <div class="summary-item">
+            <span class="summary-item__label">状态</span>
+            <span class="summary-item__value" :data-status="project.status">
+              {{ statusLabel(project.status) }}
+            </span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-item__label">创建时间</span>
+            <span class="summary-item__value">{{ formatTimestamp(project.created_at) }}</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-item__label">执行记录</span>
+            <span class="summary-item__value">
+              {{ timeline.length ? `${timeline.length} 条` : '暂无' }}
+            </span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-item__label">包含日期</span>
+            <span class="summary-item__value">{{ formattedDates }}</span>
+          </div>
+        </div>
+      </section>
+      <nav class="project-card__tabs" role="tablist" aria-label="项目信息分类">
+        <button
+          v-for="tab in detailTabs"
+          :key="tab.key"
+          class="project-card__tab"
+          :class="{ 'project-card__tab--active': activeDetailTab === tab.key }"
+          type="button"
+          role="tab"
+          :id="`project-tab-${tab.key}`"
+          :aria-selected="activeDetailTab === tab.key"
+          :aria-controls="`project-panel-${tab.key}`"
+          @click="setActiveTab(tab.key)"
+        >
+          {{ tab.label }}
+        </button>
+      </nav>
+      <div class="project-card__body">
+        <section
+          v-if="activeDetailTab === 'overview'"
+          class="project-card__panel"
+          role="tabpanel"
+          id="project-panel-overview"
+          aria-labelledby="project-tab-overview"
+        >
           <p v-if="project.description" class="details__description">{{ project.description }}</p>
-          <ul class="details__list">
-            <li><strong>状态：</strong>{{ statusLabel(project.status) }}</li>
-            <li><strong>创建时间：</strong>{{ formatTimestamp(project.created_at) }}</li>
-            <li>
-              <strong>包含日期：</strong>
-              <span v-if="project.dates?.length">{{ project.dates.join(', ') }}</span>
-              <span v-else>暂无</span>
-            </li>
-          </ul>
+          <p v-else class="details__placeholder">暂无项目描述，可在编辑模式下补充背景信息。</p>
+          <div v-if="hasDates" class="details__dates">
+            <h3>包含日期</h3>
+            <ul>
+              <li v-for="date in project.dates" :key="date">{{ date }}</li>
+            </ul>
+          </div>
           <div class="details__metadata" v-if="hasMetadata">
             <h3>附加信息</h3>
             <ul>
@@ -78,8 +124,14 @@
               </li>
             </ul>
           </div>
-        </article>
-        <section class="timeline">
+        </section>
+        <section
+          v-else
+          class="project-card__panel project-card__panel--timeline"
+          role="tabpanel"
+          id="project-panel-activity"
+          aria-labelledby="project-tab-activity"
+        >
           <h3>执行记录</h3>
           <ul v-if="timeline.length">
             <li v-for="item in timeline" :key="item.timestamp + item.operation" :data-success="item.success">
@@ -167,6 +219,23 @@ const hasMetadata = computed(
   () => props.project && props.project.metadata && Object.keys(props.project.metadata).length > 0
 )
 
+const detailTabs = [
+  { key: 'overview', label: '项目概览' },
+  { key: 'activity', label: '执行记录' }
+]
+
+const activeDetailTab = ref('overview')
+
+const hasDates = computed(() => {
+  const dates = props.project?.dates
+  return Array.isArray(dates) && dates.length > 0
+})
+
+const formattedDates = computed(() => {
+  if (!hasDates.value) return '暂无'
+  return (props.project?.dates ?? []).join('、')
+})
+
 const resetForm = () => {
   form.name = ''
   form.description = ''
@@ -187,9 +256,16 @@ watch(
     }
     formSuccess.value = ''
     formError.value = ''
+    activeDetailTab.value = 'overview'
   },
   { immediate: true }
 )
+
+const setActiveTab = (key) => {
+  if (detailTabs.some((tab) => tab.key === key)) {
+    activeDetailTab.value = key
+  }
+}
 
 const timeline = computed(() => {
   if (!props.project?.operations) return []
@@ -412,16 +488,104 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   cursor: not-allowed;
 }
 
-.card__body {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2rem;
+.card--project {
+  gap: 1.75rem;
 }
 
-.details {
+.card__header--project {
+  align-items: flex-start;
+}
+
+.project-card__summary {
+  background: #f8fafc;
+  border-radius: 16px;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid #e2e8f0;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.summary-item {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.35rem;
+}
+
+.summary-item__label {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.summary-item__value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #1f2937;
+  word-break: break-word;
+}
+
+.summary-item__value[data-status='success'] {
+  color: #047857;
+}
+
+.summary-item__value[data-status='error'] {
+  color: #b91c1c;
+}
+
+.project-card__tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  align-self: flex-start;
+}
+
+.project-card__tab {
+  border: none;
+  background: transparent;
+  padding: 0.45rem 1.1rem;
+  border-radius: 999px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.project-card__tab:hover,
+.project-card__tab:focus-visible {
+  outline: none;
+  background: rgba(99, 102, 241, 0.12);
+  color: #4338ca;
+}
+
+.project-card__tab--active {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(99, 102, 241, 0.25);
+}
+
+.project-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+
+.project-card__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.project-card__panel--timeline h3 {
+  margin: 0;
 }
 
 .details__description {
@@ -430,13 +594,58 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   line-height: 1.5;
 }
 
-.details__list {
+.details__placeholder {
+  margin: 0;
+  color: #64748b;
+  background: rgba(248, 250, 252, 0.8);
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+}
+
+.details__placeholder--muted {
+  background: transparent;
+  padding: 0;
+  color: #94a3b8;
+}
+
+.details__dates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.details__dates h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #1f2937;
+}
+
+.details__dates ul {
   list-style: none;
   padding: 0;
   margin: 0;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.details__dates li {
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #4338ca;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.details__metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  background: rgba(248, 250, 252, 0.85);
+  border-radius: 16px;
+  padding: 1rem 1.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .details__metadata h3 {
@@ -450,15 +659,20 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  color: #475569;
 }
 
-.timeline {
+.details__metadata li strong {
+  color: #1f2937;
+}
+
+.project-card__panel--timeline {
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 
-.timeline ul {
+.project-card__panel--timeline ul {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -467,7 +681,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   gap: 1rem;
 }
 
-.timeline li {
+.project-card__panel--timeline li {
   padding: 1rem;
   border-radius: 16px;
   border: 1px solid rgba(15, 23, 42, 0.08);
@@ -477,7 +691,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   gap: 0.6rem;
 }
 
-.timeline li[data-success='false'] {
+.project-card__panel--timeline li[data-success='false'] {
   border-color: rgba(220, 38, 38, 0.35);
 }
 
@@ -505,7 +719,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   color: #059669;
 }
 
-.timeline li[data-success='false'] .timeline__status {
+.project-card__panel--timeline li[data-success='false'] .timeline__status {
   color: #dc2626;
 }
 
@@ -524,6 +738,12 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   color: #64748b;
 }
 
+@media (min-width: 1280px) {
+  .summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .placeholder {
   padding: 2rem;
   border-radius: 16px;
@@ -537,8 +757,9 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 }
 
 @media (max-width: 960px) {
-  .card__body {
-    grid-template-columns: 1fr;
+  .project-card__tabs {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 </style>

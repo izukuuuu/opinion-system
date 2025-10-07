@@ -523,6 +523,10 @@ watch(activeProjectName, (name) => {
   min-height: 100vh;
   padding: 2.5rem 3rem 3.5rem;
   color: #0f172a;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .board__hero {
@@ -747,8 +751,8 @@ watch(activeProjectName, (name) => {
 .board__body {
   margin-top: 2rem;
   display: grid;
-  grid-template-columns: minmax(280px, 320px) 1fr;
-  gap: 2rem;
+  grid-template-columns: minmax(300px, 320px) minmax(0, 1fr);
+  gap: 2.25rem;
   align-items: flex-start;
 }
 
@@ -1230,6 +1234,32 @@ watch(activeProjectName, (name) => {
   padding: 2rem;
   border: 1px solid #e2e8f0;
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+@media (min-width: 1440px) {
+  .board {
+    padding: 3rem 3.5rem 4rem;
+  }
+
+  .board__hero {
+    padding: 2.25rem 2.5rem;
+  }
+
+  .board__body {
+    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
+    gap: 2.75rem;
+  }
+
+  .board__sidebar {
+    padding: 2rem 1.75rem;
+  }
+
+  .board__main {
+    padding: 2.25rem 2.5rem;
+  }
 }
 
 .modal-fade-enter-active,
