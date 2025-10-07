@@ -4,7 +4,7 @@
       <CircleStackIcon class="database-view__icon" />
       <div class="database-view__title-group">
         <h1>数据库概览</h1>
-        <p>查看数据库的连接信息、库表结构与数据量。</p>
+        <p>连接后端数据库，查看数据库内容。查看数据库的连接信息、库表结构与数据量。</p>
       </div>
       <button type="button" class="database-view__refresh" @click="refresh" :disabled="loading">
         <ArrowPathIcon class="database-view__refresh-icon" :class="{ 'is-spinning': loading }" />
