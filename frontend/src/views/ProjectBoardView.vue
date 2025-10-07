@@ -1283,6 +1283,7 @@ watch(activeProjectName, (name) => {
   align-items: center;
   justify-content: center;
   padding: 2rem;
+  overflow-y: auto;
   z-index: 50;
 }
 
@@ -1296,6 +1297,8 @@ watch(activeProjectName, (name) => {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
 }
 
 .modal__panel--wide {
@@ -1408,10 +1411,12 @@ watch(activeProjectName, (name) => {
 
   .modal__panel {
     padding: 1.5rem;
+    max-height: calc(100vh - 3rem);
   }
 
   .modal__panel--wide {
     padding: 1.5rem;
+    max-height: calc(100vh - 3rem);
   }
 }
 </style>
