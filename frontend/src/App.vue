@@ -2,7 +2,7 @@
   <div class="app-shell" :class="{ 'app-shell--collapsed': sidebarCollapsed }">
     <aside
       class="app-shell__sidebar"
-      :class="{ 'app-shell__sidebar--collapsed': sidebarCollapsed }"
+      :class="sidebarCollapsed ? 'app-shell__sidebar--collapsed' : 'app-shell__sidebar--expanded'"
     >
       <button
         type="button"
@@ -16,11 +16,25 @@
           class="app-shell__collapse-icon"
         />
       </button>
-      <RouterLink to="/" class="app-shell__brand">
+      <RouterLink
+        v-if="!sidebarCollapsed"
+        to="/"
+        class="app-shell__brand app-shell__brand--expanded"
+      >
         <span class="app-shell__logo">Opinion System</span>
         <span class="app-shell__tagline">项目制舆情工作台</span>
       </RouterLink>
-      <nav class="app-shell__nav">
+      <RouterLink
+        v-else
+        to="/"
+        class="app-shell__brand app-shell__brand--compact"
+        aria-label="Opinion System"
+        title="Opinion System"
+      >
+        <span class="app-shell__brand-mark" aria-hidden="true">OS</span>
+        <span class="sr-only">Opinion System 项目制舆情工作台</span>
+      </RouterLink>
+      <nav v-if="!sidebarCollapsed" class="app-shell__nav app-shell__nav--expanded">
         <RouterLink
           v-for="link in navigationLinks"
           :key="link.label"
@@ -32,6 +46,19 @@
             <span class="app-shell__link-label">{{ link.label }}</span>
             <span class="app-shell__link-description">{{ link.description }}</span>
           </div>
+        </RouterLink>
+      </nav>
+      <nav v-else class="app-shell__nav app-shell__nav--compact">
+        <RouterLink
+          v-for="link in navigationLinks"
+          :key="link.label"
+          :to="link.to"
+          class="app-shell__link app-shell__link--compact"
+          :title="link.label"
+          :aria-label="link.label"
+        >
+          <component :is="link.icon" class="app-shell__icon app-shell__icon--compact" />
+          <span class="sr-only">{{ link.label }}</span>
         </RouterLink>
       </nav>
     </aside>
@@ -116,20 +143,26 @@ const sidebarToggleLabel = computed(() =>
   left: 0;
   bottom: 0;
   height: 100vh;
-  padding: 3.5rem 2rem 2.5rem;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
   background: rgba(15, 23, 42, 0.96);
   color: rgba(241, 245, 249, 0.95);
   box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.18);
+  transition: width 0.3s ease, padding 0.3s ease, gap 0.3s ease;
+  box-sizing: border-box;
+}
+
+.app-shell__sidebar--expanded {
+  padding: 3.5rem 2rem 2.5rem;
+  gap: 2rem;
   overflow-y: auto;
-  transition: width 0.3s ease;
 }
 
 .app-shell__sidebar--collapsed {
+  padding: 3rem 1.25rem 2rem;
+  gap: 1.5rem;
   align-items: center;
-  padding: 3.5rem 1.35rem 2.5rem;
+  overflow-y: hidden;
 }
 
 .app-shell__collapse-toggle {
@@ -165,17 +198,22 @@ const sidebarToggleLabel = computed(() =>
   gap: 0.25rem;
   color: inherit;
   transition: opacity 0.25s ease;
+  text-decoration: none;
 }
 
-.app-shell--collapsed .app-shell__brand {
+.app-shell__brand--expanded {
+  align-items: flex-start;
+}
+
+.app-shell__brand--compact {
   align-items: center;
-  gap: 0.4rem;
+  justify-content: center;
+  width: 100%;
 }
 
 .app-shell__logo {
   font-weight: 700;
   font-size: 1.4rem;
-  transition: transform 0.3s ease;
 }
 
 .app-shell__tagline {
@@ -186,16 +224,35 @@ const sidebarToggleLabel = computed(() =>
   transition: opacity 0.2s ease;
 }
 
-.app-shell--collapsed .app-shell__tagline {
-  opacity: 0;
-  pointer-events: none;
-  height: 0;
+.app-shell__brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.85rem;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.65), rgba(129, 140, 248, 0.75));
+  color: #f8fafc;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.28);
 }
 
 .app-shell__nav {
   display: flex;
   flex-direction: column;
+  width: 100%;
+}
+
+.app-shell__nav--expanded {
   gap: 0.75rem;
+}
+
+.app-shell__nav--compact {
+  gap: 0.75rem;
+  align-items: center;
 }
 
 .app-shell__link {
@@ -209,18 +266,16 @@ const sidebarToggleLabel = computed(() =>
   transition: background 0.2s ease, transform 0.2s ease;
 }
 
-.app-shell--collapsed .app-shell__link {
+
+.app-shell__link--compact {
   justify-content: center;
   padding: 0.65rem 0;
+  width: 100%;
 }
 
 .app-shell__link:hover {
   background: rgba(148, 163, 184, 0.12);
   transform: translateX(4px);
-}
-
-.app-shell--collapsed .app-shell__link:hover {
-  transform: translateY(-2px);
 }
 
 .router-link-active.app-shell__link,
@@ -230,8 +285,8 @@ const sidebarToggleLabel = computed(() =>
   box-shadow: 0 18px 45px rgba(15, 23, 42, 0.35);
 }
 
-.app-shell--collapsed .router-link-active.app-shell__link,
-.app-shell--collapsed .router-link-exact-active.app-shell__link {
+.app-shell__link--compact.router-link-active,
+.app-shell__link--compact.router-link-exact-active {
   transform: translateY(-2px);
 }
 
@@ -240,17 +295,16 @@ const sidebarToggleLabel = computed(() =>
   height: 1.5rem;
 }
 
+.app-shell__icon--compact {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
 .app-shell__link-text {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
   transition: opacity 0.2s ease;
-}
-
-.app-shell--collapsed .app-shell__link-text {
-  opacity: 0;
-  pointer-events: none;
-  width: 0;
 }
 
 .app-shell__link-label {
@@ -265,6 +319,18 @@ const sidebarToggleLabel = computed(() =>
 .router-link-active .app-shell__link-description,
 .router-link-exact-active .app-shell__link-description {
   color: rgba(248, 250, 252, 0.85);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .app-shell__main {
