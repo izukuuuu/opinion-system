@@ -100,7 +100,7 @@ const navigationLinks = [
   },
   {
     label: '测试页面',
-    description: '用于验证交互与组件效果',
+    description: 'API调用测试',
     to: { name: 'test' },
     icon: BeakerIcon
   }

@@ -6,7 +6,7 @@
         <div class="hero__copy">
           <p class="hero__eyebrow">项目工作台</p>
           <h1>Opinion System 控制中心</h1>
-          <p>集中浏览与调度专题流程，保持与团队工具一致的现代体验。</p>
+          <p>在此编辑和开始新项目</p>
         </div>
         <button class="hero__action" type="button" @click="startNewProject">
           <span class="hero__action-icon" aria-hidden="true">+</span>
