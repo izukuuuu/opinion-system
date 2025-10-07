@@ -447,9 +447,17 @@ const sidebarToggleLabel = computed(() =>
 
 .app-shell__content {
   flex: 1;
-  padding: 0 3rem 3rem;
+  padding: 0 clamp(2rem, 5vw, 6rem) clamp(2.5rem, 6vw, 6rem);
   display: flex;
   flex-direction: column;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  gap: 2rem;
+}
+
+.app-shell__content > * {
+  width: min(1400px, 100%);
 }
 
 @media (max-width: 960px) {
@@ -489,6 +497,12 @@ const sidebarToggleLabel = computed(() =>
 
   .app-shell__content {
     padding: 0 1.75rem 2rem;
+    align-items: stretch;
+    gap: 1.5rem;
+  }
+
+  .app-shell__content > * {
+    width: 100%;
   }
 
   .app-shell__collapse-toggle {
@@ -512,6 +526,7 @@ const sidebarToggleLabel = computed(() =>
 
   .app-shell__content {
     padding: 0 1.25rem 1.75rem;
+    gap: 1.5rem;
   }
 }
 </style>
