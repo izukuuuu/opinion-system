@@ -1171,6 +1171,9 @@ watch(activeProjectName, (name) => {
   list-style: none;
   margin: 0;
   z-index: 10;
+  max-height: 14rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .project-tile__menu li {
