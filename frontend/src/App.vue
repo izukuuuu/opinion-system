@@ -70,7 +70,7 @@
     <div class="app-shell__main">
       <header class="app-shell__header">
         <div class="app-shell__header-bar">
-          <p class="app-shell__breadcrumbs">项目制控制台</p>
+          <p class="app-shell__breadcrumbs">舆情系统控制台</p>
           <div class="app-shell__active-project" role="status" aria-live="polite">
             <BriefcaseIcon class="app-shell__active-project-icon" aria-hidden="true" />
             <span class="app-shell__active-project-label">当前项目</span>
