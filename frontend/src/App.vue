@@ -39,18 +39,25 @@
         :class="sidebarCollapsed ? 'app-shell__nav-wrapper--collapsed' : 'app-shell__nav-wrapper--expanded'"
       >
         <nav v-if="!sidebarCollapsed" class="app-shell__nav app-shell__nav--expanded">
-          <RouterLink
-            v-for="link in navigationLinks"
-            :key="link.label"
-            :to="link.to"
-            class="app-shell__link"
+          <section
+            v-for="group in navigationGroups"
+            :key="group.label"
+            class="app-shell__nav-section"
           >
-            <component :is="link.icon" class="app-shell__icon" />
-            <div class="app-shell__link-text">
-              <span class="app-shell__link-label">{{ link.label }}</span>
-              <span class="app-shell__link-description">{{ link.description }}</span>
-            </div>
-          </RouterLink>
+            <h2 class="app-shell__nav-section-label">{{ group.label }}</h2>
+            <RouterLink
+              v-for="link in group.links"
+              :key="link.label"
+              :to="link.to"
+              class="app-shell__link"
+            >
+              <component :is="link.icon" class="app-shell__icon" />
+              <div class="app-shell__link-text">
+                <span class="app-shell__link-label">{{ link.label }}</span>
+                <span class="app-shell__link-description">{{ link.description }}</span>
+              </div>
+            </RouterLink>
+          </section>
         </nav>
         <nav v-else class="app-shell__nav app-shell__nav--compact">
           <RouterLink
@@ -103,38 +110,53 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useActiveProject } from './composables/useActiveProject'
 
-const navigationLinks = [
+const navigationGroups = [
   {
-    label: '项目面板',
-    description: '查看项目记录',
-    to: { name: 'projects' },
-    icon: Squares2X2Icon
+    label: '项目',
+    links: [
+      {
+        label: '项目面板',
+        description: '查看项目记录',
+        to: { name: 'projects' },
+        icon: Squares2X2Icon
+      },
+      {
+        label: '项目数据',
+        description: '导入 Excel 并生成数据存档',
+        to: { name: 'project-data' },
+        icon: DocumentArrowUpIcon
+      }
+    ]
   },
   {
-    label: '项目数据',
-    description: '导入 Excel 并生成数据存档',
-    to: { name: 'project-data' },
-    icon: DocumentArrowUpIcon
-  },
-  {
-    label: '数据库',
-    description: '查看库表与连接状态',
-    to: { name: 'database' },
-    icon: CircleStackIcon
-  },
-  {
-    label: '测试页面',
-    description: 'API调用测试',
-    to: { name: 'test' },
-    icon: BeakerIcon
-  },
-  {
-    label: '系统设置',
-    description: '配置数据库与模型参数',
-    to: { name: 'settings' },
-    icon: Cog6ToothIcon
+    label: '工具',
+    links: [
+      {
+        label: '数据库',
+        description: '查看库表与连接状态',
+        to: { name: 'database' },
+        icon: CircleStackIcon
+      },
+      {
+        label: '测试页面',
+        description: 'API调用测试',
+        to: { name: 'test' },
+        icon: BeakerIcon
+      },
+      {
+        label: '系统设置',
+        description: '配置数据库与模型参数',
+        to: { name: 'settings' },
+        icon: Cog6ToothIcon
+      }
+    ]
   }
 ]
+
+const navigationLinks = navigationGroups.reduce(
+  (links, group) => links.concat(group.links),
+  []
+)
 
 const route = useRoute()
 
@@ -285,23 +307,50 @@ const sidebarToggleLabel = computed(() =>
 }
 
 .app-shell__nav-wrapper {
-  margin-top: auto;
+  margin-top: 1rem;
   width: 100%;
   display: flex;
-  justify-content: stretch;
+  flex-direction: column;
+  justify-content: flex-start;
+  flex: 1;
+}
+
+.app-shell__nav-wrapper--expanded {
+  align-items: stretch;
 }
 
 .app-shell__nav-wrapper--collapsed {
-  justify-content: center;
+  align-items: center;
 }
 
 .app-shell__nav--expanded {
-  gap: 0.75rem;
+  gap: 1.5rem;
 }
 
 .app-shell__nav--compact {
   gap: 0.75rem;
   align-items: center;
+}
+
+.app-shell__nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.app-shell__nav-section-label {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  color: rgba(226, 232, 240, 0.85);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 .app-shell__link {
