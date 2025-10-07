@@ -52,7 +52,7 @@ def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
 
         if not db_url:
             log_error(logger, "未找到数据库连接配置", "Query")
-            raise RuntimeError("未找到数据库连接配置")
+            return None
 
         overview: Dict[str, Any] = {
             "queried_at": datetime.utcnow().isoformat() + "Z",
@@ -91,7 +91,7 @@ def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
 
         if databases_df.empty:
             log_error(logger, "未找到任何数据库", "Query")
-            raise RuntimeError("未找到任何业务数据库")
+            return None
 
         log_success(
             logger,
@@ -165,7 +165,7 @@ def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
 
     except Exception as e:
         log_error(logger, f"查询数据库信息失败: {e}", "Query")
-        raise RuntimeError(f"查询数据库信息失败: {e}") from e
+        return None
     finally:
         if db_manager is not None:
             try:
@@ -189,8 +189,13 @@ def run_query(logger=None) -> Dict[str, Any]:
 
     log_module_start(logger, "Query")
 
-    result = query_database_info(logger)
-    if result is None:
+    try:
+        result = query_database_info(logger)
+        if result is not None:
+            return result
+
         log_error(logger, "模块执行失败", "Query")
-        raise RuntimeError("数据库查询未返回数据")
-    return result
+        return {"status": "error"}
+    except Exception as e:
+        log_error(logger, f"模块执行失败: {e}", "Query")
+        return {"status": "error", "message": str(e)}

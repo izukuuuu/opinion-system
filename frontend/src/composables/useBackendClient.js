@@ -39,27 +39,10 @@ const callApi = async (path, options = {}) => {
     ...options
   })
   if (!response.ok) {
-    let message = ''
-    try {
-      const payload = await response.clone().json()
-      if (payload) {
-        if (typeof payload.message === 'string') message = payload.message
-        else if (typeof payload.error === 'string') message = payload.error
-        else if (typeof payload === 'string') message = payload
-      }
-    } catch (parseError) {
-      message = await response.text()
-    }
-    if (!message) {
-      message = `请求失败: ${response.status}`
-    }
-    throw new Error(message)
+    const message = await response.text()
+    throw new Error(message || `请求失败: ${response.status}`)
   }
-  const result = await response.json()
-  if (result?.status === 'error') {
-    throw new Error(result.message || '请求失败')
-  }
-  return result
+  return response.json()
 }
 
 export const useBackendClient = () => ({ backendBase, ensureConfig, callApi })

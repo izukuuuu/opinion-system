@@ -28,6 +28,8 @@ from src.project.storage import (  # type: ignore
     list_project_datasets,
     store_uploaded_dataset,
 )
+from src.utils.setting.editor import load_config as load_settings_config, save_config as save_settings_config  # type: ignore
+from src.utils.setting.settings import settings  # type: ignore
 
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 PROJECT_MANAGER = get_project_manager()
@@ -149,6 +151,58 @@ CORS(app)
 
 CONFIG = _load_config()
 
+DATABASES_CONFIG_NAME = "databases"
+LLM_CONFIG_NAME = "llm"
+
+
+def _success(payload: Dict[str, Any], status_code: int = 200):
+    response = {"status": "ok"}
+    response.update(payload)
+    return jsonify(response), status_code
+
+
+def _error(message: str, status_code: int = 400):
+    return jsonify({"status": "error", "message": message}), status_code
+
+
+def _reload_settings() -> None:
+    try:
+        settings.reload()
+    except Exception:
+        LOGGER.warning("Failed to reload runtime settings", exc_info=True)
+
+
+def _load_databases_config() -> Dict[str, Any]:
+    config = load_settings_config(DATABASES_CONFIG_NAME)
+    connections = config.get("connections") or []
+    if not isinstance(connections, list):
+        connections = []
+    config["connections"] = connections
+    return config
+
+
+def _persist_databases_config(config: Dict[str, Any]) -> None:
+    save_settings_config(DATABASES_CONFIG_NAME, config)
+    _reload_settings()
+
+
+def _load_llm_config() -> Dict[str, Any]:
+    config = load_settings_config(LLM_CONFIG_NAME)
+    presets = config.get("presets") or []
+    if not isinstance(presets, list):
+        presets = []
+    config["presets"] = presets
+    filter_llm = config.get("filter_llm") or {}
+    if not isinstance(filter_llm, dict):
+        filter_llm = {}
+    config["filter_llm"] = filter_llm
+    return config
+
+
+def _persist_llm_config(config: Dict[str, Any]) -> None:
+    save_settings_config(LLM_CONFIG_NAME, config)
+    _reload_settings()
+
 
 @app.get("/api/status")
 def status():
@@ -164,6 +218,199 @@ def status():
 @app.get("/api/config")
 def get_config():
     return jsonify(CONFIG)
+
+
+@app.get("/api/settings/databases")
+def list_database_connections():
+    config = _load_databases_config()
+    return _success(
+        {
+            "data": {
+                "connections": config.get("connections", []),
+                "active": config.get("active"),
+            }
+        }
+    )
+
+
+@app.post("/api/settings/databases")
+def create_database_connection():
+    payload = request.get_json(silent=True) or {}
+    required = ["id", "name", "engine", "url"]
+    missing = [field for field in required if not str(payload.get(field, "")).strip()]
+    if missing:
+        return _error(f"Missing required field(s): {', '.join(missing)}")
+
+    connection_id = str(payload["id"]).strip()
+    config = _load_databases_config()
+    connections = config.get("connections", [])
+
+    if any(conn.get("id") == connection_id for conn in connections):
+        return _error(f"Connection '{connection_id}' already exists", status_code=409)
+
+    new_connection = {
+        "id": connection_id,
+        "name": str(payload["name"]).strip(),
+        "engine": str(payload["engine"]).strip(),
+        "url": str(payload["url"]).strip(),
+        "description": str(payload.get("description", "")).strip(),
+    }
+
+    connections.append(new_connection)
+    config["connections"] = connections
+
+    if payload.get("set_active") or not config.get("active"):
+        config["active"] = connection_id
+
+    _persist_databases_config(config)
+
+    return _success({"data": new_connection}, status_code=201)
+
+
+@app.put("/api/settings/databases/<connection_id>")
+def update_database_connection(connection_id: str):
+    payload = request.get_json(silent=True) or {}
+    config = _load_databases_config()
+    connections = config.get("connections", [])
+
+    for connection in connections:
+        if connection.get("id") == connection_id:
+            if "id" in payload and str(payload["id"]).strip() != connection_id:
+                return _error("Connection id cannot be changed")
+
+            for field in ["name", "engine", "url", "description"]:
+                if field in payload:
+                    connection[field] = str(payload[field]).strip()
+
+            if payload.get("set_active"):
+                config["active"] = connection_id
+
+            _persist_databases_config(config)
+            return _success({"data": connection})
+
+    return _error(f"Connection '{connection_id}' was not found", status_code=404)
+
+
+@app.delete("/api/settings/databases/<connection_id>")
+def delete_database_connection(connection_id: str):
+    config = _load_databases_config()
+    connections = config.get("connections", [])
+    remaining = [conn for conn in connections if conn.get("id") != connection_id]
+
+    if len(remaining) == len(connections):
+        return _error(f"Connection '{connection_id}' was not found", status_code=404)
+
+    if config.get("active") == connection_id:
+        return _error("Cannot delete the active database connection", status_code=409)
+
+    config["connections"] = remaining
+    _persist_databases_config(config)
+    return _success({"data": {"deleted": connection_id}})
+
+
+@app.post("/api/settings/databases/<connection_id>/activate")
+def activate_database_connection(connection_id: str):
+    config = _load_databases_config()
+    connections = config.get("connections", [])
+
+    if not any(conn.get("id") == connection_id for conn in connections):
+        return _error(f"Connection '{connection_id}' was not found", status_code=404)
+
+    config["active"] = connection_id
+    _persist_databases_config(config)
+    return _success({"data": {"active": connection_id}})
+
+
+@app.get("/api/settings/llm")
+def get_llm_settings():
+    config = _load_llm_config()
+    return _success({"data": config})
+
+
+@app.put("/api/settings/llm/filter")
+def update_llm_filter():
+    payload = request.get_json(silent=True) or {}
+    config = _load_llm_config()
+    filter_llm = config.get("filter_llm", {})
+
+    for field in ["provider", "model"]:
+        if field in payload:
+            filter_llm[field] = str(payload[field]).strip()
+
+    for field in ["qps", "batch_size", "truncation"]:
+        if field in payload:
+            try:
+                filter_llm[field] = int(payload[field])
+            except (TypeError, ValueError):
+                return _error(f"Field '{field}' must be an integer")
+
+    config["filter_llm"] = filter_llm
+    _persist_llm_config(config)
+    return _success({"data": filter_llm})
+
+
+@app.post("/api/settings/llm/presets")
+def create_llm_preset():
+    payload = request.get_json(silent=True) or {}
+    required = ["id", "name", "provider", "model"]
+    missing = [field for field in required if not str(payload.get(field, "")).strip()]
+    if missing:
+        return _error(f"Missing required field(s): {', '.join(missing)}")
+
+    preset_id = str(payload["id"]).strip()
+    config = _load_llm_config()
+    presets = config.get("presets", [])
+
+    if any(preset.get("id") == preset_id for preset in presets):
+        return _error(f"Preset '{preset_id}' already exists", status_code=409)
+
+    new_preset = {
+        "id": preset_id,
+        "name": str(payload["name"]).strip(),
+        "provider": str(payload["provider"]).strip(),
+        "model": str(payload["model"]).strip(),
+        "description": str(payload.get("description", "")).strip(),
+    }
+
+    presets.append(new_preset)
+    config["presets"] = presets
+    _persist_llm_config(config)
+    return _success({"data": new_preset}, status_code=201)
+
+
+@app.put("/api/settings/llm/presets/<preset_id>")
+def update_llm_preset(preset_id: str):
+    payload = request.get_json(silent=True) or {}
+    config = _load_llm_config()
+    presets = config.get("presets", [])
+
+    for preset in presets:
+        if preset.get("id") == preset_id:
+            if "id" in payload and str(payload["id"]).strip() != preset_id:
+                return _error("Preset id cannot be changed")
+
+            for field in ["name", "provider", "model", "description"]:
+                if field in payload:
+                    preset[field] = str(payload[field]).strip()
+
+            _persist_llm_config(config)
+            return _success({"data": preset})
+
+    return _error(f"Preset '{preset_id}' was not found", status_code=404)
+
+
+@app.delete("/api/settings/llm/presets/<preset_id>")
+def delete_llm_preset(preset_id: str):
+    config = _load_llm_config()
+    presets = config.get("presets", [])
+    remaining = [preset for preset in presets if preset.get("id") != preset_id]
+
+    if len(remaining) == len(presets):
+        return _error(f"Preset '{preset_id}' was not found", status_code=404)
+
+    config["presets"] = remaining
+    _persist_llm_config(config)
+    return _success({"data": {"deleted": preset_id}})
 
 
 @app.post("/api/merge")
