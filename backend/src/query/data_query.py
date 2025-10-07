@@ -1,8 +1,11 @@
 """
 数据查询功能
 """
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
+
+import pandas as pd
 
 from ..utils.io.db import DatabaseManager
 from ..utils.setting.settings import settings
@@ -30,6 +33,36 @@ def _summarise_tables(tables: List[Dict[str, Any]]) -> Dict[str, Any]:
         "counted_table_count": counted_tables,
         "total_rows": total_rows,
     }
+
+
+def _serialise_preview(df: pd.DataFrame, max_rows: int = 5) -> Dict[str, Any]:
+    """将数据预览转换为可序列化结构"""
+
+    preview_df = df.head(max_rows)
+    columns = preview_df.columns.tolist()
+    rows: List[Dict[str, Any]] = []
+
+    for record in preview_df.to_dict(orient="records"):
+        normalised: Dict[str, Any] = {}
+        for key, value in record.items():
+            if isinstance(value, (datetime, date)):
+                normalised[key] = value.isoformat()
+            elif isinstance(value, Decimal):
+                normalised[key] = float(value)
+            elif isinstance(value, (bytes, bytearray)):
+                normalised[key] = value.decode("utf-8", errors="replace")
+            elif pd.isna(value):
+                normalised[key] = None
+            elif hasattr(value, "item"):
+                try:
+                    normalised[key] = value.item()
+                except Exception:
+                    normalised[key] = str(value)
+            else:
+                normalised[key] = value
+        rows.append(normalised)
+
+    return {"columns": columns, "rows": rows}
 
 
 def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
@@ -146,6 +179,20 @@ def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
                 except Exception as e:
                     table_info["error"] = str(e)
                     log_error(logger, f"查询表 {db_name}.{table_name} 信息失败: {e}", "Query")
+
+                if "error" not in table_info:
+                    try:
+                        preview_query = f"SELECT * FROM `{db_name}`.`{table_name}` LIMIT 5"
+                        preview_result = db_manager.execute_query(preview_query)
+                        table_info["preview"] = _serialise_preview(preview_result)
+                    except Exception as preview_error:
+                        table_info["preview_error"] = str(preview_error)
+                        log_error(
+                            logger,
+                            f"查询表 {db_name}.{table_name} 预览数据失败: {preview_error}",
+                            "Query",
+                        )
+
                 database_overview["tables"].append(table_info)
 
             stats = _summarise_tables(database_overview["tables"])

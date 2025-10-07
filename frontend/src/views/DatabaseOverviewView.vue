@@ -150,6 +150,26 @@ const formatNumber = (value) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—'
   return numberFormatter.format(Number(value))
 }
+const formatPreviewValue = (value) => {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'number') return numberFormatter.format(value)
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+const tabs = [
+  { key: 'overview', label: '数据概览' },
+  { key: 'table', label: '表格视图' },
+  { key: 'preview', label: '数据预览' },
+  { key: 'raw', label: '原始 JSON' }
+]
+
+const setActiveTab = (key) => {
+  if (tabs.some((tab) => tab.key === key)) {
+    activeTab.value = key
+  }
+}
 
 const tabs = [
   { key: 'overview', label: '数据概览' },
@@ -197,6 +217,16 @@ const summaryStats = computed(() => {
 })
 
 const databases = computed(() => payload.value?.databases ?? [])
+const tableViewDatabases = computed(() =>
+  databases.value.map((database) => ({
+    ...database,
+    tables: [...(database.tables ?? [])].sort((a, b) => {
+      const aValue = Number.isFinite(Number(a.record_count)) ? Number(a.record_count) : 0
+      const bValue = Number.isFinite(Number(b.record_count)) ? Number(b.record_count) : 0
+      return bValue - aValue
+    })
+  }))
+)
 const hasData = computed(() => (databases.value?.length ?? 0) > 0)
 const hasPayload = computed(() => !!payload.value)
 const rawPayload = computed(() => {
@@ -435,6 +465,17 @@ onMounted(refresh)
   gap: 1.75rem;
 }
 
+.database-view__table-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 1.75rem;
+}
+.database-view__preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 1.75rem;
+}
+
 .database-card {
   background: rgba(255, 255, 255, 0.92);
   border-radius: 24px;
@@ -501,6 +542,174 @@ onMounted(refresh)
   margin: 0;
   color: #64748b;
   font-style: italic;
+}
+
+.database-table-card {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 22px 48px -28px rgba(15, 23, 42, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.database-table-card__header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.database-table-card__header p {
+  margin: 0.35rem 0 0;
+  color: #475569;
+}
+
+.database-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+  color: #1f2937;
+}
+
+.database-table thead tr {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.database-table th,
+.database-table td {
+  padding: 0.75rem 0.5rem;
+  text-align: left;
+}
+
+.database-table__count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.database-table__status {
+  text-align: right;
+  width: 110px;
+}
+
+.database-table__status--success {
+  color: #0f766e;
+  font-weight: 600;
+}
+
+.database-table__status--error {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.database-table tbody tr + tr {
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.database-table__empty {
+  padding: 1.25rem 0.5rem;
+  text-align: center;
+  color: #64748b;
+  font-style: italic;
+}
+.database-preview-card {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 22px 48px -28px rgba(15, 23, 42, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.database-preview-card__header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+.database-preview-card__header p {
+  margin: 0.35rem 0 0;
+  color: #475569;
+}
+.database-preview-card__hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+.table-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+}
+.table-preview:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+.table-preview__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+.table-preview__header h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.table-preview__meta {
+  font-size: 0.85rem;
+  color: #475569;
+}
+.table-preview__error {
+  margin: 0;
+  color: #b91c1c;
+  font-weight: 500;
+}
+.table-preview__empty {
+  margin: 0;
+  color: #64748b;
+  font-style: italic;
+}
+.table-preview__table-wrapper {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.9);
+  position: relative;
+  overflow-x: auto;
+}
+.table-preview__table-wrapper::after {
+  content: '仅显示前 5 行';
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+.table-preview__table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 360px;
+}
+.table-preview__table thead {
+  background: rgba(226, 232, 240, 0.6);
+}
+.table-preview__table th,
+.table-preview__table td {
+  padding: 0.65rem 0.9rem;
+  text-align: left;
+  font-size: 0.9rem;
+  color: #1f2937;
+}
+.table-preview__table td {
+  font-variant-numeric: tabular-nums;
+}
+.table-preview__table tbody tr + tr {
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .database-view__empty {
