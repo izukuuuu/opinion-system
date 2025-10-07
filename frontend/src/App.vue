@@ -148,27 +148,26 @@ const sidebarToggleLabel = computed(() =>
   background: rgba(15, 23, 42, 0.96);
   color: rgba(241, 245, 249, 0.95);
   box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.18);
-  transition: width 0.3s ease, padding 0.3s ease, gap 0.3s ease;
+  transition: padding 0.3s ease, gap 0.3s ease;
   box-sizing: border-box;
+  align-items: center;
 }
 
 .app-shell__sidebar--expanded {
   padding: 3.5rem 2rem 2.5rem;
   gap: 2rem;
   overflow-y: auto;
+  align-items: stretch;
 }
 
 .app-shell__sidebar--collapsed {
   padding: 3rem 1.25rem 2rem;
-  gap: 1.5rem;
+  gap: 2rem;
   align-items: center;
   overflow-y: hidden;
 }
 
 .app-shell__collapse-toggle {
-  position: absolute;
-  top: 1.5rem;
-  right: 1.5rem;
   border: none;
   background: rgba(148, 163, 184, 0.16);
   color: rgba(241, 245, 249, 0.86);
@@ -179,12 +178,19 @@ const sidebarToggleLabel = computed(() =>
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.25s ease, transform 0.25s ease;
+  transition: background 0.25s ease;
+}
+
+.app-shell__sidebar--collapsed .app-shell__collapse-toggle {
+  align-self: center;
+}
+
+.app-shell__sidebar--expanded .app-shell__collapse-toggle {
+  align-self: flex-end;
 }
 
 .app-shell__collapse-toggle:hover {
   background: rgba(148, 163, 184, 0.28);
-  transform: translateY(-1px);
 }
 
 .app-shell__collapse-icon {
@@ -263,7 +269,7 @@ const sidebarToggleLabel = computed(() =>
   border-radius: 16px;
   color: inherit;
   background: transparent;
-  transition: background 0.2s ease, transform 0.2s ease;
+  transition: background 0.2s ease;
 }
 
 
@@ -275,7 +281,6 @@ const sidebarToggleLabel = computed(() =>
 
 .app-shell__link:hover {
   background: rgba(148, 163, 184, 0.12);
-  transform: translateX(4px);
 }
 
 .router-link-active.app-shell__link,
@@ -287,7 +292,7 @@ const sidebarToggleLabel = computed(() =>
 
 .app-shell__link--compact.router-link-active,
 .app-shell__link--compact.router-link-exact-active {
-  transform: translateY(-2px);
+  transform: none;
 }
 
 .app-shell__icon {
