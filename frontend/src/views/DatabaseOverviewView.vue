@@ -4,7 +4,7 @@
       <CircleStackIcon class="database-view__icon" />
       <div class="database-view__title-group">
         <h1>数据库概览</h1>
-        <p>实时查看后端数据库的连接信息、库表结构与数据量，快速验证配置是否正确。</p>
+        <p>连接后端数据库，查看数据库内容。查看数据库的连接信息、库表结构与数据量。</p>
       </div>
       <button type="button" class="database-view__refresh" @click="refresh" :disabled="loading">
         <ArrowPathIcon class="database-view__refresh-icon" :class="{ 'is-spinning': loading }" />
@@ -112,114 +112,6 @@
     </section>
 
     <section
-      v-else-if="activeTab === 'table'"
-      class="database-view__panel"
-      role="tabpanel"
-      id="database-panel-table"
-      aria-labelledby="database-tab-table"
-    >
-      <section v-if="loading" class="database-view__skeleton">
-        <div class="database-view__skeleton-card" v-for="index in 2" :key="index"></div>
-      </section>
-
-      <section v-if="hasData" class="database-view__table-grid">
-        <article v-for="database in tableViewDatabases" :key="database.name" class="database-table-card">
-          <header class="database-table-card__header">
-            <h3>{{ database.name }}</h3>
-            <p>{{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行</p>
-          </header>
-
-          <table class="database-table" role="grid">
-            <thead>
-              <tr>
-                <th scope="col">表名</th>
-                <th scope="col" class="database-table__count">数据量</th>
-                <th scope="col" class="database-table__status">状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="table in database.tables" :key="table.name">
-                <th scope="row">{{ table.name }}</th>
-                <td class="database-table__count">
-                  {{ table.error ? '—' : formatNumber(table.record_count) }}
-                </td>
-                <td class="database-table__status">
-                  <span v-if="table.error" class="database-table__status--error">{{ table.error }}</span>
-                  <span v-else class="database-table__status--success">正常</span>
-                </td>
-              </tr>
-              <tr v-if="!database.tables.length">
-                <td colspan="3" class="database-table__empty">该库暂无业务表。</td>
-              </tr>
-            </tbody>
-          </table>
-        </article>
-      </section>
-
-      <p v-if="!loading && !hasData && !error" class="database-view__empty">
-        未检索到业务数据库，请确认配置是否正确。
-      </p>
-    </section>
-
-    <section
-      v-else-if="activeTab === 'preview'"
-      class="database-view__panel"
-      role="tabpanel"
-      id="database-panel-preview"
-      aria-labelledby="database-tab-preview"
-    >
-      <section v-if="loading" class="database-view__skeleton">
-        <div class="database-view__skeleton-card" v-for="index in 2" :key="index"></div>
-      </section>
-
-      <section v-if="hasData" class="database-view__preview">
-        <article v-for="database in tableViewDatabases" :key="database.name" class="database-preview-card">
-          <header class="database-preview-card__header">
-            <h3>{{ database.name }}</h3>
-            <p>{{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行</p>
-          </header>
-          <p class="database-preview-card__hint">预览最近 5 条数据，快速确认字段与内容是否正确。</p>
-
-          <div v-for="table in database.tables" :key="table.name" class="table-preview">
-            <header class="table-preview__header">
-              <h4>{{ table.name }}</h4>
-              <span class="table-preview__meta">
-                {{ table.error ? '查询失败' : `${formatNumber(table.record_count)} 行` }}
-              </span>
-            </header>
-            <p v-if="table.error" class="table-preview__error">{{ table.error }}</p>
-            <p v-else-if="table.preview_error" class="table-preview__error">{{ table.preview_error }}</p>
-            <p v-else-if="!table.preview || !table.preview.rows.length" class="table-preview__empty">
-              暂无可预览的数据。
-            </p>
-            <div v-else class="table-preview__table-wrapper">
-              <table class="table-preview__table">
-                <thead>
-                  <tr>
-                    <th v-for="column in table.preview.columns" :key="column" scope="col">
-                      {{ column }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, rowIndex) in table.preview.rows" :key="rowIndex">
-                    <td v-for="column in table.preview.columns" :key="column">
-                      {{ formatPreviewValue(row[column]) }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </article>
-      </section>
-
-      <p v-if="!loading && !hasData && !error" class="database-view__empty">
-        未检索到业务数据库，请确认配置是否正确。
-      </p>
-    </section>
-
-    <section
       v-else
       class="database-view__panel"
       role="tabpanel"
@@ -270,6 +162,17 @@ const tabs = [
   { key: 'overview', label: '数据概览' },
   { key: 'table', label: '表格视图' },
   { key: 'preview', label: '数据预览' },
+  { key: 'raw', label: '原始 JSON' }
+]
+
+const setActiveTab = (key) => {
+  if (tabs.some((tab) => tab.key === key)) {
+    activeTab.value = key
+  }
+}
+
+const tabs = [
+  { key: 'overview', label: '数据概览' },
   { key: 'raw', label: '原始 JSON' }
 ]
 
@@ -886,10 +789,6 @@ onMounted(refresh)
   .database-view__tabs {
     width: 100%;
     justify-content: center;
-  }
-
-  .database-view__table-grid {
-    grid-template-columns: 1fr;
   }
 }
 </style>
