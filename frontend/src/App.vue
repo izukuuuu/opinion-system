@@ -1,23 +1,23 @@
 <template>
   <div class="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/50 to-slate-50 text-slate-900">
-    <div class="flex min-h-screen">
-      <aside
-        :class="[
-          'group relative flex h-screen flex-shrink-0 flex-col border-r border-slate-200/60 bg-white/95 shadow-xl backdrop-blur transition-all duration-300',
-          sidebarCollapsed ? 'w-20' : 'w-72'
-        ]"
+    <aside
+      :class="[
+        'group fixed inset-y-0 left-0 z-30 flex flex-col border-r border-slate-200/60 bg-white/95 shadow-xl backdrop-blur transition-[transform,box-shadow] duration-300',
+        sidebarCollapsed ? 'w-64 lg:w-24' : 'w-64 lg:w-72'
+      ]"
+    >
+      <button
+        type="button"
+        class="group/toggle absolute left-full top-1/2 hidden -translate-y-1/2 items-center gap-2 rounded-full border border-indigo-200/60 bg-indigo-500/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white shadow-lg ring-1 ring-indigo-300/50 transition hover:scale-105 hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 lg:flex"
+        :aria-expanded="!sidebarCollapsed"
+        :aria-label="sidebarToggleLabel"
+        @click="toggleSidebar"
       >
-        <button
-          type="button"
-          class="absolute -right-4 top-6 hidden h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md transition hover:-translate-y-0.5 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand lg:flex"
-          :aria-expanded="!sidebarCollapsed"
-          :aria-label="sidebarToggleLabel"
-          @click="toggleSidebar"
-        >
-          <component :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon" class="h-5 w-5" />
-        </button>
+        <component :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon" class="h-4 w-4" />
+        <span class="whitespace-nowrap">{{ sidebarCollapsed ? '展开' : '收起' }}</span>
+      </button>
 
-        <div class="flex items-center gap-3 px-6 pb-6 pt-8">
+      <div class="flex items-center gap-3 px-6 pb-6 pt-8">
           <RouterLink
             v-if="!sidebarCollapsed"
             to="/"
@@ -35,18 +35,19 @@
           >
             <span aria-hidden="true">OS</span>
           </RouterLink>
-          <button
-            type="button"
-            class="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 shadow-md transition hover:-translate-y-0.5 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand lg:hidden"
-            :aria-expanded="!sidebarCollapsed"
-            :aria-label="sidebarToggleLabel"
-            @click="toggleSidebar"
-          >
-            <component :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon" class="h-5 w-5" />
-          </button>
-        </div>
+        <button
+          type="button"
+          class="ml-auto inline-flex items-center gap-2 rounded-full border border-indigo-200/70 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-indigo-600 shadow-sm transition hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 lg:hidden"
+          :aria-expanded="!sidebarCollapsed"
+          :aria-label="sidebarToggleLabel"
+          @click="toggleSidebar"
+        >
+          <component :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon" class="h-4 w-4" />
+          <span>{{ sidebarCollapsed ? '展开' : '收起' }}</span>
+        </button>
+      </div>
 
-        <div class="flex flex-1 flex-col gap-8 overflow-y-auto px-4 pb-10">
+      <div class="flex flex-1 flex-col gap-8 overflow-y-auto px-4 pb-10">
           <nav v-if="!sidebarCollapsed" class="space-y-8">
             <section
               v-for="group in navigationGroups"
@@ -83,8 +84,17 @@
               <span class="sr-only">{{ link.label }}</span>
             </RouterLink>
           </nav>
-        </div>
-      </aside>
+      </div>
+    </aside>
+
+    <div class="flex min-h-screen">
+      <div
+        aria-hidden="true"
+        :class="[
+          'flex-shrink-0',
+          sidebarCollapsed ? 'w-64 lg:w-24' : 'w-64 lg:w-72'
+        ]"
+      ></div>
 
       <div class="flex min-h-screen flex-1 flex-col">
         <header class="flex flex-col gap-6 border-b border-slate-200/70 bg-white/80 px-6 pb-6 pt-10 backdrop-blur">
