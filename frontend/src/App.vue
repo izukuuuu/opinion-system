@@ -1,96 +1,107 @@
 <template>
-  <div class="app-shell" :class="{ 'app-shell--collapsed': sidebarCollapsed }">
-    <aside
-      class="app-shell__sidebar"
-      :class="sidebarCollapsed ? 'app-shell__sidebar--collapsed' : 'app-shell__sidebar--expanded'"
-    >
-      <button
-        type="button"
-        class="app-shell__collapse-toggle"
-        :aria-expanded="!sidebarCollapsed"
-        :aria-label="sidebarToggleLabel"
-        @click="toggleSidebar"
+  <div class="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/50 to-slate-50 text-slate-900">
+    <div class="flex min-h-screen">
+      <aside
+        :class="[
+          'group relative flex h-screen flex-shrink-0 flex-col border-r border-slate-200/60 bg-white/95 shadow-xl backdrop-blur transition-all duration-300',
+          sidebarCollapsed ? 'w-20' : 'w-72'
+        ]"
       >
-        <component
-          :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon"
-          class="app-shell__collapse-icon"
-        />
-      </button>
-      <RouterLink
-        v-if="!sidebarCollapsed"
-        to="/"
-        class="app-shell__brand app-shell__brand--expanded"
-      >
-        <span class="app-shell__logo">Opinion System</span>
-        <span class="app-shell__tagline">舆情监测系统</span>
-      </RouterLink>
-      <RouterLink
-        v-else
-        to="/"
-        class="app-shell__brand app-shell__brand--compact"
-        aria-label="Opinion System"
-        title="Opinion System"
-      >
-        <span class="app-shell__brand-mark" aria-hidden="true">OS</span>
-        <span class="sr-only">Opinion System 舆情监测系统</span>
-      </RouterLink>
-      <div
-        class="app-shell__nav-wrapper"
-        :class="sidebarCollapsed ? 'app-shell__nav-wrapper--collapsed' : 'app-shell__nav-wrapper--expanded'"
-      >
-        <nav v-if="!sidebarCollapsed" class="app-shell__nav app-shell__nav--expanded">
-          <section
-            v-for="group in navigationGroups"
-            :key="group.label"
-            class="app-shell__nav-section"
+        <button
+          type="button"
+          class="absolute -right-4 top-6 hidden h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md transition hover:-translate-y-0.5 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand lg:flex"
+          :aria-expanded="!sidebarCollapsed"
+          :aria-label="sidebarToggleLabel"
+          @click="toggleSidebar"
+        >
+          <component :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon" class="h-5 w-5" />
+        </button>
+
+        <div class="flex items-center gap-3 px-6 pb-6 pt-8">
+          <RouterLink
+            v-if="!sidebarCollapsed"
+            to="/"
+            class="flex flex-col text-left"
           >
-            <h2 class="app-shell__nav-section-label">{{ group.label }}</h2>
+            <span class="text-lg font-semibold text-slate-900">Opinion System</span>
+            <span class="text-sm text-slate-500">舆情监测系统</span>
+          </RouterLink>
+          <RouterLink
+            v-else
+            to="/"
+            class="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-100 text-sm font-semibold text-indigo-600"
+            aria-label="Opinion System"
+            title="Opinion System"
+          >
+            <span aria-hidden="true">OS</span>
+          </RouterLink>
+          <button
+            type="button"
+            class="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 shadow-md transition hover:-translate-y-0.5 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand lg:hidden"
+            :aria-expanded="!sidebarCollapsed"
+            :aria-label="sidebarToggleLabel"
+            @click="toggleSidebar"
+          >
+            <component :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon" class="h-5 w-5" />
+          </button>
+        </div>
+
+        <div class="flex flex-1 flex-col gap-8 overflow-y-auto px-4 pb-10">
+          <nav v-if="!sidebarCollapsed" class="space-y-8">
+            <section
+              v-for="group in navigationGroups"
+              :key="group.label"
+              class="space-y-4"
+            >
+              <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-400">{{ group.label }}</h2>
+              <RouterLink
+                v-for="link in group.links"
+                :key="link.label"
+                :to="link.to"
+                class="flex items-start gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                active-class="bg-indigo-100/80 text-indigo-700 shadow-inner"
+              >
+                <component :is="link.icon" class="mt-0.5 h-5 w-5 text-indigo-500" />
+                <div class="flex flex-col">
+                  <span class="font-medium">{{ link.label }}</span>
+                  <span class="text-sm text-slate-500">{{ link.description }}</span>
+                </div>
+              </RouterLink>
+            </section>
+          </nav>
+          <nav v-else class="flex flex-col items-center gap-4 py-4">
             <RouterLink
-              v-for="link in group.links"
+              v-for="link in navigationLinks"
               :key="link.label"
               :to="link.to"
-              class="app-shell__link"
+              class="flex h-12 w-12 items-center justify-center rounded-2xl text-slate-500 transition hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              :title="link.label"
+              :aria-label="link.label"
+              active-class="bg-indigo-100/70 text-indigo-600"
             >
-              <component :is="link.icon" class="app-shell__icon" />
-              <div class="app-shell__link-text">
-                <span class="app-shell__link-label">{{ link.label }}</span>
-                <span class="app-shell__link-description">{{ link.description }}</span>
-              </div>
+              <component :is="link.icon" class="h-5 w-5" />
+              <span class="sr-only">{{ link.label }}</span>
             </RouterLink>
-          </section>
-        </nav>
-        <nav v-else class="app-shell__nav app-shell__nav--compact">
-          <RouterLink
-            v-for="link in navigationLinks"
-            :key="link.label"
-            :to="link.to"
-            class="app-shell__link app-shell__link--compact"
-            :title="link.label"
-            :aria-label="link.label"
-          >
-            <component :is="link.icon" class="app-shell__icon app-shell__icon--compact" />
-            <span class="sr-only">{{ link.label }}</span>
-          </RouterLink>
-        </nav>
-      </div>
-    </aside>
-    <div class="app-shell__main">
-      <header class="app-shell__header">
-        <div class="app-shell__header-bar">
-          <p class="app-shell__breadcrumbs">舆情系统控制台</p>
-          <div class="app-shell__active-project" role="status" aria-live="polite">
-            <BriefcaseIcon class="app-shell__active-project-icon" aria-hidden="true" />
-            <span class="app-shell__active-project-label">当前项目</span>
-            <span class="app-shell__active-project-name">
-              {{ activeProjectName || '未选择项目' }}
-            </span>
-          </div>
+          </nav>
         </div>
-        <h1 class="app-shell__title">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
-      </header>
-      <main class="app-shell__content">
-        <RouterView />
-      </main>
+      </aside>
+
+      <div class="flex min-h-screen flex-1 flex-col">
+        <header class="flex flex-col gap-6 border-b border-slate-200/70 bg-white/80 px-6 pb-6 pt-10 backdrop-blur">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <p class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">舆情系统控制台</p>
+            <div class="inline-flex items-center gap-2 rounded-full bg-indigo-50/80 px-3 py-1.5 text-sm text-indigo-700" role="status" aria-live="polite">
+              <BriefcaseIcon class="h-4 w-4" aria-hidden="true" />
+              <span class="font-medium">当前项目：</span>
+              <span class="font-semibold">{{ activeProjectName || '未选择项目' }}</span>
+            </div>
+          </div>
+          <h1 class="text-2xl font-semibold text-slate-900 md:text-3xl">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
+        </header>
+        <main class="flex-1 px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+          <RouterView />
+        </main>
+      </div>
     </div>
   </div>
 </template>
@@ -174,408 +185,3 @@ const sidebarToggleLabel = computed(() =>
   sidebarCollapsed.value ? '展开侧边栏' : '收起侧边栏'
 )
 </script>
-
-<style scoped>
-.app-shell {
-  --sidebar-width: 280px;
-  --sidebar-collapsed-width: 92px;
-  min-height: 100vh;
-  display: flex;
-  background: linear-gradient(120deg, #f8fafc 0%, #eef2ff 35%, #f8fafc 100%);
-  color: #0f172a;
-  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-}
-
-.app-shell--collapsed {
-  --sidebar-width: var(--sidebar-collapsed-width);
-}
-
-.app-shell__sidebar {
-  width: var(--sidebar-width);
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: rgba(15, 23, 42, 0.96);
-  color: rgba(241, 245, 249, 0.95);
-  box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.18);
-  transition: padding 0.3s ease, gap 0.3s ease;
-  box-sizing: border-box;
-  align-items: center;
-}
-
-.app-shell__sidebar--expanded {
-  padding: 3.5rem 2rem 2.5rem;
-  gap: 2rem;
-  overflow-y: auto;
-  align-items: stretch;
-}
-
-.app-shell__sidebar--collapsed {
-  padding: 3rem 1.25rem 2rem;
-  gap: 2rem;
-  align-items: center;
-  overflow-y: hidden;
-}
-
-.app-shell__collapse-toggle {
-  border: none;
-  background: rgba(148, 163, 184, 0.16);
-  color: rgba(241, 245, 249, 0.86);
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 0.25s ease;
-}
-
-.app-shell__sidebar--collapsed .app-shell__collapse-toggle {
-  align-self: center;
-}
-
-.app-shell__sidebar--expanded .app-shell__collapse-toggle {
-  align-self: flex-end;
-}
-
-.app-shell__collapse-toggle:hover {
-  background: rgba(148, 163, 184, 0.28);
-}
-
-.app-shell__collapse-icon {
-  width: 1.25rem;
-  height: 1.25rem;
-}
-
-.app-shell__brand {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  color: inherit;
-  transition: opacity 0.25s ease;
-  text-decoration: none;
-}
-
-.app-shell__brand--expanded {
-  align-items: flex-start;
-}
-
-.app-shell__brand--compact {
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-}
-
-.app-shell__logo {
-  font-weight: 700;
-  font-size: 1.4rem;
-}
-
-.app-shell__tagline {
-  font-size: 0.85rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(226, 232, 240, 0.7);
-  transition: opacity 0.2s ease;
-}
-
-.app-shell__brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0.85rem;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.65), rgba(129, 140, 248, 0.75));
-  color: #f8fafc;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  font-size: 0.95rem;
-  text-transform: uppercase;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.28);
-}
-
-.app-shell__nav {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-}
-
-.app-shell__nav-wrapper {
-  margin-top: 1rem;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  flex: 1;
-}
-
-.app-shell__nav-wrapper--expanded {
-  align-items: stretch;
-}
-
-.app-shell__nav-wrapper--collapsed {
-  align-items: center;
-}
-
-.app-shell__nav--expanded {
-  gap: 1.5rem;
-}
-
-.app-shell__nav--compact {
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.app-shell__nav-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.app-shell__nav-section-label {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.2rem 0.65rem;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.18);
-  color: rgba(226, 232, 240, 0.85);
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.app-shell__link {
-  display: flex;
-  gap: 0.9rem;
-  align-items: center;
-  padding: 0.75rem 0.9rem;
-  border-radius: 16px;
-  color: inherit;
-  background: transparent;
-  transition: background 0.2s ease;
-}
-
-
-.app-shell__link--compact {
-  justify-content: center;
-  padding: 0.65rem 0;
-  width: 100%;
-}
-
-.app-shell__link:hover {
-  background: rgba(148, 163, 184, 0.12);
-}
-
-.router-link-active.app-shell__link,
-.router-link-exact-active.app-shell__link {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(129, 140, 248, 0.35));
-  color: #f8fafc;
-  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.35);
-}
-
-.app-shell__link--compact.router-link-active,
-.app-shell__link--compact.router-link-exact-active {
-  transform: none;
-}
-
-.app-shell__icon {
-  width: 1.5rem;
-  height: 1.5rem;
-}
-
-.app-shell__icon--compact {
-  width: 1.75rem;
-  height: 1.75rem;
-}
-
-.app-shell__link-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  transition: opacity 0.2s ease;
-}
-
-.app-shell__link-label {
-  font-weight: 600;
-}
-
-.app-shell__link-description {
-  font-size: 0.75rem;
-  color: rgba(226, 232, 240, 0.7);
-}
-
-.router-link-active .app-shell__link-description,
-.router-link-exact-active .app-shell__link-description {
-  color: rgba(248, 250, 252, 0.85);
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.app-shell__main {
-  margin-left: var(--sidebar-width);
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  transition: margin-left 0.3s ease;
-}
-
-.app-shell__header {
-  padding: 2.5rem 3rem 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-}
-
-.app-shell__header-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.app-shell__breadcrumbs {
-  margin: 0;
-  font-size: 0.85rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #64748b;
-}
-
-.app-shell__active-project {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.35rem 0.75rem;
-  border-radius: 999px;
-  background: rgba(59, 130, 246, 0.08);
-  color: #1d4ed8;
-  font-size: 0.9rem;
-}
-
-.app-shell__active-project-icon {
-  width: 1.1rem;
-  height: 1.1rem;
-}
-
-.app-shell__active-project-label {
-  font-weight: 600;
-  letter-spacing: 0.05em;
-}
-
-.app-shell__active-project-name {
-  font-weight: 600;
-  color: #1e3a8a;
-}
-
-.app-shell__title {
-  margin: 0;
-  font-size: 2rem;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.app-shell__content {
-  flex: 1;
-  padding: 0 clamp(2rem, 5vw, 6rem) clamp(2.5rem, 6vw, 6rem);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-  box-sizing: border-box;
-  gap: 2rem;
-}
-
-.app-shell__content > * {
-  width: min(1400px, 100%);
-}
-
-@media (max-width: 960px) {
-  .app-shell {
-    flex-direction: column;
-  }
-
-  .app-shell__sidebar {
-    position: relative;
-    width: 100%;
-    height: auto;
-    padding: 1.75rem 1.5rem 1.25rem;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1.5rem;
-  }
-
-  .app-shell__nav {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-
-  .app-shell__link {
-    border-radius: 12px;
-    padding: 0.6rem 0.75rem;
-  }
-
-  .app-shell__main {
-    margin-left: 0;
-    min-height: auto;
-  }
-
-  .app-shell__header {
-    padding: 2rem 1.75rem 1.5rem;
-  }
-
-  .app-shell__content {
-    padding: 0 1.75rem 2rem;
-    align-items: stretch;
-    gap: 1.5rem;
-  }
-
-  .app-shell__content > * {
-    width: 100%;
-  }
-
-  .app-shell__collapse-toggle {
-    display: none;
-  }
-}
-
-@media (max-width: 640px) {
-  .app-shell__sidebar {
-    padding: 1.5rem 1.25rem;
-  }
-
-  .app-shell__header {
-    padding: 1.5rem 1.25rem 1.25rem;
-  }
-
-  .app-shell__active-project {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .app-shell__content {
-    padding: 0 1.25rem 1.75rem;
-    gap: 1.5rem;
-  }
-}
-</style>

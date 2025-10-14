@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+  }
+
+  body {
+    @apply min-h-screen m-0 bg-slate-50;
+  }
+
+  a {
+    @apply no-underline text-inherit;
+  }
+}
+
+@layer components {
+  .card-surface {
+    @apply rounded-3xl border border-slate-200/70 bg-white/90 shadow-card backdrop-blur;
+  }
+
+  .card-section-title {
+    @apply text-lg font-semibold text-slate-900;
+  }
+
+  .badge-soft {
+    @apply inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500;
+  }
+}
