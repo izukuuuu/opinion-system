@@ -29,10 +29,22 @@ from src.project.storage import (  # type: ignore
     store_uploaded_dataset,
 )
 from src.utils.setting.editor import load_config as load_settings_config, save_config as save_settings_config  # type: ignore
+from src.utils.setting.paths import bucket  # type: ignore
 from src.utils.setting.settings import settings  # type: ignore
 
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 PROJECT_MANAGER = get_project_manager()
+
+ANALYZE_FILE_MAP = {
+    "volume": "volume.json",
+    "attitude": "attitude.json",
+    "trends": "trends.json",
+    "geography": "geography.json",
+    "publishers": "publishers.json",
+    "keywords": "keywords.json",
+    "classification": "classification.json",
+}
+DEFAULT_ANALYZE_FILENAME = "result.json"
 
 
 def _load_config() -> Dict[str, Any]:
@@ -144,6 +156,26 @@ def _require_fields(payload: Dict[str, Any], *fields: str) -> Tuple[bool, Dict[s
             "message": f"Missing required field(s): {', '.join(missing)}",
         }
     return True, {}
+
+
+def _compose_analyze_folder(start: str, end: Optional[str]) -> str:
+    end = end or ""
+    start = start.strip()
+    end = end.strip()
+    if not start:
+        return ""
+    if end and end != start:
+        return f"{start}_{end}"
+    return start
+
+
+def _load_json_file(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as fh:
+        try:
+            return json.load(fh)
+        except json.JSONDecodeError:
+            fh.seek(0)
+            return fh.read()
 
 
 app = Flask(__name__)
@@ -569,6 +601,90 @@ def analyze_endpoint():
         },
     )
     return jsonify(response), code
+
+
+@app.get("/api/analyze/results")
+def get_analyze_results():
+    topic = (request.args.get("topic") or "").strip()
+    start = (request.args.get("start") or "").strip()
+    if not topic or not start:
+        return _error("Missing required query parameters: topic, start")
+
+    end = (request.args.get("end") or "").strip() or None
+    function_alias = (request.args.get("function") or "").strip().lower() or None
+    target_alias = (request.args.get("target") or "").strip()
+
+    folder_name = _compose_analyze_folder(start, end)
+    if not folder_name:
+        return _error("Invalid start date supplied")
+
+    analyze_root = bucket("analyze", topic, folder_name)
+    if not analyze_root.exists():
+        return _error("未找到对应的分析结果目录", status_code=404)
+
+    def _match_target(name: str) -> bool:
+        if not target_alias:
+            return True
+        return name.strip() == target_alias
+
+    requested_functions = []
+    if function_alias:
+        for child in analyze_root.iterdir():
+            if child.is_dir() and child.name.lower() == function_alias:
+                requested_functions = [child.name]
+                break
+        if not requested_functions:
+            requested_functions = [function_alias]
+    else:
+        requested_functions = [child.name for child in analyze_root.iterdir() if child.is_dir()]
+
+    results = []
+    for func_name in requested_functions:
+        func_dir = analyze_root / func_name
+        if not func_dir.exists() or not func_dir.is_dir():
+            continue
+        targets = []
+        for target_dir in sorted(func_dir.iterdir()):
+            if not target_dir.is_dir():
+                continue
+            target_name = target_dir.name
+            if not _match_target(target_name):
+                continue
+            filename = ANALYZE_FILE_MAP.get(func_name, DEFAULT_ANALYZE_FILENAME)
+            file_path = target_dir / filename
+            if not file_path.exists():
+                json_candidates = sorted(target_dir.glob("*.json"))
+                if json_candidates:
+                    file_path = json_candidates[0]
+                else:
+                    continue
+            try:
+                data = _load_json_file(file_path)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("Failed to load analyze result file %s", file_path, exc_info=True)
+                data = {"error": str(exc)}
+            targets.append(
+                {
+                    "target": target_name,
+                    "file": file_path.name,
+                    "data": data,
+                }
+            )
+        if targets:
+            results.append({"name": func_name, "targets": targets})
+
+    if not results:
+        return _error("未找到匹配的分析结果文件", status_code=404)
+
+    payload = {
+        "topic": topic,
+        "range": {
+            "start": start,
+            "end": end or start,
+        },
+        "functions": results,
+    }
+    return _success(payload)
 
 
 @app.get("/api/projects")
