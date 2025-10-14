@@ -8,13 +8,20 @@
     >
       <button
         type="button"
-        class="group/toggle absolute left-full top-1/2 hidden -translate-y-1/2 items-center gap-2 rounded-full border border-indigo-200/60 bg-indigo-500/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white shadow-lg ring-1 ring-indigo-300/50 transition hover:scale-105 hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 lg:flex"
+        class="group/toggle absolute left-full top-1/2 hidden -translate-y-1/2 items-center gap-2 rounded-full border border-white/60 bg-white/90 px-3 py-2 text-sm font-medium text-indigo-600 shadow-lg shadow-indigo-500/10 ring-1 ring-slate-900/5 backdrop-blur transition hover:-translate-x-0.5 hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 lg:flex"
         :aria-expanded="!sidebarCollapsed"
         :aria-label="sidebarToggleLabel"
         @click="toggleSidebar"
       >
-        <component :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon" class="h-4 w-4" />
-        <span class="whitespace-nowrap">{{ sidebarCollapsed ? '展开' : '收起' }}</span>
+        <span
+          class="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 transition group-hover/toggle:bg-indigo-600 group-hover/toggle:text-white"
+        >
+          <component
+            :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon"
+            class="h-4 w-4"
+          />
+        </span>
+        <span class="whitespace-nowrap">{{ sidebarCollapsed ? '展开侧边栏' : '收起侧边栏' }}</span>
       </button>
 
       <div class="flex items-center gap-3 px-6 pb-6 pt-8">
@@ -37,13 +44,20 @@
           </RouterLink>
         <button
           type="button"
-          class="ml-auto inline-flex items-center gap-2 rounded-full border border-indigo-200/70 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-indigo-600 shadow-sm transition hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 lg:hidden"
+          class="ml-auto inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/90 px-3 py-2 text-sm font-medium text-indigo-600 shadow shadow-indigo-500/10 ring-1 ring-slate-900/5 backdrop-blur transition hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 lg:hidden"
           :aria-expanded="!sidebarCollapsed"
           :aria-label="sidebarToggleLabel"
           @click="toggleSidebar"
         >
-          <component :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon" class="h-4 w-4" />
-          <span>{{ sidebarCollapsed ? '展开' : '收起' }}</span>
+          <span
+            class="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 transition group-hover:bg-indigo-600 group-hover:text-white"
+          >
+            <component
+              :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon"
+              class="h-5 w-5"
+            />
+          </span>
+          <span>{{ sidebarCollapsed ? '展开侧边栏' : '收起侧边栏' }}</span>
         </button>
       </div>
 
