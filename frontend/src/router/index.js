@@ -82,7 +82,8 @@ export const routes = [
     name: 'database',
     component: DatabaseOverviewView,
     meta: {
-      title: '数据库查询'
+      title: '数据库查询',
+      breadcrumb: '数据库概览'
     }
   },
   {
