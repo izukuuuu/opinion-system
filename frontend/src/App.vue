@@ -113,7 +113,7 @@
       >
         <header class="flex flex-col gap-4 border-b border-soft bg-surface px-6 py-6">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <p class="text-sm font-semibold uppercase tracking-[0.3em] text-muted">舆情系统控制台</p>
+            <p class="text-sm font-semibold uppercase tracking-[0.3em] text-muted">舆情监测系统</p>
             <div class="inline-flex items-center gap-2 rounded-md border border-soft bg-surface-muted px-3 py-1.5 text-sm text-secondary" role="status" aria-live="polite">
               <BriefcaseIcon class="h-4 w-4 text-muted" aria-hidden="true" />
               <span class="font-medium text-muted">当前项目：</span>

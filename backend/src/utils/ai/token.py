@@ -1,80 +1,69 @@
-# -*- coding: utf-8 -*-
-"""
-Token counting utilities for Qwen models
-"""
+"""Token counting utilities for supported AI providers."""
+from __future__ import annotations
 
-from dashscope import get_tokenizer
+from typing import Dict
+
+from dashscope import get_tokenizer  # type: ignore
 
 
 def count_qwen_tokens(prompt: str, model: str = "qwen-plus") -> int:
     """
-    返回 prompt 被 qwen 词表切分后的 token 数量
-    支持模型名: qwen-turbo / qwen-plus / qwen-max 等
-    
-    Args:
-        prompt (str): 输入文本
-        model (str): 模型名称，默认为 "qwen-turbo"
-    
-    Returns:
-        int: token 数量
+    使用官方 tokenizer 统计千问模型的 token 数量。
     """
-    tok = get_tokenizer(model)      # 获取官方 tokenizer
-    return len(tok.encode(prompt))
+    if not isinstance(prompt, str):
+        return 0
+
+    tokenizer = get_tokenizer(model)
+    return len(tokenizer.encode(prompt))
 
 
-def count_input_tokens(system_prompt: str, user_query: str, model: str = "qwen-plus") -> int:
+def _get_openai_encoding(model: str):
     """
-    计算输入 token 数量（包含 system 和 user 消息）
-    
-    Args:
-        system_prompt (str): 系统提示词
-        user_query (str): 用户查询
-        model (str): 模型名称，默认为 "qwen-turbo"
-    
-    Returns:
-        int: 输入 token 数量
+    获取 OpenAI 对应的 tiktoken 编码，失败时返回默认编码。
     """
-    # 构造真正发到模型的多轮格式
-    full_prompt = f"<|im_start|>system\n{system_prompt}<|im_end|>\n" \
-                  f"<|im_start|>user\n{user_query}<|im_end|>\n" \
-                  f"<|im_start|>assistant\n"
-    
-    return count_qwen_tokens(full_prompt, model)
+    try:
+        import tiktoken  # type: ignore
+    except ImportError:  # pragma: no cover - 可选依赖
+        return None
+
+    try:
+        return tiktoken.encoding_for_model(model)
+    except KeyError:
+        return tiktoken.get_encoding("cl100k_base")
 
 
-def count_output_tokens(assistant_reply: str, model: str = "qwen-plus") -> int:
+def count_openai_tokens(prompt: str, model: str = "gpt-3.5-turbo") -> int:
     """
-    计算输出 token 数量（助手回复）
-    
-    Args:
-        assistant_reply (str): 助手回复内容
-        model (str): 模型名称，默认为 "qwen-turbo"
-    
-    Returns:
-        int: 输出 token 数量
+    使用 tiktoken 估算 OpenAI 兼容模型的 token 数量。
     """
-    return count_qwen_tokens(assistant_reply, model)
+    if not isinstance(prompt, str):
+        return 0
+
+    encoding = _get_openai_encoding(model)
+    if encoding is None:
+        return len(prompt)
+
+    return len(encoding.encode(prompt))
 
 
-def count_total_tokens(system_prompt: str, user_query: str, assistant_reply: str, model: str = "qwen-plus") -> dict:
+def count_tokens(prompt: str, model: str, provider: str) -> int:
     """
-    计算总 token 数量（输入 + 输出）
-    
-    Args:
-        system_prompt (str): 系统提示词
-        user_query (str): 用户查询
-        assistant_reply (str): 助手回复
-        model (str): 模型名称，默认为 "qwen-turbo"
-    
-    Returns:
-        dict: 包含输入、输出和总 token 数量的字典
+    根据提供方调度合适的 tokenizer。
     """
-    input_tokens = count_input_tokens(system_prompt, user_query, model)
-    output_tokens = count_output_tokens(assistant_reply, model)
-    total_tokens = input_tokens + output_tokens
-    
+    key = (provider or "").lower()
+    if key == "openai":
+        return count_openai_tokens(prompt, model or "gpt-3.5-turbo")
+    return count_qwen_tokens(prompt, model or "qwen-plus")
+
+
+def estimate_total_tokens(prompt: str, completion: str, model: str, provider: str) -> Dict[str, int]:
+    """
+    粗略估算输入、输出及总 token 数量。
+    """
+    input_tokens = count_tokens(prompt, model, provider)
+    output_tokens = count_tokens(completion, model, provider)
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "total_tokens": total_tokens
+        "total_tokens": input_tokens + output_tokens,
     }

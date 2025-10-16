@@ -13,8 +13,8 @@ from ..utils.logging.logging import setup_logger, log_success, log_error, log_sk
 from ..utils.setting.settings import settings
 from ..utils.setting.env_loader import get_api_key
 from ..utils.io.excel import write_jsonl, read_jsonl
-from ..utils.ai.qwen import QwenClient
-from ..utils.ai.token import count_qwen_tokens
+from ..utils.ai import QwenClient, OpenAIClient
+from ..utils.ai.token import count_tokens
 
 
 def _truncate(text: str, max_tokens: int, min_keep: int) -> str:
@@ -146,12 +146,17 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
 
     # 读取配置
     llm_cfg = settings.get('llm', {}).get('filter_llm', {})
-    model = llm_cfg.get('model', 'qwen-plus')
+    provider = (llm_cfg.get('provider') or 'qwen').lower()
+    model = llm_cfg.get('model', 'qwen-plus' if provider != 'openai' else 'gpt-3.5-turbo')
     qps = int(llm_cfg.get('qps', 200))
     max_tokens = int(llm_cfg.get('truncation', 200))
     batch_size = int(llm_cfg.get('batch_size', 32))
 
-    log_success(logger, f"使用模型: {model}, QPS: {qps}, 截断长度: {max_tokens}, 批次大小: {batch_size}", "Filter")
+    log_success(
+        logger,
+        f"使用模型: {model} (provider={provider}), QPS: {qps}, 截断长度: {max_tokens}, 批次大小: {batch_size}",
+        "Filter"
+    )
 
     # 读取提示词模板
     prompt_config_path = Path(f"configs/prompt/filter/{topic}.yaml")
@@ -178,7 +183,10 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
         return False
 
     # 初始化客户端
-    client = QwenClient()
+    if provider == 'openai':
+        client = OpenAIClient()
+    else:
+        client = QwenClient()
     total_tasks = 0
     successful_tasks = 0
     total_tokens = 0
@@ -230,8 +238,8 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                     total_tokens = usage_info.get('total_tokens', 0)
                     if total_tokens == 0:
                         # 如果API没有返回token信息，则使用token计算器
-                        input_tokens = count_qwen_tokens(prompt, model)
-                        output_tokens = count_qwen_tokens(text_response, model)
+                        input_tokens = count_tokens(prompt, model, provider)
+                        output_tokens = count_tokens(text_response, model, provider)
                         total_tokens = input_tokens + output_tokens
 
                     # 显示判断结果而不是原始响应

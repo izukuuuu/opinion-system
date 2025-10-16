@@ -102,3 +102,47 @@ def validate_api_key() -> bool:
     
     return True
 
+
+def _lookup_env_var(*names: str) -> Optional[str]:
+    """
+    Return the first non-empty environment variable in the provided sequence.
+    """
+    for name in names:
+        value = os.environ.get(name)
+        if value and value not in ("your_qwen_api_key_here", "your_openai_api_key_here"):
+            return value
+    return None
+
+
+def get_openai_api_key() -> Optional[str]:
+    """
+    获取 OpenAI API 密钥，支持 OPENAI_API_KEY 或 OPINION_OPENAI_API_KEY。
+
+    Returns:
+        Optional[str]: API 密钥，若未配置返回 None。
+    """
+    api_key = _lookup_env_var("OPENAI_API_KEY", "OPINION_OPENAI_API_KEY")
+    if api_key:
+        return api_key
+
+    if load_env_file():
+        return _lookup_env_var("OPENAI_API_KEY", "OPINION_OPENAI_API_KEY")
+
+    return None
+
+
+def get_openai_base_url() -> Optional[str]:
+    """
+    获取 OpenAI 兼容接口的自定义 Base URL。
+
+    Returns:
+        Optional[str]: 自定义 Base URL，若未配置返回 None。
+    """
+    base_url = _lookup_env_var("OPENAI_BASE_URL", "OPINION_OPENAI_BASE_URL")
+    if base_url:
+        return base_url
+
+    if load_env_file():
+        return _lookup_env_var("OPENAI_BASE_URL", "OPINION_OPENAI_BASE_URL")
+
+    return None
