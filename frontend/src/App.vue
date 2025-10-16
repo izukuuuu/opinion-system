@@ -14,13 +14,6 @@
         >
           <ChevronDoubleRightIcon class="h-4 w-4" />
         </button>
-        <RouterLink
-          to="/"
-          class="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-sm font-semibold text-slate-600"
-          aria-label="Opinion System"
-        >
-          <span aria-hidden="true">OS</span>
-        </RouterLink>
       </div>
       <nav class="flex flex-1 flex-col items-center gap-4 py-6">
         <RouterLink
@@ -114,7 +107,7 @@
     <div class="flex min-h-screen">
       <div
         :class="[
-          'flex min-h-screen flex-1 flex-col px-4 sm:px-6 lg:px-10',
+          'flex min-h-screen flex-1 flex-col px-0',
           sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'
         ]"
       >
@@ -157,9 +150,9 @@ const navigationGroups = [
     label: '项目',
     links: [
       {
-        label: '项目面板',
-        description: '查看项目记录',
-        to: { name: 'projects' },
+        label: '新建专题',
+        description: '上传数据并完成初始化流程',
+        to: { name: 'topic-create-overview' },
         icon: Squares2X2Icon
       },
       {

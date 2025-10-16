@@ -1,0 +1,141 @@
+:root {
+  /* Neutral foundation */
+  --color-bg-base: #f4f2ef;
+  --color-surface: #ffffff;
+  --color-surface-muted: #efede9;
+  --color-border-soft: #d7d1c8;
+  --color-text-primary: #2f2d2a;
+  --color-text-secondary: #5d5a55;
+  --color-text-muted: #7f7c75;
+  --color-focus-outline: #a1ab9c;
+
+  /* Brand — warm grey with morandi undertone (replaces indigo) */
+  --color-brand-50: 243 241 238;
+  --color-brand-100: 230 225 217;
+  --color-brand-200: 217 208 195;
+  --color-brand-300: 201 188 169;
+  --color-brand-400: 183 165 143;
+  --color-brand-500: 159 140 118;
+  --color-brand-600: 133 115 96;
+  --color-brand-700: 109 92 76;
+  --color-brand-800: 85 70 58;
+  --color-brand-900: 63 50 42;
+  --color-brand-500-hex: #9f8c76;
+  --color-brand-600-hex: #857360;
+
+  /* Accent — muted sage (replaces sky) */
+  --color-accent-50: 238 241 237;
+  --color-accent-100: 223 230 221;
+  --color-accent-200: 204 212 200;
+  --color-accent-300: 183 192 178;
+  --color-accent-400: 161 171 156;
+  --color-accent-500: 136 147 132;
+  --color-accent-600: 111 122 107;
+  --color-accent-700: 88 96 86;
+  --color-accent-800: 65 71 63;
+  --color-accent-900: 45 48 44;
+  --color-accent-500-hex: #889384;
+  --color-accent-600-hex: #6f7a6b;
+
+  /* Success — subdued green (replaces emerald) */
+  --color-success-50: 238 243 239;
+  --color-success-100: 220 232 222;
+  --color-success-200: 194 214 198;
+  --color-success-300: 166 193 171;
+  --color-success-400: 139 170 146;
+  --color-success-500: 110 143 117;
+  --color-success-600: 88 114 94;
+  --color-success-700: 67 85 71;
+  --color-success-800: 46 57 49;
+  --color-success-900: 31 38 31;
+  --color-success-500-hex: #6e8f75;
+
+  /* Danger — muted crimson (replaces rose) */
+  --color-danger-50: 246 236 236;
+  --color-danger-100: 235 214 214;
+  --color-danger-200: 220 182 182;
+  --color-danger-300: 203 149 150;
+  --color-danger-400: 184 115 115;
+  --color-danger-500: 159 89 89;
+  --color-danger-600: 130 70 70;
+  --color-danger-700: 100 53 53;
+  --color-danger-800: 69 36 36;
+  --color-danger-900: 46 24 24;
+  --color-danger-500-hex: #9f5959;
+
+  /* Warning — softened amber (replaces amber) */
+  --color-warning-50: 247 240 228;
+  --color-warning-100: 237 220 195;
+  --color-warning-200: 222 198 158;
+  --color-warning-300: 205 168 114;
+  --color-warning-400: 187 140 79;
+  --color-warning-500: 163 113 59;
+  --color-warning-600: 134 89 47;
+  --color-warning-700: 104 66 33;
+  --color-warning-800: 77 47 23;
+  --color-warning-900: 52 31 15;
+  --color-warning-500-hex: #a3713b;
+}
+
+@layer utilities {
+  .text-primary {
+    color: var(--color-text-primary);
+  }
+
+  .text-secondary {
+    color: var(--color-text-secondary);
+  }
+
+  .text-muted {
+    color: var(--color-text-muted);
+  }
+
+  .bg-surface {
+    background-color: var(--color-surface);
+  }
+
+  .bg-surface-muted {
+    background-color: var(--color-surface-muted);
+  }
+
+  .border-soft {
+    border-color: var(--color-border-soft);
+  }
+
+  .focus-ring-accent:focus-visible {
+    outline: 2px solid var(--color-focus-outline);
+    outline-offset: 2px;
+  }
+
+  .bg-accent-soft {
+    background-color: rgb(var(--color-accent-100));
+  }
+
+  .text-accent {
+    color: var(--color-accent-600-hex);
+  }
+
+  .badge-muted {
+    background-color: rgb(var(--color-accent-100));
+    color: var(--color-text-secondary);
+  }
+
+  .btn-primary {
+    background-color: var(--color-brand-600-hex);
+    color: #ffffff;
+  }
+
+  .btn-primary:hover {
+    background-color: var(--color-brand-500-hex);
+  }
+
+  .btn-secondary {
+    background-color: transparent;
+    border: 1px solid var(--color-border-soft);
+    color: var(--color-text-secondary);
+  }
+
+  .btn-secondary:hover {
+    background-color: rgb(var(--color-brand-100) / 0.4);
+  }
+}

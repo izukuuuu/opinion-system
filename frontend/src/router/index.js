@@ -1,5 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import ProjectBoardView from '../views/ProjectBoardView.vue'
+import TopicCreationLayout from '../views/topics/TopicCreationLayout.vue'
+import TopicCreationOverview from '../views/topics/TopicCreationOverview.vue'
+import TopicUploadStep from '../views/topics/TopicUploadStep.vue'
+import TopicPreprocessStep from '../views/topics/TopicPreprocessStep.vue'
+import TopicIngestionStep from '../views/topics/TopicIngestionStep.vue'
+import TopicAnalysisStep from '../views/topics/TopicAnalysisStep.vue'
 import ProjectDataView from '../views/ProjectDataView.vue'
 import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
 import TestView from '../views/TestView.vue'
@@ -8,12 +13,59 @@ import SettingsView from '../views/SettingsView.vue'
 export const routes = [
   {
     path: '/',
-    name: 'projects',
-    component: ProjectBoardView,
+    redirect: { name: 'topic-create-overview' }
+  },
+  {
+    path: '/topics/new',
+    component: TopicCreationLayout,
     alias: ['/projects'],
-    meta: {
-      title: '项目面板'
-    }
+    children: [
+      {
+        path: '',
+        name: 'topic-create-overview',
+        component: TopicCreationOverview,
+        meta: {
+          title: '新建专题',
+          breadcrumb: '流程概览'
+        }
+      },
+      {
+        path: 'upload',
+        name: 'topic-create-upload',
+        component: TopicUploadStep,
+        meta: {
+          title: '上传原始数据',
+          breadcrumb: '上传原始数据'
+        }
+      },
+      {
+        path: 'preprocess',
+        name: 'topic-create-preprocess',
+        component: TopicPreprocessStep,
+        meta: {
+          title: '数据预处理',
+          breadcrumb: '数据预处理'
+        }
+      },
+      {
+        path: 'ingest',
+        name: 'topic-create-ingest',
+        component: TopicIngestionStep,
+        meta: {
+          title: '数据入库',
+          breadcrumb: '数据入库'
+        }
+      },
+      {
+        path: 'analysis',
+        name: 'topic-create-analysis',
+        component: TopicAnalysisStep,
+        meta: {
+          title: '基本分析',
+          breadcrumb: '基本分析'
+        }
+      }
+    ]
   },
   {
     path: '/datasets',
@@ -49,7 +101,7 @@ export const routes = [
   },
   {
     path: '/:pathMatch(.*)*',
-    redirect: '/'
+    redirect: { name: 'topic-create-overview' }
   }
 ]
 

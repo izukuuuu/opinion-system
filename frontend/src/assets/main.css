@@ -1,14 +1,20 @@
+@import './colors.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+    @apply font-sans antialiased;
+    color: var(--color-text-primary);
+    background-color: var(--color-bg-base);
   }
 
   body {
-    @apply min-h-screen m-0 bg-slate-50;
+    @apply min-h-screen m-0;
+    background-color: var(--color-bg-base);
+    color: var(--color-text-primary);
   }
 
   a {
@@ -18,14 +24,19 @@
 
 @layer components {
   .card-surface {
-    @apply rounded-3xl border border-slate-200/70 bg-white/90 shadow-card backdrop-blur;
+    @apply rounded-3xl border shadow-card backdrop-blur;
+    background-color: var(--color-surface);
+    border-color: var(--color-border-soft);
   }
 
   .card-section-title {
-    @apply text-lg font-semibold text-slate-900;
+    @apply text-lg font-semibold;
+    color: var(--color-text-primary);
   }
 
   .badge-soft {
-    @apply inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500;
+    @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium;
+    background-color: rgb(var(--color-accent-100));
+    color: var(--color-text-secondary);
   }
 }
