@@ -259,12 +259,16 @@ checkStatus()
 
 .workbench__header p {
   margin: 0.35rem 0 0;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .workbench__status {
   border: none;
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-brand-500-hex) 0%,
+    var(--color-accent-500-hex) 100%
+  );
   color: #fff;
   padding: 0.7rem 1.4rem;
   border-radius: 999px;
@@ -280,7 +284,7 @@ checkStatus()
 
 .workbench__status:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 12px 25px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 12px 25px rgb(var(--color-brand-500) / 0.28);
 }
 
 .workbench__grid {
@@ -308,7 +312,7 @@ checkStatus()
 
 .card header p {
   margin: 0.4rem 0 0;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .card__link {
@@ -316,8 +320,8 @@ checkStatus()
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: rgb(var(--color-brand-100) / 0.6);
+  color: var(--color-brand-600-hex);
   font-weight: 600;
   padding: 0.65rem 1.1rem;
   border-radius: 999px;
@@ -326,7 +330,7 @@ checkStatus()
 }
 
 .card__link:hover {
-  background: rgba(37, 99, 235, 0.2);
+  background: rgb(var(--color-brand-100) / 0.9);
   transform: translateY(-1px);
 }
 
@@ -345,7 +349,7 @@ label {
   flex-direction: column;
   gap: 0.45rem;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--color-text-primary);
 }
 
 input,
@@ -359,7 +363,11 @@ button[type='submit'] {
 }
 
 button[type='submit'] {
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-brand-500-hex) 0%,
+    var(--color-accent-500-hex) 100%
+  );
   color: #fff;
   font-weight: 600;
   cursor: pointer;
@@ -373,13 +381,13 @@ button[type='submit']:disabled {
 
 button[type='submit']:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 12px 25px rgba(76, 29, 149, 0.25);
+  box-shadow: 0 12px 25px rgb(var(--color-accent-500) / 0.25);
 }
 
 pre {
   margin: 0;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: rgba(47, 45, 42, 0.92);
+  color: var(--color-surface);
   border-radius: 18px;
   padding: 1.2rem;
   overflow-x: auto;

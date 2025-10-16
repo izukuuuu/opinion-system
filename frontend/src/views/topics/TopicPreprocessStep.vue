@@ -2,55 +2,55 @@
   <div class="space-y-8">
     <header class="flex flex-wrap items-center justify-between gap-3">
       <div class="space-y-1">
-        <h1 class="text-2xl font-semibold text-slate-900">数据预处理</h1>
-        <p class="text-sm text-slate-500">按日期依次执行 Merge、Clean、Filter，生成标准化结果。</p>
+        <h1 class="text-2xl font-semibold text-primary">数据预处理</h1>
+        <p class="text-sm text-secondary">按日期依次执行 Merge、Clean、Filter，生成标准化结果。</p>
       </div>
-      <div class="flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-600">
+      <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
         <FunnelIcon class="h-4 w-4" />
         <span>步骤 2 · 预处理</span>
       </div>
     </header>
 
-    <section class="card-surface space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section class="card-surface space-y-6 p-6">
       <header class="space-y-2">
-        <h2 class="text-xl font-semibold text-slate-900">准备参数</h2>
-        <p class="text-sm text-slate-500">
+        <h2 class="text-xl font-semibold text-primary">准备参数</h2>
+        <p class="text-sm text-secondary">
           请填写专题名称与专题所属日期。系统将基于该日期定位上传的原始数据文件。
         </p>
       </header>
       <form class="grid gap-4 md:grid-cols-2">
         <label class="space-y-1 text-sm">
-          <span class="font-medium text-slate-600">专题名称</span>
+          <span class="font-medium text-secondary">专题名称</span>
           <input
             v-model.trim="topic"
             type="text"
             required
-            class="w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
             placeholder="例如：2024-lianghui"
           />
         </label>
         <label class="space-y-1 text-sm">
-          <span class="font-medium text-slate-600">专题日期</span>
+          <span class="font-medium text-secondary">专题日期</span>
           <input
             v-model="date"
             type="date"
             required
-            class="w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
           />
         </label>
       </form>
       <p v-if="parameterError" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">{{ parameterError }}</p>
     </section>
 
-    <section class="card-surface space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section class="card-surface space-y-5 p-6">
       <header class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 class="text-xl font-semibold text-slate-900">执行预处理步骤</h2>
-          <p class="text-sm text-slate-500">按顺序执行 Merge → Clean → Filter，或单独运行其中某个步骤。</p>
+          <h2 class="text-xl font-semibold text-primary">执行预处理步骤</h2>
+          <p class="text-sm text-secondary">按顺序执行 Merge → Clean → Filter，或单独运行其中某个步骤。</p>
         </div>
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-full border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
+          class="inline-flex items-center gap-2 rounded-full border border-brand-soft px-4 py-2 text-sm font-semibold text-brand-600 transition hover:bg-brand-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
           :disabled="pipeline.running"
           @click="runPipeline"
         >
@@ -63,23 +63,23 @@
         <article
           v-for="operation in operations"
           :key="operation.key"
-          class="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-slate-50/70 p-5"
+          class="flex flex-col gap-4 rounded-3xl border border-brand-soft bg-surface-muted p-5"
         >
           <div class="flex items-center gap-3">
-            <span class="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-600">
+            <span class="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-soft text-brand-600">
               <component :is="operation.icon" class="h-5 w-5" />
             </span>
             <div>
-              <h3 class="text-base font-semibold text-slate-900">{{ operation.title }}</h3>
-              <p class="text-xs uppercase tracking-[0.2em] text-slate-400">{{ operation.subtitle }}</p>
+              <h3 class="text-base font-semibold text-primary">{{ operation.title }}</h3>
+              <p class="text-xs uppercase tracking-[0.2em] text-muted">{{ operation.subtitle }}</p>
             </div>
           </div>
-          <p class="text-sm text-slate-600 leading-relaxed">
+          <p class="text-sm leading-relaxed text-secondary">
             {{ operation.description }}
           </p>
           <button
             type="button"
-            class="inline-flex items-center justify-center rounded-full bg-indigo-600 px-4 py-1.5 text-sm font-semibold text-white shadow transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+            class="inline-flex items-center justify-center rounded-full bg-brand-600 px-4 py-1.5 text-sm font-semibold text-white shadow transition hover:bg-brand-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:bg-brand-300 disabled:text-white/70"
             :disabled="statuses[operation.key].running"
             @click="runOperation(operation.key)"
           >

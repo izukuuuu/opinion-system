@@ -7,28 +7,21 @@
     leave-from-class="opacity-100"
     leave-to-class="opacity-0"
   >
-    <div
-      v-if="modelValue"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6 backdrop-blur"
-      @click.self="handleBackdrop"
-    >
-      <div
-        class="w-full rounded-3xl bg-white p-6 shadow-2xl"
-        :class="width"
-      >
-        <header class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
+    <div v-if="modelValue" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6 backdrop-blur" @click.self="handleBackdrop">
+      <div class="w-full rounded-3xl bg-surface p-6 shadow-2xl" :class="width">
+        <header class="flex items-start justify-between gap-4 border-b border-soft pb-4">
           <div class="space-y-1.5">
-            <p v-if="eyebrow" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">
+            <p v-if="eyebrow" class="text-xs font-semibold uppercase tracking-[0.35em] text-muted">
               {{ eyebrow }}
             </p>
-            <h2 class="text-2xl font-semibold text-slate-900">
+            <h2 class="text-2xl font-semibold text-primary">
               {{ title }}
             </h2>
           </div>
           <button
             v-if="showClose"
             type="button"
-            class="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            class="flex h-10 w-10 items-center justify-center rounded-full border border-soft text-secondary transition hover:border-brand-soft hover:bg-accent-faint hover:text-primary focus-ring-accent"
             @click="handleCancel"
             aria-label="关闭"
           >
@@ -36,7 +29,7 @@
           </button>
         </header>
 
-        <section class="mt-4 space-y-4 text-sm text-slate-600">
+        <section class="mt-4 space-y-4 text-sm text-secondary">
           <slot name="description">
             <p v-if="description">{{ description }}</p>
           </slot>
@@ -46,7 +39,7 @@
         <footer class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end sm:gap-4">
           <button
             type="button"
-            class="inline-flex items-center justify-center rounded-full border border-slate-200 px-5 py-2 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
+            class="inline-flex items-center justify-center rounded-full border border-soft px-5 py-2 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-ring-accent disabled:cursor-not-allowed disabled:opacity-60"
             :disabled="confirmLoading"
             @click="handleCancel"
           >
@@ -130,12 +123,12 @@ const emit = defineEmits(['update:modelValue', 'cancel', 'confirm'])
 
 const confirmButtonClass = computed(() => {
   if (props.confirmTone === 'danger') {
-    return 'bg-rose-600 hover:bg-rose-500 focus-visible:outline-rose-600 disabled:cursor-not-allowed disabled:bg-rose-300'
+    return 'bg-danger-600 hover:bg-danger-500 focus-visible:outline-danger-600 disabled:cursor-not-allowed disabled:bg-danger-300'
   }
   if (props.confirmTone === 'success') {
-    return 'bg-emerald-600 hover:bg-emerald-500 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:bg-emerald-300'
+    return 'bg-success-600 hover:bg-success-500 focus-visible:outline-success-600 disabled:cursor-not-allowed disabled:bg-success-300'
   }
-  return 'bg-indigo-600 hover:bg-indigo-500 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300'
+  return 'bg-brand-600 hover:bg-brand-500 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:bg-brand-300'
 })
 
 const handleCancel = () => {

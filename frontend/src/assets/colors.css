@@ -20,8 +20,11 @@
   --color-brand-700: 109 92 76;
   --color-brand-800: 85 70 58;
   --color-brand-900: 63 50 42;
+  --color-brand-300-hex: #c9bca9;
+  --color-brand-400-hex: #b7a58f;
   --color-brand-500-hex: #9f8c76;
   --color-brand-600-hex: #857360;
+  --color-brand-700-hex: #6d5c4c;
 
   /* Accent — muted sage (replaces sky) */
   --color-accent-50: 238 241 237;
@@ -34,6 +37,7 @@
   --color-accent-700: 88 96 86;
   --color-accent-800: 65 71 63;
   --color-accent-900: 45 48 44;
+  --color-accent-300-hex: #b7c0b2;
   --color-accent-500-hex: #889384;
   --color-accent-600-hex: #6f7a6b;
 
@@ -78,6 +82,14 @@
 }
 
 @layer utilities {
+  .text-brand {
+    color: rgb(var(--color-brand-600) / 1);
+  }
+
+  .text-brand-strong {
+    color: rgb(var(--color-brand-700) / 1);
+  }
+
   .text-primary {
     color: var(--color-text-primary);
   }
@@ -94,6 +106,31 @@
     background-color: var(--color-surface);
   }
 
+  .bg-base {
+    background-color: var(--color-bg-base);
+  }
+
+  .bg-brand {
+    background-color: rgb(var(--color-brand-600) / 1);
+    color: #ffffff;
+  }
+
+  .bg-brand-soft {
+    background-color: rgb(var(--color-brand-100) / 1);
+  }
+
+  .bg-brand-soft-muted {
+    background-color: rgb(var(--color-brand-100) / 0.7);
+  }
+
+  .bg-accent-soft {
+    background-color: rgb(var(--color-accent-100) / 1);
+  }
+
+  .bg-accent-faint {
+    background-color: rgb(var(--color-accent-50) / 1);
+  }
+
   .bg-surface-muted {
     background-color: var(--color-surface-muted);
   }
@@ -102,13 +139,17 @@
     border-color: var(--color-border-soft);
   }
 
+  .border-brand-soft {
+    border-color: rgb(var(--color-brand-200) / 1);
+  }
+
+  .border-brand {
+    border-color: rgb(var(--color-brand-400) / 1);
+  }
+
   .focus-ring-accent:focus-visible {
     outline: 2px solid var(--color-focus-outline);
     outline-offset: 2px;
-  }
-
-  .bg-accent-soft {
-    background-color: rgb(var(--color-accent-100));
   }
 
   .text-accent {
@@ -118,6 +159,16 @@
   .badge-muted {
     background-color: rgb(var(--color-accent-100));
     color: var(--color-text-secondary);
+  }
+
+  .badge-brand {
+    background-color: rgb(var(--color-brand-100) / 1);
+    color: rgb(var(--color-brand-600) / 1);
+  }
+
+  .badge-accent {
+    background-color: rgb(var(--color-accent-100) / 1);
+    color: rgb(var(--color-accent-600) / 1);
   }
 
   .btn-primary {
@@ -137,5 +188,47 @@
 
   .btn-secondary:hover {
     background-color: rgb(var(--color-brand-100) / 0.4);
+  }
+
+  .bg-gradient-brand {
+    background-image: linear-gradient(
+      135deg,
+      rgb(var(--color-brand-500) / 1) 0%,
+      rgb(var(--color-accent-400) / 1) 45%,
+      rgb(var(--color-accent-500) / 1) 100%
+    );
+  }
+
+  .bg-gradient-muted {
+    background-image: linear-gradient(
+      135deg,
+      var(--color-surface-muted) 0%,
+      rgb(var(--color-brand-100) / 1) 50%,
+      rgb(var(--color-accent-50) / 1) 100%
+    );
+  }
+
+  .text-success {
+    color: rgb(var(--color-success-600) / 1);
+  }
+
+  .text-danger {
+    color: rgb(var(--color-danger-600) / 1);
+  }
+
+  .text-warning {
+    color: rgb(var(--color-warning-500) / 1);
+  }
+
+  .bg-success-soft {
+    background-color: rgb(var(--color-success-100) / 1);
+  }
+
+  .bg-danger-soft {
+    background-color: rgb(var(--color-danger-100) / 1);
+  }
+
+  .bg-warning-soft {
+    background-color: rgb(var(--color-warning-100) / 1);
   }
 }

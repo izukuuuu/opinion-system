@@ -363,7 +363,7 @@ const refreshResults = async (prefilled) => {
 
 .analyze-workbench__header p {
   margin: 0.3rem 0 0;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .analyze-workbench__actions {
@@ -374,7 +374,7 @@ const refreshResults = async (prefilled) => {
 
 .analyze-workbench__actions button {
   border: none;
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  background: linear-gradient(135deg, var(--color-brand-500-hex) 0%, var(--color-accent-500-hex) 100%);
   color: #fff;
   padding: 0.7rem 1.4rem;
   border-radius: 999px;
@@ -384,8 +384,8 @@ const refreshResults = async (prefilled) => {
 }
 
 .analyze-workbench__actions button.ghost {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: rgb(var(--color-brand-500) / 0.12);
+  color: var(--color-brand-600-hex);
   box-shadow: none;
 }
 
@@ -396,7 +396,7 @@ const refreshResults = async (prefilled) => {
 
 .analyze-workbench__actions button:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 12px 25px rgba(76, 29, 149, 0.25);
+  box-shadow: 0 12px 25px rgb(var(--color-accent-500) / 0.25);
 }
 
 .analyze-workbench__grid {
@@ -424,12 +424,12 @@ const refreshResults = async (prefilled) => {
 
 .card header p {
   margin: 0.4rem 0 0;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .card__meta {
   margin: 0;
-  color: #1d4ed8;
+  color: var(--color-brand-600-hex);
   font-size: 0.9rem;
 }
 
@@ -448,7 +448,7 @@ label {
   flex-direction: column;
   gap: 0.45rem;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--color-text-primary);
 }
 
 input {
@@ -467,7 +467,7 @@ input {
 
 .form__actions button {
   border: none;
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  background: linear-gradient(135deg, var(--color-brand-500-hex) 0%, var(--color-accent-500-hex) 100%);
   color: #fff;
   padding: 0.65rem 1.2rem;
   border-radius: 12px;
@@ -477,8 +477,8 @@ input {
 }
 
 .form__actions button.ghost {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: rgb(var(--color-brand-500) / 0.12);
+  color: var(--color-brand-600-hex);
   box-shadow: none;
 }
 
@@ -524,12 +524,12 @@ input {
 
 .status-list__label {
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .status-placeholder {
   margin: 0;
-  color: #64748b;
+  color: var(--color-text-muted);
   font-size: 0.92rem;
 }
 
@@ -555,7 +555,7 @@ input {
 
 .functions__item p {
   margin: 0.25rem 0 0;
-  color: #475569;
+  color: var(--color-text-secondary);
   font-size: 0.92rem;
 }
 
@@ -567,19 +567,19 @@ input {
 
 .functions__title strong {
   font-size: 1rem;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .functions__title span {
   font-size: 0.85rem;
-  color: #2563eb;
+  color: var(--color-brand-600-hex);
   font-weight: 600;
 }
 
 .functions__meta {
   margin: 0.4rem 0 0;
   font-size: 0.82rem;
-  color: #64748b;
+  color: var(--color-text-muted);
 }
 
 .result-block {
@@ -600,7 +600,7 @@ input {
 
 .result-block__header p {
   margin: 0.3rem 0 0;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .result-block__targets {
@@ -633,7 +633,7 @@ input {
 
 .result-target__file {
   font-size: 0.82rem;
-  color: #64748b;
+  color: var(--color-text-muted);
 }
 
 .result-table {
@@ -659,13 +659,13 @@ input {
 
 .result-raw summary {
   cursor: pointer;
-  color: #2563eb;
+  color: var(--color-brand-600-hex);
 }
 
 .result-raw pre {
   margin: 0.6rem 0 0;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: rgba(47, 45, 42, 0.92);
+  color: var(--color-surface);
   border-radius: 14px;
   padding: 0.85rem;
   max-height: 260px;
@@ -675,7 +675,7 @@ input {
 
 .results-placeholder {
   margin: 0;
-  color: #64748b;
+  color: var(--color-text-muted);
   font-size: 0.95rem;
 }
 

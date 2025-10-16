@@ -1,24 +1,24 @@
 <template>
   <div class="space-y-6">
-    <header class="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500">
+    <header class="flex flex-wrap items-center justify-between gap-3 text-sm text-secondary">
       <nav class="flex items-center gap-2">
         <RouterLink
           :to="{ name: 'topic-create-overview' }"
-          class="inline-flex items-center gap-1 rounded-full px-3 py-1 transition hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
-          :class="isOverview ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500'"
+          class="inline-flex items-center gap-1 rounded-full px-3 py-1 transition focus-ring-accent hover:bg-brand-soft hover:text-brand-600"
+          :class="isOverview ? 'bg-brand-soft text-brand-600' : 'text-secondary'"
         >
           <Squares2X2Icon class="h-4 w-4" />
           <span>流程概览</span>
         </RouterLink>
         <template v-if="!isOverview">
-          <ChevronRightIcon class="h-4 w-4 text-slate-400" />
-          <span class="text-slate-600">{{ currentBreadcrumb }}</span>
+          <ChevronRightIcon class="h-4 w-4 text-muted" />
+          <span class="text-secondary">{{ currentBreadcrumb }}</span>
         </template>
       </nav>
       <RouterLink
         v-if="!isOverview"
         :to="{ name: 'topic-create-overview' }"
-        class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+        class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-ring-accent"
       >
         <ChevronLeftIcon class="h-4 w-4" />
         返回开始页
@@ -31,18 +31,18 @@
           v-for="step in steps"
           :key="step.label"
           :to="step.to"
-          class="inline-flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+          class="inline-flex items-center justify-between rounded-2xl border border-soft px-4 py-3 text-sm font-semibold transition focus-ring-accent"
           :class="[
             isActive(step.to)
-              ? 'border-indigo-200 bg-indigo-50 text-indigo-600 shadow-sm'
-              : 'bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/40 hover:text-indigo-600'
+              ? 'border-brand-soft bg-brand-soft text-brand-600 shadow-sm'
+              : 'bg-surface text-secondary hover:border-brand-soft hover:bg-accent-faint hover:text-brand-600'
           ]"
         >
           <span class="flex items-center gap-2">
             <component :is="step.icon" class="h-4 w-4" />
             <span>{{ step.label }}</span>
           </span>
-          <ChevronRightIcon class="h-4 w-4 text-slate-400" />
+          <ChevronRightIcon class="h-4 w-4 text-muted" />
         </RouterLink>
       </aside>
       <div class="flex-1 min-w-0">

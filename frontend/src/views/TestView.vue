@@ -75,7 +75,7 @@ const activeComponent = computed(() => {
 .test-view__tab {
   border: none;
   background: transparent;
-  color: #475569;
+  color: var(--color-text-secondary);
   font-weight: 600;
   padding: 0.45rem 1.1rem;
   border-radius: 999px;
@@ -84,14 +84,14 @@ const activeComponent = computed(() => {
 }
 
 .test-view__tab.is-active {
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  background: linear-gradient(135deg, var(--color-brand-500-hex) 0%, var(--color-accent-500-hex) 100%);
   color: #fff;
   box-shadow: 0 12px 24px rgba(37, 99, 235, 0.25);
 }
 
 .test-view__tab:not(.is-active):hover {
   transform: translateY(-1px);
-  color: #1d4ed8;
+  color: var(--color-brand-600-hex);
 }
 
 .test-view__header {
@@ -103,7 +103,7 @@ const activeComponent = computed(() => {
 .test-view__icon {
   width: 3rem;
   height: 3rem;
-  color: #2563eb;
+  color: var(--color-brand-600-hex);
 }
 
 .test-view__header h1 {
@@ -114,7 +114,7 @@ const activeComponent = computed(() => {
 
 .test-view__header p {
   margin: 0.35rem 0 0;
-  color: #475569;
+  color: var(--color-text-secondary);
   max-width: 640px;
 }
 
