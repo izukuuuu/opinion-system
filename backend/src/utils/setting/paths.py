@@ -116,6 +116,21 @@ def get_configs_root() -> Path:
     return project_root / "configs"
 
 
+def _project_data_root(topic: str) -> Path:
+    """
+    获取项目级数据根目录（backend/data/projects/<topic>）
+    
+    Args:
+        topic (str): 专题名称
+    
+    Returns:
+        Path: 项目数据根目录
+    """
+    data_root = get_data_root() / "projects"
+    project_root = data_root / topic
+    return project_root
+
+
 def bucket(layer: LAYERS, topic: str, date: str) -> Path:
     """
     获取指定层级的数据桶路径
@@ -128,8 +143,8 @@ def bucket(layer: LAYERS, topic: str, date: str) -> Path:
     Returns:
         Path: 数据桶路径
     """
-    data_root = get_data_root()
-    return data_root / layer / topic / date
+    project_root = _project_data_root(topic)
+    return project_root / layer / date
 
 
 def ensure_bucket(layer: LAYERS, topic: str, date: str) -> Path:
@@ -179,4 +194,3 @@ def get_relative_path(absolute_path: Path) -> str:
         return str(absolute_path.relative_to(project_root))
     except ValueError:
         return str(absolute_path)
-

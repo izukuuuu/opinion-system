@@ -1,18 +1,18 @@
 # 入库数据流水线 TODO
 
 ## 后端流程概览（1→Merge, 2→Clean, 3→Filter, 4→Update）
-- **Merge** (`backend/src/merge/data_merge.py:25`): 读取 `data/raw/<topic>/<date>/*.xlsx`，按渠道字段配置合并 Excel，去重后写入 `data/merge/<topic>/<date>/<channel>.xlsx`。
-- **Clean** (`backend/src/clean/data_clean.py:105`): 按渠道映射标准列名，拼接文本为 `contents`，规范地域与时间格式，重排 `id` 并二次去重，输出 `data/clean/<topic>/<date>/<channel>.xlsx`。
-- **Filter** (`backend/src/filter/data_filter.py:130`): 裁剪 `contents`，组合提示词调用千问模型，解析响应中的相关性与分类，仅保留高相关记录，写入 `data/filter/<topic>/<date>/<channel>.xlsx`。
-- **Update** (`backend/src/update/data_update.py:69`): 确保数据库与标准表结构存在，对 `data/filter/<topic>/<date>` 中的 Excel 去重后批量 `to_sql` 入库（一个文件对应一张表）。
+- **Merge** (`backend/src/merge/data_merge.py:25`): 读取 `backend/data/projects/<topic>/raw/<date>/*.xlsx`，按渠道配置合并 Sheet，并输出 `backend/data/projects/<topic>/merge/<date>/<channel>.jsonl`。
+- **Clean** (`backend/src/clean/data_clean.py:105`): 对 JSONL 渠道数据做字段映射、文本拼接、地域与时间规范化，生成 `backend/data/projects/<topic>/clean/<date>/<channel>.jsonl`。
+- **Filter** (`backend/src/filter/data_filter.py:130`): 读取 clean 产物裁剪内容、调用千问模型判定相关性，仅保留高相关记录并写回 `backend/data/projects/<topic>/filter/<date>/<channel>.jsonl`。
+- **Update** (`backend/src/update/data_update.py:69`): 遍历 filter JSONL，清洗去重后按渠道写入数据库中的 `{topic}.{channel}` 表。
 
 ## 前端调用串联
-- **推荐调用**：`POST /api/pipeline`，后端顺序执行 Merge → Clean → Filter → Upload，响应体中的 `steps` 数组给出每一步的 `success` 状态与返回值。
-- **备用拆分**：如需逐步调试，可继续依次调用 `POST /api/merge → /api/clean → /api/filter → /api/upload`，请求体统一为 `{ topic: string, date: "YYYY-MM-DD" }`。
-- **请求节奏**：Pipeline 为同步阻塞调用，Filter 步骤耗时最长；前端需在调用期间展示 Loading/进度提示，必要时可结合日志流或轮询刷新。
-- **成功判断**：管道接口返回 `{"status":"ok","steps":[...]}` 表示全流程完成；若任何步骤失败，`status="error"` 且 `steps` 中标记出失败节点，前端应提取 `message` 给用户，并提供重新尝试或局部重跑入口。
+- **执行顺序**：前端应依次调用 `POST /api/merge → /api/clean → /api/filter → /api/upload`，每个接口共用 `{ topic: string, date: "YYYY-MM-DD" }` 请求体；上一步失败时立刻终止并提示。
+- **状态反馈**：每个接口返回 `{"status":"ok","operation": "...", "data": ...}` 代表成功；遇到 `status:"error"` 需弹出 `message` 并允许用户重试当前步骤。
+- **进度提示**：Merge/Clean 主要是本地 I/O，可直接 await；Filter 依赖 LLM，时延较高，需展示 Loading；Upload 触发前应再次确认 Filter 成功，以免写入空数据。
+- **补充能力**：`POST /api/pipeline` 仍保留作为后端串行执行的备用方案（调试或脚本化场景），响应包含 `steps` 明细，可用于后台作业或二次排障。
 
 ## 待办事项
-- [ ] 在前端新增 `/api/pipeline` 一键入库入口，利用 `steps` 结果渲染实时状态与异常提示。
-- [ ] 保留手动四步调用作为高级调试模式，并提示用户核对 `configs/prompt/filter/<topic>.yaml` 是否存在。
-- [ ] 联合后端确认生产环境数据库连接与权限配置（`config.yaml.databases`）已验证可写。
+- [ ] 将四个接口串联进前端的入库流程（按钮/向导均可），并在 Filter 步骤加入可视化进度提示。
+- [ ] 调用 Filter 前先校验 `configs/prompt/filter/<topic>.yaml` 是否存在；缺失时提醒用户补充提示词或跳过筛选。
+- [ ] 与后端同步新的文件布局与 JSONL 规范，确保部署环境已创建 `backend/data/projects/<topic>/raw` 等目录并拥有写权限。

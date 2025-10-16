@@ -167,7 +167,7 @@ def run_update(topic: str, date: str, logger=None) -> bool:
     log_module_start(logger, "Update")
 
     try:
-        # 上传筛选后的Excel文件
+        # 上传筛选后的JSONL文件
         result = upload_filtered_excels(topic, date, logger)
 
         if result:

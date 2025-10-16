@@ -8,7 +8,7 @@
     <ul>
       <li>运行 <code>npm install</code> 安装依赖（已包含 @heroicons/vue）</li>
       <li>执行 <code>npm run dev</code> 启动开发服务器</li>
-      <li>前往“项目数据”上传 Excel/CSV，即可生成对应的 PKL 与 JSON</li>
+      <li>前往“项目数据”上传 Excel/CSV/JSONL，即可生成对应的 JSONL 与 PKL 归档</li>
     </ul>
   </section>
 </template>

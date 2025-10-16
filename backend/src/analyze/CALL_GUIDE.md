@@ -19,7 +19,7 @@ backend/src/analyze/
 
 ## run_Analyze 调用流程
 1. **初始化日志与配置**：根据 `settings.get_analysis_config()` 中的 `functions` 列表决定要运行的分析项。
-2. **读取数据**：从 `bucket("fetch", topic, date_or_range)` 目录加载 `总体.csv` 以及同目录下的渠道 CSV。
+2. **读取数据**：从 `bucket("fetch", topic, date_or_range)` 目录加载 `总体.jsonl` 以及同目录下的渠道 JSONL。
 3. **调度函数**：按照配置的 `name`（功能）与 `target`（`总体` 或 `渠道`）调用对应函数，例如 `volume`、`attitude` 等。
 4. **结果落盘**：将返回的数据写入 `bucket("analyze", topic, date_or_range)/<function>/<target>/` 目录，并使用各功能约定的文件名，例如 `volume.json`。
 
@@ -28,7 +28,7 @@ backend/src/analyze/
 ## 可用分析函数与输入要求
 | 功能名 | 目标 | 依赖字段/说明 | 输出结构 |
 | --- | --- | --- | --- |
-| `volume` | 总体/渠道 | 需存在对应 CSV；总体模式读取所有渠道文件统计行数 | `{"data": [{"name": 渠道, "value": 行数}]}` |
+| `volume` | 总体/渠道 | 需存在对应 JSONL；总体模式读取所有渠道文件统计行数 | `{"data": [{"name": 渠道, "value": 行数}]}` |
 | `attitude` | 总体/渠道 | 需要情感字段，可识别 `attitude`、`polarity`、`情感` 等列名 | `{"data": [{"name": 情感标签, "value": 数量}]}` |
 | `trends` | 总体/渠道 | 需 `published_at` 列，可转为日期 | `{"data": [{"name": 日期, "value": 数量}]}` |
 | `keywords` | 总体/渠道 | 需文本列（如 `content`、`正文`）；可利用停用词配置 | `{"data": [{"name": 关键词, "value": 词频}]}` |

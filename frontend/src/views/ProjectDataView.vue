@@ -39,7 +39,7 @@
       <header class="space-y-2">
         <h1 class="text-2xl font-semibold text-slate-900">项目数据归档</h1>
         <p class="text-sm text-slate-500">
-          导入 Excel/CSV 文件并自动生成 PKL 与 JSON 存档，全部保存在 backend/data 与 backend/store 中。
+          导入 Excel/CSV/JSONL 文件并自动生成 JSONL 与 PKL 存档，全部保存在 backend/data/projects/<project>/uploads 下。
         </p>
       </header>
 
@@ -49,14 +49,14 @@
           <span v-if="selectedProject" class="badge-soft bg-indigo-100 text-indigo-600">当前项目：{{ selectedProject }}</span>
         </div>
         <p class="text-sm text-slate-500">
-          支持 .xlsx、.xls、.csv 文件，系统会为每份表格生成同名的 PKL 和 JSON 文件，方便在后续流程中直接读取。
+          支持 .xlsx、.xls、.csv、.jsonl 文件，系统会为每份数据生成同名的 JSONL 与 PKL 文件，方便在后续流程中直接读取。
         </p>
         <form class="space-y-4" @submit.prevent="uploadDataset">
           <label
             class="flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50/70 px-6 text-center text-sm text-slate-500 transition hover:border-indigo-300 hover:bg-indigo-50/40"
             :class="{ 'border-indigo-300 bg-white shadow-inner text-indigo-600': uploadFile }"
           >
-            <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.xls,.csv" @change="handleFileChange" />
+            <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.xls,.csv,.jsonl" @change="handleFileChange" />
             <span class="text-sm font-medium">
               {{ uploadFile ? uploadFile.name : '点击或拖拽文件到此处' }}
             </span>
@@ -113,7 +113,11 @@
                 <dd class="text-sm text-slate-600">{{ dataset.pkl_file }}</dd>
               </div>
               <div class="space-y-1">
-                <dt class="text-xs uppercase tracking-widest text-slate-400">JSON</dt>
+                <dt class="text-xs uppercase tracking-widest text-slate-400">JSONL</dt>
+                <dd class="text-sm text-slate-600">{{ dataset.jsonl_file }}</dd>
+              </div>
+              <div class="space-y-1">
+                <dt class="text-xs uppercase tracking-widest text-slate-400">Meta JSON</dt>
                 <dd class="text-sm text-slate-600">{{ dataset.json_file }}</dd>
               </div>
             </dl>
@@ -250,7 +254,7 @@ const uploadDataset = async () => {
     }
 
     await response.json()
-    uploadSuccess.value = '上传成功，已生成对应的 PKL 与 JSON 文件。'
+    uploadSuccess.value = '上传成功，已生成对应的 JSONL 与 PKL 文件。'
     uploadFile.value = null
     if (fileInput.value) {
       fileInput.value.value = ''

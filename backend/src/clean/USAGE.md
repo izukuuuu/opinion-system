@@ -28,12 +28,12 @@
 
 数据清洗主流程，步骤包括：
 
-1. 遍历 `data/merge/<topic>/<date>` 下的 Excel 文件，每个文件视为一个渠道。
+1. 遍历 `backend/data/projects/<topic>/merge/<date>` 下的 JSONL 文件，每个文件视为一个渠道。
 2. 基于渠道配置 (`channels.yaml.field_alias`) 重命名列，保证字段标准化。
 3. 对内容字段执行两轮去重：先按 `content`，再按合成的 `contents`。
 4. 将 `title`、`summary`、`ocr`、`content` 拼接成带标签的 `contents` 字段，并清理空白字符。
 5. 依据配置标准化地域、解析发布时间、补齐平台信息，缺失字段统一填充 "未知"。
-6. 为每条记录生成 `yyyymmdd` 前缀的自增整型 `id`，保留关键列并写回 `data/clean/<topic>/<date>/<channel>.xlsx`。
+6. 为每条记录生成 `yyyymmdd` 前缀的自增整型 `id`，保留关键列并写回 `backend/data/projects/<topic>/clean/<date>/<channel>.jsonl`。
 
 函数返回是否至少成功处理一个渠道文件，可用于判断任务执行结果。
 
@@ -50,6 +50,6 @@ if __name__ == "__main__":
 
 调用前请确保：
 
-- `data/merge/<topic>/<date>` 目录已存在并包含需清洗的 Excel 文件。
+- `backend/data/projects/<topic>/merge/<date>` 目录已存在并包含需清洗的 JSONL 文件。
 - `configs/channels.yaml`（或其他渠道配置）提供了字段别名与地域配置。
 - `backend/src/utils` 下的日志、路径、Excel I/O 配置均已正确初始化。

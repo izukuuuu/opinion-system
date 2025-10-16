@@ -103,40 +103,25 @@
 
 ## 4. 数据入库流水线
 
-### `POST /api/pipeline`
-- **说明**：串行执行 Merge → Clean → Filter → Upload。
+### 推荐顺序：逐步调用四个接口
+所有接口共用请求体 `{ "topic": string, "date": "YYYY-MM-DD" }`，上一环节失败时应立即终止流程。
+
+| 步骤 | 接口 | 说明 |
+| ---- | ---- | ---- |
+| 1 | `POST /api/merge` | 读取 `backend/data/projects/<topic>/raw/<date>` 下的 Excel，按渠道合并并写出 `backend/data/projects/<topic>/merge/<date>/<channel>.jsonl`。 |
+| 2 | `POST /api/clean` | 规范字段、时间和文本，生成 `backend/data/projects/<topic>/clean/<date>/<channel>.jsonl`。 |
+| 3 | `POST /api/filter` | 调用 LLM 判定相关性，只保留高相关数据，输出 `backend/data/projects/<topic>/filter/<date>/<channel>.jsonl`。 |
+| 4 | `POST /api/upload` | 遍历 filter JSONL，同步至数据库 `{topic}.{channel}` 表。 |
+
+每个接口返回 `{"status":"ok","operation":"...", "data": ...}` 代表成功；若返回 `status: "error"`，`message` 字段携带失败原因。
+
+### 备选方案：`POST /api/pipeline`
+- **说明**：后端在一次调用中串行执行四个步骤，适用于脚本化或后台批量任务。
 - **请求体**：
   ```json
   { "topic": "campaign_x", "date": "2024-04-01" }
   ```
-- **成功响应**：
-  ```json
-  {
-    "status": "ok",
-    "operation": "pipeline",
-    "data": {
-      "status": "ok",
-      "steps": [
-        { "operation": "merge", "success": true, "result": true },
-        { "operation": "clean", "success": true, "result": true },
-        { "operation": "filter", "success": true, "result": true },
-        { "operation": "upload", "success": true, "result": true }
-      ]
-    }
-  }
-  ```
-- **失败响应**：`data.status = "error"`，`message` 指出失败步骤，`steps` 中对应 `success=false`。
-- **推荐用法**：前端调用时展示 per-step 状态，失败后可引导用户查看日志或改用单步接口。
-
-### 单步接口（可调试或按需重跑）
-所有接口共用请求体 `{ "topic": string, "date": "YYYY-MM-DD" }`。
-
-| 接口 | 说明 | 成功返回 |
-| ---- | ---- | -------- |
-| `POST /api/merge` | 合并 `data/raw/<topic>/<date>` 下多渠道 Excel，结果写入 `data/merge/<topic>/<date>` | `{"status":"ok","operation":"merge","data":true}` |
-| `POST /api/clean` | 标准化列名/文本/时间并重排 `id`，输出 `data/clean/<topic>/<date>` | 同上 |
-| `POST /api/filter` | 调用千问模型筛选高相关内容，输出 `data/filter/<topic>/<date>` | 同上，失败时可能返回模型错误信息 |
-| `POST /api/upload` | 确保数据库及表结构存在，将筛选结果写入 `{topic}` 数据库 | 同上 |
+- **响应**：`data.steps` 数组逐步列出每个阶段的 `success`、`result` 信息，便于排错；任一阶段失败会返回 `status: "error"` 与失败步骤提示。
 
 ---
 
@@ -147,7 +132,7 @@
 - **返回**：封装后的查询结果结构，具体取决于实现。
 
 ### `POST /api/fetch`
-- **说明**：从数据库提取指定日期范围的数据并落盘。
+- **说明**：从数据库提取指定日期范围的数据，按渠道写入 `backend/data/projects/<topic>/fetch/<start>_<end>/<channel>.jsonl`，同时生成 `总体.jsonl` 与配置中的合并文件。
 - **请求体**：
   ```json
   {
@@ -159,7 +144,7 @@
 - **返回**：`run_fetch` 的序列化结果。
 
 ### `POST /api/analyze`
-- **说明**：对提取好的数据执行分析，可指定分析函数。
+- **说明**：读取 `backend/data/projects/<topic>/fetch/<range>/` 下的 `总体.jsonl` 与各渠道 JSONL 并执行分析，可指定分析函数。
 - **请求体**：
   ```json
   {
@@ -226,11 +211,11 @@
 - **说明**：删除项目；若不存在返回 404。
 
 ### `GET /api/projects/<name>/datasets`
-- **说明**：列出项目下的本地数据集清单；异常时返回 500 并附错误提示。
+- **说明**：列出项目下的本地数据集清单，数据来自 `backend/data/projects/<slug>/uploads/manifest.json`；异常时返回 500 并附错误提示。
 
 ### `POST /api/projects/<name>/datasets`
-- **说明**：通过 multipart form 上传文件，并写入项目数据仓库。
-- **请求体**：`form-data`，字段名为 `file`，值为 Excel 或 CSV 文件。
+- **说明**：通过 multipart form 上传文件，原始文件保存至 `uploads/original/`，同时生成标准化 `jsonl` 与 `pkl` 缓存文件。
+- **请求体**：`form-data`，字段名为 `file`，可上传 Excel/CSV/JSONL。
 - **成功返回**：
   ```json
   {

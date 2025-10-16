@@ -43,7 +43,7 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
         log_error(logger, "未配置分析函数", "Analysis")
         return False
     
-    # 读取数据：总体.csv 与各渠道 *.csv（排除 总体.csv）
+    # 读取数据：总体.jsonl 与各渠道 *.jsonl（排除 总体.jsonl）
     # 如果提供了结束日期，使用日期范围格式，否则使用单个日期
     if end_date:
         folder_name = f"{date}_{end_date}"

@@ -114,7 +114,7 @@ def write_jsonl(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> None
         file_path: 文件路径
         **kwargs: 额外传递给df.to_json的参数
     """
-    params = {"orient": "records", "lines": True, "force_ascii": False}
+    params = {"orient": "records", "lines": True, "force_ascii": False, "date_format": "iso"}
     params.update(kwargs)
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)

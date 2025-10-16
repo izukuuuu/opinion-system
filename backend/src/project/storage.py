@@ -12,14 +12,15 @@ import pandas as pd
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
+from ..utils.io.excel import write_jsonl, read_jsonl
+
 __all__ = ["store_uploaded_dataset", "list_project_datasets"]
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _BACKEND_ROOT.parent
-_DATA_ROOT = _BACKEND_ROOT / "data"
-_STORE_ROOT = _BACKEND_ROOT / "store"
+_DATA_ROOT = _BACKEND_ROOT / "data" / "projects"
 _MANIFEST_FILENAME = "manifest.json"
-_ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
+_ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".jsonl"}
 
 
 def _normalise_project_name(name: str) -> str:
@@ -29,13 +30,27 @@ def _normalise_project_name(name: str) -> str:
     return cleaned.lower() or "project"
 
 
-def _ensure_directories(project: str) -> str:
+def _ensure_directories(project: str) -> Dict[str, Path]:
     slug = _normalise_project_name(project)
-    data_dir = _DATA_ROOT / slug
-    store_dir = _STORE_ROOT / slug
-    data_dir.mkdir(parents=True, exist_ok=True)
-    store_dir.mkdir(parents=True, exist_ok=True)
-    return slug
+    project_dir = _DATA_ROOT / slug
+    uploads_dir = project_dir / "uploads"
+    original_dir = uploads_dir / "original"
+    jsonl_dir = uploads_dir / "jsonl"
+    cache_dir = uploads_dir / "cache"
+    meta_dir = uploads_dir / "meta"
+
+    for path in (original_dir, jsonl_dir, cache_dir, meta_dir):
+        path.mkdir(parents=True, exist_ok=True)
+
+    return {
+        "slug": slug,
+        "project_dir": project_dir,
+        "uploads_dir": uploads_dir,
+        "original_dir": original_dir,
+        "jsonl_dir": jsonl_dir,
+        "cache_dir": cache_dir,
+        "meta_dir": meta_dir,
+    }
 
 
 def _dataset_timestamp() -> datetime:
@@ -45,15 +60,20 @@ def _dataset_timestamp() -> datetime:
 def _load_dataframe(path: Path, extension: str) -> pd.DataFrame:
     if extension == ".csv":
         return pd.read_csv(path)
-    return pd.read_excel(path)
+    if extension in {".xlsx", ".xls"}:
+        return pd.read_excel(path)
+    if extension == ".jsonl":
+        return read_jsonl(path)
+    raise ValueError(f"不支持的文件类型：{extension}")
 
 
 def _manifest_path(project_slug: str) -> Path:
-    return _DATA_ROOT / project_slug / _MANIFEST_FILENAME
+    return _DATA_ROOT / project_slug / "uploads" / _MANIFEST_FILENAME
 
 
 def _write_manifest(project_slug: str, metadata: Dict) -> None:
     manifest_path = _manifest_path(project_slug)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest = {"project": metadata.get("project", ""), "datasets": []}
     if manifest_path.exists():
         try:
@@ -102,7 +122,13 @@ def store_uploaded_dataset(project: str, file_storage: FileStorage) -> Dict:
     if not file_storage or not getattr(file_storage, "filename", ""):
         raise ValueError("未检测到上传文件")
 
-    project_slug = _ensure_directories(project)
+    dirs = _ensure_directories(project)
+    project_slug = dirs["slug"]
+    original_dir = dirs["original_dir"]
+    jsonl_dir = dirs["jsonl_dir"]
+    cache_dir = dirs["cache_dir"]
+    meta_dir = dirs["meta_dir"]
+
     original_name = file_storage.filename or "dataset.xlsx"
     extension = Path(original_name).suffix.lower()
     if extension not in _ALLOWED_EXTENSIONS:
@@ -111,17 +137,22 @@ def store_uploaded_dataset(project: str, file_storage: FileStorage) -> Dict:
 
     timestamp = _dataset_timestamp()
     dataset_id = f"{timestamp.strftime('%Y%m%dT%H%M%S')}-{uuid4().hex[:8]}"
-    stored_name = secure_filename(original_name) or f"dataset{extension}"
+    stored_name = secure_filename(original_name) or f"dataset{extension or 'jsonl'}"
     stored_filename = f"{dataset_id}_{stored_name}"
-    store_path = _STORE_ROOT / project_slug / stored_filename
+    store_path = original_dir / stored_filename
     file_storage.save(store_path)
 
     dataframe = _load_dataframe(store_path, extension)
     rows = int(dataframe.shape[0])
     columns = [str(column) for column in dataframe.columns]
-    data_dir = _DATA_ROOT / project_slug
-    pkl_path = data_dir / f"{dataset_id}.pkl"
+
+    # 缓存为 pickle，供后端快速载入
+    pkl_path = cache_dir / f"{dataset_id}.pkl"
     dataframe.to_pickle(pkl_path)
+
+    # 统一产出 JSONL 版本
+    jsonl_path = jsonl_dir / f"{dataset_id}.jsonl"
+    write_jsonl(dataframe, jsonl_path)
 
     metadata = {
         "id": dataset_id,
@@ -135,12 +166,13 @@ def store_uploaded_dataset(project: str, file_storage: FileStorage) -> Dict:
         "file_size": store_path.stat().st_size,
         "source_file": str(store_path.relative_to(_REPO_ROOT)),
         "pkl_file": str(pkl_path.relative_to(_REPO_ROOT)),
+        "jsonl_file": str(jsonl_path.relative_to(_REPO_ROOT)),
     }
 
-    json_path = data_dir / f"{dataset_id}.json"
-    with json_path.open("w", encoding="utf-8") as fh:
+    meta_path = meta_dir / f"{dataset_id}.json"
+    with meta_path.open("w", encoding="utf-8") as fh:
         json.dump(metadata, fh, ensure_ascii=False, indent=2)
-    metadata["json_file"] = str(json_path.relative_to(_REPO_ROOT))
+    metadata["json_file"] = str(meta_path.relative_to(_REPO_ROOT))
 
     _write_manifest(project_slug, metadata)
     return metadata

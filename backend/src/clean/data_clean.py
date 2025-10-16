@@ -107,14 +107,14 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
     运行清洗流水线（直接读取 merge/<topic>/<date> 下各渠道 JSONL）
     
     清洗流程线：
-    - 遍历 data/merge/<topic>/<date> 下每个渠道的 JSONL
+    - 遍历 backend/data/projects/<topic>/merge/<date> 下每个渠道的 JSONL
     - 每表重编号：id = yyyymmdd + 序号（从1开始），整型
     - 按 channels.yaml.field_alias 将列名映射
     - 针对 content 去重，再基于 contents 再去重
     - 将 title、summary、ocr、content 合并为 contents（存在则拼接）
     - 保留列：id、contents、author、published_at、url、region、hit_words、polarity
     - 清洗 contents 文本；region 省级化；published_at 解析为 MySQL 格式
-    - 保存到 data/clean/<topic>/<date>/<channel>.jsonl
+    - 保存到 backend/data/projects/<topic>/clean/<date>/<channel>.jsonl
     
     Args:
         topic (str): 专题名称
