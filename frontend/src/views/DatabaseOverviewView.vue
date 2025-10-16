@@ -2,7 +2,7 @@
   <section class="space-y-8">
     <header class="card-surface flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between">
       <div class="flex items-start gap-4">
-        <CircleStackIcon class="h-12 w-12 text-indigo-500" />
+        <CircleStackIcon class="h-12 w-12 text-brand" />
         <div class="space-y-1">
           <h1 class="text-2xl font-semibold text-slate-900">数据库概览</h1>
           <p class="text-sm text-slate-500">连接后端数据库，查看数据库的连接信息、库表结构与数据量。</p>
@@ -10,13 +10,13 @@
       </div>
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+        class="inline-flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold shadow btn-primary disabled:cursor-not-allowed disabled:bg-slate-300"
         @click="refresh"
         :disabled="loading"
       >
         <ArrowPathIcon
           class="h-5 w-5"
-          :class="{ 'animate-spin text-indigo-200': loading }"
+          :class="{ 'animate-spin text-brand-soft': loading }"
         />
         {{ loading ? '刷新中…' : '刷新数据' }}
       </button>
@@ -27,7 +27,7 @@
         v-for="tab in tabs"
         :key="tab.key"
         class="flex-1 whitespace-nowrap rounded-2xl px-4 py-2 text-sm font-medium transition"
-        :class="activeTab === tab.key ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 hover:bg-indigo-50 hover:text-indigo-600'"
+        :class="activeTab === tab.key ? 'bg-brand text-white shadow' : 'text-slate-500 hover:bg-brand-soft hover:text-brand'"
         type="button"
         role="tab"
         :id="`database-tab-${tab.key}`"
@@ -71,17 +71,17 @@
             <p class="text-sm text-slate-500">帮助快速了解业务数据规模。</p>
           </header>
           <ul class="grid gap-4 sm:grid-cols-3">
-            <li class="rounded-2xl bg-indigo-50/80 p-4 text-center">
-              <span class="text-xs uppercase tracking-widest text-indigo-500">业务数据库</span>
-              <strong class="mt-2 block text-2xl font-semibold text-indigo-700">{{ summaryStats.databaseCount }}</strong>
+            <li class="rounded-2xl bg-brand-soft p-4 text-center">
+              <span class="text-xs uppercase tracking-widest text-brand">业务数据库</span>
+              <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.databaseCount }}</strong>
             </li>
-            <li class="rounded-2xl bg-indigo-50/80 p-4 text-center">
-              <span class="text-xs uppercase tracking-widest text-indigo-500">总表数</span>
-              <strong class="mt-2 block text-2xl font-semibold text-indigo-700">{{ summaryStats.tableCount }}</strong>
+            <li class="rounded-2xl bg-brand-soft p-4 text-center">
+              <span class="text-xs uppercase tracking-widest text-brand">总表数</span>
+              <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.tableCount }}</strong>
             </li>
-            <li class="rounded-2xl bg-indigo-50/80 p-4 text-center">
-              <span class="text-xs uppercase tracking-widest text-indigo-500">已统计行数</span>
-              <strong class="mt-2 block text-2xl font-semibold text-indigo-700">{{ summaryStats.rowCount }}</strong>
+            <li class="rounded-2xl bg-brand-soft p-4 text-center">
+              <span class="text-xs uppercase tracking-widest text-brand">已统计行数</span>
+              <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.rowCount }}</strong>
             </li>
           </ul>
           <footer v-if="queriedAt" class="flex items-center gap-2 text-sm text-slate-500">
@@ -219,8 +219,13 @@ const refresh = async () => {
   loading.value = true
   error.value = ''
   try {
-    const response = await callApi('/database/overview')
-    payload.value = response
+    const response = await callApi('/api/query', { method: 'POST', body: JSON.stringify({}) })
+    if (response && response.status === 'ok') {
+      payload.value = response.data ?? null
+    } else {
+      const message = response && typeof response === 'object' ? response.message : ''
+      throw new Error(message || '数据库查询失败')
+    }
   } catch (err) {
     console.error(err)
     error.value = err instanceof Error ? err.message : '请求失败'
