@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-10">
-    <section class="relative overflow-hidden rounded-3xl bg-gradient-brand px-6 py-10 text-white shadow-2xl sm:px-10">
+    <section class="relative overflow-hidden rounded-3xl bg-gradient-brand px-6 py-10 text-white sm:px-10">
       <div class="absolute inset-0 opacity-40">
         <div class="absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-white/25 blur-3xl"></div>
         <div class="absolute bottom-0 right-10 h-56 w-56 rounded-full bg-accent-soft opacity-60 blur-3xl"></div>
@@ -15,10 +15,10 @@
         </div>
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-full bg-white/90 px-6 py-3 text-brand-600 shadow-lg transition hover:-translate-y-0.5 hover:bg-white focus-ring-accent"
+          class="inline-flex items-center gap-2 rounded-full bg-brand-600 px-6 py-3 text-white shadow-md transition hover:bg-brand-500 focus-ring-accent"
           @click="goToUpload"
         >
-          <span class="flex h-9 w-9 items-center justify-center rounded-full bg-brand-soft text-brand-600">
+          <span class="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white">
             <CloudArrowUpIcon class="h-5 w-5" />
           </span>
           <span class="text-base font-semibold">立即上传数据</span>
@@ -37,7 +37,7 @@
         <article
           v-for="stage in stages"
           :key="stage.title"
-          class="card-surface flex flex-col gap-4 p-6 transition hover:-translate-y-1 hover:shadow-lg"
+          class="card-surface flex flex-col gap-4 p-6"
         >
           <div class="flex items-center gap-3">
             <span

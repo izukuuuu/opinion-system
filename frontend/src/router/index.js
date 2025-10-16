@@ -8,7 +8,9 @@ import TopicAnalysisStep from '../views/topics/TopicAnalysisStep.vue'
 import ProjectDataView from '../views/ProjectDataView.vue'
 import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
 import TestView from '../views/TestView.vue'
-import SettingsView from '../views/SettingsView.vue'
+import SettingsLayout from '../views/settings/SettingsLayout.vue'
+import SettingsDatabasesView from '../views/settings/SettingsDatabasesView.vue'
+import SettingsAiView from '../views/settings/SettingsAiView.vue'
 
 export const routes = [
   {
@@ -88,16 +90,40 @@ export const routes = [
     name: 'test',
     component: TestView,
     meta: {
-      title: '测试界面'
+      title: '测试工具'
     }
   },
   {
     path: '/settings',
     name: 'settings',
-    component: SettingsView,
+    component: SettingsLayout,
     meta: {
       title: '系统设置'
-    }
+    },
+    children: [
+      {
+        path: '',
+        redirect: { name: 'settings-databases' }
+      },
+      {
+        path: 'databases',
+        name: 'settings-databases',
+        component: SettingsDatabasesView,
+        meta: {
+          title: '数据库连接',
+          breadcrumb: '数据库连接'
+        }
+      },
+      {
+        path: 'ai',
+        name: 'settings-ai',
+        component: SettingsAiView,
+        meta: {
+          title: 'AI 服务配置',
+          breadcrumb: 'AI 服务配置'
+        }
+      }
+    ]
   },
   {
     path: '/:pathMatch(.*)*',

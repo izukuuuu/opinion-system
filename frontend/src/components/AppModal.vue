@@ -47,7 +47,7 @@
           </button>
           <button
             type="button"
-            class="inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-semibold text-white shadow transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            class="btn-base px-5 py-2"
             :class="[confirmButtonClass, confirmLoading ? 'cursor-wait opacity-90' : '']"
             :disabled="confirmDisabled || confirmLoading"
             @click="handleConfirm"
@@ -123,12 +123,12 @@ const emit = defineEmits(['update:modelValue', 'cancel', 'confirm'])
 
 const confirmButtonClass = computed(() => {
   if (props.confirmTone === 'danger') {
-    return 'bg-danger-600 hover:bg-danger-500 focus-visible:outline-danger-600 disabled:cursor-not-allowed disabled:bg-danger-300'
+    return 'btn-tone-danger'
   }
   if (props.confirmTone === 'success') {
-    return 'bg-success-600 hover:bg-success-500 focus-visible:outline-success-600 disabled:cursor-not-allowed disabled:bg-success-300'
+    return 'btn-tone-success'
   }
-  return 'bg-brand-600 hover:bg-brand-500 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:bg-brand-300'
+  return 'btn-tone-primary'
 })
 
 const handleCancel = () => {

@@ -131,7 +131,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   BeakerIcon,
@@ -173,15 +173,15 @@ const navigationGroups = [
         icon: CircleStackIcon
       },
       {
-        label: '测试页面',
-        description: 'API调用测试',
+        label: '测试工具',
+        description: '未上线功能测试',
         to: { name: 'test' },
         icon: BeakerIcon
       },
       {
         label: '系统设置',
         description: '配置数据库与模型参数',
-        to: { name: 'settings' },
+        to: { name: 'settings-databases' },
         icon: Cog6ToothIcon
       }
     ]
@@ -199,16 +199,52 @@ const pageTitle = computed(() => route.meta?.title ?? '')
 
 const { activeProjectName } = useActiveProject()
 
-const initialCollapsed =
-  typeof window !== 'undefined' ? !window.matchMedia('(min-width: 1024px)').matches : false
+const mediaQuery =
+  typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)') : null
 
-const sidebarCollapsed = ref(initialCollapsed)
+const sidebarCollapsed = ref(mediaQuery ? !mediaQuery.matches : false)
+const lastDesktopSidebarState = ref(mediaQuery?.matches ? sidebarCollapsed.value : false)
+let cleanupMediaQueryListener
 
 const toggleSidebar = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
+
+  if (mediaQuery?.matches) {
+    lastDesktopSidebarState.value = sidebarCollapsed.value
+  }
 }
 
 const sidebarToggleLabel = computed(() =>
   sidebarCollapsed.value ? '展开侧边栏' : '收起侧边栏'
 )
+
+onMounted(() => {
+  if (!mediaQuery) return
+
+  if (mediaQuery.matches) {
+    lastDesktopSidebarState.value = sidebarCollapsed.value
+  }
+
+  const listener = (event) => {
+    if (event.matches) {
+      sidebarCollapsed.value = lastDesktopSidebarState.value
+      return
+    }
+
+    lastDesktopSidebarState.value = sidebarCollapsed.value
+    sidebarCollapsed.value = true
+  }
+
+  if ('addEventListener' in mediaQuery) {
+    mediaQuery.addEventListener('change', listener)
+    cleanupMediaQueryListener = () => mediaQuery.removeEventListener('change', listener)
+  } else {
+    mediaQuery.addListener(listener)
+    cleanupMediaQueryListener = () => mediaQuery.removeListener(listener)
+  }
+})
+
+onBeforeUnmount(() => {
+  cleanupMediaQueryListener?.()
+})
 </script>

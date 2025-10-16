@@ -1,45 +1,45 @@
 :root {
   /* Neutral foundation */
-  --color-bg-base: #f4f2ef;
+  --color-bg-base: #eef2f6;
   --color-surface: #ffffff;
-  --color-surface-muted: #efede9;
-  --color-border-soft: #d7d1c8;
-  --color-text-primary: #2f2d2a;
-  --color-text-secondary: #5d5a55;
-  --color-text-muted: #7f7c75;
-  --color-focus-outline: #a1ab9c;
+  --color-surface-muted: #c4d2e1;
+  --color-border-soft: #d0d5d9;
+  --color-text-primary: #1c252c;
+  --color-text-secondary: #303d47;
+  --color-text-muted: #445562;
+  --color-focus-outline: #9aafc0;
 
   /* Brand — warm grey with morandi undertone (replaces indigo) */
-  --color-brand-50: 243 241 238;
-  --color-brand-100: 230 225 217;
-  --color-brand-200: 217 208 195;
-  --color-brand-300: 201 188 169;
-  --color-brand-400: 183 165 143;
-  --color-brand-500: 159 140 118;
-  --color-brand-600: 133 115 96;
-  --color-brand-700: 109 92 76;
-  --color-brand-800: 85 70 58;
-  --color-brand-900: 63 50 42;
-  --color-brand-300-hex: #c9bca9;
-  --color-brand-400-hex: #b7a58f;
-  --color-brand-500-hex: #9f8c76;
-  --color-brand-600-hex: #857360;
-  --color-brand-700-hex: #6d5c4c;
+  --color-brand-50: 214 223 233;
+  --color-brand-100: 202 214 227;
+  --color-brand-200: 190 205 221;
+  --color-brand-300: 178 196 215;
+  --color-brand-400: 166 187 209;
+  --color-brand-500: 154 178 203;
+  --color-brand-600: 135 157 179;
+  --color-brand-700: 114 133 152;
+  --color-brand-800: 93 109 125;
+  --color-brand-900: 72 85 98;
+  --color-brand-300-hex: #b2c4d7;
+  --color-brand-400-hex: #a6bbd1;
+  --color-brand-500-hex: #9ab2cb;
+  --color-brand-600-hex: #879db3;
+  --color-brand-700-hex: #728598;
 
   /* Accent — muted sage (replaces sky) */
-  --color-accent-50: 238 241 237;
-  --color-accent-100: 223 230 221;
-  --color-accent-200: 204 212 200;
-  --color-accent-300: 183 192 178;
-  --color-accent-400: 161 171 156;
-  --color-accent-500: 136 147 132;
-  --color-accent-600: 111 122 107;
-  --color-accent-700: 88 96 86;
-  --color-accent-800: 65 71 63;
-  --color-accent-900: 45 48 44;
-  --color-accent-300-hex: #b7c0b2;
-  --color-accent-500-hex: #889384;
-  --color-accent-600-hex: #6f7a6b;
+  --color-accent-50: 218 231 241;
+  --color-accent-100: 199 219 234;
+  --color-accent-200: 180 207 227;
+  --color-accent-300: 161 195 220;
+  --color-accent-400: 142 183 213;
+  --color-accent-500: 123 171 206;
+  --color-accent-600: 104 159 199;
+  --color-accent-700: 91 140 175;
+  --color-accent-800: 77 119 149;
+  --color-accent-900: 63 98 123;
+  --color-accent-300-hex: #a1c3dc;
+  --color-accent-500-hex: #7babce;
+  --color-accent-600-hex: #689fc7;
 
   /* Success — subdued green (replaces emerald) */
   --color-success-50: 238 243 239;

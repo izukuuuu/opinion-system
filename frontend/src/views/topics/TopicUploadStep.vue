@@ -39,7 +39,7 @@
           </label>
           <button
             type="submit"
-            class="inline-flex w-full items-center justify-center gap-2 rounded-full bg-brand-600 px-5 py-2 text-sm font-semibold text-white shadow transition hover:bg-brand-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:bg-brand-300 disabled:text-white/70"
+            class="btn-base btn-tone-primary w-full gap-2 px-5 py-2"
             :disabled="creating || !topicName"
           >
             <span v-if="creating">创建中…</span>
@@ -93,7 +93,7 @@
           </button>
         </div>
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <button type="submit" class="inline-flex items-center justify-center rounded-full bg-brand-600 px-6 py-2 text-sm font-semibold text-white shadow transition hover:bg-brand-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:bg-brand-300 disabled:text-white/70" :disabled="uploading">
+          <button type="submit" class="btn-base btn-tone-primary px-6 py-2" :disabled="uploading">
             {{ uploading ? '上传中…' : '上传并生成存档' }}
           </button>
           <div class="space-y-1 text-sm">
