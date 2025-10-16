@@ -346,12 +346,34 @@
         </div>
       </div>
     </transition>
+
+    <AppModal
+      v-model="showDeleteModal"
+      eyebrow="危险操作"
+      title="删除项目"
+      :description="deleteDescription"
+      cancel-text="取消"
+      confirm-text="删除"
+      confirm-tone="danger"
+      :confirm-loading="isDeleting"
+      :confirm-disabled="isDeleting"
+      confirm-loading-text="删除中…"
+      :close-on-backdrop="!isDeleting"
+      :show-close="!isDeleting"
+      @cancel="handleDeleteCancelled"
+      @confirm="confirmDeleteProject"
+    >
+      <p class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-600">
+        删除操作不可恢复，将从服务器移除该项目的所有归档与配置数据。
+      </p>
+    </AppModal>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowPathIcon, EllipsisHorizontalIcon, EyeIcon, PencilSquareIcon, PlusIcon } from '@heroicons/vue/24/outline'
+import AppModal from '../components/AppModal.vue'
 import ProjectDashboard from '../components/ProjectDashboard.vue'
 import { useActiveProject } from '../composables/useActiveProject'
 
@@ -366,7 +388,9 @@ const lastSelectedProject = ref('')
 const showCreateModal = ref(false)
 const showProjectModal = ref(false)
 const projectModalMode = ref('view')
+const showDeleteModal = ref(false)
 const openActionMenu = ref('')
+const projectPendingDelete = ref('')
 
 const { activeProjectName, setActiveProject, clearActiveProject } = useActiveProject()
 const selectedProjectName = ref(activeProjectName.value || '')
@@ -444,6 +468,13 @@ const projectModalEyebrow = computed(() =>
   projectModalMode.value === 'edit' ? '更新信息' : '项目详情'
 )
 
+const deleteDescription = computed(() => {
+  if (!projectPendingDelete.value) {
+    return '确认删除当前项目吗？此操作无法撤销。'
+  }
+  return `确定要删除项目 “${projectPendingDelete.value}” 吗？此操作无法撤销。`
+})
+
 const startNewProject = () => {
   lastSelectedProject.value = selectedProjectName.value
   showCreateModal.value = true
@@ -503,21 +534,19 @@ const startViewProject = (name = selectedProjectName.value) => {
   closeProjectMenu()
 }
 
-const confirmDeleteProject = async (name = selectedProjectName.value) => {
-  if (!name) return
-  closeProjectMenu()
-  const confirmed = window.confirm(`确定要删除项目 “${name}” 吗？`)
-  if (!confirmed) return
+const confirmDeleteProject = async (name) => {
+  const targetName = name || projectPendingDelete.value || selectedProjectName.value
+  if (!targetName) return
   error.value = ''
   isDeleting.value = true
   try {
-    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(name)}`, {
+    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(targetName)}`, {
       method: 'DELETE'
     })
     if (!response.ok) {
       throw new Error('删除项目失败')
     }
-    projects.value = projects.value.filter((project) => project.name !== name)
+    projects.value = projects.value.filter((project) => project.name !== targetName)
     if (projects.value.length) {
       selectedProjectName.value = projects.value[0].name
       setActiveProject(projects.value[0])
@@ -526,11 +555,17 @@ const confirmDeleteProject = async (name = selectedProjectName.value) => {
       clearActiveProject()
     }
     closeProjectModal()
+    closeDeleteModal()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '删除项目时出现问题'
   } finally {
     isDeleting.value = false
   }
+}
+
+const closeDeleteModal = () => {
+  showDeleteModal.value = false
+  projectPendingDelete.value = ''
 }
 
 const closeProjectModal = () => {
@@ -568,7 +603,10 @@ const handleMenuEdit = (name) => {
 
 const handleMenuDelete = (name) => {
   closeProjectMenu()
-  confirmDeleteProject(name)
+  if (!name) return
+  projectPendingDelete.value = name
+  showDeleteModal.value = true
+  error.value = ''
 }
 
 const formatTimestamp = (timestamp) => {
@@ -603,6 +641,11 @@ const handleProjectModalCancelled = () => {
   closeProjectModal()
 }
 
+const handleDeleteCancelled = () => {
+  if (isDeleting.value) return
+  closeDeleteModal()
+}
+
 onMounted(() => {
   document.addEventListener('click', closeProjectMenu)
   fetchProjects()
@@ -619,6 +662,12 @@ watch(activeProjectName, (name) => {
   }
   if (selectedProjectName.value !== name) {
     selectedProjectName.value = name
+  }
+})
+
+watch(showDeleteModal, (visible) => {
+  if (!visible) {
+    projectPendingDelete.value = ''
   }
 })
 </script>

@@ -39,7 +39,7 @@
       <header class="space-y-2">
         <h1 class="text-2xl font-semibold text-slate-900">项目数据归档</h1>
         <p class="text-sm text-slate-500">
-          导入 Excel/CSV/JSONL 文件并自动生成 JSONL 与 PKL 存档，全部保存在 backend/data/projects/<project>/uploads 下。
+          导入 Excel/CSV/JSONL 文件并自动生成 JSONL 与 PKL 存档，全部保存在 backend/data/projects/&lt;project&gt;/uploads 下。
         </p>
       </header>
 

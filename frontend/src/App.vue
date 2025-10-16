@@ -1,123 +1,130 @@
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/50 to-slate-50 text-slate-900">
+  <div class="min-h-screen bg-slate-100 text-slate-900">
     <aside
-      :class="[
-        'group fixed inset-y-0 left-0 z-30 flex flex-col border-r border-slate-200/60 bg-white/95 shadow-xl backdrop-blur transition-[transform,box-shadow] duration-300',
-        sidebarCollapsed ? 'w-64 lg:w-24' : 'w-64 lg:w-72'
-      ]"
+      v-if="sidebarCollapsed"
+      class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-20 lg:flex-col lg:border-r lg:border-slate-200 lg:bg-white"
     >
-      <button
-        type="button"
-        class="group/toggle absolute left-full top-1/2 hidden -translate-y-1/2 items-center gap-2 rounded-full border border-white/60 bg-white/90 px-3 py-2 text-sm font-medium text-indigo-600 shadow-lg shadow-indigo-500/10 ring-1 ring-slate-900/5 backdrop-blur transition hover:-translate-x-0.5 hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 lg:flex"
-        :aria-expanded="!sidebarCollapsed"
-        :aria-label="sidebarToggleLabel"
-        @click="toggleSidebar"
-      >
-        <span
-          class="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 transition group-hover/toggle:bg-indigo-600 group-hover/toggle:text-white"
-        >
-          <component
-            :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon"
-            class="h-4 w-4"
-          />
-        </span>
-        <span class="whitespace-nowrap">{{ sidebarCollapsed ? '展开侧边栏' : '收起侧边栏' }}</span>
-      </button>
-
-      <div class="flex items-center gap-3 px-6 pb-6 pt-8">
-          <RouterLink
-            v-if="!sidebarCollapsed"
-            to="/"
-            class="flex flex-col text-left"
-          >
-            <span class="text-lg font-semibold text-slate-900">Opinion System</span>
-            <span class="text-sm text-slate-500">舆情监测系统</span>
-          </RouterLink>
-          <RouterLink
-            v-else
-            to="/"
-            class="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-100 text-sm font-semibold text-indigo-600"
-            aria-label="Opinion System"
-            title="Opinion System"
-          >
-            <span aria-hidden="true">OS</span>
-          </RouterLink>
+      <div class="flex flex-col items-center gap-3 border-b border-slate-200 px-3 py-4">
         <button
           type="button"
-          class="ml-auto inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/90 px-3 py-2 text-sm font-medium text-indigo-600 shadow shadow-indigo-500/10 ring-1 ring-slate-900/5 backdrop-blur transition hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 lg:hidden"
+          class="flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
           :aria-expanded="!sidebarCollapsed"
           :aria-label="sidebarToggleLabel"
           @click="toggleSidebar"
         >
-          <span
-            class="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 transition group-hover:bg-indigo-600 group-hover:text-white"
-          >
-            <component
-              :is="sidebarCollapsed ? ChevronDoubleRightIcon : ChevronDoubleLeftIcon"
-              class="h-5 w-5"
-            />
-          </span>
-          <span>{{ sidebarCollapsed ? '展开侧边栏' : '收起侧边栏' }}</span>
+          <ChevronDoubleRightIcon class="h-4 w-4" />
         </button>
+        <RouterLink
+          to="/"
+          class="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-sm font-semibold text-slate-600"
+          aria-label="Opinion System"
+        >
+          <span aria-hidden="true">OS</span>
+        </RouterLink>
       </div>
+      <nav class="flex flex-1 flex-col items-center gap-4 py-6">
+        <RouterLink
+          v-for="link in navigationLinks"
+          :key="link.label"
+          :to="link.to"
+          class="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+          :title="link.label"
+          :aria-label="link.label"
+          active-class="bg-slate-100 text-indigo-600"
+        >
+          <component :is="link.icon" class="h-5 w-5" />
+        </RouterLink>
+      </nav>
+    </aside>
 
-      <div class="flex flex-1 flex-col gap-8 overflow-y-auto px-4 pb-10">
-          <nav v-if="!sidebarCollapsed" class="space-y-8">
+    <button
+      v-if="sidebarCollapsed"
+      type="button"
+      class="fixed left-4 top-6 z-40 inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white/90 px-3 py-2 text-xs font-medium text-slate-600 shadow-sm backdrop-blur transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 lg:hidden"
+      :aria-expanded="!sidebarCollapsed"
+      :aria-label="sidebarToggleLabel"
+      @click="toggleSidebar"
+    >
+      <ChevronDoubleRightIcon class="h-4 w-4" />
+      <span>展开侧边栏</span>
+    </button>
+
+    <Transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0 -translate-x-4"
+      enter-to-class="opacity-100 translate-x-0"
+      leave-active-class="transition duration-150 ease-in"
+      leave-from-class="opacity-100 translate-x-0"
+      leave-to-class="opacity-0 -translate-x-4"
+    >
+      <div
+        v-if="!sidebarCollapsed"
+        class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200 bg-white shadow-lg lg:w-72 lg:shadow-sm"
+      >
+        <div class="flex h-16 items-center justify-between border-b border-slate-200 px-5">
+          <div class="flex flex-col">
+            <span class="text-lg font-semibold text-slate-900">Opinion System</span>
+            <span class="text-sm text-slate-500">舆情监测系统</span>
+          </div>
+          <button
+            type="button"
+            class="inline-flex items-center justify-center rounded-md border border-transparent bg-slate-100 p-2 text-slate-500 transition hover:bg-slate-200 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+            :aria-label="sidebarToggleLabel"
+            @click="toggleSidebar"
+          >
+            <ChevronDoubleLeftIcon class="h-4 w-4" />
+            <span class="sr-only">收起侧边栏</span>
+          </button>
+        </div>
+
+        <div class="flex flex-1 flex-col gap-8 overflow-y-auto px-5 pb-8 pt-6">
+          <nav class="space-y-8">
             <section
               v-for="group in navigationGroups"
               :key="group.label"
               class="space-y-4"
             >
-              <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-400">{{ group.label }}</h2>
+              <h2 class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{{ group.label }}</h2>
               <RouterLink
                 v-for="link in group.links"
                 :key="link.label"
                 :to="link.to"
-                class="flex items-start gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                active-class="bg-indigo-100/80 text-indigo-700 shadow-inner"
+                class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+                active-class="bg-slate-100 text-indigo-600"
               >
-                <component :is="link.icon" class="mt-0.5 h-5 w-5 text-indigo-500" />
+                <component :is="link.icon" class="h-5 w-5 text-slate-400" />
                 <div class="flex flex-col">
-                  <span class="font-medium">{{ link.label }}</span>
-                  <span class="text-sm text-slate-500">{{ link.description }}</span>
+                  <span>{{ link.label }}</span>
+                  <span class="text-xs font-normal text-slate-500">{{ link.description }}</span>
                 </div>
               </RouterLink>
             </section>
           </nav>
-          <nav v-else class="flex flex-col items-center gap-4 py-4">
-            <RouterLink
-              v-for="link in navigationLinks"
-              :key="link.label"
-              :to="link.to"
-              class="flex h-12 w-12 items-center justify-center rounded-2xl text-slate-500 transition hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-              :title="link.label"
-              :aria-label="link.label"
-              active-class="bg-indigo-100/70 text-indigo-600"
-            >
-              <component :is="link.icon" class="h-5 w-5" />
-              <span class="sr-only">{{ link.label }}</span>
-            </RouterLink>
-          </nav>
+        </div>
       </div>
-    </aside>
+    </Transition>
+
+    <div
+      v-if="!sidebarCollapsed"
+      class="fixed inset-0 z-30 bg-slate-900/30 backdrop-blur-sm transition lg:hidden"
+      @click="toggleSidebar"
+      aria-hidden="true"
+    ></div>
 
     <div class="flex min-h-screen">
       <div
-        aria-hidden="true"
         :class="[
-          'flex-shrink-0',
-          sidebarCollapsed ? 'w-64 lg:w-24' : 'w-64 lg:w-72'
+          'flex min-h-screen flex-1 flex-col px-4 sm:px-6 lg:px-10',
+          sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'
         ]"
-      ></div>
-
-      <div class="flex min-h-screen flex-1 flex-col">
-        <header class="flex flex-col gap-6 border-b border-slate-200/70 bg-white/80 px-6 pb-6 pt-10 backdrop-blur">
+      >
+        <header class="flex flex-col gap-4 border-b border-slate-200 bg-white px-6 py-6">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <p class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">舆情系统控制台</p>
-            <div class="inline-flex items-center gap-2 rounded-full bg-indigo-50/80 px-3 py-1.5 text-sm text-indigo-700" role="status" aria-live="polite">
-              <BriefcaseIcon class="h-4 w-4" aria-hidden="true" />
-              <span class="font-medium">当前项目：</span>
-              <span class="font-semibold">{{ activeProjectName || '未选择项目' }}</span>
+            <div class="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-600" role="status" aria-live="polite">
+              <BriefcaseIcon class="h-4 w-4 text-slate-500" aria-hidden="true" />
+              <span class="font-medium text-slate-500">当前项目：</span>
+              <span class="font-semibold text-slate-800">{{ activeProjectName || '未选择项目' }}</span>
             </div>
           </div>
           <h1 class="text-2xl font-semibold text-slate-900 md:text-3xl">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
@@ -199,7 +206,10 @@ const pageTitle = computed(() => route.meta?.title ?? '')
 
 const { activeProjectName } = useActiveProject()
 
-const sidebarCollapsed = ref(false)
+const initialCollapsed =
+  typeof window !== 'undefined' ? !window.matchMedia('(min-width: 1024px)').matches : false
+
+const sidebarCollapsed = ref(initialCollapsed)
 
 const toggleSidebar = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
