@@ -106,19 +106,19 @@
               </div>
               <div class="space-y-1">
                 <dt class="text-xs uppercase tracking-widest text-slate-400">源文件</dt>
-                <dd class="text-sm text-slate-600">{{ dataset.source_file }}</dd>
+                <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="dataset.source_file">{{ dataset.source_file }}</dd>
               </div>
               <div class="space-y-1">
                 <dt class="text-xs uppercase tracking-widest text-slate-400">PKL</dt>
-                <dd class="text-sm text-slate-600">{{ dataset.pkl_file }}</dd>
+                <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="dataset.pkl_file">{{ dataset.pkl_file }}</dd>
               </div>
               <div class="space-y-1">
                 <dt class="text-xs uppercase tracking-widest text-slate-400">JSONL</dt>
-                <dd class="text-sm text-slate-600">{{ dataset.jsonl_file }}</dd>
+                <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="dataset.jsonl_file">{{ dataset.jsonl_file }}</dd>
               </div>
               <div class="space-y-1">
                 <dt class="text-xs uppercase tracking-widest text-slate-400">Meta JSON</dt>
-                <dd class="text-sm text-slate-600">{{ dataset.json_file }}</dd>
+                <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="dataset.json_file">{{ dataset.json_file }}</dd>
               </div>
             </dl>
             <details class="mt-4 rounded-2xl bg-slate-50/80 p-4 text-sm text-slate-600">

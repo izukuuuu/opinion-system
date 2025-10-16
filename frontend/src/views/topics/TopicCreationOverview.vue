@@ -15,13 +15,14 @@
         </div>
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-full bg-brand-600 px-6 py-3 text-white shadow-md transition hover:bg-brand-500 focus-ring-accent"
+          class="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 border border-brand-100 transition hover:bg-gray-50 focus-ring-accent"
           @click="goToUpload"
         >
-          <span class="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white">
+          <span class="flex h-9 w-9 items-center justify-center rounded-full bg-brand-50"
+                style="color: rgb(var(--color-brand-800));">
             <CloudArrowUpIcon class="h-5 w-5" />
           </span>
-          <span class="text-base font-semibold">立即上传数据</span>
+          <span class="text-base font-semibold" style="color: rgb(var(--color-brand-800));">立即上传数据</span>
         </button>
       </div>
     </section>
