@@ -55,7 +55,7 @@
         <article class="card-surface space-y-4 p-6">
           <header class="space-y-1">
             <h2 class="text-lg font-semibold text-slate-900">连接信息</h2>
-            <p class="text-sm text-slate-500">从配置文件推断出的数据库连接要素。</p>
+            <p class="text-sm text-slate-500">查看远程服务器连接配置</p>
           </header>
           <dl class="grid gap-3">
             <div v-for="detail in connectionDetails" :key="detail.label" class="flex flex-col rounded-2xl bg-slate-50/80 px-4 py-3">
@@ -68,7 +68,7 @@
         <article class="card-surface space-y-4 p-6">
           <header class="space-y-1">
             <h2 class="text-lg font-semibold text-slate-900">数据量统计</h2>
-            <p class="text-sm text-slate-500">帮助快速了解业务数据规模。</p>
+            <p class="text-sm text-slate-500">当前存储的专题数据量</p>
           </header>
           <ul class="grid gap-4 sm:grid-cols-3">
             <li class="rounded-2xl bg-brand-soft p-4 text-center">

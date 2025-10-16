@@ -2,7 +2,7 @@
   /* Neutral foundation */
   --color-bg-base: #eef2f6;
   --color-surface: #ffffff;
-  --color-surface-muted: #c4d2e1;
+  --color-surface-muted: #e2e9f1;
   --color-border-soft: #d0d5d9;
   --color-text-primary: #1c252c;
   --color-text-secondary: #303d47;
@@ -11,20 +11,20 @@
 
   /* Brand — warm grey with morandi undertone (replaces indigo) */
   --color-brand-50: 214 223 233;
-  --color-brand-100: 202 214 227;
-  --color-brand-200: 190 205 221;
-  --color-brand-300: 178 196 215;
-  --color-brand-400: 166 187 209;
-  --color-brand-500: 154 178 203;
-  --color-brand-600: 135 157 179;
-  --color-brand-700: 114 133 152;
-  --color-brand-800: 93 109 125;
-  --color-brand-900: 72 85 98;
-  --color-brand-300-hex: #b2c4d7;
-  --color-brand-400-hex: #a6bbd1;
-  --color-brand-500-hex: #9ab2cb;
-  --color-brand-600-hex: #879db3;
-  --color-brand-700-hex: #728598;
+  --color-brand-100: 214 223 233;
+  --color-brand-200: 202 214 227;
+  --color-brand-300: 190 205 221;
+  --color-brand-400: 178 196 215;
+  --color-brand-500: 166 187 209;
+  --color-brand-600: 154 178 203;
+  --color-brand-700: 135 157 179;
+  --color-brand-800: 114 133 152;
+  --color-brand-900: 93 109 125;
+  --color-brand-300-hex: #becddd;
+  --color-brand-400-hex: #b2c4d7;
+  --color-brand-500-hex: #a6bbd1;
+  --color-brand-600-hex: #9ab2cb;
+  --color-brand-700-hex: #879db3;
 
   /* Accent — muted sage (replaces sky) */
   --color-accent-50: 218 231 241;
@@ -88,6 +88,10 @@
 
   .text-brand-strong {
     color: rgb(var(--color-brand-700) / 1);
+  }
+
+  .text-brand-soft {
+    color: rgb(var(--color-brand-400) / 1);
   }
 
   .text-primary {
@@ -197,6 +201,14 @@
       rgb(var(--color-accent-400) / 1) 45%,
       rgb(var(--color-accent-500) / 1) 100%
     );
+  }
+
+  .hover\:bg-brand-soft:hover {
+    background-color: rgb(var(--color-brand-100) / 1);
+  }
+
+  .hover\:text-brand:hover {
+    color: rgb(var(--color-brand-600) / 1);
   }
 
   .bg-gradient-muted {
