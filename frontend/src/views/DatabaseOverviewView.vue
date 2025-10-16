@@ -135,7 +135,9 @@
           <h2 class="text-lg font-semibold text-slate-900">原始响应数据</h2>
           <p class="text-sm text-slate-500">以下内容展示了后端返回的完整 JSON，便于对照排查。</p>
         </header>
-        <pre class="max-h-[480px] overflow-auto rounded-2xl bg-slate-900/90 p-4 text-xs text-emerald-100">{{ rawPayload }}</pre>
+        <pre class="max-h-[480px] max-w-full sm:max-w-xl md:max-w-2xl lg:max-w-4xl overflow-x-auto rounded-2xl bg-slate-900/90 p-4 text-xs text-emerald-100">
+          {{ rawPayload }}
+        </pre>
       </div>
       <p v-else class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">
         暂无可展的数据，请先点击上方的“刷新数据”按钮获取最新结果。
