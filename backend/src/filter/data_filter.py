@@ -12,7 +12,7 @@ from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.logging.logging import setup_logger, log_success, log_error, log_skip, log_module_start
 from ..utils.setting.settings import settings
 from ..utils.setting.env_loader import get_api_key
-from ..utils.io.excel import write_excel, read_excel
+from ..utils.io.excel import write_jsonl, read_jsonl
 from ..utils.ai.qwen import QwenClient
 from ..utils.ai.token import count_qwen_tokens
 
@@ -172,7 +172,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
         return False
 
     clean_dir = bucket("clean", topic, date)
-    files = sorted(clean_dir.glob("*.xlsx"))
+    files = sorted(clean_dir.glob("*.jsonl"))
     if not files:
         log_error(logger, f"未找到清洗数据: {clean_dir}", "Filter")
         return False
@@ -274,7 +274,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
         log_success(logger, f"开始处理渠道: {channel}", "Filter")
 
         try:
-            df = read_excel(fp)
+            df = read_jsonl(fp)
             if df.empty:
                 log_skip(logger, f"{channel} 空数据，跳过", "Filter")
                 continue
@@ -338,7 +338,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
             dst = ensure_bucket('filter', topic, date)
             original_cols = [c for c in df.columns if c not in ['rel_raw', 'rel_score', 'classification']]
             to_save = out[original_cols + ['classification']] if all(c in out.columns for c in original_cols) else out.drop(columns=['rel_raw','rel_score'], errors='ignore')
-            write_excel(to_save, dst / f"{channel}.xlsx")
+            write_jsonl(to_save, dst / f"{channel}.jsonl")
 
         except Exception as e:
             log_error(logger, f"{channel} 处理失败: {e}", "Filter")

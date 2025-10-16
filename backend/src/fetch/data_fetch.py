@@ -2,11 +2,10 @@
 数据提取功能
 """
 import pandas as pd
-from pathlib import Path
 from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.setting.settings import settings
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_skip
-from ..utils.io.excel import write_csv
+from ..utils.io.excel import write_jsonl, read_jsonl
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 
@@ -79,8 +78,8 @@ def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, lo
                             df['classification'] = df['classification'].fillna('未知')
                         
                         # 保存渠道数据
-                        channel_file = fetch_dir / f"{channel}.csv"
-                        write_csv(df, channel_file)
+                        channel_file = fetch_dir / f"{channel}.jsonl"
+                        write_jsonl(df, channel_file)
                         channel_files[channel] = channel_file
                         all_data.append(df)
                         
@@ -101,15 +100,15 @@ def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, lo
                     merge_data = []
                     for source_channel in source_channels:
                         if source_channel in channel_files and channel_files[source_channel].exists():
-                            df = pd.read_csv(channel_files[source_channel])
+                            df = read_jsonl(channel_files[source_channel])
                             if len(df) > 0:
                                 merge_data.append(df)
                                 files_to_remove.add(source_channel)
                     
                     if merge_data:
                         merged_df = pd.concat(merge_data, ignore_index=True)
-                        merged_file = fetch_dir / f"{merge_name}.csv"
-                        write_csv(merged_df, merged_file)
+                        merged_file = fetch_dir / f"{merge_name}.jsonl"
+                        write_jsonl(merged_df, merged_file)
                         all_data.append(merged_df)
                         log_success(logger, f"合并完成: {merge_name} -- {len(merged_df)}条)", "Fetch")
                         
@@ -123,7 +122,7 @@ def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, lo
                     try:
                         channel_files[channel].unlink()
                     except Exception as e:
-                        log_error(logger, f"删除文件 {channel}.csv 失败: {e}", "Fetch")
+                        log_error(logger, f"删除文件 {channel}.jsonl 失败: {e}", "Fetch")
             
             # 7. 保存总体数据
             if all_data:
@@ -131,22 +130,22 @@ def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, lo
                 final_data = []
                 for channel in channels:
                     if channel not in files_to_remove and channel in channel_files and channel_files[channel].exists():
-                        df = pd.read_csv(channel_files[channel])
+                        df = read_jsonl(channel_files[channel])
                         if len(df) > 0:
                             final_data.append(df)
                 
                 # 添加合并后的数据
                 for merge_name in merge_config.keys():
-                    merged_file = fetch_dir / f"{merge_name}.csv"
+                    merged_file = fetch_dir / f"{merge_name}.jsonl"
                     if merged_file.exists():
-                        df = pd.read_csv(merged_file)
+                        df = read_jsonl(merged_file)
                         if len(df) > 0:
                             final_data.append(df)
                 
                 if final_data:
                     all_df = pd.concat(final_data, ignore_index=True)
-                    all_file = fetch_dir / "总体.csv"
-                    write_csv(all_df, all_file)
+                    all_file = fetch_dir / "总体.jsonl"
+                    write_jsonl(all_df, all_file)
                     return True
                 else:
                     log_error(logger, "没有提取到任何数据", "Fetch")

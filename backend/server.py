@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
 from flask import Flask, jsonify, request
@@ -234,6 +234,61 @@ def _load_llm_config() -> Dict[str, Any]:
 def _persist_llm_config(config: Dict[str, Any]) -> None:
     save_settings_config(LLM_CONFIG_NAME, config)
     _reload_settings()
+
+
+def _run_data_pipeline(topic: str, date: str) -> Dict[str, Any]:
+    """
+    Run Merge → Clean → Filter → Upload sequentially.
+
+    Args:
+        topic: Project/topic identifier.
+        date: Date string in YYYY-MM-DD format.
+
+    Returns:
+        Dict[str, Any]: Structured status report with per-step results.
+    """
+    from src.merge import run_merge  # type: ignore
+    from src.clean import run_clean  # type: ignore
+    from src.filter import run_filter  # type: ignore
+    from src.update import run_update  # type: ignore
+
+    pipeline_steps = [
+        ("merge", run_merge),
+        ("clean", run_clean),
+        ("filter", run_filter),
+        ("upload", run_update),
+    ]
+
+    step_context = {
+        "project": topic,
+        "params": {
+            "date": date,
+            "source": "api.pipeline",
+        },
+    }
+    steps: List[Dict[str, Any]] = []
+
+    for name, func in pipeline_steps:
+        result = func(topic, date)
+        success = _evaluate_success(result)
+        steps.append({
+            "operation": name,
+            "success": success,
+            "result": _serialise_result(result),
+        })
+        _log_with_context(name, success, step_context)
+
+        if not success:
+            return {
+                "status": "error",
+                "message": f"{name} 步骤执行失败",
+                "steps": steps,
+            }
+
+    return {
+        "status": "ok",
+        "steps": steps,
+    }
 
 
 @app.get("/api/status")
@@ -523,6 +578,26 @@ def upload_endpoint():
     response, code = _execute_operation(
         "upload",
         run_update,
+        payload["topic"],
+        payload["date"],
+        log_context={
+            "project": payload["topic"],
+            "params": {"date": payload["date"], "source": "api"},
+        },
+    )
+    return jsonify(response), code
+
+
+@app.post("/api/pipeline")
+def pipeline_endpoint():
+    payload = request.get_json(silent=True) or {}
+    valid, error = _require_fields(payload, "topic", "date")
+    if not valid:
+        return jsonify(error), 400
+
+    response, code = _execute_operation(
+        "pipeline",
+        _run_data_pipeline,
         payload["topic"],
         payload["date"],
         log_context={

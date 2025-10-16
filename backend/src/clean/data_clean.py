@@ -11,7 +11,7 @@ import pytz
 from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.logging.logging import setup_logger, log_success, log_error, log_module_start
 from ..utils.setting.settings import settings
-from ..utils.io.excel import read_excel, write_excel
+from ..utils.io.excel import read_jsonl, write_jsonl
 
 
 def parse_datetime(time_str: str, formats: List[str] = None) -> Optional[datetime]:
@@ -104,17 +104,17 @@ def normalize_region(region: str, fillna: str = "未知") -> str:
 
 def run_clean(topic: str, date: str, logger=None) -> bool:
     """
-    运行清洗流水线（直接读取 merge/<topic>/<date> 下各渠道 Excel）
+    运行清洗流水线（直接读取 merge/<topic>/<date> 下各渠道 JSONL）
     
     清洗流程线：
-    - 遍历 data/merge/<topic>/<date> 下每个渠道的 Excel
+    - 遍历 data/merge/<topic>/<date> 下每个渠道的 JSONL
     - 每表重编号：id = yyyymmdd + 序号（从1开始），整型
     - 按 channels.yaml.field_alias 将列名映射
     - 针对 content 去重，再基于 contents 再去重
     - 将 title、summary、ocr、content 合并为 contents（存在则拼接）
     - 保留列：id、contents、author、published_at、url、region、hit_words、polarity
     - 清洗 contents 文本；region 省级化；published_at 解析为 MySQL 格式
-    - 保存到 data/clean/<topic>/<date>/<channel>.xlsx
+    - 保存到 data/clean/<topic>/<date>/<channel>.jsonl
     
     Args:
         topic (str): 专题名称
@@ -136,19 +136,19 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
     field_alias = channel_config.get('field_alias', {})
     region_config = channel_config.get('region', {})
 
-    excel_files = sorted(merge_dir.glob("*.xlsx"))
-    if not excel_files:
-        log_error(logger, f"未在 {merge_dir} 找到任何渠道 Excel 文件")
+    jsonl_files = sorted(merge_dir.glob("*.jsonl"))
+    if not jsonl_files:
+        log_error(logger, f"未在 {merge_dir} 找到任何渠道 JSONL 文件")
         return False
 
     date_digits = date.replace('-', '')
     total_rows = 0
     success_files = 0
 
-    for file_path in excel_files:
+    for file_path in jsonl_files:
         channel_name = file_path.stem
         try:
-            df = read_excel(file_path)
+            df = read_jsonl(file_path)
             original_count = len(df)
         except Exception as e:
             log_error(logger, f"读取 {file_path.name} 失败：{e}", "Clean")
@@ -268,9 +268,9 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
 
         df_out = df[[c for c in keep_cols]]
 
-        out_file = clean_dir / f"{channel_name}.xlsx"
+        out_file = clean_dir / f"{channel_name}.jsonl"
         try:
-            write_excel(df_out, out_file)
+            write_jsonl(df_out, out_file)
             total_rows += len(df_out)
             success_files += 1
         except Exception as e:

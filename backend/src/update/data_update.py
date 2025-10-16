@@ -6,7 +6,7 @@ from pathlib import Path
 from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.setting.settings import settings
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_skip
-from ..utils.io.excel import read_excel, write_excel, sanitize_dataframe, get_standard_table_schema
+from ..utils.io.excel import read_jsonl, sanitize_dataframe, get_standard_table_schema
 from ..utils.io.db import db_manager
 from sqlalchemy import text
 
@@ -68,7 +68,7 @@ def table_exists(conn, table_name: str, topic: str) -> bool:
 
 def upload_filtered_excels(topic: str, date: str, logger=None) -> bool:
     """
-    上传筛选后的Excel文件到数据库
+    上传筛选后的JSONL文件到数据库
     使用锁死的标准表结构，按最大容量设计
     
     Args:
@@ -82,10 +82,10 @@ def upload_filtered_excels(topic: str, date: str, logger=None) -> bool:
     
     # 1. 定位文件
     filter_dir = bucket("filter", topic, date)
-    excel_files = list(filter_dir.glob("*.xlsx"))
+    jsonl_files = list(filter_dir.glob("*.jsonl"))
     
-    if not excel_files:
-        log_error(logger, "未找到Excel文件", "Upload")
+    if not jsonl_files:
+        log_error(logger, "未找到JSONL文件", "Upload")
         return False
     
     # 2. 确保数据库存在
@@ -99,7 +99,7 @@ def upload_filtered_excels(topic: str, date: str, logger=None) -> bool:
     
     with engine.begin() as conn:
         # 4. 创建表（如果不存在）
-        for file_path in excel_files:
+        for file_path in jsonl_files:
             table_name = file_path.stem
             
             if not table_exists(conn, table_name, topic):
@@ -107,12 +107,12 @@ def upload_filtered_excels(topic: str, date: str, logger=None) -> bool:
                     continue
         
         # 5. 上传数据
-        for file_path in excel_files:
+        for file_path in jsonl_files:
             table_name = file_path.stem
             
             try:
-                # 读取Excel文件
-                df = read_excel(file_path)
+                # 读取JSONL文件
+                df = read_jsonl(file_path)
                 if df is None or len(df) == 0:
                     log_skip(logger, f"{file_path.name} 无数据，跳过", "Upload")
                     continue

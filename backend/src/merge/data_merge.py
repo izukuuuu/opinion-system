@@ -2,16 +2,15 @@
 TRS数据合并功能
 """
 import pandas as pd
-from pathlib import Path
 from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.setting.settings import settings
-from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_skip
-from ..utils.io.excel import read_excel, write_excel
+from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error
+from ..utils.io.excel import write_jsonl
 
 
 def merge_trs_data(topic: str, date: str, logger=None) -> bool:
     """
-    合并TRS Excel文件
+    合并TRS Excel文件并输出JSONL
     
     Args:
         topic (str): 专题名称
@@ -41,7 +40,7 @@ def merge_trs_data(topic: str, date: str, logger=None) -> bool:
     merge_dir = ensure_bucket("merge", topic, date)
     
     # 4. 收集所有Excel文件
-    excel_files = list(raw_dir.glob("*.xlsx"))
+    excel_files = sorted(list(raw_dir.glob("*.xlsx")) + list(raw_dir.glob("*.xls")))
     if not excel_files:
         log_error(logger, "未找到Excel文件", "Merge")
         return False
@@ -89,9 +88,9 @@ def merge_trs_data(topic: str, date: str, logger=None) -> bool:
             if before_count != after_count:
                 log_success(logger, f"渠道 {channel} 去重: {before_count} -> {after_count}", "Merge")
             
-            # 保存到merge目录
-            output_file = merge_dir / f"{channel}.xlsx"
-            write_excel(merged_df, output_file)
+            # 保存为 JSONL 格式
+            output_file = merge_dir / f"{channel}.jsonl"
+            write_jsonl(merged_df, output_file)
             
             success_count += 1
             log_success(logger, f"成功保存: {channel} -- 共{len(merged_df)}条", "Merge")

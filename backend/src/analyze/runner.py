@@ -8,7 +8,7 @@ from typing import Dict, List, Any
 from ..utils.setting.paths import bucket
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_save_success, log_skip
 from ..utils.setting.settings import settings
-from ..utils.io.excel import read_csv
+from ..utils.io.excel import read_jsonl
 from .functions.volume import analyze_volume_overall, analyze_volume_by_channel
 from .functions.attitude import analyze_attitude_overall, analyze_attitude_by_channel
 from .functions.trends import analyze_trends_overall, analyze_trends_by_channel
@@ -53,22 +53,22 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
     if not fetch_dir.exists():
         log_error(logger, f"未找到数据目录: {fetch_dir}", "Analysis")
         return False
-    overall_file = fetch_dir / "总体.csv"
+    overall_file = fetch_dir / "总体.jsonl"
     if not overall_file.exists():
         log_error(logger, f"未找到总体数据文件: {overall_file}", "Analysis")
         return False
     try:
-        df_overall = read_csv(overall_file)
+        df_overall = read_jsonl(overall_file)
     except Exception as e:
         log_error(logger, f"读取总体数据失败: {e}", "Analysis")
         return False
     # 收集渠道文件
     channel_files: Dict[str, Path] = {}
-    for csv_path in fetch_dir.glob("*.csv"):
-        if csv_path.name == "总体.csv":
+    for jsonl_path in fetch_dir.glob("*.jsonl"):
+        if jsonl_path.name == "总体.jsonl":
             continue
-        channel_name = csv_path.stem
-        channel_files[channel_name] = csv_path
+        channel_name = jsonl_path.stem
+        channel_files[channel_name] = jsonl_path
     
     # 创建输出目录（按功能/渠道分层）
     # 使用与fetch模块相同的日期范围格式
@@ -145,9 +145,9 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
             elif target == '渠道':
                 # 逐渠道运行
                 any_success = False
-                for channel_name, csv_path in channel_files.items():
+                for channel_name, jsonl_path in channel_files.items():
                     try:
-                        df_channel = read_csv(csv_path)
+                        df_channel = read_jsonl(jsonl_path)
                     except Exception as e:
                         log_error(logger, f"读取渠道 {channel_name} 数据失败: {e}", "Analysis")
                         continue
