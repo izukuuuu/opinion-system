@@ -2,23 +2,13 @@
   <section class="space-y-6">
     <header class="flex flex-wrap items-center justify-between gap-3 text-sm text-secondary">
       <nav class="flex items-center gap-2">
-        <RouterLink
-          :to="rootNavigation.to"
-          class="inline-flex items-center gap-1 rounded-full px-3 py-1 transition focus-ring-accent hover:bg-brand-soft hover:text-brand-600"
-        >
-          <Squares2X2Icon class="h-4 w-4" />
-          <span>{{ rootNavigation.label }}</span>
-        </RouterLink>
+        <span class="inline-flex items-center gap-1 rounded-full bg-brand-soft px-3 py-1 text-brand-600">
+          <CircleStackIcon class="h-4 w-4" />
+          <span>数据库查询</span>
+        </span>
         <ChevronRightIcon class="h-4 w-4 text-muted" />
         <span class="text-secondary">{{ breadcrumbLabel }}</span>
       </nav>
-      <RouterLink
-        :to="rootNavigation.to"
-        class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-ring-accent"
-      >
-        <ChevronLeftIcon class="h-4 w-4" />
-        返回工作台
-      </RouterLink>
     </header>
 
     <div class="flex flex-col gap-6 lg:flex-row lg:items-start">
@@ -85,12 +75,12 @@
           id="database-panel-overview"
           aria-labelledby="database-tab-overview"
         >
-          <section v-if="isInitialLoading" class="relative overflow-hidden rounded-3xl border border-slate-200 bg-white/80 p-10">
-            <div class="pointer-events-none absolute inset-0 animate-[spin_12s_linear_infinite] bg-[conic-gradient(from_90deg,rgba(59,130,246,0.12),rgba(59,130,246,0)_70%)] opacity-80"></div>
-            <div class="relative flex flex-col items-center gap-2 text-sm text-slate-500">
-              <ArrowPathIcon class="h-6 w-6 animate-spin text-brand" />
-              正在刷新最新的数据库信息…
-            </div>
+          <section
+            v-if="isInitialLoading"
+            class="flex flex-col items-center gap-2 rounded-3xl border border-slate-200 bg-white/80 p-10 text-sm text-slate-500"
+          >
+            <ArrowPathIcon class="h-6 w-6 animate-spin text-brand" />
+            正在刷新最新的数据库信息…
           </section>
 
           <section v-if="hasData" class="grid gap-6 lg:grid-cols-2">
@@ -251,11 +241,11 @@ const setActiveTab = (key) => {
 
 const route = useRoute()
 
-const breadcrumbLabel = computed(() => route.meta?.breadcrumb || route.meta?.title || '数据库概览')
-const rootNavigation = {
-  to: { name: 'topic-create-overview' },
-  label: '专题工作台'
-}
+const breadcrumbLabel = computed(() => {
+  const active = tabs.find((tab) => tab.key === activeTab.value)
+  if (active) return active.label
+  return route.meta?.breadcrumb || route.meta?.title || '数据库概览'
+})
 
 const queriedAt = computed(() => {
   if (!payload.value?.queried_at) return ''

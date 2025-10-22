@@ -24,13 +24,24 @@
             project.name === selectedProject ? 'border-indigo-200 bg-white shadow-md' : ''
           ]"
         >
-          <button type="button" class="flex w-full flex-col gap-1 px-4 py-3 text-left" @click="selectProject(project.name)">
+          <button type="button" class="flex w-full flex-col gap-1.5 px-4 py-3 text-left" @click="selectProject(project.name)">
             <span class="text-base font-semibold text-slate-900">{{ project.name }}</span>
-            <span class="text-xs uppercase tracking-widest text-slate-400">{{ formatTimestamp(project.updated_at) }}</span>
+            <span v-if="project.description" class="text-sm text-slate-600">{{ project.description }}</span>
+            <span class="text-xs text-slate-500">更新时间：{{ formatTimestamp(project.updated_at) }}</span>
+            <span class="text-[11px] text-slate-400">目录：{{ getUploadDirectory(project.slug) }}</span>
           </button>
         </li>
       </ul>
-      <p v-if="!projects.length && !projectLoading" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">
+      <p
+        v-if="projectError"
+        class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600"
+      >
+        {{ projectError }}
+      </p>
+      <p
+        v-else-if="!projects.length && !projectLoading"
+        class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500"
+      >
         暂无项目，请先在项目面板中创建。
       </p>
     </aside>
@@ -86,7 +97,12 @@
 
       <div class="card-surface space-y-6 p-6">
         <div class="flex flex-wrap items-center justify-between gap-4">
-          <h2 class="text-lg font-semibold text-slate-900">数据集清单</h2>
+          <div class="space-y-1">
+            <h2 class="text-lg font-semibold text-slate-900">数据集清单</h2>
+            <p v-if="selectedProjectMeta" class="text-xs text-slate-400">
+              存储目录：{{ getUploadDirectory(selectedProjectMeta.slug) }}
+            </p>
+          </div>
           <span v-if="datasets.length" class="badge-soft">共 {{ datasets.length }} 个</span>
         </div>
         <p v-if="!selectedProject" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">请选择左侧项目以查看归档记录。</p>
@@ -99,10 +115,26 @@
               <h3 class="text-lg font-semibold text-slate-900">{{ dataset.display_name }}</h3>
               <span class="text-sm text-slate-500">{{ formatTimestamp(dataset.stored_at) }}</span>
             </header>
-            <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div class="space-y-1">
+                <dt class="text-xs uppercase tracking-widest text-slate-400">数据集 ID</dt>
+                <dd class="text-sm text-slate-600">{{ dataset.id }}</dd>
+              </div>
+              <div class="space-y-1">
+                <dt class="text-xs uppercase tracking-widest text-slate-400">专题名称</dt>
+                <dd class="text-sm text-slate-600">{{ dataset.project }}</dd>
+              </div>
               <div class="space-y-1">
                 <dt class="text-xs uppercase tracking-widest text-slate-400">数据行列</dt>
                 <dd class="text-sm text-slate-600">{{ dataset.rows }} 行 · {{ dataset.column_count }} 列</dd>
+              </div>
+              <div class="space-y-1">
+                <dt class="text-xs uppercase tracking-widest text-slate-400">文件大小</dt>
+                <dd class="text-sm text-slate-600">{{ formatFileSize(dataset.file_size) }}</dd>
+              </div>
+              <div class="space-y-1">
+                <dt class="text-xs uppercase tracking-widest text-slate-400">存储目录</dt>
+                <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="getUploadDirectory(dataset.project_slug)">{{ getUploadDirectory(dataset.project_slug) }}</dd>
               </div>
               <div class="space-y-1">
                 <dt class="text-xs uppercase tracking-widest text-slate-400">源文件</dt>
@@ -140,6 +172,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 
 const projects = ref([])
 const projectLoading = ref(false)
+const projectError = ref('')
 
 const datasets = ref([])
 const datasetLoading = ref(false)
@@ -153,6 +186,87 @@ const uploadSuccess = ref('')
 
 const { activeProject, activeProjectName, setActiveProject, clearActiveProject } = useActiveProject()
 const selectedProject = computed(() => activeProjectName.value)
+const selectedProjectMeta = computed(() =>
+  activeProjectName.value
+    ? projects.value.find((project) => project.name === activeProjectName.value) || null
+    : null
+)
+
+const normaliseProjectName = (value) => {
+  if (!value) return 'project'
+  return value
+    .toString()
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase() || 'project'
+}
+
+const getUploadDirectory = (slug) => {
+  if (!slug) return '—'
+  return `backend/data/projects/${slug}/uploads`
+}
+
+const toNumber = (value) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const formatFileSize = (size) => {
+  const value = toNumber(size)
+  if (!value) return '—'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let current = value
+  let unitIndex = 0
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024
+    unitIndex += 1
+  }
+  const precision = current >= 100 || unitIndex === 0 ? 0 : current >= 10 ? 1 : 2
+  return `${current.toFixed(precision)} ${units[unitIndex]}`
+}
+
+const normalizeProject = (project) => {
+  if (!project || typeof project !== 'object') return null
+  const name = project.name || ''
+  const slug = normaliseProjectName(name)
+  return {
+    description: '',
+    metadata: {},
+    ...project,
+    name,
+    slug
+  }
+}
+
+const normalizeDataset = (dataset) => {
+  if (!dataset || typeof dataset !== 'object') return null
+  const projectName = dataset.project || activeProjectName.value || ''
+  const projectSlug = dataset.project_slug || normaliseProjectName(projectName)
+  const displayName =
+    dataset.display_name ||
+    dataset.source_file?.split('/')?.pop() ||
+    dataset.jsonl_file?.split('/')?.pop() ||
+    dataset.id ||
+    '数据集'
+
+  return {
+    id: dataset.id || '',
+    project: projectName || '—',
+    project_slug: projectSlug,
+    display_name: displayName,
+    stored_at: dataset.stored_at || '',
+    rows: toNumber(dataset.rows),
+    column_count: toNumber(dataset.column_count),
+    columns: Array.isArray(dataset.columns)
+      ? dataset.columns.map((column) => column.toString())
+      : [],
+    file_size: toNumber(dataset.file_size),
+    source_file: dataset.source_file || '',
+    pkl_file: dataset.pkl_file || '',
+    jsonl_file: dataset.jsonl_file || '',
+    json_file: dataset.json_file || ''
+  }
+}
 
 const uploadHelper = computed(() => {
   if (uploading.value) return ''
@@ -163,25 +277,31 @@ const uploadHelper = computed(() => {
 
 const fetchProjects = async () => {
   projectLoading.value = true
+  projectError.value = ''
   try {
     const response = await fetch(`${API_BASE_URL}/projects`)
-    if (!response.ok) {
-      throw new Error('项目列表获取失败')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload || payload.status !== 'ok') {
+      const message = payload?.message || '项目列表获取失败'
+      throw new Error(message)
     }
-    const data = await response.json()
-    projects.value = Array.isArray(data.projects) ? data.projects : []
+    const list = Array.isArray(payload.projects) ? payload.projects : []
+    projects.value = list
+      .map(normalizeProject)
+      .filter(Boolean)
     if (!projects.value.length) {
       clearActiveProject()
-    } else {
-      const currentName = activeProjectName.value
-      const matched = currentName
-        ? projects.value.find((project) => project.name === currentName)
-        : null
-      const targetProject = matched || projects.value[0]
-      setActiveProject(targetProject)
+      return
     }
+    const currentName = activeProjectName.value
+    const matched = currentName
+      ? projects.value.find((project) => project.name === currentName)
+      : null
+    const targetProject = matched || projects.value[0]
+    setActiveProject(targetProject)
   } catch (err) {
     console.error(err)
+    projectError.value = err instanceof Error ? err.message : '项目列表获取失败'
     projects.value = []
     clearActiveProject()
   } finally {
@@ -195,11 +315,15 @@ const fetchDatasets = async (projectName) => {
   datasetError.value = ''
   try {
     const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectName)}/datasets`)
-    if (!response.ok) {
-      throw new Error('读取数据集失败')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload || payload.status !== 'ok') {
+      const message = payload?.message || '读取数据集失败'
+      throw new Error(message)
     }
-    const data = await response.json()
-    datasets.value = Array.isArray(data.datasets) ? data.datasets : []
+    const list = Array.isArray(payload.datasets) ? payload.datasets : []
+    datasets.value = list
+      .map(normalizeDataset)
+      .filter(Boolean)
   } catch (err) {
     datasetError.value = err instanceof Error ? err.message : '读取数据集失败'
     datasets.value = []
@@ -248,12 +372,12 @@ const uploadDataset = async () => {
       }
     )
 
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}))
-      throw new Error(payload.message || '上传失败')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload || payload.status !== 'ok') {
+      const message = payload?.message || '上传失败'
+      throw new Error(message)
     }
 
-    await response.json()
     uploadSuccess.value = '上传成功，已生成对应的 JSONL 与 PKL 文件。'
     uploadFile.value = null
     if (fileInput.value) {

@@ -119,6 +119,10 @@
     color: #ffffff;
   }
 
+  .bg-brand-200 {
+    background-color: rgb(var(--color-brand-200) / 1);
+  }
+
   .bg-brand-soft {
     background-color: rgb(var(--color-brand-100) / 1);
   }

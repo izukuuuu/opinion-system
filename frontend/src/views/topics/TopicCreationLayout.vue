@@ -26,23 +26,30 @@
     </header>
 
     <div class="flex flex-col gap-6 lg:flex-row lg:items-start">
-      <aside class="flex w-full shrink-0 flex-col gap-3 lg:w-56">
+      <aside class="flex w-full shrink-0 flex-col gap-3 lg:w-64">
         <RouterLink
           v-for="step in steps"
           :key="step.label"
           :to="step.to"
-          class="inline-flex items-center justify-between rounded-2xl border border-soft px-4 py-3 text-sm font-semibold transition focus-ring-accent"
+          class="group inline-flex items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm transition focus-ring-accent"
           :class="[
             isActive(step.to)
               ? 'border-brand-soft bg-brand-soft text-brand-600 shadow-sm'
-              : 'bg-surface text-secondary hover:border-brand-soft hover:bg-accent-faint hover:text-brand-600'
+              : 'border-transparent bg-surface text-secondary hover:border-brand-soft hover:bg-accent-faint hover:text-brand-600'
           ]"
+          role="tab"
+          :aria-current="isActive(step.to) ? 'page' : undefined"
         >
-          <span class="flex items-center gap-2">
-            <component :is="step.icon" class="h-4 w-4" />
-            <span>{{ step.label }}</span>
+          <span class="flex items-start gap-3">
+            <div class="mt-0.5 rounded-xl bg-white/70 p-2 text-brand-600 shadow-sm">
+              <component :is="step.icon" class="h-4 w-4" />
+            </div>
+            <span class="flex flex-col gap-1">
+              <span class="font-semibold">{{ step.label }}</span>
+              <span v-if="step.description" class="text-xs text-muted">{{ step.description }}</span>
+            </span>
           </span>
-          <ChevronRightIcon class="h-4 w-4 text-muted" />
+          <ChevronRightIcon class="h-4 w-4 text-muted transition group-hover:text-brand-500" />
         </RouterLink>
       </aside>
       <div class="flex-1 min-w-0">
@@ -69,27 +76,32 @@ const steps = [
   {
     label: '流程概览',
     to: { name: 'topic-create-overview' },
-    icon: Squares2X2Icon
+    icon: Squares2X2Icon,
+    description: '快速了解专题创建的核心步骤'
   },
   {
     label: '上传',
     to: { name: 'topic-create-upload' },
-    icon: CloudArrowUpIcon
+    icon: CloudArrowUpIcon,
+    description: '导入原始文件，启动流程'
   },
   {
     label: '数据预处理',
     to: { name: 'topic-create-preprocess' },
-    icon: FunnelIcon
+    icon: FunnelIcon,
+    description: '清洗并筛选关键字段'
   },
   {
     label: '入库',
     to: { name: 'topic-create-ingest' },
-    icon: ArrowTrendingUpIcon
+    icon: ArrowTrendingUpIcon,
+    description: '提交数据写入业务数据库'
   },
   {
     label: '基本分析',
     to: { name: 'topic-create-analysis' },
-    icon: BeakerIcon
+    icon: BeakerIcon,
+    description: '查看初步分析与检验'
   }
 ]
 

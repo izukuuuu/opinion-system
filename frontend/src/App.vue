@@ -20,12 +20,18 @@
           v-for="link in navigationLinks"
           :key="link.label"
           :to="link.to"
-          class="flex h-11 w-11 items-center justify-center rounded-lg text-muted transition hover:bg-brand-soft hover:text-brand-600 focus-ring-accent"
+          class="group relative flex h-11 w-11 items-center justify-center rounded-lg text-muted transition hover:bg-brand-soft hover:text-brand-600 focus-ring-accent"
           :title="link.label"
           :aria-label="link.label"
           active-class="bg-brand-soft text-brand-600"
         >
           <component :is="link.icon" class="h-5 w-5" />
+          <span
+            class="pointer-events-none absolute left-full top-1/2 z-10 ml-3 -translate-y-1/2 whitespace-nowrap rounded-md bg-brand-200 px-2 py-1 text-xs font-medium text-secondary opacity-0 shadow-lg transition duration-150 ease-out group-hover:translate-x-1 group-hover:opacity-100"
+            aria-hidden="true"
+          >
+            {{ link.label }}
+          </span>
         </RouterLink>
       </nav>
     </aside>
@@ -54,14 +60,14 @@
         v-if="!sidebarCollapsed"
         class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-soft bg-surface shadow-lg lg:w-72 lg:shadow-sm"
       >
-        <div class="flex h-16 items-center justify-between border-b border-soft px-5">
-          <div class="flex flex-col">
+        <div class="flex items-center justify-between border-b border-soft px-5 py-4">
+          <div class="flex flex-col h-10 justify-center overflow-hidden">
             <span class="text-lg font-semibold text-primary">Opinion System</span>
             <span class="text-sm text-secondary">舆情监测系统</span>
           </div>
           <button
             type="button"
-            class="inline-flex items-center justify-center rounded-md border border-transparent bg-accent-faint p-2 text-secondary transition hover:bg-accent-soft hover:text-primary focus-ring-accent"
+            class="flex h-10 w-10 items-center justify-center rounded-md border border-soft bg-surface text-secondary transition hover:border-brand-soft hover:text-primary focus-ring-accent"
             :aria-label="sidebarToggleLabel"
             @click="toggleSidebar"
           >
