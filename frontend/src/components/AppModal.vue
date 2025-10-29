@@ -41,7 +41,10 @@
             <slot />
           </section>
 
-          <footer class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end sm:gap-4">
+          <footer
+            v-if="showFooter"
+            class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end sm:gap-4"
+          >
             <button
               type="button"
               class="inline-flex items-center justify-center rounded-full border border-soft px-5 py-2 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-ring-accent disabled:cursor-not-allowed disabled:opacity-60"
@@ -120,6 +123,10 @@ const props = defineProps({
     default: true
   },
   closeOnBackdrop: {
+    type: Boolean,
+    default: true
+  },
+  showFooter: {
     type: Boolean,
     default: true
   }

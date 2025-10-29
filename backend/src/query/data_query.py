@@ -35,7 +35,10 @@ def _summarise_tables(tables: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _serialise_preview(df: pd.DataFrame, max_rows: int = 5) -> Dict[str, Any]:
+PREVIEW_ROW_LIMIT = 20
+
+
+def _serialise_preview(df: pd.DataFrame, max_rows: int = PREVIEW_ROW_LIMIT) -> Dict[str, Any]:
     """将数据预览转换为可序列化结构"""
 
     preview_df = df.head(max_rows)
@@ -182,7 +185,7 @@ def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
 
                 if "error" not in table_info:
                     try:
-                        preview_query = f"SELECT * FROM `{db_name}`.`{table_name}` LIMIT 5"
+                        preview_query = f"SELECT * FROM `{db_name}`.`{table_name}` LIMIT {PREVIEW_ROW_LIMIT}"
                         preview_result = db_manager.execute_query(preview_query)
                         table_info["preview"] = _serialise_preview(preview_result)
                     except Exception as preview_error:

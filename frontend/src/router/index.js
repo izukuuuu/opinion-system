@@ -4,9 +4,10 @@ import TopicCreationOverview from '../views/topics/TopicCreationOverview.vue'
 import TopicUploadStep from '../views/topics/TopicUploadStep.vue'
 import TopicPreprocessStep from '../views/topics/TopicPreprocessStep.vue'
 import TopicIngestionStep from '../views/topics/TopicIngestionStep.vue'
-import TopicAnalysisStep from '../views/topics/TopicAnalysisStep.vue'
 import ProjectDataView from '../views/ProjectDataView.vue'
+import ProjectBasicAnalysisView from '../views/ProjectBasicAnalysisView.vue'
 import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
+import DatabaseDatasetsView from '../views/DatabaseDatasetsView.vue'
 import TestView from '../views/TestView.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
 import SettingsDatabasesView from '../views/settings/SettingsDatabasesView.vue'
@@ -58,15 +59,6 @@ export const routes = [
           breadcrumb: '数据入库'
         }
       },
-      {
-        path: 'analysis',
-        name: 'topic-create-analysis',
-        component: TopicAnalysisStep,
-        meta: {
-          title: '基本分析',
-          breadcrumb: '基本分析'
-        }
-      }
     ]
   },
   {
@@ -78,12 +70,29 @@ export const routes = [
     }
   },
   {
+    path: '/datasets/analysis',
+    name: 'project-data-analysis',
+    component: ProjectBasicAnalysisView,
+    meta: {
+      title: '专题基础分析'
+    }
+  },
+  {
     path: '/database',
     name: 'database',
     component: DatabaseOverviewView,
     meta: {
       title: '数据库查询',
       breadcrumb: '数据库概览'
+    }
+  },
+  {
+    path: '/overview/datasets',
+    name: 'overview-datasets',
+    component: DatabaseDatasetsView,
+    meta: {
+      title: '数据集概览',
+      breadcrumb: '数据集'
     }
   },
   {

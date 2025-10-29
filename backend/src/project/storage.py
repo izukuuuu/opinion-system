@@ -4,17 +4,18 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from itertools import islice
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 from uuid import uuid4
 
 import pandas as pd
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
-from ..utils.io.excel import write_jsonl, read_jsonl
+from ..utils.io.excel import read_jsonl, write_jsonl
 
-__all__ = ["store_uploaded_dataset", "list_project_datasets"]
+__all__ = ["store_uploaded_dataset", "list_project_datasets", "get_dataset_preview"]
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _BACKEND_ROOT.parent
@@ -112,6 +113,91 @@ def list_project_datasets(project: str) -> List[Dict]:
     except Exception:
         return []
     return []
+
+
+def _stringify_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (str, int, float, bool)):
+        return str(value)
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except TypeError:
+        return str(value)
+
+
+def _resolve_dataset_metadata(project: str, dataset_id: str) -> Dict[str, Any]:
+    datasets = list_project_datasets(project)
+    for item in datasets:
+        if item.get("id") == dataset_id:
+            return item
+    raise LookupError("指定的数据集不存在或已被移除")
+
+
+def get_dataset_preview(project: str, dataset_id: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+    """Return a paginated preview for a stored dataset."""
+
+    if not project or not project.strip():
+        raise ValueError("项目名称不能为空")
+    if not dataset_id:
+        raise ValueError("数据集编号不能为空")
+
+    page = max(int(page or 1), 1)
+    page_size = max(min(int(page_size or 20), 200), 1)
+    offset = (page - 1) * page_size
+
+    metadata = _resolve_dataset_metadata(project, dataset_id)
+    jsonl_path = metadata.get("jsonl_file")
+    if not jsonl_path:
+        raise LookupError("数据集缺少 JSONL 存储路径")
+
+    file_path = (_REPO_ROOT / jsonl_path).resolve()
+    if not file_path.exists():
+        raise FileNotFoundError("未找到数据集 JSONL 文件")
+
+    declared_columns = [str(column) for column in metadata.get("columns", [])]
+    columns = list(dict.fromkeys(declared_columns))
+    rows: List[Dict[str, str]] = []
+    extra_columns: List[str] = []
+
+    with file_path.open("r", encoding="utf-8") as handle:
+        for raw_line in islice(handle, offset, offset + page_size):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, dict):
+                continue
+
+            for key in record.keys():
+                key_str = str(key)
+                if key_str not in columns and key_str not in extra_columns:
+                    extra_columns.append(key_str)
+
+            row = {str(key): _stringify_cell(value) for key, value in record.items()}
+            row["__row_index"] = offset + len(rows) + 1
+            rows.append(row)
+            if len(rows) >= page_size:
+                break
+
+    columns.extend(extra_columns)
+    total_rows = int(metadata.get("rows") or 0)
+    total_pages = (
+        (total_rows - 1) // page_size + 1 if total_rows else (1 if rows else 0)
+    )
+
+    return {
+        "dataset": metadata,
+        "columns": columns,
+        "rows": rows,
+        "page": page,
+        "page_size": page_size,
+        "total_rows": total_rows,
+        "total_pages": total_pages,
+    }
 
 
 def store_uploaded_dataset(project: str, file_storage: FileStorage) -> Dict:

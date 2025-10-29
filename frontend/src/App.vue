@@ -147,7 +147,9 @@ import {
   CircleStackIcon,
   Cog6ToothIcon,
   DocumentArrowUpIcon,
-  Squares2X2Icon
+  PresentationChartLineIcon,
+  Squares2X2Icon,
+  TableCellsIcon
 } from '@heroicons/vue/24/outline'
 import { useActiveProject } from './composables/useActiveProject'
 
@@ -166,6 +168,23 @@ const navigationGroups = [
         description: '导入 Excel 并生成数据存档',
         to: { name: 'project-data' },
         icon: DocumentArrowUpIcon
+      },
+      {
+        label: '基础分析',
+        description: '查看专题基础指标',
+        to: { name: 'project-data-analysis' },
+        icon: PresentationChartLineIcon
+      }
+    ]
+  },
+  {
+    label: '概览',
+    links: [
+      {
+        label: '数据集',
+        description: '远程数据库已上传数据',
+        to: { name: 'overview-datasets' },
+        icon: TableCellsIcon
       }
     ]
   },

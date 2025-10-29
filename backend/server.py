@@ -23,8 +23,9 @@ for path in (BACKEND_DIR, SRC_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from src.project import get_project_manager  # type: ignore
-from src.project.storage import (  # type: ignore
+from src.project import (  # type: ignore
+    get_dataset_preview,
+    get_project_manager,
     list_project_datasets,
     store_uploaded_dataset,
 )
@@ -809,6 +810,24 @@ def project_datasets(name: str):
         LOGGER.exception("Failed to read dataset manifest for project %s", name)
         return jsonify({"status": "error", "message": "无法读取项目数据清单"}), 500
     return jsonify({"status": "ok", "datasets": datasets})
+
+
+@app.get("/api/projects/<string:name>/datasets/<string:dataset_id>/preview")
+def project_dataset_preview(name: str, dataset_id: str):
+    page = request.args.get("page", default=1, type=int)
+    page_size = request.args.get("page_size", default=20, type=int)
+    try:
+        preview = get_dataset_preview(name, dataset_id, page=page, page_size=page_size)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 404
+    except FileNotFoundError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 404
+    except Exception:  # pragma: no cover - defensive logging
+        LOGGER.exception("Failed to preview dataset %s for project %s", dataset_id, name)
+        return jsonify({"status": "error", "message": "无法加载数据集预览"}), 500
+    return jsonify({"status": "ok", "preview": preview})
 
 
 @app.post("/api/projects/<string:name>/datasets")

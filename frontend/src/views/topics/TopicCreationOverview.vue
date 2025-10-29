@@ -10,7 +10,7 @@
           <p class="text-sm font-semibold uppercase tracking-[0.4em] text-white/70">新建专题</p>
           <h1 class="text-3xl font-semibold sm:text-4xl">启动新的舆情专题</h1>
           <p class="text-lg text-white/80">
-            通过上传数据、执行预处理、入库以及分析，快速完成专题初始化。
+            通过上传数据、执行预处理与入库，快速完成专题初始化；分析结果可在项目数据模块中查看。
           </p>
         </div>
         <button
@@ -103,13 +103,5 @@ const stages = [
       '将筛选后的数据写入数据库，后续可用于深度分析与可视化展示。当前阶段暂留空，可提前规划。',
     route: { name: 'topic-create-ingest' }
   },
-  {
-    index: 4,
-    title: '基本分析',
-    subtitle: '快速查看数据指标',
-    description:
-      '执行基础数据统计与概览，为舆情研判提供初步依据。功能即将开放，敬请期待。',
-    route: { name: 'topic-create-analysis' }
-  }
 ]
 </script>

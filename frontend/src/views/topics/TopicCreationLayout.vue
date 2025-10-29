@@ -64,7 +64,6 @@ import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   ArrowTrendingUpIcon,
-  BeakerIcon,
   CloudArrowUpIcon,
   FunnelIcon,
   ChevronRightIcon,
@@ -97,12 +96,7 @@ const steps = [
     icon: ArrowTrendingUpIcon,
     description: '提交数据写入业务数据库'
   },
-  {
-    label: '基本分析',
-    to: { name: 'topic-create-analysis' },
-    icon: BeakerIcon,
-    description: '查看初步分析与检验'
-  }
+  // 基本分析迁移到项目数据模块，此处保留前三个操作步骤
 ]
 
 const route = useRoute()

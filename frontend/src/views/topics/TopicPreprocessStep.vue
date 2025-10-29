@@ -42,11 +42,11 @@
       <p v-if="parameterError" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">{{ parameterError }}</p>
     </section>
 
-    <section class="card-surface space-y-5 p-6">
-      <header class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-xl font-semibold text-primary">执行预处理步骤</h2>
-          <p class="text-sm text-secondary">按顺序执行 Merge → Clean → Filter，或单独运行其中某个步骤。</p>
+    <section class="space-y-5">
+      <div class="card-surface flex flex-wrap items-center justify-between gap-3 p-6">
+        <div class="space-y-1">
+          <h2 class="text-xl font-semibold text-primary">预处理执行</h2>
+          <p class="text-sm text-secondary">可单独运行每个步骤，或使用一键执行快速完成全部流程。</p>
         </div>
         <button
           type="button"
@@ -57,44 +57,46 @@
           <SparklesIcon class="h-4 w-4" />
           <span>{{ pipeline.running ? '执行中…' : '一键执行 Pipeline' }}</span>
         </button>
-      </header>
+      </div>
 
-      <div class="grid gap-5 lg:grid-cols-3">
+      <div class="space-y-5">
         <article
           v-for="operation in operations"
           :key="operation.key"
-          class="flex flex-col gap-4 rounded-3xl border border-brand-soft bg-surface-muted p-5"
+          class="card-surface space-y-4 p-6"
         >
-          <div class="flex items-center gap-3">
+          <header class="flex items-center gap-3">
             <span class="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-soft text-brand-600">
               <component :is="operation.icon" class="h-5 w-5" />
             </span>
             <div>
-              <h3 class="text-base font-semibold text-primary">{{ operation.title }}</h3>
               <p class="text-xs uppercase tracking-[0.2em] text-muted">{{ operation.subtitle }}</p>
+              <h3 class="text-base font-semibold text-primary">{{ operation.title }}</h3>
             </div>
-          </div>
+          </header>
           <p class="text-sm leading-relaxed text-secondary">
             {{ operation.description }}
           </p>
-          <button
-            type="button"
-            class="btn-base btn-tone-primary px-4 py-1.5"
-            :disabled="statuses[operation.key].running"
-            @click="runOperation(operation.key)"
-          >
-            <span v-if="statuses[operation.key].running">执行中…</span>
-            <span v-else>执行 {{ operation.label }}</span>
-          </button>
-          <p
-            v-if="statuses[operation.key].message"
-            :class="[
-              'text-sm rounded-2xl px-3 py-1.5',
-              statuses[operation.key].success ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-            ]"
-          >
-            {{ statuses[operation.key].message }}
-          </p>
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="button"
+              class="btn-base btn-tone-primary px-4 py-1.5"
+              :disabled="statuses[operation.key].running"
+              @click="runOperation(operation.key)"
+            >
+              <span v-if="statuses[operation.key].running">执行中…</span>
+              <span v-else>执行 {{ operation.label }}</span>
+            </button>
+            <p
+              v-if="statuses[operation.key].message"
+              :class="[
+                'text-sm rounded-2xl px-3 py-1.5',
+                statuses[operation.key].success ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
+              ]"
+            >
+              {{ statuses[operation.key].message }}
+            </p>
+          </div>
         </article>
       </div>
 

@@ -124,28 +124,6 @@
             <div class="h-48 rounded-3xl bg-slate-200/70 animate-pulse"></div>
           </section>
 
-          <section v-if="hasData" class="grid gap-6">
-            <article v-for="database in databases" :key="database.name" class="card-surface space-y-5 p-6">
-              <header class="flex flex-wrap items-center justify-between gap-3">
-                <h3 class="text-xl font-semibold text-slate-900">{{ database.name }}</h3>
-                <p class="text-sm text-slate-500">{{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行</p>
-              </header>
-              <ul class="space-y-2">
-                <li
-                  v-for="table in database.tables"
-                  :key="table.name"
-                  class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3"
-                  :class="{ 'border-rose-200 bg-rose-50/80 text-rose-600': table.error }"
-                >
-                  <span class="font-medium">{{ table.name }}</span>
-                  <span v-if="table.error" class="text-sm">{{ table.error }}</span>
-                  <span v-else class="text-sm text-slate-500">{{ formatNumber(table.record_count) }} 行</span>
-                </li>
-              </ul>
-              <p v-if="!database.tables.length" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">该库暂无业务表。</p>
-            </article>
-          </section>
-
           <p v-if="!loading && !hasData && !error" class="rounded-3xl border border-slate-200 bg-white/80 p-8 text-center text-sm text-slate-500">
             未检索到业务数据库，请确认配置是否正确。
           </p>
@@ -187,20 +165,19 @@
       />
       <span class="hidden sm:inline">刷新数据</span>
     </button>
+
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import {
   ArrowPathIcon,
   CircleStackIcon,
   CodeBracketSquareIcon,
   ServerStackIcon,
-  Squares2X2Icon,
-  ChevronRightIcon,
-  ChevronLeftIcon
+  ChevronRightIcon
 } from '@heroicons/vue/24/outline'
 
 import { useBackendClient } from '../composables/useBackendClient'

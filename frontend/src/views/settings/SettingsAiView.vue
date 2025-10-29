@@ -30,6 +30,18 @@
             </option>
           </select>
         </label>
+        <label
+          v-if="llmState.filter.provider === 'openai'"
+          class="flex flex-col gap-2 text-sm font-medium text-slate-600"
+        >
+          <span>API Base URL</span>
+          <input
+            v-model.trim="llmState.filter.base_url"
+            type="text"
+            placeholder="https://api.example.com/v1"
+            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          />
+        </label>
         <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
           <span>模型名称</span>
           <input
@@ -95,6 +107,18 @@
             </option>
           </select>
         </label>
+        <label
+          v-if="llmState.assistant.provider === 'openai'"
+          class="flex flex-col gap-2 text-sm font-medium text-slate-600"
+        >
+          <span>API Base URL</span>
+          <input
+            v-model.trim="llmState.assistant.base_url"
+            type="text"
+            placeholder="https://api.example.com/v1"
+            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          />
+        </label>
         <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
           <span>模型名称</span>
           <input
@@ -134,7 +158,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, watch } from 'vue'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 const providerOptions = [
@@ -148,13 +172,15 @@ const llmState = reactive({
     model: '',
     qps: 0,
     batch_size: 1,
-    truncation: 0
+    truncation: 0,
+    base_url: ''
   },
   assistant: {
     provider: 'qwen',
     model: '',
     max_tokens: 0,
-    temperature: 0
+    temperature: 0,
+    base_url: ''
   },
   loading: false,
   error: '',
@@ -166,6 +192,24 @@ const filterModelPlaceholder = computed(() =>
 )
 const assistantModelPlaceholder = computed(() =>
   llmState.assistant.provider === 'openai' ? '如：gpt-4o-mini' : '如：qwen-turbo'
+)
+
+watch(
+  () => llmState.filter.provider,
+  (provider) => {
+    if (provider !== 'openai') {
+      llmState.filter.base_url = ''
+    }
+  }
+)
+
+watch(
+  () => llmState.assistant.provider,
+  (provider) => {
+    if (provider !== 'openai') {
+      llmState.assistant.base_url = ''
+    }
+  }
 )
 
 const submitLlmFilter = async () => {
