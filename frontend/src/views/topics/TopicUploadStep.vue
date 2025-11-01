@@ -1,15 +1,51 @@
 <template>
-  <div class="space-y-8">
-    <header class="flex flex-wrap items-center justify-between gap-3">
-      <div class="space-y-1">
-        <h1 class="text-2xl font-semibold text-primary">上传原始数据</h1>
-        <p class="text-sm text-secondary">创建专题并上传 Excel/CSV 文件，生成标准化存档。</p>
+  <div class="space-y-10">
+    <header class="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-soft bg-white/80 p-6 shadow-sm">
+      <div class="space-y-2">
+        <div class="inline-flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
+          <CloudArrowUpIcon class="h-4 w-4" />
+          <span>步骤 1 · 上传</span>
+        </div>
+        <div>
+          <h1 class="text-2xl font-semibold text-primary">上传原始数据</h1>
+          <p class="text-sm text-secondary">创建专题并上传 Excel/CSV 文件，生成标准化存档。</p>
+        </div>
       </div>
-      <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
-        <CloudArrowUpIcon class="h-4 w-4" />
-        <span>步骤 1 · 上传</span>
-      </div>
+      <dl class="grid gap-3 text-xs text-secondary sm:grid-cols-2">
+        <div class="rounded-2xl bg-surface-muted px-4 py-3">
+          <dt class="text-[11px] uppercase tracking-widest text-muted">当前专题</dt>
+          <dd class="mt-1 text-sm font-semibold text-primary">{{ topicName || '未填写' }}</dd>
+        </div>
+        <div class="rounded-2xl bg-surface-muted px-4 py-3">
+          <dt class="text-[11px] uppercase tracking-widest text-muted">标签选择</dt>
+          <dd class="mt-1 text-sm font-semibold text-primary">{{ selectedTags.length ? selectedTags.join('，') : '未选择' }}</dd>
+        </div>
+      </dl>
     </header>
+
+    <nav class="grid gap-3 sm:grid-cols-3">
+      <div class="group flex items-start gap-3 rounded-3xl border border-brand bg-brand-soft px-5 py-4 shadow-sm">
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-white text-sm font-semibold">1</span>
+        <div class="space-y-1">
+          <p class="text-sm font-semibold text-brand-700">上传原始数据</p>
+          <p class="text-xs text-brand-600/80">创建专题并准备源数据文件。</p>
+        </div>
+      </div>
+      <div class="group flex items-start gap-3 rounded-3xl border border-dashed border-soft px-5 py-4 text-secondary transition hover:border-brand-soft">
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-muted">2</span>
+        <div class="space-y-1">
+          <p class="text-sm font-semibold text-secondary">数据预处理</p>
+          <p class="text-xs text-muted">数据清洗、字段映射与质量检测。</p>
+        </div>
+      </div>
+      <div class="group flex items-start gap-3 rounded-3xl border border-dashed border-soft px-5 py-4 text-secondary transition hover:border-brand-soft">
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-muted">3</span>
+        <div class="space-y-1">
+          <p class="text-sm font-semibold text-secondary">数据入库</p>
+          <p class="text-xs text-muted">写入业务数据库并生成分析指标。</p>
+        </div>
+      </div>
+    </nav>
 
     <section class="card-surface space-y-6 p-6">
       <header class="space-y-2">
@@ -37,6 +73,31 @@
               placeholder="补充专题背景、抓取渠道等信息。"
             ></textarea>
           </label>
+          <div class="space-y-2 rounded-2xl border border-dashed border-brand-soft bg-surface-muted px-4 py-3 text-xs text-secondary">
+            <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-muted">
+              <TagIcon class="h-4 w-4 text-brand-500" />
+              推荐标签
+            </div>
+            <p class="text-xs text-muted">点击快速补充专题说明，可多选。</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="tag in suggestedTags"
+                :key="tag"
+                type="button"
+                class="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-brand-200"
+                :class="selectedTags.includes(tag)
+                  ? 'border-brand bg-brand-soft text-brand-700 shadow-sm'
+                  : 'border-soft bg-white text-secondary hover:border-brand-soft hover:text-brand-600'"
+                @click="toggleTag(tag)"
+              >
+                <span>{{ tag }}</span>
+              </button>
+            </div>
+            <div v-if="selectedTags.length" class="space-y-1 rounded-2xl bg-white/80 px-3 py-2 text-xs text-secondary">
+              <p class="font-semibold text-primary">已选标签</p>
+              <p class="text-muted">{{ selectedTags.join(' · ') }}</p>
+            </div>
+          </div>
           <button
             type="submit"
             class="btn-base btn-tone-primary w-full gap-2 px-5 py-2"
@@ -74,7 +135,7 @@
 
       <form class="space-y-5" @submit.prevent="uploadDataset">
         <div
-          class="flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-brand-soft bg-surface-muted px-6 text-center text-sm text-secondary transition hover:border-brand hover:bg-brand-soft hover:text-brand-600"
+          class="flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-brand-soft bg-surface-muted px-6 text-center text-sm text-secondary transition hover:border-brand hover:bg-brand-soft hover:text-brand-600"
           :class="{ 'border-brand bg-surface text-brand-600 shadow-inner': uploadFile }"
         >
           <input
@@ -105,18 +166,173 @@
           </div>
         </div>
       </form>
+      <transition name="fade" mode="out-in">
+        <article
+          v-if="latestDataset"
+          key="dataset-card"
+          class="rounded-3xl border border-brand-soft bg-white/90 p-6 shadow-inner"
+        >
+          <header class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-widest text-muted">最新上传</p>
+              <h3 class="text-lg font-semibold text-primary">{{ latestDataset.display_name }}</h3>
+              <p class="text-xs text-secondary">
+                数据集 ID：{{ latestDataset.id }} · 行列：{{ latestDataset.rows }} 行 × {{ latestDataset.column_count }} 列
+              </p>
+            </div>
+            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">上传成功</span>
+          </header>
+          <dl class="mt-4 grid gap-3 text-sm text-secondary sm:grid-cols-2 lg:grid-cols-3">
+            <div class="rounded-2xl bg-surface-muted px-4 py-3">
+              <dt class="text-[11px] uppercase tracking-widest text-muted">文件大小</dt>
+              <dd class="mt-1 font-semibold text-primary">{{ formatFileSize(latestDataset.file_size) }}</dd>
+            </div>
+            <div class="rounded-2xl bg-surface-muted px-4 py-3">
+              <dt class="text-[11px] uppercase tracking-widest text-muted">生成 JSONL</dt>
+              <dd class="mt-1 truncate text-primary" :title="latestDataset.jsonl_file">
+                {{ latestDataset.jsonl_file }}
+              </dd>
+            </div>
+            <div class="rounded-2xl bg-surface-muted px-4 py-3">
+              <dt class="text-[11px] uppercase tracking-widest text-muted">生成 PKL</dt>
+              <dd class="mt-1 truncate text-primary" :title="latestDataset.pkl_file">
+                {{ latestDataset.pkl_file }}
+              </dd>
+            </div>
+            <div class="rounded-2xl bg-surface-muted px-4 py-3">
+              <dt class="text-[11px] uppercase tracking-widest text-muted">Meta 清单</dt>
+              <dd class="mt-1 truncate text-primary" :title="latestDataset.json_file">
+                {{ latestDataset.json_file }}
+              </dd>
+            </div>
+            <div class="rounded-2xl bg-surface-muted px-4 py-3">
+              <dt class="text-[11px] uppercase tracking-widest text-muted">专题名称</dt>
+              <dd class="mt-1 text-primary">{{ latestDataset.project }}</dd>
+            </div>
+            <div class="rounded-2xl bg-surface-muted px-4 py-3">
+              <dt class="text-[11px] uppercase tracking-widest text-muted">专题标识</dt>
+              <dd class="mt-1 text-primary">{{ latestDataset.topic_label || '未设置' }}</dd>
+            </div>
+            <div class="rounded-2xl bg-surface-muted px-4 py-3">
+              <dt class="text-[11px] uppercase tracking-widest text-muted">更新于</dt>
+              <dd class="mt-1 text-primary">{{ formatTimestamp(latestDataset.stored_at) }}</dd>
+            </div>
+          </dl>
+          <footer class="mt-4 flex flex-wrap items-center gap-3 text-xs text-secondary">
+            <span
+              v-if="Array.isArray(latestDataset.columns) && latestDataset.columns.length"
+              class="rounded-full bg-surface-muted px-3 py-1"
+            >
+              字段：{{ latestDataset.columns.join(', ') }}
+            </span>
+            <span
+              v-if="latestDataset.topic_label"
+              class="rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600"
+            >
+              专题标识：{{ latestDataset.topic_label }}
+            </span>
+            <RouterLink
+              class="inline-flex items-center gap-1 rounded-full bg-brand px-4 py-1 text-xs font-semibold text-white shadow transition hover:bg-brand-600"
+              :to="{ name: 'project-data', query: { project: latestDataset.project } }"
+            >
+              前往数据管理
+            </RouterLink>
+          </footer>
+          <section v-if="latestDataset" class="mt-6 space-y-4">
+            <header class="space-y-1">
+              <h4 class="text-sm font-semibold text-primary">字段映射</h4>
+              <p class="text-xs text-secondary">
+                指定专题标识、日期、标题、正文与作者列，系统将在预处理与后续流程中使用这些字段。
+              </p>
+              <p v-if="!datasetColumns.length" class="text-xs text-muted">当前尚未识别到字段列表，可先保存专题标识。</p>
+            </header>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label class="space-y-1 text-xs sm:col-span-2">
+                <span class="font-medium text-secondary">专题标识（可选）</span>
+                <input
+                  v-model="columnMappingForm.topic"
+                  type="text"
+                  class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+                  placeholder="为该数据集设置自定义专题名称"
+                />
+              </label>
+              <label class="space-y-1 text-xs">
+                <span class="font-medium text-secondary">日期列</span>
+                <select
+                  v-model="columnMappingForm.date"
+                  class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+                >
+                  <option value="">未指定</option>
+                  <option v-for="column in datasetColumns" :key="`date-${column}`" :value="column">
+                    {{ column }}
+                  </option>
+                </select>
+              </label>
+              <label class="space-y-1 text-xs">
+                <span class="font-medium text-secondary">标题列</span>
+                <select
+                  v-model="columnMappingForm.title"
+                  class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+                >
+                  <option value="">未指定</option>
+                  <option v-for="column in datasetColumns" :key="`title-${column}`" :value="column">
+                    {{ column }}
+                  </option>
+                </select>
+              </label>
+              <label class="space-y-1 text-xs">
+                <span class="font-medium text-secondary">正文列</span>
+                <select
+                  v-model="columnMappingForm.content"
+                  class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+                >
+                  <option value="">未指定</option>
+                  <option v-for="column in datasetColumns" :key="`content-${column}`" :value="column">
+                    {{ column }}
+                  </option>
+                </select>
+              </label>
+              <label class="space-y-1 text-xs">
+                <span class="font-medium text-secondary">作者列</span>
+                <select
+                  v-model="columnMappingForm.author"
+                  class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+                >
+                  <option value="">未指定</option>
+                  <option v-for="column in datasetColumns" :key="`author-${column}`" :value="column">
+                    {{ column }}
+                  </option>
+                </select>
+              </label>
+            </div>
+            <div class="flex flex-wrap items-center gap-3 text-xs">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-brand-soft px-4 py-1.5 text-xs font-semibold text-brand-600 transition hover:bg-brand-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="mappingSaving"
+                @click="saveColumnMapping"
+              >
+                {{ mappingSaving ? '保存中…' : '保存字段映射' }}
+              </button>
+              <p v-if="mappingError" class="text-rose-600">{{ mappingError }}</p>
+              <p v-else-if="mappingSuccess" class="text-emerald-600">{{ mappingSuccess }}</p>
+            </div>
+          </section>
+        </article>
+      </transition>
     </section>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { CloudArrowUpIcon, DocumentArrowUpIcon } from '@heroicons/vue/24/outline'
+import { computed, reactive, ref, watch } from 'vue'
+import { CloudArrowUpIcon, DocumentArrowUpIcon, TagIcon } from '@heroicons/vue/24/outline'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
 const topicName = ref('')
 const topicDescription = ref('')
+const selectedTags = ref([])
 
 const creating = ref(false)
 const createError = ref('')
@@ -127,6 +343,26 @@ const uploadFile = ref(null)
 const uploading = ref(false)
 const uploadError = ref('')
 const uploadSuccess = ref('')
+const latestDataset = ref(null)
+const columnMappingForm = reactive({
+  topic: '',
+  date: '',
+  title: '',
+  content: '',
+  author: ''
+})
+const mappingSaving = ref(false)
+const mappingError = ref('')
+const mappingSuccess = ref('')
+
+const suggestedTags = Object.freeze([
+  '舆情监测',
+  '新闻采集',
+  '社交媒体',
+  '自动化报告',
+  '关键事件',
+  '专家研判'
+])
 
 const uploadHelper = computed(() => {
   if (uploading.value) return ''
@@ -134,6 +370,129 @@ const uploadHelper = computed(() => {
   if (!uploadFile.value) return '请选择需要上传的文件'
   return ''
 })
+
+const datasetColumns = computed(() => {
+  if (!latestDataset.value || !Array.isArray(latestDataset.value.columns)) return []
+  return latestDataset.value.columns.map((column) => column.toString())
+})
+
+const toggleTag = (tag) => {
+  if (selectedTags.value.includes(tag)) {
+    selectedTags.value = selectedTags.value.filter((item) => item !== tag)
+  } else {
+    selectedTags.value = [...selectedTags.value, tag]
+  }
+  if (!topicDescription.value) {
+    topicDescription.value = selectedTags.value.map((item) => `#${item}`).join(' · ')
+  }
+}
+
+const formatFileSize = (value) => {
+  const bytes = Number(value)
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const size = bytes / Math.pow(1024, exponent)
+  return `${size.toFixed(size >= 100 || exponent === 0 ? 0 : 1)} ${units[exponent]}`
+}
+
+const datetimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit'
+})
+
+const formatTimestamp = (value) => {
+  if (!value) return '—'
+  try {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return datetimeFormatter.format(date)
+  } catch (error) {
+    return value
+  }
+}
+
+const applyDatasetMapping = (dataset) => {
+  if (!dataset || typeof dataset !== 'object') {
+    columnMappingForm.date = ''
+    columnMappingForm.title = ''
+    columnMappingForm.content = ''
+    columnMappingForm.author = ''
+    columnMappingForm.topic = ''
+    mappingError.value = ''
+    mappingSuccess.value = ''
+    return
+  }
+  const mapping = typeof dataset.column_mapping === 'object' && dataset.column_mapping !== null
+    ? dataset.column_mapping
+    : {}
+  columnMappingForm.topic = typeof dataset.topic_label === 'string' ? dataset.topic_label.trim() : ''
+  columnMappingForm.date = mapping.date || ''
+  columnMappingForm.title = mapping.title || ''
+  columnMappingForm.content = mapping.content || ''
+  columnMappingForm.author = mapping.author || ''
+  mappingError.value = ''
+}
+
+const saveColumnMapping = async () => {
+  if (!latestDataset.value || !topicName.value) return
+  mappingSaving.value = true
+  mappingError.value = ''
+  mappingSuccess.value = ''
+
+  const payload = {
+    column_mapping: {
+      date: columnMappingForm.date || '',
+      title: columnMappingForm.title || '',
+      content: columnMappingForm.content || '',
+      author: columnMappingForm.author || ''
+    },
+    topic_label: columnMappingForm.topic || ''
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${encodeURIComponent(latestDataset.value.project)}/datasets/${encodeURIComponent(latestDataset.value.id)}/mapping`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }
+    )
+    const result = await response.json()
+    if (!response.ok || result.status !== 'ok') {
+      throw new Error(result.message || '字段映射保存失败')
+    }
+    mappingSuccess.value = '字段映射已保存'
+    latestDataset.value = {
+      ...latestDataset.value,
+      column_mapping: result.column_mapping,
+      topic_label: typeof result.topic_label === 'string' ? result.topic_label : columnMappingForm.topic
+    }
+    columnMappingForm.topic = typeof latestDataset.value.topic_label === 'string' ? latestDataset.value.topic_label.trim() : ''
+  } catch (err) {
+    mappingError.value = err instanceof Error ? err.message : '字段映射保存失败'
+  } finally {
+    mappingSaving.value = false
+  }
+}
+
+watch(
+  latestDataset,
+  (dataset, previous) => {
+    const previousId = previous && typeof previous === 'object' ? previous.id : ''
+    applyDatasetMapping(dataset)
+    if (!dataset || dataset.id !== previousId) {
+      mappingSuccess.value = ''
+    }
+  },
+  { immediate: true }
+)
 
 const createTopic = async () => {
   if (!topicName.value) return
@@ -149,7 +508,8 @@ const createTopic = async () => {
       },
       body: JSON.stringify({
         name: topicName.value,
-        description: topicDescription.value || undefined
+        description: topicDescription.value || undefined,
+        metadata: selectedTags.value.length ? { tags: selectedTags.value } : undefined
       })
     })
 
@@ -170,6 +530,7 @@ const handleFileChange = (event) => {
   uploadFile.value = file || null
   uploadError.value = ''
   uploadSuccess.value = ''
+  latestDataset.value = null
 }
 
 const uploadDataset = async () => {
@@ -199,6 +560,9 @@ const uploadDataset = async () => {
       throw new Error(result.message || '上传失败')
     }
     uploadSuccess.value = '上传成功，已生成 JSONL 与 PKL 存档。'
+    latestDataset.value = result.dataset
+      ? { ...result.dataset, topic_label: typeof result.dataset.topic_label === 'string' ? result.dataset.topic_label.trim() : '' }
+      : null
     uploadFile.value = null
     if (fileInput.value) {
       fileInput.value.value = ''

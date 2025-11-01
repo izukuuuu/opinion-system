@@ -1,4 +1,3 @@
-"""Simple Flask server exposing OpinionSystem operations as REST endpoints."""
 from __future__ import annotations
 
 import json
@@ -24,9 +23,11 @@ for path in (BACKEND_DIR, SRC_DIR):
         sys.path.insert(0, str(path))
 
 from src.project import (  # type: ignore
+    get_dataset_date_summary,
     get_dataset_preview,
     get_project_manager,
     list_project_datasets,
+    update_dataset_column_mapping,
     store_uploaded_dataset,
 )
 from src.utils.setting.editor import load_config as load_settings_config, save_config as save_settings_config  # type: ignore
@@ -177,6 +178,46 @@ def _load_json_file(path: Path) -> Any:
         except json.JSONDecodeError:
             fh.seek(0)
             return fh.read()
+
+
+def _parse_column_mapping_payload(raw: Any) -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if isinstance(value, str):
+                mapping[str(key)] = value.strip()
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError:
+            decoded = {}
+        if isinstance(decoded, dict):
+            for key, value in decoded.items():
+                if isinstance(value, str):
+                    mapping[str(key)] = value.strip()
+
+    normalized: Dict[str, str] = {}
+    for key in ("date", "title", "content", "author"):
+        value = mapping.get(key)
+        if isinstance(value, str):
+            normalized[key] = value.strip()
+    return normalized
+
+
+def _parse_column_mapping_from_form(form: Dict[str, Any]) -> Dict[str, str]:
+    initial = _parse_column_mapping_payload(form.get("column_mapping"))
+    for key in ("date", "title", "content", "author"):
+        field_name = f"{key}_column"
+        value = form.get(field_name)
+        if isinstance(value, str) and value.strip():
+            initial[key] = value.strip()
+    return initial
+
+
+def _normalise_topic_label(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    return ""
 
 
 app = Flask(__name__)
@@ -830,14 +871,83 @@ def project_dataset_preview(name: str, dataset_id: str):
     return jsonify({"status": "ok", "preview": preview})
 
 
+@app.get("/api/projects/<string:name>/date-range")
+def project_date_range(name: str):
+    dataset_id = request.args.get("dataset_id")
+    try:
+        summary = get_dataset_date_summary(name, dataset_id=dataset_id)
+    except (LookupError, FileNotFoundError) as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except Exception:  # pragma: no cover - defensive logging
+        LOGGER.exception("Failed to derive date range for project %s", name)
+        return jsonify({"status": "error", "message": "无法解析数据集日期范围"}), 500
+
+    dataset_info = summary.get("dataset")
+    if isinstance(dataset_info, dict):
+        dataset_info.setdefault("column_mapping", summary.get("column_mapping"))
+
+    payload: Dict[str, Any] = {"status": "ok", "topic": name}
+    payload.update(summary)
+    return jsonify(payload)
+
+
+@app.put("/api/projects/<string:name>/datasets/<string:dataset_id>/mapping")
+def update_project_dataset_mapping(name: str, dataset_id: str):
+    payload = request.get_json(silent=True) or {}
+    raw_mapping = payload.get("column_mapping", payload)
+    mapping = _parse_column_mapping_payload(raw_mapping)
+    if not mapping:
+        for key in ("date", "title", "content", "author"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                mapping[key] = value.strip()
+
+    topic_label = None
+    if "topic_label" in payload:
+        topic_label = _normalise_topic_label(payload.get("topic_label"))
+
+    try:
+        updated = update_dataset_column_mapping(
+            name,
+            dataset_id,
+            mapping,
+            topic_label=topic_label,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 404
+    except Exception:  # pragma: no cover - defensive logging
+        LOGGER.exception("Failed to update column mapping for dataset %s of project %s", dataset_id, name)
+        return jsonify({"status": "error", "message": "无法更新字段映射"}), 500
+
+    return jsonify(
+        {
+            "status": "ok",
+            "column_mapping": updated.get("column_mapping", {}),
+            "topic_label": updated.get("topic_label", ""),
+        }
+    )
+
+
 @app.post("/api/projects/<string:name>/datasets")
 def upload_project_dataset(name: str):
     file = request.files.get("file")
     if not file or not getattr(file, "filename", ""):
         return jsonify({"status": "error", "message": "请选择需要上传的表格文件"}), 400
 
+    mapping_hints = _parse_column_mapping_from_form(request.form)
+    topic_label_hint = _normalise_topic_label(request.form.get("topic_label"))
+
     try:
-        dataset = store_uploaded_dataset(name, file)
+        dataset = store_uploaded_dataset(
+            name,
+            file,
+            column_mapping=mapping_hints,
+            topic_label=topic_label_hint,
+        )
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
     except Exception:  # pragma: no cover - defensive logging
@@ -862,6 +972,8 @@ def upload_project_dataset(name: str):
                 "filename": dataset.get("display_name"),
                 "rows": dataset.get("rows"),
                 "columns": dataset.get("column_count"),
+                "column_mapping": dataset.get("column_mapping"),
+                "topic_label": dataset.get("topic_label"),
                 "source": "api",
             },
             success=True,

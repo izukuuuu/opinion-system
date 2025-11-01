@@ -38,6 +38,10 @@
               <dd class="text-sm text-slate-600">{{ selectedDataset.rows }} 行 · {{ selectedDataset.column_count }} 列</dd>
             </div>
             <div class="space-y-1">
+              <dt class="text-xs uppercase tracking-widest text-slate-400">专题标识</dt>
+              <dd class="text-sm text-slate-600">{{ selectedDataset.topic_label || '未设置' }}</dd>
+            </div>
+            <div class="space-y-1">
               <dt class="text-xs uppercase tracking-widest text-slate-400">字段列表</dt>
               <dd class="text-sm text-slate-600 break-words">{{ selectedDataset.columns.join(', ') }}</dd>
             </div>
@@ -49,11 +53,91 @@
               <dt class="text-xs uppercase tracking-widest text-slate-400">JSONL</dt>
               <dd class="text-sm text-slate-600 truncate" :title="selectedDataset.jsonl_file">{{ selectedDataset.jsonl_file }}</dd>
             </div>
-            <div class="space-y-1">
-              <dt class="text-xs uppercase tracking-widest text-slate-400">PKL</dt>
-              <dd class="text-sm text-slate-600 truncate" :title="selectedDataset.pkl_file">{{ selectedDataset.pkl_file }}</dd>
+          <div class="space-y-1">
+            <dt class="text-xs uppercase tracking-widest text-slate-400">PKL</dt>
+            <dd class="text-sm text-slate-600 truncate" :title="selectedDataset.pkl_file">{{ selectedDataset.pkl_file }}</dd>
+          </div>
+        </dl>
+        <div v-if="selectedDataset" class="mt-6 space-y-4">
+            <header class="space-y-1">
+              <h2 class="text-base font-semibold text-slate-900">字段映射</h2>
+              <p class="text-xs text-slate-500">指定专题标识与关键信息字段，系统将根据映射执行预处理与分析。</p>
+              <p v-if="!selectedDatasetColumns.length" class="text-xs text-slate-400">
+                当前数据集尚未记录字段列表，可先维护专题标识。
+              </p>
+            </header>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label class="space-y-1 text-xs sm:col-span-2">
+                <span class="font-medium text-slate-600">专题标识（自定义）</span>
+                <input
+                  v-model="mappingForm.topic"
+                  type="text"
+                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  placeholder="例如：2024-两会专题"
+                />
+              </label>
+              <label class="space-y-1 text-xs">
+                <span class="font-medium text-slate-600">日期列</span>
+                <select
+                  v-model="mappingForm.date"
+                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                >
+                  <option value="">未指定</option>
+                  <option v-for="column in selectedDatasetColumns" :key="`preview-date-${column}`" :value="column">
+                    {{ column }}
+                  </option>
+                </select>
+              </label>
+              <label class="space-y-1 text-xs">
+                <span class="font-medium text-slate-600">标题列</span>
+                <select
+                  v-model="mappingForm.title"
+                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                >
+                  <option value="">未指定</option>
+                  <option v-for="column in selectedDatasetColumns" :key="`preview-title-${column}`" :value="column">
+                    {{ column }}
+                  </option>
+                </select>
+              </label>
+              <label class="space-y-1 text-xs">
+                <span class="font-medium text-slate-600">正文列</span>
+                <select
+                  v-model="mappingForm.content"
+                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                >
+                  <option value="">未指定</option>
+                  <option v-for="column in selectedDatasetColumns" :key="`preview-content-${column}`" :value="column">
+                    {{ column }}
+                  </option>
+                </select>
+              </label>
+              <label class="space-y-1 text-xs">
+                <span class="font-medium text-slate-600">作者列</span>
+                <select
+                  v-model="mappingForm.author"
+                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                >
+                  <option value="">未指定</option>
+                  <option v-for="column in selectedDatasetColumns" :key="`preview-author-${column}`" :value="column">
+                    {{ column }}
+                  </option>
+                </select>
+              </label>
             </div>
-          </dl>
+            <div class="flex flex-wrap items-center gap-3 text-xs">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-indigo-200 px-4 py-1.5 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="mappingSaving"
+                @click="saveSelectedDatasetMapping"
+              >
+                {{ mappingSaving ? '保存中…' : '保存字段映射' }}
+              </button>
+              <p v-if="mappingError" class="text-rose-600">{{ mappingError }}</p>
+              <p v-else-if="mappingSuccess" class="text-emerald-600">{{ mappingSuccess }}</p>
+            </div>
+          </div>
         </section>
 
         <section class="card-surface space-y-6 p-6">
@@ -329,6 +413,10 @@
                       <dd class="text-sm text-slate-600">{{ dataset.project }}</dd>
                     </div>
                     <div class="space-y-1">
+                      <dt class="text-xs uppercase tracking-widest text-slate-400">专题标识</dt>
+                      <dd class="text-sm text-slate-600">{{ dataset.topic_label || '未设置' }}</dd>
+                    </div>
+                    <div class="space-y-1">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">数据行列</dt>
                       <dd class="text-sm text-slate-600">{{ dataset.rows }} 行 · {{ dataset.column_count }} 列</dd>
                     </div>
@@ -359,6 +447,9 @@
                   </dl>
                   <p class="text-xs text-slate-500">字段：{{ dataset.columns.join(', ') }}</p>
                   <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span v-if="dataset.topic_label" class="rounded-full bg-indigo-50 px-2 py-1 font-medium text-indigo-600">
+                      专题标识：{{ dataset.topic_label }}
+                    </span>
                     <span class="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
                       点击进入预览页
                     </span>
@@ -377,7 +468,7 @@
 <script setup>
 import { FlexRender, getCoreRowModel, useVueTable } from '@tanstack/vue-table'
 import { ChevronLeftIcon } from '@heroicons/vue/24/outline'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useActiveProject } from '../composables/useActiveProject'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
@@ -407,6 +498,16 @@ const uploadFile = ref(null)
 const uploading = ref(false)
 const uploadError = ref('')
 const uploadSuccess = ref('')
+const mappingForm = reactive({
+  topic: '',
+  date: '',
+  title: '',
+  content: '',
+  author: ''
+})
+const mappingSaving = ref(false)
+const mappingError = ref('')
+const mappingSuccess = ref('')
 
 const { activeProject, activeProjectName, setActiveProject, clearActiveProject } = useActiveProject()
 const selectedProject = computed(() => activeProjectName.value)
@@ -419,6 +520,16 @@ const selectedDataset = computed(() =>
   activeDatasetId.value
     ? datasets.value.find((dataset) => dataset.id === activeDatasetId.value) || null
     : null
+)
+const selectedDatasetColumns = computed(() =>
+  selectedDataset.value && Array.isArray(selectedDataset.value.columns)
+    ? selectedDataset.value.columns.map((column) => column.toString())
+    : []
+)
+const selectedDatasetMapping = computed(() =>
+  selectedDataset.value && typeof selectedDataset.value.column_mapping === 'object'
+    ? selectedDataset.value.column_mapping || {}
+    : {}
 )
 const isPreviewMode = computed(() => Boolean(activeDatasetId.value))
 const previewTotalPagesDisplay = computed(() => previewTotalPages.value || 1)
@@ -526,9 +637,100 @@ const normalizeDataset = (dataset) => {
     source_file: dataset.source_file || '',
     pkl_file: dataset.pkl_file || '',
     jsonl_file: dataset.jsonl_file || '',
-    json_file: dataset.json_file || ''
+    json_file: dataset.json_file || '',
+    column_mapping:
+      typeof dataset.column_mapping === 'object' && dataset.column_mapping !== null
+        ? dataset.column_mapping
+        : {},
+    topic_label: typeof dataset.topic_label === 'string' ? dataset.topic_label.trim() : ''
   }
 }
+
+const applySelectedDatasetMapping = (dataset) => {
+  if (!dataset || typeof dataset !== 'object') {
+    mappingForm.date = ''
+    mappingForm.title = ''
+    mappingForm.content = ''
+    mappingForm.author = ''
+    mappingError.value = ''
+    return
+  }
+  const mapping =
+    typeof dataset.column_mapping === 'object' && dataset.column_mapping !== null
+      ? dataset.column_mapping
+      : {}
+  mappingForm.topic = typeof dataset.topic_label === 'string' ? dataset.topic_label.trim() : ''
+  mappingForm.date = mapping.date || ''
+  mappingForm.title = mapping.title || ''
+  mappingForm.content = mapping.content || ''
+  mappingForm.author = mapping.author || ''
+  mappingError.value = ''
+}
+
+const saveSelectedDatasetMapping = async () => {
+  const dataset = selectedDataset.value
+  if (!dataset) return
+  mappingSaving.value = true
+  mappingError.value = ''
+  mappingSuccess.value = ''
+
+  const payload = {
+    column_mapping: {
+      date: mappingForm.date || '',
+      title: mappingForm.title || '',
+      content: mappingForm.content || '',
+      author: mappingForm.author || ''
+    },
+    topic_label: mappingForm.topic || ''
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${encodeURIComponent(dataset.project)}/datasets/${encodeURIComponent(dataset.id)}/mapping`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }
+    )
+    const result = await response.json().catch(() => null)
+    if (!response.ok || !result || result.status !== 'ok') {
+      const message = result?.message || '字段映射保存失败'
+      throw new Error(message)
+    }
+    mappingSuccess.value = '字段映射已保存'
+    const nextMapping = result.column_mapping || {}
+    const nextTopicLabelRaw = typeof result.topic_label === 'string' ? result.topic_label : mappingForm.topic
+    const nextTopicLabel = typeof nextTopicLabelRaw === 'string' ? nextTopicLabelRaw.trim() : ''
+    const index = datasets.value.findIndex((item) => item.id === dataset.id)
+    if (index !== -1) {
+      datasets.value[index] = {
+        ...datasets.value[index],
+        column_mapping: nextMapping,
+        topic_label: nextTopicLabel
+      }
+    }
+    mappingForm.topic = nextTopicLabel
+  } catch (err) {
+    mappingError.value = err instanceof Error ? err.message : '字段映射保存失败'
+  } finally {
+    mappingSaving.value = false
+  }
+}
+
+watch(
+  selectedDataset,
+  (dataset, previous) => {
+    const previousId = previous && typeof previous === 'object' ? previous.id : ''
+    applySelectedDatasetMapping(dataset)
+    if (!dataset || dataset.id !== previousId) {
+      mappingSuccess.value = ''
+    }
+  },
+  { immediate: true }
+)
 
 const stringifyPreviewCell = (value) => {
   if (value === null || value === undefined) return ''
