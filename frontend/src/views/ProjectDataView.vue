@@ -648,11 +648,18 @@ const projectDeleteError = ref('')
 
 const { activeProject, activeProjectName, setActiveProject, clearActiveProject } = useActiveProject()
 const selectedProject = computed(() => activeProjectName.value)
-const selectedProjectMeta = computed(() =>
-  activeProjectName.value
-    ? projects.value.find((project) => project.name === activeProjectName.value) || null
-    : null
-)
+const selectedProjectMeta = computed(() => {
+  if (activeProject.value && activeProject.value.id) {
+    const matchedById = projects.value.find((project) => project.id === activeProject.value.id)
+    if (matchedById) {
+      return matchedById
+    }
+  }
+  if (activeProjectName.value) {
+    return projects.value.find((project) => project.name === activeProjectName.value) || null
+  }
+  return null
+})
 const selectedProjectDisplayName = computed(() =>
   selectedProjectMeta.value?.display_name || selectedProject.value
 )
@@ -741,7 +748,15 @@ const formatFileSize = (size) => {
 const normalizeProject = (project) => {
   if (!project || typeof project !== 'object') return null
   const name = String(project.name || '')
-  const slug = normaliseProjectName(name)
+  const rawIdCandidate =
+    typeof project.id === 'string' && project.id.trim()
+      ? project.id.trim()
+      : typeof project.identifier === 'string' && project.identifier.trim()
+        ? project.identifier.trim()
+        : typeof project.project_id === 'string' && project.project_id.trim()
+          ? project.project_id.trim()
+          : ''
+  const slug = rawIdCandidate || normaliseProjectName(name)
   const metadata =
     project.metadata && typeof project.metadata === 'object'
       ? { ...project.metadata }
@@ -755,6 +770,8 @@ const normalizeProject = (project) => {
     description: '',
     metadata: {},
     ...project,
+    id: rawIdCandidate || '',
+    project_id: rawIdCandidate || slug,
     name,
     slug,
     metadata,
@@ -765,7 +782,11 @@ const normalizeProject = (project) => {
 const normalizeDataset = (dataset) => {
   if (!dataset || typeof dataset !== 'object') return null
   const projectName = dataset.project || activeProjectName.value || ''
-  const projectSlug = dataset.project_slug || normaliseProjectName(projectName)
+  const projectId =
+    (typeof dataset.project_id === 'string' && dataset.project_id.trim()) ||
+    (typeof dataset.project_slug === 'string' && dataset.project_slug.trim()) ||
+    ''
+  const projectSlug = projectId || normaliseProjectName(projectName)
   const displayName =
     dataset.display_name ||
     dataset.source_file?.split('/')?.pop() ||
@@ -776,6 +797,7 @@ const normalizeDataset = (dataset) => {
   return {
     id: dataset.id || '',
     project: projectName || '—',
+    project_id: projectId || projectSlug,
     project_slug: projectSlug,
     display_name: displayName,
     stored_at: dataset.stored_at || '',
@@ -800,7 +822,12 @@ const normalizeDataset = (dataset) => {
 const upsertProjectInList = (payload) => {
   const normalized = normalizeProject(payload)
   if (!normalized) return
-  const others = projects.value.filter((item) => item.name !== normalized.name)
+  const others = projects.value.filter((item) => {
+    if (normalized.id && item.id) {
+      return item.id !== normalized.id
+    }
+    return item.name !== normalized.name
+  })
   const sorted = [normalized, ...others].sort((a, b) =>
     String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
   )

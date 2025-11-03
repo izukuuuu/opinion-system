@@ -1,10 +1,11 @@
 """
 统一路径管理模块
 """
-import os
 import re
 from pathlib import Path
 from typing import Literal
+
+from ...project.manager import get_project_manager
 
 # 目录层级类型
 LAYERS = Literal['raw', 'merge', 'clean', 'filter', 'fetch', 'analyze', 'reports', 'results']
@@ -141,6 +142,13 @@ def _project_data_root(topic: str) -> Path:
     """
     data_root = get_data_root() / "projects"
     data_root.mkdir(parents=True, exist_ok=True)
+
+    manager = get_project_manager()
+    identifier = manager.resolve_identifier(topic)
+    if identifier:
+        project_dir = data_root / identifier
+        project_dir.mkdir(parents=True, exist_ok=True)
+        return project_dir
 
     topic = str(topic or "").strip()
     if topic:

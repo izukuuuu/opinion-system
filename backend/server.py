@@ -246,6 +246,9 @@ def _resolve_topic_identifier(payload: Dict[str, Any]) -> Tuple[str, str, str]:
 
     candidates: List[str] = []
     if dataset_meta:
+        project_id = dataset_meta.get("project_id")
+        if isinstance(project_id, str):
+            candidates.append(project_id)
         slug = dataset_meta.get("project_slug")
         if isinstance(slug, str):
             candidates.append(slug)
@@ -257,6 +260,9 @@ def _resolve_topic_identifier(payload: Dict[str, Any]) -> Tuple[str, str, str]:
             candidates.append(meta_topic)
 
     if project_name:
+        resolved_id = PROJECT_MANAGER.resolve_identifier(project_name)
+        if resolved_id:
+            candidates.append(resolved_id)
         candidates.append(normalise_project_name(project_name))
         candidates.append(project_name)
 
@@ -273,6 +279,10 @@ def _resolve_topic_identifier(payload: Dict[str, Any]) -> Tuple[str, str, str]:
     )
     if not resolved_topic:
         resolved_topic = ordered_candidates[0]
+
+    canonical_topic = PROJECT_MANAGER.resolve_identifier(resolved_topic)
+    if canonical_topic:
+        resolved_topic = canonical_topic
 
     display_name = (
         topic_label

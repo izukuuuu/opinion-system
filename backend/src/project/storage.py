@@ -14,6 +14,7 @@ from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
 from ..utils.io.excel import read_jsonl, write_jsonl
+from .manager import get_project_manager
 
 __all__ = [
     "normalise_project_name",
@@ -34,9 +35,15 @@ _ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".jsonl"}
 
 
 def _normalise_project_name(name: str) -> str:
-    """Convert the project name into a filesystem friendly slug."""
+    """Resolve the canonical storage identifier for a project."""
 
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("- ")
+    manager = get_project_manager()
+    identifier = manager.resolve_identifier(name)
+    if identifier:
+        return identifier
+
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(name or ""))
+    cleaned = cleaned.strip("- ")
     return cleaned.lower() or "project"
 
 
@@ -46,7 +53,13 @@ def normalise_project_name(name: str) -> str:
 
 
 def _ensure_directories(project: str) -> Dict[str, Path]:
-    slug = _normalise_project_name(project)
+    manager = get_project_manager()
+    try:
+        record = manager.ensure_project_storage(project, create_if_missing=False)
+    except LookupError as exc:
+        raise ValueError("指定的项目不存在，请先在项目管理中创建该项目") from exc
+
+    slug = record.identifier or _normalise_project_name(project)
     project_dir = _DATA_ROOT / slug
     uploads_dir = project_dir / "uploads"
     original_dir = uploads_dir / "original"
@@ -59,6 +72,7 @@ def _ensure_directories(project: str) -> Dict[str, Path]:
 
     return {
         "slug": slug,
+        "identifier": slug,
         "project_dir": project_dir,
         "uploads_dir": uploads_dir,
         "original_dir": original_dir,
@@ -89,7 +103,11 @@ def _manifest_path(project_slug: str) -> Path:
 def _write_manifest(project_slug: str, metadata: Dict) -> None:
     manifest_path = _manifest_path(project_slug)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest = {"project": metadata.get("project", ""), "datasets": []}
+    manifest = {
+        "project": metadata.get("project", ""),
+        "project_id": metadata.get("project_id") or project_slug,
+        "datasets": [],
+    }
     if manifest_path.exists():
         try:
             with manifest_path.open("r", encoding="utf-8") as fh:
@@ -97,12 +115,19 @@ def _write_manifest(project_slug: str, metadata: Dict) -> None:
             if isinstance(loaded, dict) and isinstance(loaded.get("datasets"), list):
                 manifest = loaded
         except Exception:
-            manifest = {"project": metadata.get("project", ""), "datasets": []}
+            manifest = {
+                "project": metadata.get("project", ""),
+                "project_id": metadata.get("project_id") or project_slug,
+                "datasets": [],
+            }
     datasets = [item for item in manifest.get("datasets", []) if item.get("id") != metadata.get("id")]
+    metadata.setdefault("project_id", project_slug)
+    metadata.setdefault("project_slug", project_slug)
     datasets.append(metadata)
     datasets.sort(key=lambda item: item.get("stored_at", ""), reverse=True)
     manifest["datasets"] = datasets
     manifest["project"] = metadata.get("project", manifest.get("project", ""))
+    manifest["project_id"] = metadata.get("project_id", manifest.get("project_id", project_slug))
     with manifest_path.open("w", encoding="utf-8") as fh:
         json.dump(manifest, fh, ensure_ascii=False, indent=2)
 
@@ -129,20 +154,25 @@ def list_project_datasets(project: str) -> List[Dict]:
                     try:
                         with meta_path.open("r", encoding="utf-8") as meta_fh:
                             meta_data = json.load(meta_fh)
-                        if isinstance(meta_data, dict):
-                            item.setdefault("columns", meta_data.get("columns", []))
-                            if isinstance(meta_data.get("column_mapping"), dict):
-                                item["column_mapping"] = _sanitize_column_mapping(
-                                    meta_data.get("column_mapping"),
-                                    [str(column) for column in item.get("columns", [])],
+                            if isinstance(meta_data, dict):
+                                item.setdefault("columns", meta_data.get("columns", []))
+                                if isinstance(meta_data.get("column_mapping"), dict):
+                                    item["column_mapping"] = _sanitize_column_mapping(
+                                        meta_data.get("column_mapping"),
+                                        [str(column) for column in item.get("columns", [])],
+                                    )
+                                else:
+                                    item.setdefault("column_mapping", {})
+                                topic_label_value = meta_data.get("topic_label", "")
+                                if isinstance(topic_label_value, str):
+                                    item["topic_label"] = topic_label_value.strip()
+                                else:
+                                    item.setdefault("topic_label", "")
+                                item.setdefault("project_id", meta_data.get("project_id") or slug)
+                                item.setdefault(
+                                    "project_slug",
+                                    meta_data.get("project_slug") or meta_data.get("project_id") or slug,
                                 )
-                            else:
-                                item.setdefault("column_mapping", {})
-                            topic_label_value = meta_data.get("topic_label", "")
-                            if isinstance(topic_label_value, str):
-                                item["topic_label"] = topic_label_value.strip()
-                            else:
-                                item.setdefault("topic_label", "")
                     except Exception:
                         item.setdefault("column_mapping", {})
                 else:
@@ -158,6 +188,8 @@ def list_project_datasets(project: str) -> List[Dict]:
                         item["topic_label"] = topic_label_value.strip()
                     else:
                         item["topic_label"] = ""
+                    item.setdefault("project_id", slug)
+                    item.setdefault("project_slug", slug)
             datasets.sort(key=lambda item: item.get("stored_at", ""), reverse=True)
             return datasets
     except Exception:
@@ -211,8 +243,9 @@ def find_dataset_by_id(dataset_id: str) -> Optional[Dict[str, Any]]:
             continue
         for record in datasets:
             if record.get("id") == dataset_id:
-                if "project_slug" not in record:
-                    record["project_slug"] = normalise_project_name(record.get("project", project_name))
+                identifier = normalise_project_name(record.get("project", project_name))
+                record.setdefault("project_id", identifier)
+                record.setdefault("project_slug", identifier)
                 return record
     return None
 
@@ -520,6 +553,7 @@ def update_dataset_column_mapping(
         {
             "id": dataset_id,
             "project": project,
+            "project_id": project_slug,
             "project_slug": project_slug,
             "columns": columns or meta_payload.get("columns", []),
             "column_mapping": sanitized_mapping,
@@ -539,6 +573,8 @@ def update_dataset_column_mapping(
     manifest_record = metadata.copy()
     manifest_record["column_mapping"] = sanitized_mapping
     manifest_record["topic_label"] = meta_payload.get("topic_label", "")
+    manifest_record["project_id"] = project_slug
+    manifest_record["project_slug"] = project_slug
     _write_manifest(project_slug, manifest_record)
 
     return {
@@ -663,6 +699,7 @@ def store_uploaded_dataset(
     metadata = {
         "id": dataset_id,
         "project": project,
+        "project_id": project_slug,
         "project_slug": project_slug,
         "display_name": original_name,
         "stored_at": timestamp.isoformat(),
