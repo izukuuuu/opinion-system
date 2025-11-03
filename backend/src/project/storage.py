@@ -677,8 +677,10 @@ def store_uploaded_dataset(
 
     timestamp = _dataset_timestamp()
     dataset_id = f"{timestamp.strftime('%Y%m%dT%H%M%S')}-{uuid4().hex[:8]}"
-    stored_name = secure_filename(original_name) or f"dataset{extension or 'jsonl'}"
-    stored_filename = f"{dataset_id}_{stored_name}"
+    original_path = Path(original_name)
+    safe_stem = secure_filename(original_path.stem) or "dataset"
+    stored_basename = f"{safe_stem}{extension}" if extension else safe_stem
+    stored_filename = f"{dataset_id}_{stored_basename}"
     store_path = original_dir / stored_filename
     file_storage.save(store_path)
 

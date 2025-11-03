@@ -4,17 +4,112 @@ AI相关性筛选功能
 import json
 import asyncio
 import time
-import aiohttp
-import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
+
+import pandas as pd
+
 from ..utils.setting.paths import bucket, ensure_bucket
-from ..utils.logging.logging import setup_logger, log_success, log_error, log_skip, log_module_start
+from ..utils.logging.logging import (
+    setup_logger,
+    log_success,
+    log_error,
+    log_skip,
+    log_module_start,
+)
 from ..utils.setting.settings import settings
-from ..utils.setting.env_loader import get_api_key
 from ..utils.io.excel import write_jsonl, read_jsonl
 from ..utils.ai import QwenClient, OpenAIClient
 from ..utils.ai.token import count_tokens
+
+
+def _load_progress(topic: str, date: str, channel: str) -> Dict[str, Any]:
+    """
+    加载进度记录
+
+    Args:
+        topic (str): 专题名称
+        date (str): 日期字符串
+        channel (str): 渠道名称
+
+    Returns:
+        Dict[str, Any]: 进度记录
+    """
+    progress_file = Path(__file__).parent / f"{topic}_{date}_{channel}_progress.json"
+    if progress_file.exists():
+        try:
+            with open(progress_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"completed_indices": [], "failed_indices": [], "total_count": 0, "results": []}
+
+
+def _save_progress(topic: str, date: str, channel: str, progress: Dict[str, Any]) -> None:
+    """
+    保存进度记录
+
+    Args:
+        topic (str): 专题名称
+        date (str): 日期字符串
+        channel (str): 渠道名称
+        progress (Dict[str, Any]): 进度记录
+    """
+    try:
+        progress_file = Path(__file__).parent / f"{topic}_{date}_{channel}_progress.json"
+        with open(progress_file, "w", encoding="utf-8") as f:
+            json.dump(progress, f, ensure_ascii=False, indent=2)
+    except Exception as exc:  # pragma: no cover - 记录失败不影响流程
+        print(f"保存进度记录失败: {exc}")
+
+
+def _save_partial_results(topic: str, date: str, channel: str, results_df: pd.DataFrame) -> None:
+    """
+    保存部分结果到JSONL文件
+
+    Args:
+        topic (str): 专题名称
+        date (str): 日期字符串
+        channel (str): 渠道名称
+        results_df (pd.DataFrame): 结果数据框
+    """
+    if results_df.empty:
+        return
+
+    try:
+        dst = ensure_bucket("filter", topic, date)
+        output_file = dst / f"{channel}.jsonl"
+
+        if output_file.exists():
+            try:
+                existing_df = read_jsonl(output_file)
+            except Exception:
+                existing_df = pd.DataFrame()
+            combined_df = pd.concat([existing_df, results_df], ignore_index=True)
+            if "contents" in combined_df.columns:
+                combined_df = combined_df.drop_duplicates(subset=["contents"], keep="last")
+            write_jsonl(combined_df, output_file)
+        else:
+            write_jsonl(results_df, output_file)
+    except Exception as exc:  # pragma: no cover - 写入失败不应中断整体流程
+        print(f"保存部分结果失败: {exc}")
+
+
+def _clear_progress(topic: str, date: str, channel: str) -> None:
+    """
+    清理进度记录文件
+
+    Args:
+        topic (str): 专题名称
+        date (str): 日期字符串
+        channel (str): 渠道名称
+    """
+    try:
+        progress_file = Path(__file__).parent / f"{topic}_{date}_{channel}_progress.json"
+        if progress_file.exists():
+            progress_file.unlink()
+    except Exception:
+        pass
 
 
 def _truncate(text: str, max_tokens: int, min_keep: int) -> str:
@@ -145,17 +240,21 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
     log_module_start(logger, "Filter")
 
     # 读取配置
-    llm_cfg = settings.get('llm', {}).get('filter_llm', {})
-    provider = (llm_cfg.get('provider') or 'qwen').lower()
-    model = llm_cfg.get('model', 'qwen-plus' if provider != 'openai' else 'gpt-3.5-turbo')
-    qps = int(llm_cfg.get('qps', 200))
-    max_tokens = int(llm_cfg.get('truncation', 200))
-    batch_size = int(llm_cfg.get('batch_size', 32))
+    llm_cfg = settings.get("llm", {}).get("filter_llm", {})
+    provider = (llm_cfg.get("provider") or "qwen").lower()
+    if provider == "openai":
+        model = llm_cfg.get("model", "gpt-3.5-turbo")
+    else:
+        provider = "qwen"
+        model = llm_cfg.get("model", "qwen-plus")
+    qps = int(llm_cfg.get("qps", 200))
+    max_tokens = int(llm_cfg.get("truncation", 200))
+    batch_size = int(llm_cfg.get("batch_size", 32))
 
     log_success(
         logger,
         f"使用模型: {model} (provider={provider}), QPS: {qps}, 截断长度: {max_tokens}, 批次大小: {batch_size}",
-        "Filter"
+        "Filter",
     )
 
     # 读取提示词模板
@@ -183,7 +282,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
         return False
 
     # 初始化客户端
-    if provider == 'openai':
+    if provider == "openai":
         client = OpenAIClient()
     else:
         client = QwenClient()
@@ -194,7 +293,12 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
     # QPS控制
     last_request_time = time.time()
 
-    async def call_with_qps(prompt: str, idx: int, channel: str, max_retries: int = 3) -> Tuple[int, Optional[str], int]:
+    async def call_with_qps(
+        prompt: str,
+        idx: int,
+        channel: str,
+        max_retries: int = 3,
+    ) -> Tuple[int, Optional[str], int, bool]:
         """
         带QPS控制和重试机制的API调用
 
@@ -205,7 +309,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
             max_retries (int): 最大重试次数
 
         Returns:
-            Tuple[int, Optional[str], int]: (索引, 响应内容, token消耗)
+            Tuple[int, Optional[str], int, bool]: (索引, 响应内容, token消耗, 是否成功)
         """
         nonlocal last_request_time
 
@@ -222,12 +326,12 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                 
                 last_request_time = time.time()
 
-                # 使用简化的qwen客户端
+                # 调用模型客户端执行推理
                 result = await client.call(prompt, model, max_tokens)
 
-                if result and result.get('text'):
-                    text_response = result['text']
-                    usage_info = result.get('usage', {})
+                if result and result.get("text"):
+                    text_response = result["text"]
+                    usage_info = result.get("usage", {})
 
                     # 解析响应并判断相关性
                     parsed = _parse_response(text_response)
@@ -235,125 +339,246 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                     classification = _get_classification(parsed)
 
                     # 获取实际token消耗
-                    total_tokens = usage_info.get('total_tokens', 0)
-                    if total_tokens == 0:
+                    total_token_usage = usage_info.get("total_tokens", 0)
+                    if total_token_usage == 0:
                         # 如果API没有返回token信息，则使用token计算器
                         input_tokens = count_tokens(prompt, model, provider)
                         output_tokens = count_tokens(text_response, model, provider)
-                        total_tokens = input_tokens + output_tokens
+                        total_token_usage = input_tokens + output_tokens
 
                     # 显示判断结果而不是原始响应
                     result_text = "相关" if is_relevant else "不相关"
                     if attempt > 0:
-                        log_success(logger, f"[{channel}] 任务{idx} 成功 (重试{attempt}次) | 结果: {result_text} | 分类: {classification} | Token: {total_tokens}", "Filter")
+                        log_success(
+                            logger,
+                            f"[{channel}] 任务{idx} 成功 (重试{attempt}次) | 结果: {result_text} | 分类: {classification} | Token: {total_token_usage}",
+                            "Filter",
+                        )
                     else:
-                        log_success(logger, f"[{channel}] 任务{idx} 成功 | 结果: {result_text} | 分类: {classification} | Token: {total_tokens}", "Filter")
+                        log_success(
+                            logger,
+                            f"[{channel}] 任务{idx} 成功 | 结果: {result_text} | 分类: {classification} | Token: {total_token_usage}",
+                            "Filter",
+                        )
 
-                    return idx, text_response, total_tokens
+                    return idx, text_response, total_token_usage, True
                 else:
                     if attempt < max_retries:
                         # 重试前等待更长时间
                         wait_time = (attempt + 1) * 2  # 递增等待时间
-                        log_error(logger, f"[{channel}] 任务{idx} 失败，{wait_time}秒后重试 (第{attempt + 1}次)", "Filter")
+                        log_error(
+                            logger,
+                            f"[{channel}] 任务{idx} 失败，{wait_time}秒后重试 (第{attempt + 1}次)",
+                            "Filter",
+                        )
                         await asyncio.sleep(wait_time)
                         continue
                     else:
                         log_error(logger, f"[{channel}] 任务{idx} 失败 | 无响应 (已重试{max_retries}次)", "Filter")
-                        return idx, None, 0
+                        return idx, None, 0, False
 
             except Exception as e:
                 if attempt < max_retries:
                     wait_time = (attempt + 1) * 2
-                    log_error(logger, f"[{channel}] 任务{idx} 异常，{wait_time}秒后重试 (第{attempt + 1}次) | {str(e)}", "Filter")
+                    log_error(
+                        logger,
+                        f"[{channel}] 任务{idx} 异常，{wait_time}秒后重试 (第{attempt + 1}次) | {str(e)}",
+                        "Filter",
+                    )
                     await asyncio.sleep(wait_time)
                     continue
                 else:
                     log_error(logger, f"[{channel}] 任务{idx} 异常 | {str(e)} (已重试{max_retries}次)", "Filter")
-                    return idx, None, 0
+                    return idx, None, 0, False
 
-        return idx, None, 0
+        return idx, None, 0, False
 
     # 处理每个渠道
     for fp in files:
         channel = fp.stem
-        if channel == 'all':
+        if channel == "all":
             continue
 
         log_success(logger, f"开始处理渠道: {channel}", "Filter")
-
         try:
             df = read_jsonl(fp)
             if df.empty:
                 log_skip(logger, f"{channel} 空数据，跳过", "Filter")
                 continue
 
-            # 构建 prompts
+            # 加载进度记录
+            progress = _load_progress(topic, date, channel)
+            completed_indices = set(progress.get("completed_indices", []))
+            failed_indices = set(progress.get("failed_indices", []))
+
+            # 构建 prompts 并过滤已完成的任务
             texts: List[str] = []
-            for _, r in df.iterrows():
-                c = r.get('contents', '')
+            pending_indices: List[int] = []
+
+            for idx, (_, r) in enumerate(df.iterrows()):
+                if idx in completed_indices:
+                    continue
+
+                c = r.get("contents", "")
                 if isinstance(c, str) and c.strip():
                     texts.append(_truncate(c, max_tokens, 50))  # min_keep设为50
+                    pending_indices.append(idx)
+                else:
+                    completed_indices.add(idx)
+                    failed_indices.discard(idx)
 
             if not texts:
-                log_skip(logger, f"{channel} 无有效文段，跳过", "Filter")
+                progress["completed_indices"] = list(completed_indices)
+                progress["failed_indices"] = list(failed_indices)
+                progress["total_count"] = len(df)
+                _save_progress(topic, date, channel, progress)
+
+                if completed_indices:
+                    log_success(logger, f"{channel} 所有任务已完成，跳过", "Filter")
+                else:
+                    log_skip(logger, f"{channel} 无有效文段，跳过", "Filter")
                 continue
 
-            prompts = [template.replace('{text}', t) for t in texts]
+            prompts = [template.replace("{text}", t) for t in texts]
 
-            # 批次并发处理，避免同时发送太多请求
-            # 使用配置文件中的batch_size，但确保在合理范围内
+            if completed_indices or failed_indices:
+                log_success(
+                    logger,
+                    f"{channel} 断点续传 | 已完成:{len(completed_indices)}, 失败:{len(failed_indices)}, 待处理:{len(texts)}",
+                    "Filter",
+                )
+
             actual_batch_size = batch_size
-            results = []
-            
-            for i in range(0, len(prompts), actual_batch_size):
-                batch_prompts = prompts[i:i + actual_batch_size]
-                batch_tasks = [
-                    asyncio.create_task(call_with_qps(prompt, i + j, channel))
-                    for j, prompt in enumerate(batch_prompts)
-                ]
-                
-                # 等待当前批次完成
-                batch_results = await asyncio.gather(*batch_tasks)
-                results.extend(batch_results)
-            
-
-            # 处理结果
-            responses = []
             channel_tokens = 0
 
-            for idx, response, tokens in results:
-                total_tasks += 1
-                responses.append(response)
-                channel_tokens += tokens
+            try:
+                for i in range(0, len(prompts), actual_batch_size):
+                    batch_prompts = prompts[i : i + actual_batch_size]
+                    batch_indices = pending_indices[i : i + actual_batch_size]
 
-                if response:
-                    successful_tasks += 1
-                    total_tokens += tokens
+                    batch_tasks = [
+                        asyncio.create_task(call_with_qps(prompt, batch_indices[j], channel))
+                        for j, prompt in enumerate(batch_prompts)
+                    ]
 
-            # 解析并筛选
-            parsed = [_parse_response(r or '') for r in responses]
-            mask = [_is_high(p) for p in parsed]
-            classifications = [_get_classification(p) for p in parsed]
-            out = df.iloc[:len(mask)].copy()
-            out['rel_raw'] = parsed
-            out['rel_score'] = mask
-            out['classification'] = classifications
-            out = out[out['rel_score'] == True]
+                    current_batch_results = await asyncio.gather(*batch_tasks)
 
-            log_success(logger, f"{channel} 完成 | 原始:{len(df)}, 相关:{len(out)}, Token消耗:{channel_tokens}", "Filter")
+                    batch_tokens = 0
+                    batch_responses: List[Optional[str]] = []
+                    for (idx, response, tokens, success), original_idx in zip(
+                        current_batch_results, batch_indices
+                    ):
+                        total_tasks += 1
+                        batch_tokens += tokens
+                        channel_tokens += tokens
+                        batch_responses.append(response)
 
-            # 保存结果
-            dst = ensure_bucket('filter', topic, date)
-            original_cols = [c for c in df.columns if c not in ['rel_raw', 'rel_score', 'classification']]
-            to_save = out[original_cols + ['classification']] if all(c in out.columns for c in original_cols) else out.drop(columns=['rel_raw','rel_score'], errors='ignore')
-            write_jsonl(to_save, dst / f"{channel}.jsonl")
+                        if response and success:
+                            successful_tasks += 1
+                            total_tokens += tokens
+                            completed_indices.add(idx)
+                            failed_indices.discard(idx)
+                        else:
+                            failed_indices.add(original_idx)
+
+                    parsed_batch = [_parse_response(r or "") for r in batch_responses]
+                    mask_batch = [_is_high(p) for p in parsed_batch]
+                    classifications_batch = [_get_classification(p) for p in parsed_batch]
+
+                    batch_df = df.iloc[batch_indices].copy()
+                    batch_df["rel_raw"] = parsed_batch
+                    batch_df["rel_score"] = mask_batch
+                    batch_df["classification"] = classifications_batch
+
+                    relevant_batch = batch_df[batch_df["rel_score"] == True]  # noqa: E712
+                    if not relevant_batch.empty:
+                        original_cols = [
+                            c for c in df.columns if c not in ["rel_raw", "rel_score", "classification"]
+                        ]
+                        if all(col in relevant_batch.columns for col in original_cols):
+                            to_save = relevant_batch[original_cols + ["classification"]]
+                        else:
+                            to_save = relevant_batch.drop(columns=["rel_raw", "rel_score"], errors="ignore")
+                        _save_partial_results(topic, date, channel, to_save)
+
+                    progress["completed_indices"] = list(completed_indices)
+                    progress["failed_indices"] = list(failed_indices)
+                    progress["total_count"] = len(df)
+                    _save_progress(topic, date, channel, progress)
+
+                    log_success(
+                        logger,
+                        f"{channel} 批次完成 | 进度:{len(completed_indices)}/{len(df)}, Token:{batch_tokens}",
+                        "Filter",
+                    )
+
+            except KeyboardInterrupt:
+                log_error(logger, f"{channel} 用户中断，保存当前进度", "Filter")
+                progress["completed_indices"] = list(completed_indices)
+                progress["failed_indices"] = list(failed_indices)
+                progress["total_count"] = len(df)
+                _save_progress(topic, date, channel, progress)
+                raise
+            except Exception as exc:
+                log_error(logger, f"{channel} 处理异常，保存当前进度: {exc}", "Filter")
+                progress["completed_indices"] = list(completed_indices)
+                progress["failed_indices"] = list(failed_indices)
+                progress["total_count"] = len(df)
+                _save_progress(topic, date, channel, progress)
+                continue
+
+            total_completed = len(completed_indices)
+            total_failed = len(failed_indices)
+
+            if total_completed == len(df):
+                log_success(
+                    logger,
+                    f"{channel} 完全完成 | 原始:{len(df)}, Token消耗:{channel_tokens}",
+                    "Filter",
+                )
+            else:
+                log_success(
+                    logger,
+                    f"{channel} 部分完成 | 原始:{len(df)}, 已完成:{total_completed}, 失败:{total_failed}, Token消耗:{channel_tokens}",
+                    "Filter",
+                )
 
         except Exception as e:
             log_error(logger, f"{channel} 处理失败: {e}", "Filter")
             continue
 
-    # 最终汇总
-    log_success(logger, f"筛选完成汇总 | 总任务:{total_tasks}, 成功:{successful_tasks}, 总Token:{total_tokens}", "Filter")
+    # 最终汇总与进度清理
+    all_channels_fully_completed = True
+    for fp in files:
+        channel = fp.stem
+        if channel == "all":
+            continue
+        progress = _load_progress(topic, date, channel)
+        completed_indices = set(progress.get("completed_indices", []))
+        total_count = progress.get("total_count", 0)
+        if total_count > 0 and len(completed_indices) < total_count:
+            all_channels_fully_completed = False
+            break
+
+    if all_channels_fully_completed:
+        log_success(logger, "所有渠道完全完成，清理进度记录文件", "Filter")
+        for fp in files:
+            channel = fp.stem
+            if channel != "all":
+                _clear_progress(topic, date, channel)
+        log_success(
+            logger,
+            f"筛选完全完成汇总 | 总任务:{total_tasks}, 成功:{successful_tasks}, 总Token:{total_tokens}",
+            "Filter",
+        )
+    else:
+        log_success(
+            logger,
+            f"筛选部分完成汇总 | 总任务:{total_tasks}, 成功:{successful_tasks}, 总Token:{total_tokens}",
+            "Filter",
+        )
+        log_success(logger, "部分渠道未完成，进度记录已保存，可重新运行继续处理", "Filter")
+
     return successful_tasks > 0
 
 

@@ -306,7 +306,7 @@ const navigationLinks = navigationGroups.reduce(
 
 const route = useRoute()
 const isLandingLayout = computed(() => route.meta?.layout === 'landing')
-const backendEntryRoute = { name: 'topic-create-overview' }
+const backendEntryRoute = { name: 'overview-datasets' }
 
 const pageTitle = computed(() => route.meta?.title ?? '')
 

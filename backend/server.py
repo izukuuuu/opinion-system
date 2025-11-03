@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -239,7 +240,183 @@ def _resolve_dataset_payload(project_name: str, dataset_id: Any) -> Dict[str, An
     return {}
 
 
-def _resolve_topic_identifier(payload: Dict[str, Any]) -> Tuple[str, str, str]:
+def _update_dataset_source_references(dataset_meta: Dict[str, Any]) -> None:
+    dataset_id = dataset_meta.get("id")
+    source_file = dataset_meta.get("source_file")
+    if not isinstance(dataset_id, str) or not dataset_id.strip():
+        return
+    if not isinstance(source_file, str) or not source_file.strip():
+        return
+
+    project_slug = (
+        dataset_meta.get("project_slug")
+        or dataset_meta.get("project_id")
+        or dataset_meta.get("project")
+        or ""
+    )
+    project_slug = str(project_slug).strip()
+    if not project_slug:
+        try:
+            parts = Path(source_file).parts
+            projects_idx = parts.index("projects")
+            project_slug = parts[projects_idx + 1]
+        except (ValueError, IndexError):
+            return
+
+    uploads_dir = DATA_PROJECTS_ROOT / project_slug / "uploads"
+    meta_path = uploads_dir / "meta" / f"{dataset_id}.json"
+    try:
+        if meta_path.exists():
+            with meta_path.open("r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                data["source_file"] = source_file
+                with meta_path.open("w", encoding="utf-8") as fh:
+                    json.dump(data, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        LOGGER.exception("Failed to update metadata file for dataset %s", dataset_id)
+
+    manifest_path = uploads_dir / "manifest.json"
+    try:
+        if manifest_path.exists():
+            with manifest_path.open("r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            changed = False
+            if isinstance(manifest, dict):
+                records = manifest.get("datasets")
+                if isinstance(records, list):
+                    for record in records:
+                        if isinstance(record, dict) and record.get("id") == dataset_id:
+                            record["source_file"] = source_file
+                            changed = True
+                            break
+            if changed:
+                with manifest_path.open("w", encoding="utf-8") as fh:
+                    json.dump(manifest, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        LOGGER.exception("Failed to update manifest for dataset %s", dataset_id)
+
+
+def _resolve_dataset_source_path(dataset_meta: Dict[str, Any]) -> Optional[Path]:
+    source_file = dataset_meta.get("source_file")
+    if not isinstance(source_file, str) or not source_file.strip():
+        return None
+
+    source_path = Path(source_file.strip())
+    if not source_path.is_absolute():
+        source_path = (PROJECT_ROOT / source_path).resolve()
+
+    if not source_path.exists():
+        LOGGER.warning(
+            "Dataset %s source file %s is missing; raw staging skipped",
+            dataset_meta.get("id"),
+            source_path,
+        )
+        return None
+
+    if source_path.suffix:
+        return source_path
+
+    display_name = dataset_meta.get("display_name")
+    suffix_hint = Path(str(display_name)).suffix.lower() if isinstance(display_name, str) else ""
+    if not suffix_hint:
+        name_lower = source_path.name.lower()
+        for token, extension in (
+            ("_xlsx", ".xlsx"),
+            ("_xls", ".xls"),
+            ("_csv", ".csv"),
+            ("_jsonl", ".jsonl"),
+        ):
+            if name_lower.endswith(token):
+                suffix_hint = extension
+                break
+
+    if not suffix_hint:
+        return source_path
+
+    dataset_id = str(dataset_meta.get("id") or source_path.stem or "dataset").strip() or "dataset"
+    new_path = source_path.with_name(f"{dataset_id}{suffix_hint}")
+
+    if new_path.exists():
+        return source_path
+
+    try:
+        source_path.rename(new_path)
+        dataset_meta["source_file"] = str(new_path.relative_to(PROJECT_ROOT))
+        _update_dataset_source_references(dataset_meta)
+        LOGGER.info(
+            "Renamed dataset %s source file to %s",
+            dataset_meta.get("id"),
+            new_path,
+        )
+        return new_path
+    except Exception:
+        LOGGER.exception(
+            "Failed to normalise source file name for dataset %s",
+            dataset_meta.get("id"),
+        )
+        return source_path
+
+
+def _ensure_raw_dataset_availability(topic_identifier: str, date: str, dataset_meta: Dict[str, Any]) -> None:
+    """
+    Ensure the merge stage can locate the original spreadsheet by copying it into the raw bucket.
+    """
+    if not dataset_meta:
+        return
+
+    source_path = _resolve_dataset_source_path(dataset_meta)
+    if source_path is None:
+        return
+
+    raw_dir = DATA_PROJECTS_ROOT / topic_identifier / "raw" / date
+    try:
+        raw_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        LOGGER.exception(
+            "Failed to create raw directory %s for dataset %s",
+            raw_dir,
+            dataset_meta.get("id"),
+        )
+        return
+
+    display_name = dataset_meta.get("display_name")
+    candidate_extension = source_path.suffix.lower()
+    if not candidate_extension and isinstance(display_name, str):
+        candidate_extension = Path(display_name).suffix.lower()
+    destination_name = source_path.name
+    if candidate_extension and not destination_name.lower().endswith(candidate_extension):
+        base_name = str(dataset_meta.get("id") or source_path.stem or "dataset").strip() or "dataset"
+        destination_name = f"{base_name}{candidate_extension}"
+
+    destination_path = raw_dir / destination_name
+    try:
+        if destination_path.exists():
+            try:
+                if destination_path.samefile(source_path):
+                    return
+            except (OSError, AttributeError):
+                try:
+                    if destination_path.stat().st_size == source_path.stat().st_size:
+                        return
+                except OSError:
+                    pass
+        shutil.copy2(source_path, destination_path)
+        LOGGER.info(
+            "Prepared raw input for dataset %s at %s",
+            dataset_meta.get("id"),
+            destination_path,
+        )
+    except Exception:
+        LOGGER.exception(
+            "Failed to copy dataset %s (%s) to raw directory %s",
+            dataset_meta.get("id"),
+            source_path,
+            raw_dir,
+        )
+
+
+def _resolve_topic_identifier(payload: Dict[str, Any]) -> Tuple[str, str, str, Dict[str, Any]]:
     project_name = str(payload.get("project") or "").strip()
     topic_label = str(payload.get("topic") or "").strip()
     dataset_meta = _resolve_dataset_payload(project_name, payload.get("dataset_id"))
@@ -293,14 +470,15 @@ def _resolve_topic_identifier(payload: Dict[str, Any]) -> Tuple[str, str, str]:
 
     log_project = project_name or dataset_meta.get("project") or resolved_topic
 
-    return resolved_topic, display_name, str(log_project)
+    return resolved_topic, display_name, str(log_project), dataset_meta
 
 
 def _prepare_pipeline_args(payload: Dict[str, Any]) -> Tuple[str, str, str]:
-    topic_identifier, display_name, log_project = _resolve_topic_identifier(payload)
+    topic_identifier, display_name, log_project, dataset_meta = _resolve_topic_identifier(payload)
     date = str(payload.get("date") or "").strip()
     if not date:
         raise ValueError("Missing required field(s): date")
+    _ensure_raw_dataset_availability(topic_identifier, date, dataset_meta)
     return topic_identifier, date, display_name or topic_identifier, log_project or topic_identifier
 
 
@@ -817,7 +995,7 @@ def fetch_endpoint():
         return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
 
     try:
-        topic_identifier, display_name, log_project = _resolve_topic_identifier(payload)
+        topic_identifier, display_name, log_project, _ = _resolve_topic_identifier(payload)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
@@ -856,7 +1034,7 @@ def analyze_endpoint():
         return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
 
     try:
-        topic_identifier, display_name, log_project = _resolve_topic_identifier(payload)
+        topic_identifier, display_name, log_project, _ = _resolve_topic_identifier(payload)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
@@ -899,7 +1077,7 @@ def get_analyze_results():
     }
 
     try:
-        topic_identifier, display_name, _ = _resolve_topic_identifier(payload)
+        topic_identifier, display_name, _, _ = _resolve_topic_identifier(payload)
     except ValueError:
         topic_identifier = (raw_topic or "").strip()
         if not topic_identifier:
