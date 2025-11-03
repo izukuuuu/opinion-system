@@ -444,7 +444,7 @@ def filter_status():
         return error(str(exc))
 
     status_payload = collect_filter_status(topic_identifier, date_param)
-    status_payload["ai_config"] = _filter_ai_overview()
+    status_payload["ai_config"] = filter_ai_overview()
     return success({"data": status_payload})
 
 
