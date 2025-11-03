@@ -2,8 +2,9 @@
 统一路径管理模块
 """
 import os
+import re
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 # 目录层级类型
 LAYERS = Literal['raw', 'merge', 'clean', 'filter', 'fetch', 'analyze', 'reports', 'results']
@@ -116,6 +117,18 @@ def get_configs_root() -> Path:
     return project_root / "configs"
 
 
+_TOPIC_NORMALISER = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _normalise_topic(topic: str) -> str:
+    """
+    将专题名称转换为文件系统友好格式，保持与上传数据存储一致。
+    非 ASCII 字符会被替换为短横线，空结果回退为 'project'。
+    """
+    text = _TOPIC_NORMALISER.sub("-", str(topic or "")).strip("- ").lower()
+    return text or "project"
+
+
 def _project_data_root(topic: str) -> Path:
     """
     获取项目级数据根目录（backend/data/projects/<topic>）
@@ -127,8 +140,16 @@ def _project_data_root(topic: str) -> Path:
         Path: 项目数据根目录
     """
     data_root = get_data_root() / "projects"
-    project_root = data_root / topic
-    return project_root
+    data_root.mkdir(parents=True, exist_ok=True)
+
+    topic = str(topic or "").strip()
+    if topic:
+        project_dir = data_root / topic
+        if project_dir.exists():
+            return project_dir
+
+    normalised_topic = _normalise_topic(topic)
+    return data_root / normalised_topic
 
 
 def bucket(layer: LAYERS, topic: str, date: str) -> Path:

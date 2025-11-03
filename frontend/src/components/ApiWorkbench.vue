@@ -134,7 +134,18 @@ const loading = reactive({
 const statusResult = ref('等待调用...')
 const pipelineResult = ref('等待调用...')
 const fetchResult = ref('等待调用...')
-const analyzeResult = ref('等待调用...')
+const analyzeResult = ref(
+  [
+    '等待调用...',
+    '',
+    '│   ├── 情感分析',
+    '│   ├── 话题分类',
+    '│   ├── 地域分析',
+    '│   ├── 关键词提取',
+    '│   ├── 趋势分析',
+    '│   └── 内容编码分析'
+  ].join('\n')
+)
 
 const pipelineForm = reactive({
   topic: '',

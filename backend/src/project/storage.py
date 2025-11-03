@@ -16,6 +16,9 @@ from werkzeug.utils import secure_filename
 from ..utils.io.excel import read_jsonl, write_jsonl
 
 __all__ = [
+    "normalise_project_name",
+    "get_dataset_metadata",
+    "find_dataset_by_id",
     "store_uploaded_dataset",
     "list_project_datasets",
     "get_dataset_preview",
@@ -35,6 +38,11 @@ def _normalise_project_name(name: str) -> str:
 
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("- ")
     return cleaned.lower() or "project"
+
+
+def normalise_project_name(name: str) -> str:
+    """Public helper to normalise project identifiers."""
+    return _normalise_project_name(str(name or ""))
 
 
 def _ensure_directories(project: str) -> Dict[str, Path]:
@@ -174,6 +182,39 @@ def _resolve_dataset_metadata(project: str, dataset_id: str) -> Dict[str, Any]:
         if item.get("id") == dataset_id:
             return item
     raise LookupError("指定的数据集不存在或已被移除")
+
+
+def get_dataset_metadata(project: str, dataset_id: str) -> Dict[str, Any]:
+    """Public helper to load metadata for a dataset within a project."""
+    if not project or not str(project).strip():
+        raise ValueError("项目名称不能为空")
+    if not dataset_id:
+        raise ValueError("数据集编号不能为空")
+    return _resolve_dataset_metadata(project, dataset_id)
+
+
+def find_dataset_by_id(dataset_id: str) -> Optional[Dict[str, Any]]:
+    """Locate dataset metadata by id across all projects."""
+    dataset_id = str(dataset_id or "").strip()
+    if not dataset_id:
+        return None
+
+    for project_dir in _DATA_ROOT.iterdir():
+        if not project_dir.is_dir():
+            continue
+        project_name = project_dir.name
+        try:
+            datasets = list_project_datasets(project_name)
+        except ValueError:
+            continue
+        except Exception:
+            continue
+        for record in datasets:
+            if record.get("id") == dataset_id:
+                if "project_slug" not in record:
+                    record["project_slug"] = normalise_project_name(record.get("project", project_name))
+                return record
+    return None
 
 
 _DATE_KEYWORDS = (

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import HomeView from '../views/HomeView.vue'
 import TopicCreationLayout from '../views/topics/TopicCreationLayout.vue'
 import TopicCreationOverview from '../views/topics/TopicCreationOverview.vue'
 import TopicUploadStep from '../views/topics/TopicUploadStep.vue'
@@ -12,11 +13,17 @@ import TestView from '../views/TestView.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
 import SettingsDatabasesView from '../views/settings/SettingsDatabasesView.vue'
 import SettingsAiView from '../views/settings/SettingsAiView.vue'
+import PlaceholderModuleView from '../views/PlaceholderModuleView.vue'
 
 export const routes = [
   {
     path: '/',
-    redirect: { name: 'topic-create-overview' }
+    name: 'home',
+    component: HomeView,
+    meta: {
+      title: '系统简介',
+      layout: 'landing'
+    }
   },
   {
     path: '/topics/new',
@@ -70,11 +77,101 @@ export const routes = [
     }
   },
   {
-    path: '/datasets/analysis',
+    path: '/analysis/basic',
     name: 'project-data-analysis',
     component: ProjectBasicAnalysisView,
     meta: {
       title: '专题基础分析'
+    }
+  },
+  {
+    path: '/analysis/interpretation',
+    name: 'data-interpretation-engine',
+    component: PlaceholderModuleView,
+    meta: {
+      title: '智能解读引擎',
+      placeholder: '智能解读引擎功能正在筹备，敬请期待。'
+    }
+  },
+  {
+    path: '/analysis/interpretation/tagrag',
+    name: 'data-interpretation-tagrag',
+    component: PlaceholderModuleView,
+    meta: {
+      title: 'TagRAG 集成',
+      placeholder: 'TagRAG 集成解读流程规划中。'
+    }
+  },
+  {
+    path: '/analysis/interpretation/multidimensional',
+    name: 'data-interpretation-multidimensional',
+    component: PlaceholderModuleView,
+    meta: {
+      title: '多维度解读',
+      placeholder: '多维度智能解读能力即将上线。'
+    }
+  },
+  {
+    path: '/data-acquisition/platform',
+    name: 'data-acquisition-platform',
+    component: PlaceholderModuleView,
+    meta: {
+      title: '平台数据获取',
+      placeholder: '平台数据获取能力规划中，敬请期待。'
+    }
+  },
+  {
+    path: '/analysis/deep/fluid-dynamics',
+    name: 'deep-analysis-fluid-dynamics',
+    component: PlaceholderModuleView,
+    meta: {
+      title: '舆论流体力学',
+      placeholder: '舆论流体力学模块建设中，敬请期待。'
+    }
+  },
+  {
+    path: '/retrieval/tagrag',
+    name: 'data-retrieval-tagrag',
+    component: PlaceholderModuleView,
+    meta: {
+      title: 'TagRAG 检索',
+      placeholder: '标签向量检索体验敬请期待。'
+    }
+  },
+  {
+    path: '/retrieval/routerrag',
+    name: 'data-retrieval-routerrag',
+    component: PlaceholderModuleView,
+    meta: {
+      title: 'RouterRAG 检索',
+      placeholder: 'RouterRAG 检索路由设计中。'
+    }
+  },
+  {
+    path: '/retrieval/routerrag/graph',
+    name: 'data-retrieval-routerrag-graph',
+    component: PlaceholderModuleView,
+    meta: {
+      title: 'GraphRAG（知识图谱）',
+      placeholder: '知识图谱驱动的 GraphRAG 检索方案筹备中。'
+    }
+  },
+  {
+    path: '/retrieval/routerrag/semantic',
+    name: 'data-retrieval-routerrag-semantic',
+    component: PlaceholderModuleView,
+    meta: {
+      title: 'NormalRAG（语义向量）',
+      placeholder: '语义向量检索（NormalRAG）正在建设。'
+    }
+  },
+  {
+    path: '/retrieval/routerrag/tag',
+    name: 'data-retrieval-routerrag-tag',
+    component: PlaceholderModuleView,
+    meta: {
+      title: 'TagRAG（标签向量）',
+      placeholder: 'RouterRAG 中的标签向量检索能力即将上线。'
     }
   },
   {

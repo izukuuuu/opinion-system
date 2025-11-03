@@ -1,5 +1,27 @@
 <template>
   <div class="min-h-screen bg-base text-primary">
+    <div
+      v-if="isLandingLayout"
+      class="flex min-h-screen flex-col"
+    >
+      <header class="flex items-center justify-between border-b border-soft bg-surface/90 px-6 py-4 backdrop-blur-sm sm:px-10">
+        <div class="flex items-center gap-3">
+          <span class="text-lg font-semibold text-primary">Opinion System</span>
+          <span class="hidden text-sm text-secondary sm:inline">舆情监测系统</span>
+        </div>
+        <RouterLink
+          :to="backendEntryRoute"
+          class="inline-flex items-center justify-center rounded-full bg-primary px-6 py-2 text-sm font-semibold text-surface shadow-sm transition hover:bg-primary/90 focus-ring-accent"
+        >
+          进入后台
+        </RouterLink>
+      </header>
+      <main class="flex-1">
+        <RouterView />
+      </main>
+    </div>
+
+    <template v-else>
     <aside
       v-if="sidebarCollapsed"
       class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-20 lg:flex-col lg:border-r border-soft lg:bg-surface"
@@ -120,11 +142,7 @@
         <header class="flex flex-col gap-4 border-b border-soft bg-surface px-6 py-6">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <p class="text-sm font-semibold uppercase tracking-[0.3em] text-muted">舆情监测系统</p>
-            <div class="inline-flex items-center gap-2 rounded-md border border-soft bg-surface-muted px-3 py-1.5 text-sm text-secondary" role="status" aria-live="polite">
-              <BriefcaseIcon class="h-4 w-4 text-muted" aria-hidden="true" />
-              <span class="font-medium text-muted">当前项目：</span>
-              <span class="font-semibold text-primary">{{ activeProjectName || '未选择项目' }}</span>
-            </div>
+            <ActiveProjectSwitcher />
           </div>
           <h1 class="text-2xl font-semibold text-primary md:text-3xl">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
         </header>
@@ -133,6 +151,7 @@
         </main>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
@@ -141,39 +160,32 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   BeakerIcon,
-  BriefcaseIcon,
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
   CircleStackIcon,
+  HomeIcon,
+  CloudArrowDownIcon,
   Cog6ToothIcon,
   DocumentArrowUpIcon,
+  ArrowsRightLeftIcon,
   PresentationChartLineIcon,
   Squares2X2Icon,
-  TableCellsIcon
+  TableCellsIcon,
+  MagnifyingGlassCircleIcon,
+  SparklesIcon,
+  ChartBarIcon
 } from '@heroicons/vue/24/outline'
-import { useActiveProject } from './composables/useActiveProject'
+import ActiveProjectSwitcher from './components/ActiveProjectSwitcher.vue'
 
 const navigationGroups = [
   {
-    label: '项目',
+    label: '主页',
     links: [
       {
-        label: '新建专题',
-        description: '上传数据并完成初始化流程',
-        to: { name: 'topic-create-overview' },
-        icon: Squares2X2Icon
-      },
-      {
-        label: '项目数据',
-        description: '导入 Excel 并生成数据存档',
-        to: { name: 'project-data' },
-        icon: DocumentArrowUpIcon
-      },
-      {
-        label: '基础分析',
-        description: '查看专题基础指标',
-        to: { name: 'project-data-analysis' },
-        icon: PresentationChartLineIcon
+        label: '系统简介',
+        description: 'OpinionSystem 平台概览',
+        to: { name: 'home' },
+        icon: HomeIcon
       }
     ]
   },
@@ -188,6 +200,80 @@ const navigationGroups = [
       }
     ]
   },
+  {
+    label: '数据获取',
+    links: [
+      {
+        label: '平台数据获取',
+        description: '通过 API 获得公开平台数据',
+        to: { name: 'data-acquisition-platform' },
+        icon: CloudArrowDownIcon
+      }
+    ]
+  },
+  {
+    label: '项目管理',
+    links: [
+      {
+        label: '新建专题',
+        description: '上传数据并完成初始化流程',
+        to: { name: 'topic-create-overview' },
+        icon: Squares2X2Icon
+      },
+      {
+        label: '项目数据',
+        description: '导入 Excel 并生成数据存档',
+        to: { name: 'project-data' },
+        icon: DocumentArrowUpIcon
+      }
+    ]
+  },
+  {
+    label: '舆情特征',
+    links: [
+      {
+        label: '基础分析',
+        description: '查看专题基础指标',
+        to: { name: 'project-data-analysis' },
+        icon: PresentationChartLineIcon
+      },
+      {
+        label: '智能解读',
+        description: '舆情特征智能解读',
+        to: { name: 'data-interpretation-engine' },
+        icon: SparklesIcon
+      }
+    ]
+  },
+  {
+    label: '深度分析',
+    links: [
+      {
+        label: '舆论流体力学',
+        description: '舆情发展趋势洞察',
+        to: { name: 'deep-analysis-fluid-dynamics' },
+        icon: ChartBarIcon
+      }
+    ]
+  },
+  {
+    label: '数据检索',
+    links: [
+      {
+        label: 'TagRAG 检索',
+        description: '基于标签的智能问答',
+        to: { name: 'data-retrieval-tagrag' },
+        icon: MagnifyingGlassCircleIcon
+      },
+      {
+        label: 'RouterRAG 检索',
+        description: '多模型协同智能问答',
+        to: { name: 'data-retrieval-routerrag' },
+        icon: ArrowsRightLeftIcon
+      }
+    ]
+  },
+
   {
     label: '工具',
     links: [
@@ -219,10 +305,10 @@ const navigationLinks = navigationGroups.reduce(
 )
 
 const route = useRoute()
+const isLandingLayout = computed(() => route.meta?.layout === 'landing')
+const backendEntryRoute = { name: 'topic-create-overview' }
 
 const pageTitle = computed(() => route.meta?.title ?? '')
-
-const { activeProjectName } = useActiveProject()
 
 const mediaQuery =
   typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)') : null

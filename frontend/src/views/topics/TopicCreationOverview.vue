@@ -92,7 +92,7 @@ const stages = [
     title: '数据预处理',
     subtitle: '执行合并、清洗与筛选',
     description:
-      '根据专题日期执行 Merge、Clean、Filter 三个步骤，生成符合分析标准的结构化数据。',
+      '根据当前处理日期执行 Merge、Clean、Filter 三个步骤，生成符合分析标准的结构化数据。',
     route: { name: 'topic-create-preprocess' }
   },
   {

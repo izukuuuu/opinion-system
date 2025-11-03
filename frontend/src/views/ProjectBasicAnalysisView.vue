@@ -15,23 +15,24 @@
 
     <section class="card-surface space-y-6 p-6 text-sm text-secondary">
       <header class="space-y-2">
-        <h2 class="text-xl font-semibold text-primary">分析面板建设中</h2>
-        <p>
-          计划提供词云、情感倾向、热度趋势等基础指标，帮助团队快速理解专题表现并指导后续研判。
-        </p>
+        <h2 class="text-xl font-semibold text-primary">分析模块规划中</h2>
+        <p>以下功能正在搭建中，敬请期待。</p>
       </header>
-      <div class="rounded-3xl border border-dashed border-brand-soft bg-brand-soft-muted p-5 text-sm text-brand-600">
-        当前可通过命令行或 Notebook 运行
-        <code class="rounded bg-brand-soft px-1 py-0.5 text-xs text-brand-600">analyze</code>
-        模块获取统计结果。界面版分析将在后续迭代中上线。
+      <div class="rounded-3xl border border-dashed border-brand-soft bg-brand-soft-muted p-5 font-mono text-sm text-brand-600">
+        <pre class="whitespace-pre text-brand-700" v-text="placeholderTree"></pre>
       </div>
-      <p>
-        具体请移步测试页面。
-      </p>
     </section>
   </div>
 </template>
 
 <script setup>
 import { BeakerIcon } from '@heroicons/vue/24/outline'
+
+const placeholderTree = `专题基础分析
+├── 情感分析
+│   ├── 话题分类
+│   ├── 地域分析
+│   ├── 关键词提取
+│   ├── 趋势分析
+│   └── 内容编码分析`
 </script>

@@ -23,10 +23,13 @@ for path in (BACKEND_DIR, SRC_DIR):
         sys.path.insert(0, str(path))
 
 from src.project import (  # type: ignore
+    find_dataset_by_id,
+    get_dataset_metadata,
     get_dataset_date_summary,
     get_dataset_preview,
     get_project_manager,
     list_project_datasets,
+    normalise_project_name,
     update_dataset_column_mapping,
     store_uploaded_dataset,
 )
@@ -47,6 +50,7 @@ ANALYZE_FILE_MAP = {
     "classification": "classification.json",
 }
 DEFAULT_ANALYZE_FILENAME = "result.json"
+DATA_PROJECTS_ROOT = BACKEND_DIR / "data" / "projects"
 
 
 def _load_config() -> Dict[str, Any]:
@@ -204,6 +208,92 @@ def _parse_column_mapping_payload(raw: Any) -> Dict[str, str]:
     return normalized
 
 
+def _iter_unique_strings(values: List[Any]) -> List[str]:
+    seen = set()
+    ordered: List[str] = []
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
+
+
+def _resolve_dataset_payload(project_name: str, dataset_id: Any) -> Dict[str, Any]:
+    dataset_id_str = str(dataset_id or "").strip()
+    if not dataset_id_str:
+        return {}
+
+    if project_name:
+        try:
+            return get_dataset_metadata(project_name, dataset_id_str)
+        except (LookupError, ValueError):
+            pass
+
+    metadata = find_dataset_by_id(dataset_id_str)
+    if metadata:
+        return metadata
+    return {}
+
+
+def _resolve_topic_identifier(payload: Dict[str, Any]) -> Tuple[str, str, str]:
+    project_name = str(payload.get("project") or "").strip()
+    topic_label = str(payload.get("topic") or "").strip()
+    dataset_meta = _resolve_dataset_payload(project_name, payload.get("dataset_id"))
+
+    candidates: List[str] = []
+    if dataset_meta:
+        slug = dataset_meta.get("project_slug")
+        if isinstance(slug, str):
+            candidates.append(slug)
+        meta_project = dataset_meta.get("project")
+        if isinstance(meta_project, str):
+            candidates.append(meta_project)
+        meta_topic = dataset_meta.get("topic_label")
+        if isinstance(meta_topic, str):
+            candidates.append(meta_topic)
+
+    if project_name:
+        candidates.append(normalise_project_name(project_name))
+        candidates.append(project_name)
+
+    if topic_label:
+        candidates.append(topic_label)
+
+    ordered_candidates = _iter_unique_strings(candidates)
+    if not ordered_candidates:
+        raise ValueError("Missing required field(s): topic or project")
+
+    resolved_topic = next(
+        (candidate for candidate in ordered_candidates if (DATA_PROJECTS_ROOT / candidate).exists()),
+        None,
+    )
+    if not resolved_topic:
+        resolved_topic = ordered_candidates[0]
+
+    display_name = (
+        topic_label
+        or (dataset_meta.get("topic_label") if isinstance(dataset_meta.get("topic_label"), str) else None)
+        or project_name
+        or resolved_topic
+    )
+
+    log_project = project_name or dataset_meta.get("project") or resolved_topic
+
+    return resolved_topic, display_name, str(log_project)
+
+
+def _prepare_pipeline_args(payload: Dict[str, Any]) -> Tuple[str, str, str]:
+    topic_identifier, display_name, log_project = _resolve_topic_identifier(payload)
+    date = str(payload.get("date") or "").strip()
+    if not date:
+        raise ValueError("Missing required field(s): date")
+    return topic_identifier, date, display_name or topic_identifier, log_project or topic_identifier
+
+
 def _parse_column_mapping_from_form(form: Dict[str, Any]) -> Dict[str, str]:
     initial = _parse_column_mapping_payload(form.get("column_mapping"))
     for key in ("date", "title", "content", "author"):
@@ -278,13 +368,15 @@ def _persist_llm_config(config: Dict[str, Any]) -> None:
     _reload_settings()
 
 
-def _run_data_pipeline(topic: str, date: str) -> Dict[str, Any]:
+def _run_data_pipeline(topic: str, date: str, *, project: Optional[str] = None, topic_label: Optional[str] = None) -> Dict[str, Any]:
     """
     Run Merge → Clean → Filter → Upload sequentially.
 
     Args:
         topic: Project/topic identifier.
         date: Date string in YYYY-MM-DD format.
+        project: Canonical project name used for logging.
+        topic_label: Optional display name recorded in logs.
 
     Returns:
         Dict[str, Any]: Structured status report with per-step results.
@@ -301,11 +393,19 @@ def _run_data_pipeline(topic: str, date: str) -> Dict[str, Any]:
         ("upload", run_update),
     ]
 
+    log_project = project or topic
+    params: Dict[str, Any] = {
+        "date": date,
+        "source": "api.pipeline",
+        "bucket": topic,
+    }
+    if topic_label:
+        params["topic"] = topic_label
+
     step_context = {
-        "project": topic,
+        "project": log_project,
         "params": {
-            "date": date,
-            "source": "api.pipeline",
+            **params,
         },
     }
     steps: List[Dict[str, Any]] = []
@@ -545,20 +645,26 @@ def delete_llm_preset(preset_id: str):
 @app.post("/api/merge")
 def merge_endpoint():
     payload = request.get_json(silent=True) or {}
-    valid, error = _require_fields(payload, "topic", "date")
-    if not valid:
-        return jsonify(error), 400
+    try:
+        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     from src.merge import run_merge  # type: ignore
 
     response, code = _execute_operation(
         "merge",
         run_merge,
-        payload["topic"],
-        payload["date"],
+        topic_identifier,
+        date,
         log_context={
-            "project": payload["topic"],
-            "params": {"date": payload["date"], "source": "api"},
+            "project": log_project,
+            "params": {
+                "date": date,
+                "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
+            },
         },
     )
     return jsonify(response), code
@@ -567,20 +673,26 @@ def merge_endpoint():
 @app.post("/api/clean")
 def clean_endpoint():
     payload = request.get_json(silent=True) or {}
-    valid, error = _require_fields(payload, "topic", "date")
-    if not valid:
-        return jsonify(error), 400
+    try:
+        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     from src.clean import run_clean  # type: ignore
 
     response, code = _execute_operation(
         "clean",
         run_clean,
-        payload["topic"],
-        payload["date"],
+        topic_identifier,
+        date,
         log_context={
-            "project": payload["topic"],
-            "params": {"date": payload["date"], "source": "api"},
+            "project": log_project,
+            "params": {
+                "date": date,
+                "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
+            },
         },
     )
     return jsonify(response), code
@@ -589,20 +701,26 @@ def clean_endpoint():
 @app.post("/api/filter")
 def filter_endpoint():
     payload = request.get_json(silent=True) or {}
-    valid, error = _require_fields(payload, "topic", "date")
-    if not valid:
-        return jsonify(error), 400
+    try:
+        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     from src.filter import run_filter  # type: ignore
 
     response, code = _execute_operation(
         "filter",
         run_filter,
-        payload["topic"],
-        payload["date"],
+        topic_identifier,
+        date,
         log_context={
-            "project": payload["topic"],
-            "params": {"date": payload["date"], "source": "api"},
+            "project": log_project,
+            "params": {
+                "date": date,
+                "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
+            },
         },
     )
     return jsonify(response), code
@@ -611,20 +729,26 @@ def filter_endpoint():
 @app.post("/api/upload")
 def upload_endpoint():
     payload = request.get_json(silent=True) or {}
-    valid, error = _require_fields(payload, "topic", "date")
-    if not valid:
-        return jsonify(error), 400
+    try:
+        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     from src.update import run_update  # type: ignore
 
     response, code = _execute_operation(
         "upload",
         run_update,
-        payload["topic"],
-        payload["date"],
+        topic_identifier,
+        date,
         log_context={
-            "project": payload["topic"],
-            "params": {"date": payload["date"], "source": "api"},
+            "project": log_project,
+            "params": {
+                "date": date,
+                "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
+            },
         },
     )
     return jsonify(response), code
@@ -633,18 +757,26 @@ def upload_endpoint():
 @app.post("/api/pipeline")
 def pipeline_endpoint():
     payload = request.get_json(silent=True) or {}
-    valid, error = _require_fields(payload, "topic", "date")
-    if not valid:
-        return jsonify(error), 400
+    try:
+        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     response, code = _execute_operation(
         "pipeline",
         _run_data_pipeline,
-        payload["topic"],
-        payload["date"],
+        topic_identifier,
+        date,
+        project=log_project,
+        topic_label=display_name,
         log_context={
-            "project": payload["topic"],
-            "params": {"date": payload["date"], "source": "api"},
+            "project": log_project,
+            "params": {
+                "date": date,
+                "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
+            },
         },
     )
     return jsonify(response), code
@@ -665,24 +797,36 @@ def query_endpoint():
 @app.post("/api/fetch")
 def fetch_endpoint():
     payload = request.get_json(silent=True) or {}
-    valid, error = _require_fields(payload, "topic", "start", "end")
+    valid, error = _require_fields(payload, "start", "end")
     if not valid:
         return jsonify(error), 400
+
+    start = str(payload.get("start") or "").strip()
+    end = str(payload.get("end") or "").strip()
+    if not start or not end:
+        return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
+
+    try:
+        topic_identifier, display_name, log_project = _resolve_topic_identifier(payload)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     from src.fetch import run_fetch  # type: ignore
 
     response, code = _execute_operation(
         "fetch",
         run_fetch,
-        payload["topic"],
-        payload["start"],
-        payload["end"],
+        topic_identifier,
+        start,
+        end,
         log_context={
-            "project": payload["topic"],
+            "project": log_project,
             "params": {
-                "start": payload["start"],
-                "end": payload["end"],
+                "start": start,
+                "end": end,
                 "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
             },
         },
     )
@@ -692,9 +836,19 @@ def fetch_endpoint():
 @app.post("/api/analyze")
 def analyze_endpoint():
     payload = request.get_json(silent=True) or {}
-    valid, error = _require_fields(payload, "topic", "start", "end")
+    valid, error = _require_fields(payload, "start", "end")
     if not valid:
         return jsonify(error), 400
+
+    start = str(payload.get("start") or "").strip()
+    end = str(payload.get("end") or "").strip()
+    if not start or not end:
+        return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
+
+    try:
+        topic_identifier, display_name, log_project = _resolve_topic_identifier(payload)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     func = payload.get("function")
 
@@ -703,17 +857,19 @@ def analyze_endpoint():
     response, code = _execute_operation(
         "analyze",
         run_Analyze,
-        payload["topic"],
-        payload["start"],
-        end_date=payload["end"],
+        topic_identifier,
+        start,
+        end_date=end,
         only_function=func,
         log_context={
-            "project": payload["topic"],
+            "project": log_project,
             "params": {
-                "start": payload["start"],
-                "end": payload["end"],
+                "start": start,
+                "end": end,
                 "function": func,
                 "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
             },
         },
     )
@@ -722,10 +878,29 @@ def analyze_endpoint():
 
 @app.get("/api/analyze/results")
 def get_analyze_results():
-    topic = (request.args.get("topic") or "").strip()
+    raw_topic = request.args.get("topic")
+    raw_project = request.args.get("project")
+    raw_dataset_id = request.args.get("dataset_id")
+
+    payload = {
+        "topic": raw_topic,
+        "project": raw_project,
+        "dataset_id": raw_dataset_id,
+    }
+
+    try:
+        topic_identifier, display_name, _ = _resolve_topic_identifier(payload)
+    except ValueError:
+        topic_identifier = (raw_topic or "").strip()
+        if not topic_identifier:
+            return _error("Missing required query parameters: topic or project")
+        display_name = raw_topic or raw_project or topic_identifier
+
+    topic_display = display_name or raw_topic or raw_project or topic_identifier
+
     start = (request.args.get("start") or "").strip()
-    if not topic or not start:
-        return _error("Missing required query parameters: topic, start")
+    if not start:
+        return _error("Missing required query parameters: start")
 
     end = (request.args.get("end") or "").strip() or None
     function_alias = (request.args.get("function") or "").strip().lower() or None
@@ -735,7 +910,7 @@ def get_analyze_results():
     if not folder_name:
         return _error("Invalid start date supplied")
 
-    analyze_root = bucket("analyze", topic, folder_name)
+    analyze_root = bucket("analyze", topic_identifier, folder_name)
     if not analyze_root.exists():
         return _error("未找到对应的分析结果目录", status_code=404)
 
@@ -793,15 +968,15 @@ def get_analyze_results():
     if not results:
         return _error("未找到匹配的分析结果文件", status_code=404)
 
-    payload = {
-        "topic": topic,
+    response_payload = {
+        "topic": topic_display,
         "range": {
             "start": start,
             "end": end or start,
         },
         "functions": results,
     }
-    return _success(payload)
+    return _success(response_payload)
 
 
 @app.get("/api/projects")

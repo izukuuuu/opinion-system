@@ -260,7 +260,7 @@
             v-for="project in projects"
             :key="project.name"
             :class="[
-              'rounded-2xl border transition focus-within:ring-2 focus-within:ring-indigo-200 focus-within:ring-offset-2',
+              'relative rounded-2xl border transition focus-within:ring-2 focus-within:ring-indigo-200 focus-within:ring-offset-2',
               project.name === selectedProject
                 ? 'border-brand bg-brand text-white'
                 : 'border-transparent bg-surface-muted hover:border-brand-soft hover:bg-brand-soft-muted'
@@ -268,7 +268,7 @@
           >
             <button
               type="button"
-              class="flex w-full flex-col gap-1.5 px-4 py-3 text-left transition"
+              class="flex w-full flex-col gap-1.5 px-4 py-3 pr-12 text-left transition"
               @click="selectProject(project.name)"
             >
               <span
@@ -277,7 +277,16 @@
                   project.name === selectedProject ? 'text-white' : 'text-slate-800'
                 ]"
               >
-                {{ project.name }}
+                {{ project.display_name }}
+              </span>
+              <span
+                v-if="project.display_name !== project.name"
+                :class="[
+                  'text-xs transition-colors',
+                  project.name === selectedProject ? 'text-white/70' : 'text-slate-500'
+                ]"
+              >
+                标识：{{ project.name }}
               </span>
               <span
                 v-if="project.description"
@@ -305,6 +314,37 @@
                 目录：{{ getUploadDirectory(project.slug) }}
               </span>
             </button>
+            <div class="absolute right-3 top-3 z-10 flex flex-col items-end">
+              <button
+                type="button"
+                class="inline-flex h-8 w-8 items-center justify-center rounded-full transition"
+                :class="project.name === selectedProject ? 'text-white hover:bg-white/10 focus-visible:outline-white/60' : 'text-slate-500 hover:bg-slate-200/60 focus-visible:outline-slate-400/40'"
+                @click.stop="toggleProjectMenu(project.name)"
+              >
+                <EllipsisVerticalIcon class="h-5 w-5" />
+              </button>
+              <div
+                v-if="projectActionMenu === project.name"
+                class="mt-2 w-36 rounded-2xl border border-slate-200 bg-white p-2 text-left text-sm text-slate-600 shadow-lg"
+              >
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-slate-100"
+                  @click.stop="openProjectEditor(project)"
+                >
+                  <PencilSquareIcon class="h-4 w-4" />
+                  编辑项目
+                </button>
+                <button
+                  type="button"
+                  class="mt-1 flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-rose-600 hover:bg-rose-50"
+                  @click.stop="confirmProjectDelete(project)"
+                >
+                  <TrashIcon class="h-4 w-4" />
+                  删除项目
+                </button>
+              </div>
+            </div>
           </li>
         </ul>
         <p
@@ -332,7 +372,7 @@
         <div class="card-surface space-y-6 p-6">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <h2 class="text-lg font-semibold text-slate-900">上传表格</h2>
-            <span v-if="selectedProject" class="badge-soft bg-indigo-100 text-indigo-600">当前项目：{{ selectedProject }}</span>
+            <span v-if="selectedProject" class="badge-soft bg-indigo-100 text-indigo-600">当前项目：{{ selectedProjectDisplayName }}</span>
           </div>
           <p class="text-sm text-slate-500">
             支持 .xlsx、.xls、.csv、.jsonl 文件，系统会为每份数据生成同名的 JSONL 与 PKL 文件，方便在后续流程中直接读取。
@@ -461,14 +501,99 @@
         </div>
       </section>
     </div>
+    <div
+      v-if="editingProject"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6"
+      @click.self="closeProjectEditor"
+    >
+      <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl">
+        <header class="mb-4 space-y-1">
+          <h3 class="text-lg font-semibold text-slate-900">编辑项目</h3>
+          <p class="text-sm text-slate-500">更新项目的展示名称与描述信息，原始标识将保持不变。</p>
+        </header>
+        <form class="space-y-4" @submit.prevent="submitProjectEdit">
+          <label class="block space-y-1 text-sm">
+            <span class="font-medium text-slate-700">展示名称</span>
+            <input
+              v-model.trim="projectForm.displayName"
+              type="text"
+              required
+              class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              placeholder="在列表中显示的名称"
+            />
+            <p class="text-xs text-slate-400">原始标识：{{ editingProject && editingProject.name }}</p>
+          </label>
+          <label class="block space-y-1 text-sm">
+            <span class="font-medium text-slate-700">简介</span>
+            <textarea
+              v-model.trim="projectForm.description"
+              rows="4"
+              class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              placeholder="记录该项目的用途或数据来源"
+            />
+          </label>
+          <p v-if="projectEditError" class="text-sm text-rose-600">{{ projectEditError }}</p>
+          <div class="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              class="rounded-full border border-slate-200 px-4 py-1.5 text-sm text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
+              @click="closeProjectEditor"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              class="rounded-full bg-indigo-600 px-5 py-1.5 text-sm font-semibold text-white shadow transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+              :disabled="projectEditLoading"
+            >
+              {{ projectEditLoading ? '保存中…' : '保存修改' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div
+      v-if="deletingProject"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6"
+      @click.self="cancelProjectDelete"
+    >
+      <div class="w-full max-w-sm rounded-3xl bg-white p-6 text-sm text-slate-600 shadow-xl">
+        <header class="mb-3 space-y-1">
+          <h3 class="text-lg font-semibold text-slate-900">确认删除项目</h3>
+          <p>此操作会移除项目的配置记录，但不会自动清理对应目录中的文件。</p>
+        </header>
+        <p class="mb-4 text-xs text-slate-500">
+          目标项目：{{ deletingProject.display_name }}（标识：{{ deletingProject.name }}）
+        </p>
+        <p v-if="projectDeleteError" class="mb-3 text-sm text-rose-600">{{ projectDeleteError }}</p>
+        <div class="flex items-center justify-end gap-3">
+          <button
+            type="button"
+            class="rounded-full border border-slate-200 px-4 py-1.5 text-sm text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
+            @click="cancelProjectDelete"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="rounded-full bg-rose-600 px-5 py-1.5 text-sm font-semibold text-white shadow transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:bg-rose-300"
+            :disabled="projectDeleteLoading"
+            @click="deleteProject"
+          >
+            {{ projectDeleteLoading ? '删除中…' : '确认删除' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 
 <script setup>
 import { FlexRender, getCoreRowModel, useVueTable } from '@tanstack/vue-table'
-import { ChevronLeftIcon } from '@heroicons/vue/24/outline'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ChevronLeftIcon, EllipsisVerticalIcon, PencilSquareIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useActiveProject } from '../composables/useActiveProject'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
@@ -509,12 +634,27 @@ const mappingSaving = ref(false)
 const mappingError = ref('')
 const mappingSuccess = ref('')
 
+const projectActionMenu = ref('')
+const editingProject = ref(null)
+const projectForm = reactive({
+  displayName: '',
+  description: ''
+})
+const projectEditLoading = ref(false)
+const projectEditError = ref('')
+const deletingProject = ref(null)
+const projectDeleteLoading = ref(false)
+const projectDeleteError = ref('')
+
 const { activeProject, activeProjectName, setActiveProject, clearActiveProject } = useActiveProject()
 const selectedProject = computed(() => activeProjectName.value)
 const selectedProjectMeta = computed(() =>
   activeProjectName.value
     ? projects.value.find((project) => project.name === activeProjectName.value) || null
     : null
+)
+const selectedProjectDisplayName = computed(() =>
+  selectedProjectMeta.value?.display_name || selectedProject.value
 )
 const selectedDataset = computed(() =>
   activeDatasetId.value
@@ -600,14 +740,25 @@ const formatFileSize = (size) => {
 
 const normalizeProject = (project) => {
   if (!project || typeof project !== 'object') return null
-  const name = project.name || ''
+  const name = String(project.name || '')
   const slug = normaliseProjectName(name)
+  const metadata =
+    project.metadata && typeof project.metadata === 'object'
+      ? { ...project.metadata }
+      : {}
+  const displayNameSource = metadata.display_name
+  const displayName =
+    typeof displayNameSource === 'string' && displayNameSource.trim()
+      ? displayNameSource.trim()
+      : name
   return {
     description: '',
     metadata: {},
     ...project,
     name,
-    slug
+    slug,
+    metadata,
+    display_name: displayName
   }
 }
 
@@ -643,6 +794,120 @@ const normalizeDataset = (dataset) => {
         ? dataset.column_mapping
         : {},
     topic_label: typeof dataset.topic_label === 'string' ? dataset.topic_label.trim() : ''
+  }
+}
+
+const upsertProjectInList = (payload) => {
+  const normalized = normalizeProject(payload)
+  if (!normalized) return
+  const others = projects.value.filter((item) => item.name !== normalized.name)
+  const sorted = [normalized, ...others].sort((a, b) =>
+    String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+  )
+  projects.value = sorted
+  if (activeProjectName.value === normalized.name) {
+    setActiveProject(normalized)
+  }
+}
+
+const toggleProjectMenu = (projectName) => {
+  projectActionMenu.value = projectActionMenu.value === projectName ? '' : projectName
+}
+
+const openProjectEditor = (project) => {
+  if (!project) return
+  editingProject.value = project
+  projectForm.displayName = project.display_name || project.name || ''
+  projectForm.description = project.description || ''
+  projectEditError.value = ''
+  projectActionMenu.value = ''
+}
+
+const closeProjectEditor = () => {
+  editingProject.value = null
+  projectEditError.value = ''
+  projectForm.displayName = ''
+  projectForm.description = ''
+}
+
+const submitProjectEdit = async () => {
+  if (!editingProject.value) return
+  const displayName = projectForm.displayName.trim()
+  if (!displayName) {
+    projectEditError.value = '展示名称不能为空'
+    return
+  }
+  projectEditLoading.value = true
+  projectEditError.value = ''
+  try {
+    const metadata = {
+      ...(editingProject.value.metadata || {}),
+      display_name: displayName
+    }
+    const payload = {
+      name: editingProject.value.name,
+      description: projectForm.description || '',
+      metadata
+    }
+    const response = await fetch(`${API_BASE_URL}/projects`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok || !result || result.status !== 'ok') {
+      const message = result?.message || '项目保存失败'
+      throw new Error(message)
+    }
+    upsertProjectInList(result.project)
+    closeProjectEditor()
+  } catch (err) {
+    projectEditError.value = err instanceof Error ? err.message : '项目保存失败'
+  } finally {
+    projectEditLoading.value = false
+  }
+}
+
+const confirmProjectDelete = (project) => {
+  deletingProject.value = project || null
+  projectDeleteError.value = ''
+  projectActionMenu.value = ''
+}
+
+const cancelProjectDelete = () => {
+  deletingProject.value = null
+  projectDeleteError.value = ''
+}
+
+const deleteProject = async () => {
+  if (!deletingProject.value) return
+  projectDeleteLoading.value = true
+  projectDeleteError.value = ''
+  const targetName = deletingProject.value.name
+  try {
+    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(targetName)}`, {
+      method: 'DELETE'
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok || !result || result.status !== 'ok') {
+      const message = result?.message || '删除项目失败'
+      throw new Error(message)
+    }
+    projects.value = projects.value.filter((item) => item.name !== targetName)
+    if (activeProjectName.value === targetName) {
+      clearActiveProject()
+      clearActiveDatasetSelection()
+      if (projects.value.length) {
+        setActiveProject(projects.value[0])
+      }
+    }
+    deletingProject.value = null
+  } catch (err) {
+    projectDeleteError.value = err instanceof Error ? err.message : '删除项目失败'
+  } finally {
+    projectDeleteLoading.value = false
   }
 }
 
@@ -868,6 +1133,7 @@ const uploadHelper = computed(() => {
 const fetchProjects = async () => {
   projectLoading.value = true
   projectError.value = ''
+  projectActionMenu.value = ''
   try {
     const response = await fetch(`${API_BASE_URL}/projects`)
     const payload = await response.json().catch(() => null)
@@ -942,6 +1208,7 @@ const fetchDatasets = async (projectName) => {
 }
 
 const selectProject = async (projectName) => {
+  projectActionMenu.value = ''
   if (activeProjectName.value === projectName) return
   const project = projects.value.find((item) => item.name === projectName)
   clearActiveDatasetSelection()
@@ -1010,7 +1277,22 @@ const formatTimestamp = (timestamp) => {
   }
 }
 
-onMounted(fetchProjects)
+const handleGlobalClick = () => {
+  projectActionMenu.value = ''
+}
+
+onMounted(() => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('click', handleGlobalClick)
+  }
+  fetchProjects()
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('click', handleGlobalClick)
+  }
+})
 
 watch(
   activeProject,
