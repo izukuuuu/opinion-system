@@ -2,44 +2,58 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import yaml
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+
+# 注意：所有新的辅助函数请存放在 ``backend/server_support`` 包中，
+# 并通过 ``from server_support import ...`` 或具体模块导入，保持 server.py 专注于路由逻辑。
+
+from server_support.paths import BACKEND_DIR, SRC_DIR  # type: ignore
 
 
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BACKEND_DIR = PROJECT_ROOT / "backend"
-SRC_DIR = BACKEND_DIR / "src"
 
 for path in (BACKEND_DIR, SRC_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 from src.project import (  # type: ignore
-    find_dataset_by_id,
-    get_dataset_metadata,
     get_dataset_date_summary,
     get_dataset_preview,
     get_project_manager,
     list_project_datasets,
-    normalise_project_name,
     update_dataset_column_mapping,
     store_uploaded_dataset,
 )
-from src.utils.setting.editor import load_config as load_settings_config, save_config as save_settings_config  # type: ignore
 from src.utils.setting.paths import bucket  # type: ignore
-from src.utils.setting.settings import settings  # type: ignore
 
-CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+from server_support import (  # type: ignore
+    collect_filter_status,
+    error,
+    evaluate_success,
+    filter_ai_overview,
+    load_config,
+    load_databases_config,
+    load_filter_template_config,
+    load_llm_config,
+    normalise_topic_label,
+    parse_column_mapping_from_form,
+    parse_column_mapping_payload,
+    persist_databases_config,
+    persist_filter_template_config,
+    persist_llm_config,
+    prepare_pipeline_args,
+    resolve_topic_identifier,
+    require_fields,
+    serialise_result,
+    success,
+)
+
 PROJECT_MANAGER = get_project_manager()
 
 ANALYZE_FILE_MAP = {
@@ -52,309 +66,6 @@ ANALYZE_FILE_MAP = {
     "classification": "classification.json",
 }
 DEFAULT_ANALYZE_FILENAME = "result.json"
-DATA_PROJECTS_ROOT = BACKEND_DIR / "data" / "projects"
-FILTER_PROMPT_DIR = BACKEND_DIR / "configs" / "prompt" / "filter"
-FILTER_PROGRESS_DIR = SRC_DIR / "filter"
-FILTER_SUMMARY_FILENAME = "_summary.json"
-_RECENT_RECORD_LIMIT = 40
-_IRRELEVANT_SAMPLE_LIMIT = 10
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _filter_template_path(topic: str) -> Path:
-    safe_topic = str(topic or "").strip()
-    if not safe_topic:
-        raise ValueError("Missing topic identifier")
-    normalised = safe_topic.replace("/", "_").replace("\\", "_")
-    FILTER_PROMPT_DIR.mkdir(parents=True, exist_ok=True)
-    return FILTER_PROMPT_DIR / f"{normalised}.yaml"
-
-
-def _build_filter_template_text(theme: str, categories: List[str]) -> str:
-    subject = (theme or "").strip() or "该专题"
-    cleaned_categories = [str(item).strip() for item in categories if str(item or "").strip()]
-
-    lines = [
-        f"你是一名舆情筛选助手，请判断以下文本是否与“{subject}”专题相关，并输出 JSON 结果：",
-        "规则：",
-        f"1. 判断文本是否与{subject}相关，相关返回true，否则返回false；",
-    ]
-    if cleaned_categories:
-        option_text = "、".join(cleaned_categories)
-        lines.append(f"2. 如果文本相关，请从以下分类中选择最贴切的一项：{option_text}。")
-        lines.append('返回格式: {"相关": true或false, "分类": "<分类名称，必须来自上述列表>"}')
-    else:
-        lines.append("2. 如果文本相关，请给出合适的分类描述。")
-        lines.append('返回格式: {"相关": true或false, "分类": "分类名称"}')
-    lines.append("文本：{text}")
-    return "\n".join(lines)
-
-
-def _load_filter_template_config(topic: str) -> Dict[str, Any]:
-    path = _filter_template_path(topic)
-    if not path.exists():
-        return {
-            "topic": topic,
-            "exists": False,
-            "template": "",
-            "topic_theme": "",
-            "categories": [],
-            "metadata": {},
-        }
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            payload = yaml.safe_load(fh) or {}
-    except Exception as exc:
-        raise ValueError(f"读取提示词配置失败: {exc}") from exc
-
-    template = str(payload.get("template") or "")
-    metadata = payload.get("metadata") or {}
-    if not isinstance(metadata, dict):
-        metadata = {}
-    theme = str(metadata.get("topic_theme") or metadata.get("theme") or "")
-    categories = metadata.get("categories") or []
-    if not isinstance(categories, list):
-        categories = []
-    parsed_categories = [str(item).strip() for item in categories if str(item or "").strip()]
-
-    return {
-        "topic": topic,
-        "exists": True,
-        "template": template,
-        "topic_theme": theme,
-        "categories": parsed_categories,
-        "metadata": metadata,
-        "updated_at": metadata.get("updated_at"),
-        "path": str(path),
-    }
-
-
-def _persist_filter_template_config(
-    topic: str,
-    theme: str,
-    categories: List[str],
-    template_text: Optional[str] = None,
-) -> Dict[str, Any]:
-    path = _filter_template_path(topic)
-    clean_theme = (theme or "").strip()
-    clean_categories = [str(item).strip() for item in categories if str(item or "").strip()]
-    final_template = (
-        str(template_text).strip()
-        if isinstance(template_text, str) and str(template_text).strip()
-        else _build_filter_template_text(clean_theme, clean_categories)
-    )
-
-    payload = {
-        "template": final_template,
-        "metadata": {
-            "topic_theme": clean_theme,
-            "categories": clean_categories,
-            "updated_at": _utc_now(),
-            "version": 1,
-        },
-    }
-
-    with path.open("w", encoding="utf-8") as fh:
-        yaml.safe_dump(payload, fh, allow_unicode=True, sort_keys=False)
-
-    return _load_filter_template_config(topic)
-
-
-def _count_jsonl_rows(path: Path) -> int:
-    if not path.exists():
-        return 0
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            return sum(1 for line in fh if line.strip())
-    except Exception:
-        return 0
-
-
-def _load_filter_summary_data(topic: str, date: str) -> Dict[str, Any]:
-    filter_dir = bucket("filter", topic, date)
-    summary_path = filter_dir / FILTER_SUMMARY_FILENAME
-    payload: Dict[str, Any] = {}
-    if summary_path.exists():
-        try:
-            with summary_path.open("r", encoding="utf-8") as fh:
-                raw = json.load(fh) or {}
-            if isinstance(raw, dict):
-                payload = raw
-        except Exception:
-            payload = {}
-
-    summary = {
-        "topic": topic,
-        "date": date,
-        "total_rows": int(payload.get("total_rows") or 0),
-        "kept_rows": int(payload.get("kept_rows") or 0),
-        "discarded_rows": int(payload.get("discarded_rows") or 0),
-        "irrelevant_samples": payload.get("irrelevant_samples")
-        if isinstance(payload.get("irrelevant_samples"), list)
-        else [],
-        "completed": bool(payload.get("completed")),
-        "updated_at": payload.get("updated_at"),
-    }
-    return summary
-
-
-def _collect_filter_status(topic: str, date: str) -> Dict[str, Any]:
-    clean_dir = bucket("clean", topic, date)
-    filter_dir = bucket("filter", topic, date)
-
-    channels: List[Dict[str, Any]] = []
-    combined_recent: List[Dict[str, Any]] = []
-
-    total_rows = 0
-    completed_rows = 0
-    failed_rows = 0
-    kept_rows = 0
-    running = False
-
-    clean_files = sorted(clean_dir.glob("*.jsonl")) if clean_dir.exists() else []
-    for file_path in clean_files:
-        channel = file_path.stem
-        if channel == "all":
-            continue
-
-        progress_path = FILTER_PROGRESS_DIR / f"{topic}_{date}_{channel}_progress.json"
-        progress_data: Dict[str, Any] = {}
-        if progress_path.exists():
-            try:
-                with progress_path.open("r", encoding="utf-8") as fh:
-                    raw = json.load(fh) or {}
-                if isinstance(raw, dict):
-                    progress_data = raw
-            except Exception:
-                progress_data = {}
-
-        channel_total = progress_data.get("total_count")
-        if not isinstance(channel_total, int):
-            channel_total = _count_jsonl_rows(file_path)
-
-        channel_completed = progress_data.get("completed_count")
-        if not isinstance(channel_completed, int):
-            channel_completed = len(progress_data.get("completed_indices", []))
-
-        channel_failed = progress_data.get("failed_count")
-        if not isinstance(channel_failed, int):
-            channel_failed = len(progress_data.get("failed_indices", []))
-
-        channel_kept = _count_jsonl_rows(filter_dir / f"{channel}.jsonl")
-
-        total_rows += channel_total
-        completed_rows += min(channel_total, channel_completed)
-        failed_rows += min(channel_total, channel_failed)
-        kept_rows += channel_kept
-
-        recent_items = progress_data.get("recent_records") or []
-        if isinstance(recent_items, list):
-            combined_recent.extend(item for item in recent_items if isinstance(item, dict))
-
-        channel_running = progress_path.exists() and (channel_total == 0 or channel_completed < channel_total)
-        running = running or channel_running
-
-        channels.append({
-            "channel": channel,
-            "total": channel_total,
-            "completed": channel_completed,
-            "failed": channel_failed,
-            "kept": channel_kept,
-            "updated_at": progress_data.get("updated_at"),
-        })
-
-    summary = _load_filter_summary_data(topic, date)
-    if not summary["total_rows"]:
-        summary["total_rows"] = total_rows
-    if not summary["kept_rows"]:
-        summary["kept_rows"] = kept_rows
-    summary["discarded_rows"] = max(summary["total_rows"] - summary["kept_rows"], 0)
-
-    combined_recent.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
-    recent_records = combined_recent[:_RECENT_RECORD_LIMIT]
-    irrelevant_samples = (summary.get("irrelevant_samples") or [])[:_IRRELEVANT_SAMPLE_LIMIT]
-
-    progress_overview = {
-        "total": total_rows,
-        "completed": completed_rows,
-        "failed": failed_rows,
-        "kept": kept_rows,
-        "percentage": (completed_rows / total_rows * 100) if total_rows else 0,
-    }
-
-    return {
-        "topic": topic,
-        "date": date,
-        "running": running,
-        "channels": channels,
-        "recent_records": recent_records,
-        "summary": summary,
-        "progress": progress_overview,
-        "irrelevant_samples": irrelevant_samples,
-    }
-
-
-def _filter_ai_overview() -> Dict[str, Any]:
-    cfg = _load_llm_config().get("filter_llm", {})
-    if not isinstance(cfg, dict):
-        cfg = {}
-    return {
-        "provider": str(cfg.get("provider") or "").strip() or "qwen",
-        "model": str(cfg.get("model") or "").strip(),
-        "qps": cfg.get("qps"),
-        "batch_size": cfg.get("batch_size"),
-        "truncation": cfg.get("truncation"),
-    }
-
-
-def _load_config() -> Dict[str, Any]:
-    if CONFIG_PATH.is_file():
-        with CONFIG_PATH.open("r", encoding="utf-8") as fh:
-            return yaml.safe_load(fh) or {}
-    LOGGER.warning("Configuration file %s not found, using defaults", CONFIG_PATH)
-    return {}
-
-
-def _serialise_result(value: Any) -> Any:
-    """Make sure the result can be JSON serialised."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, list):
-        return [_serialise_result(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _serialise_result(val) for key, val in value.items()}
-
-    # Handle common dataframe-like objects lazily to avoid hard dependency.
-    try:
-        import pandas as pd  # type: ignore
-
-        if isinstance(value, pd.DataFrame):
-            return value.to_dict(orient="records")
-        if isinstance(value, pd.Series):
-            return value.to_dict()
-    except Exception:  # pragma: no cover - optional dependency
-        pass
-
-    try:
-        return json.loads(json.dumps(value, default=str))
-    except TypeError:
-        return str(value)
-
-
-def _evaluate_success(result: Any) -> bool:
-    if isinstance(result, bool):
-        return result
-    if result is None:
-        return False
-    if isinstance(result, dict):
-        status = result.get("status")
-        if status is not None:
-            return status != "error"
-        return True
-    return True
 
 
 def _log_with_context(operation: str, success: bool, context: Optional[Dict[str, Any]]) -> None:
@@ -379,9 +90,9 @@ def _execute_operation(
 ) -> Tuple[Dict[str, Any], int]:
     try:
         result = caller(*args, **kwargs)
-        success = _evaluate_success(result)
+        success = evaluate_success(result)
         _log_with_context(operation, success, log_context)
-        serialised = _serialise_result(result)
+        serialised = serialise_result(result)
         if success:
             return {
                 "status": "ok",
@@ -411,16 +122,6 @@ def _execute_operation(
         }, 500
 
 
-def _require_fields(payload: Dict[str, Any], *fields: str) -> Tuple[bool, Dict[str, Any]]:
-    missing = [field for field in fields if not payload.get(field)]
-    if missing:
-        return False, {
-            "status": "error",
-            "message": f"Missing required field(s): {', '.join(missing)}",
-        }
-    return True, {}
-
-
 def _compose_analyze_folder(start: str, end: Optional[str]) -> str:
     end = end or ""
     start = start.strip()
@@ -432,6 +133,15 @@ def _compose_analyze_folder(start: str, end: Optional[str]) -> str:
     return start
 
 
+app = Flask(__name__)
+CORS(app)
+
+CONFIG = load_config()
+
+DATABASES_CONFIG_NAME = "databases"
+LLM_CONFIG_NAME = "llm"
+
+
 def _load_json_file(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as fh:
         try:
@@ -439,377 +149,6 @@ def _load_json_file(path: Path) -> Any:
         except json.JSONDecodeError:
             fh.seek(0)
             return fh.read()
-
-
-def _parse_column_mapping_payload(raw: Any) -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
-    if isinstance(raw, dict):
-        for key, value in raw.items():
-            if isinstance(value, str):
-                mapping[str(key)] = value.strip()
-    elif isinstance(raw, str) and raw.strip():
-        try:
-            decoded = json.loads(raw)
-        except json.JSONDecodeError:
-            decoded = {}
-        if isinstance(decoded, dict):
-            for key, value in decoded.items():
-                if isinstance(value, str):
-                    mapping[str(key)] = value.strip()
-
-    normalized: Dict[str, str] = {}
-    for key in ("date", "title", "content", "author"):
-        value = mapping.get(key)
-        if isinstance(value, str):
-            normalized[key] = value.strip()
-    return normalized
-
-
-def _iter_unique_strings(values: List[Any]) -> List[str]:
-    seen = set()
-    ordered: List[str] = []
-    for value in values:
-        if value is None:
-            continue
-        text = str(value).strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        ordered.append(text)
-    return ordered
-
-
-def _resolve_dataset_payload(project_name: str, dataset_id: Any) -> Dict[str, Any]:
-    dataset_id_str = str(dataset_id or "").strip()
-    if not dataset_id_str:
-        return {}
-
-    if project_name:
-        try:
-            return get_dataset_metadata(project_name, dataset_id_str)
-        except (LookupError, ValueError):
-            pass
-
-    metadata = find_dataset_by_id(dataset_id_str)
-    if metadata:
-        return metadata
-    return {}
-
-
-def _update_dataset_source_references(dataset_meta: Dict[str, Any]) -> None:
-    dataset_id = dataset_meta.get("id")
-    source_file = dataset_meta.get("source_file")
-    if not isinstance(dataset_id, str) or not dataset_id.strip():
-        return
-    if not isinstance(source_file, str) or not source_file.strip():
-        return
-
-    project_slug = (
-        dataset_meta.get("project_slug")
-        or dataset_meta.get("project_id")
-        or dataset_meta.get("project")
-        or ""
-    )
-    project_slug = str(project_slug).strip()
-    if not project_slug:
-        try:
-            parts = Path(source_file).parts
-            projects_idx = parts.index("projects")
-            project_slug = parts[projects_idx + 1]
-        except (ValueError, IndexError):
-            return
-
-    uploads_dir = DATA_PROJECTS_ROOT / project_slug / "uploads"
-    meta_path = uploads_dir / "meta" / f"{dataset_id}.json"
-    try:
-        if meta_path.exists():
-            with meta_path.open("r", encoding="utf-8") as fh:
-                data = json.load(fh)
-            if isinstance(data, dict):
-                data["source_file"] = source_file
-                with meta_path.open("w", encoding="utf-8") as fh:
-                    json.dump(data, fh, ensure_ascii=False, indent=2)
-    except Exception:
-        LOGGER.exception("Failed to update metadata file for dataset %s", dataset_id)
-
-    manifest_path = uploads_dir / "manifest.json"
-    try:
-        if manifest_path.exists():
-            with manifest_path.open("r", encoding="utf-8") as fh:
-                manifest = json.load(fh)
-            changed = False
-            if isinstance(manifest, dict):
-                records = manifest.get("datasets")
-                if isinstance(records, list):
-                    for record in records:
-                        if isinstance(record, dict) and record.get("id") == dataset_id:
-                            record["source_file"] = source_file
-                            changed = True
-                            break
-            if changed:
-                with manifest_path.open("w", encoding="utf-8") as fh:
-                    json.dump(manifest, fh, ensure_ascii=False, indent=2)
-    except Exception:
-        LOGGER.exception("Failed to update manifest for dataset %s", dataset_id)
-
-
-def _resolve_dataset_source_path(dataset_meta: Dict[str, Any]) -> Optional[Path]:
-    source_file = dataset_meta.get("source_file")
-    if not isinstance(source_file, str) or not source_file.strip():
-        return None
-
-    source_path = Path(source_file.strip())
-    if not source_path.is_absolute():
-        source_path = (PROJECT_ROOT / source_path).resolve()
-
-    if not source_path.exists():
-        LOGGER.warning(
-            "Dataset %s source file %s is missing; raw staging skipped",
-            dataset_meta.get("id"),
-            source_path,
-        )
-        return None
-
-    if source_path.suffix:
-        return source_path
-
-    display_name = dataset_meta.get("display_name")
-    suffix_hint = Path(str(display_name)).suffix.lower() if isinstance(display_name, str) else ""
-    if not suffix_hint:
-        name_lower = source_path.name.lower()
-        for token, extension in (
-            ("_xlsx", ".xlsx"),
-            ("_xls", ".xls"),
-            ("_csv", ".csv"),
-            ("_jsonl", ".jsonl"),
-        ):
-            if name_lower.endswith(token):
-                suffix_hint = extension
-                break
-
-    if not suffix_hint:
-        return source_path
-
-    dataset_id = str(dataset_meta.get("id") or source_path.stem or "dataset").strip() or "dataset"
-    new_path = source_path.with_name(f"{dataset_id}{suffix_hint}")
-
-    if new_path.exists():
-        return source_path
-
-    try:
-        source_path.rename(new_path)
-        dataset_meta["source_file"] = str(new_path.relative_to(PROJECT_ROOT))
-        _update_dataset_source_references(dataset_meta)
-        LOGGER.info(
-            "Renamed dataset %s source file to %s",
-            dataset_meta.get("id"),
-            new_path,
-        )
-        return new_path
-    except Exception:
-        LOGGER.exception(
-            "Failed to normalise source file name for dataset %s",
-            dataset_meta.get("id"),
-        )
-        return source_path
-
-
-def _ensure_raw_dataset_availability(topic_identifier: str, date: str, dataset_meta: Dict[str, Any]) -> None:
-    """
-    Ensure the merge stage can locate the original spreadsheet by copying it into the raw bucket.
-    """
-    if not dataset_meta:
-        return
-
-    source_path = _resolve_dataset_source_path(dataset_meta)
-    if source_path is None:
-        return
-
-    raw_dir = DATA_PROJECTS_ROOT / topic_identifier / "raw" / date
-    try:
-        raw_dir.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        LOGGER.exception(
-            "Failed to create raw directory %s for dataset %s",
-            raw_dir,
-            dataset_meta.get("id"),
-        )
-        return
-
-    display_name = dataset_meta.get("display_name")
-    candidate_extension = source_path.suffix.lower()
-    if not candidate_extension and isinstance(display_name, str):
-        candidate_extension = Path(display_name).suffix.lower()
-    destination_name = source_path.name
-    if candidate_extension and not destination_name.lower().endswith(candidate_extension):
-        base_name = str(dataset_meta.get("id") or source_path.stem or "dataset").strip() or "dataset"
-        destination_name = f"{base_name}{candidate_extension}"
-
-    destination_path = raw_dir / destination_name
-    try:
-        if destination_path.exists():
-            try:
-                if destination_path.samefile(source_path):
-                    return
-            except (OSError, AttributeError):
-                try:
-                    if destination_path.stat().st_size == source_path.stat().st_size:
-                        return
-                except OSError:
-                    pass
-        shutil.copy2(source_path, destination_path)
-        LOGGER.info(
-            "Prepared raw input for dataset %s at %s",
-            dataset_meta.get("id"),
-            destination_path,
-        )
-    except Exception:
-        LOGGER.exception(
-            "Failed to copy dataset %s (%s) to raw directory %s",
-            dataset_meta.get("id"),
-            source_path,
-            raw_dir,
-        )
-
-
-def _resolve_topic_identifier(payload: Dict[str, Any]) -> Tuple[str, str, str, Dict[str, Any]]:
-    project_name = str(payload.get("project") or "").strip()
-    topic_label = str(payload.get("topic") or "").strip()
-    dataset_meta = _resolve_dataset_payload(project_name, payload.get("dataset_id"))
-
-    candidates: List[str] = []
-    if dataset_meta:
-        project_id = dataset_meta.get("project_id")
-        if isinstance(project_id, str):
-            candidates.append(project_id)
-        slug = dataset_meta.get("project_slug")
-        if isinstance(slug, str):
-            candidates.append(slug)
-        meta_project = dataset_meta.get("project")
-        if isinstance(meta_project, str):
-            candidates.append(meta_project)
-        meta_topic = dataset_meta.get("topic_label")
-        if isinstance(meta_topic, str):
-            candidates.append(meta_topic)
-
-    if project_name:
-        resolved_id = PROJECT_MANAGER.resolve_identifier(project_name)
-        if resolved_id:
-            candidates.append(resolved_id)
-        candidates.append(normalise_project_name(project_name))
-        candidates.append(project_name)
-
-    if topic_label:
-        candidates.append(topic_label)
-
-    ordered_candidates = _iter_unique_strings(candidates)
-    if not ordered_candidates:
-        raise ValueError("Missing required field(s): topic or project")
-
-    resolved_topic = next(
-        (candidate for candidate in ordered_candidates if (DATA_PROJECTS_ROOT / candidate).exists()),
-        None,
-    )
-    if not resolved_topic:
-        resolved_topic = ordered_candidates[0]
-
-    canonical_topic = PROJECT_MANAGER.resolve_identifier(resolved_topic)
-    if canonical_topic:
-        resolved_topic = canonical_topic
-
-    display_name = (
-        topic_label
-        or (dataset_meta.get("topic_label") if isinstance(dataset_meta.get("topic_label"), str) else None)
-        or project_name
-        or resolved_topic
-    )
-
-    log_project = project_name or dataset_meta.get("project") or resolved_topic
-
-    return resolved_topic, display_name, str(log_project), dataset_meta
-
-
-def _prepare_pipeline_args(payload: Dict[str, Any]) -> Tuple[str, str, str]:
-    topic_identifier, display_name, log_project, dataset_meta = _resolve_topic_identifier(payload)
-    date = str(payload.get("date") or "").strip()
-    if not date:
-        raise ValueError("Missing required field(s): date")
-    _ensure_raw_dataset_availability(topic_identifier, date, dataset_meta)
-    return topic_identifier, date, display_name or topic_identifier, log_project or topic_identifier
-
-
-def _parse_column_mapping_from_form(form: Dict[str, Any]) -> Dict[str, str]:
-    initial = _parse_column_mapping_payload(form.get("column_mapping"))
-    for key in ("date", "title", "content", "author"):
-        field_name = f"{key}_column"
-        value = form.get(field_name)
-        if isinstance(value, str) and value.strip():
-            initial[key] = value.strip()
-    return initial
-
-
-def _normalise_topic_label(value: Any) -> str:
-    if isinstance(value, str):
-        return value.strip()
-    return ""
-
-
-app = Flask(__name__)
-CORS(app)
-
-CONFIG = _load_config()
-
-DATABASES_CONFIG_NAME = "databases"
-LLM_CONFIG_NAME = "llm"
-
-
-def _success(payload: Dict[str, Any], status_code: int = 200):
-    response = {"status": "ok"}
-    response.update(payload)
-    return jsonify(response), status_code
-
-
-def _error(message: str, status_code: int = 400):
-    return jsonify({"status": "error", "message": message}), status_code
-
-
-def _reload_settings() -> None:
-    try:
-        settings.reload()
-    except Exception:
-        LOGGER.warning("Failed to reload runtime settings", exc_info=True)
-
-
-def _load_databases_config() -> Dict[str, Any]:
-    config = load_settings_config(DATABASES_CONFIG_NAME)
-    connections = config.get("connections") or []
-    if not isinstance(connections, list):
-        connections = []
-    config["connections"] = connections
-    return config
-
-
-def _persist_databases_config(config: Dict[str, Any]) -> None:
-    save_settings_config(DATABASES_CONFIG_NAME, config)
-    _reload_settings()
-
-
-def _load_llm_config() -> Dict[str, Any]:
-    config = load_settings_config(LLM_CONFIG_NAME)
-    presets = config.get("presets") or []
-    if not isinstance(presets, list):
-        presets = []
-    config["presets"] = presets
-    filter_llm = config.get("filter_llm") or {}
-    if not isinstance(filter_llm, dict):
-        filter_llm = {}
-    config["filter_llm"] = filter_llm
-    return config
-
-
-def _persist_llm_config(config: Dict[str, Any]) -> None:
-    save_settings_config(LLM_CONFIG_NAME, config)
-    _reload_settings()
 
 
 def _run_data_pipeline(topic: str, date: str, *, project: Optional[str] = None, topic_label: Optional[str] = None) -> Dict[str, Any]:
@@ -852,11 +191,11 @@ def _run_data_pipeline(topic: str, date: str, *, project: Optional[str] = None, 
 
     for name, func in pipeline_steps:
         result = func(topic, date)
-        success = _evaluate_success(result)
+        success = evaluate_success(result)
         steps.append({
             "operation": name,
             "success": success,
-            "result": _serialise_result(result),
+            "result": serialise_result(result),
         })
         _log_with_context(name, success, step_context)
 
@@ -891,8 +230,8 @@ def get_config():
 
 @app.get("/api/settings/databases")
 def list_database_connections():
-    config = _load_databases_config()
-    return _success(
+    config = load_databases_config()
+    return success(
         {
             "data": {
                 "connections": config.get("connections", []),
@@ -908,14 +247,14 @@ def create_database_connection():
     required = ["id", "name", "engine", "url"]
     missing = [field for field in required if not str(payload.get(field, "")).strip()]
     if missing:
-        return _error(f"Missing required field(s): {', '.join(missing)}")
+        return error(f"Missing required field(s): {', '.join(missing)}")
 
     connection_id = str(payload["id"]).strip()
-    config = _load_databases_config()
+    config = load_databases_config()
     connections = config.get("connections", [])
 
     if any(conn.get("id") == connection_id for conn in connections):
-        return _error(f"Connection '{connection_id}' already exists", status_code=409)
+        return error(f"Connection '{connection_id}' already exists", status_code=409)
 
     new_connection = {
         "id": connection_id,
@@ -931,21 +270,21 @@ def create_database_connection():
     if payload.get("set_active") or not config.get("active"):
         config["active"] = connection_id
 
-    _persist_databases_config(config)
+    persist_databases_config(config)
 
-    return _success({"data": new_connection}, status_code=201)
+    return success({"data": new_connection}, status_code=201)
 
 
 @app.put("/api/settings/databases/<connection_id>")
 def update_database_connection(connection_id: str):
     payload = request.get_json(silent=True) or {}
-    config = _load_databases_config()
+    config = load_databases_config()
     connections = config.get("connections", [])
 
     for connection in connections:
         if connection.get("id") == connection_id:
             if "id" in payload and str(payload["id"]).strip() != connection_id:
-                return _error("Connection id cannot be changed")
+                return error("Connection id cannot be changed")
 
             for field in ["name", "engine", "url", "description"]:
                 if field in payload:
@@ -954,52 +293,52 @@ def update_database_connection(connection_id: str):
             if payload.get("set_active"):
                 config["active"] = connection_id
 
-            _persist_databases_config(config)
-            return _success({"data": connection})
+            persist_databases_config(config)
+            return success({"data": connection})
 
-    return _error(f"Connection '{connection_id}' was not found", status_code=404)
+    return error(f"Connection '{connection_id}' was not found", status_code=404)
 
 
 @app.delete("/api/settings/databases/<connection_id>")
 def delete_database_connection(connection_id: str):
-    config = _load_databases_config()
+    config = load_databases_config()
     connections = config.get("connections", [])
     remaining = [conn for conn in connections if conn.get("id") != connection_id]
 
     if len(remaining) == len(connections):
-        return _error(f"Connection '{connection_id}' was not found", status_code=404)
+        return error(f"Connection '{connection_id}' was not found", status_code=404)
 
     if config.get("active") == connection_id:
-        return _error("Cannot delete the active database connection", status_code=409)
+        return error("Cannot delete the active database connection", status_code=409)
 
     config["connections"] = remaining
-    _persist_databases_config(config)
-    return _success({"data": {"deleted": connection_id}})
+    persist_databases_config(config)
+    return success({"data": {"deleted": connection_id}})
 
 
 @app.post("/api/settings/databases/<connection_id>/activate")
 def activate_database_connection(connection_id: str):
-    config = _load_databases_config()
+    config = load_databases_config()
     connections = config.get("connections", [])
 
     if not any(conn.get("id") == connection_id for conn in connections):
-        return _error(f"Connection '{connection_id}' was not found", status_code=404)
+        return error(f"Connection '{connection_id}' was not found", status_code=404)
 
     config["active"] = connection_id
-    _persist_databases_config(config)
-    return _success({"data": {"active": connection_id}})
+    persist_databases_config(config)
+    return success({"data": {"active": connection_id}})
 
 
 @app.get("/api/settings/llm")
 def get_llm_settings():
-    config = _load_llm_config()
-    return _success({"data": config})
+    config = load_llm_config()
+    return success({"data": config})
 
 
 @app.put("/api/settings/llm/filter")
 def update_llm_filter():
     payload = request.get_json(silent=True) or {}
-    config = _load_llm_config()
+    config = load_llm_config()
     filter_llm = config.get("filter_llm", {})
 
     for field in ["provider", "model"]:
@@ -1011,11 +350,11 @@ def update_llm_filter():
             try:
                 filter_llm[field] = int(payload[field])
             except (TypeError, ValueError):
-                return _error(f"Field '{field}' must be an integer")
+                return error(f"Field '{field}' must be an integer")
 
     config["filter_llm"] = filter_llm
-    _persist_llm_config(config)
-    return _success({"data": filter_llm})
+    persist_llm_config(config)
+    return success({"data": filter_llm})
 
 
 @app.get("/api/filter/template")
@@ -1024,7 +363,7 @@ def get_filter_template():
     project_param = str(request.args.get("project", "") or "").strip()
 
     if not topic_param and not project_param:
-        return _error("Missing required field(s): topic or project")
+        return error("Missing required field(s): topic or project")
 
     resolution_payload: Dict[str, Any] = {}
     if topic_param:
@@ -1033,16 +372,16 @@ def get_filter_template():
         resolution_payload["project"] = project_param
 
     try:
-        topic_identifier, _, _, _ = _resolve_topic_identifier(resolution_payload)
+        topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
     except ValueError as exc:
-        return _error(str(exc))
+        return error(str(exc))
 
     try:
-        data = _load_filter_template_config(topic_identifier)
+        data = load_filter_template_config(topic_identifier)
     except ValueError as exc:
-        return _error(str(exc))
+        return error(str(exc))
 
-    return _success({"data": data})
+    return success({"data": data})
 
 
 @app.post("/api/filter/template")
@@ -1054,11 +393,11 @@ def upsert_filter_template():
     categories_value = payload.get("categories", [])
 
     if not topic_param:
-        return _error("Missing required field(s): topic")
+        return error("Missing required field(s): topic")
     if not theme:
-        return _error("Missing required field(s): topic_theme")
+        return error("Missing required field(s): topic_theme")
     if not isinstance(categories_value, list):
-        return _error("Field 'categories' must be a list")
+        return error("Field 'categories' must be a list")
 
     categories = [str(item).strip() for item in categories_value if str(item or "").strip()]
 
@@ -1069,17 +408,17 @@ def upsert_filter_template():
         resolution_payload["dataset_id"] = payload.get("dataset_id")
 
     try:
-        topic_identifier, _, _, _ = _resolve_topic_identifier(resolution_payload)
+        topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
     except ValueError as exc:
-        return _error(str(exc))
+        return error(str(exc))
 
     template_override = payload.get("template")
     try:
-        data = _persist_filter_template_config(topic_identifier, theme, categories, template_override)
+        data = persist_filter_template_config(topic_identifier, theme, categories, template_override)
     except ValueError as exc:
-        return _error(str(exc))
+        return error(str(exc))
 
-    return _success({"data": data})
+    return success({"data": data})
 
 
 @app.get("/api/filter/status")
@@ -1089,9 +428,9 @@ def filter_status():
     date_param = str(request.args.get("date", "") or "").strip()
 
     if not topic_param and not project_param:
-        return _error("Missing required field(s): topic or project")
+        return error("Missing required field(s): topic or project")
     if not date_param:
-        return _error("Missing required field(s): date")
+        return error("Missing required field(s): date")
 
     resolution_payload: Dict[str, Any] = {}
     if topic_param:
@@ -1100,13 +439,13 @@ def filter_status():
         resolution_payload["project"] = project_param
 
     try:
-        topic_identifier, _, _, _ = _resolve_topic_identifier(resolution_payload)
+        topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
     except ValueError as exc:
-        return _error(str(exc))
+        return error(str(exc))
 
-    status_payload = _collect_filter_status(topic_identifier, date_param)
+    status_payload = collect_filter_status(topic_identifier, date_param)
     status_payload["ai_config"] = _filter_ai_overview()
-    return _success({"data": status_payload})
+    return success({"data": status_payload})
 
 
 @app.post("/api/settings/llm/presets")
@@ -1115,14 +454,14 @@ def create_llm_preset():
     required = ["id", "name", "provider", "model"]
     missing = [field for field in required if not str(payload.get(field, "")).strip()]
     if missing:
-        return _error(f"Missing required field(s): {', '.join(missing)}")
+        return error(f"Missing required field(s): {', '.join(missing)}")
 
     preset_id = str(payload["id"]).strip()
-    config = _load_llm_config()
+    config = load_llm_config()
     presets = config.get("presets", [])
 
     if any(preset.get("id") == preset_id for preset in presets):
-        return _error(f"Preset '{preset_id}' already exists", status_code=409)
+        return error(f"Preset '{preset_id}' already exists", status_code=409)
 
     new_preset = {
         "id": preset_id,
@@ -1134,50 +473,50 @@ def create_llm_preset():
 
     presets.append(new_preset)
     config["presets"] = presets
-    _persist_llm_config(config)
-    return _success({"data": new_preset}, status_code=201)
+    persist_llm_config(config)
+    return success({"data": new_preset}, status_code=201)
 
 
 @app.put("/api/settings/llm/presets/<preset_id>")
 def update_llm_preset(preset_id: str):
     payload = request.get_json(silent=True) or {}
-    config = _load_llm_config()
+    config = load_llm_config()
     presets = config.get("presets", [])
 
     for preset in presets:
         if preset.get("id") == preset_id:
             if "id" in payload and str(payload["id"]).strip() != preset_id:
-                return _error("Preset id cannot be changed")
+                return error("Preset id cannot be changed")
 
             for field in ["name", "provider", "model", "description"]:
                 if field in payload:
                     preset[field] = str(payload[field]).strip()
 
-            _persist_llm_config(config)
-            return _success({"data": preset})
+            persist_llm_config(config)
+            return success({"data": preset})
 
-    return _error(f"Preset '{preset_id}' was not found", status_code=404)
+    return error(f"Preset '{preset_id}' was not found", status_code=404)
 
 
 @app.delete("/api/settings/llm/presets/<preset_id>")
 def delete_llm_preset(preset_id: str):
-    config = _load_llm_config()
+    config = load_llm_config()
     presets = config.get("presets", [])
     remaining = [preset for preset in presets if preset.get("id") != preset_id]
 
     if len(remaining) == len(presets):
-        return _error(f"Preset '{preset_id}' was not found", status_code=404)
+        return error(f"Preset '{preset_id}' was not found", status_code=404)
 
     config["presets"] = remaining
-    _persist_llm_config(config)
-    return _success({"data": {"deleted": preset_id}})
+    persist_llm_config(config)
+    return success({"data": {"deleted": preset_id}})
 
 
 @app.post("/api/merge")
 def merge_endpoint():
     payload = request.get_json(silent=True) or {}
     try:
-        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+        topic_identifier, date, display_name, log_project = prepare_pipeline_args(payload, PROJECT_MANAGER)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
@@ -1205,7 +544,7 @@ def merge_endpoint():
 def clean_endpoint():
     payload = request.get_json(silent=True) or {}
     try:
-        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+        topic_identifier, date, display_name, log_project = prepare_pipeline_args(payload, PROJECT_MANAGER)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
@@ -1233,7 +572,7 @@ def clean_endpoint():
 def filter_endpoint():
     payload = request.get_json(silent=True) or {}
     try:
-        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+        topic_identifier, date, display_name, log_project = prepare_pipeline_args(payload, PROJECT_MANAGER)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
@@ -1261,7 +600,7 @@ def filter_endpoint():
 def upload_endpoint():
     payload = request.get_json(silent=True) or {}
     try:
-        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+        topic_identifier, date, display_name, log_project = prepare_pipeline_args(payload, PROJECT_MANAGER)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
@@ -1289,7 +628,7 @@ def upload_endpoint():
 def pipeline_endpoint():
     payload = request.get_json(silent=True) or {}
     try:
-        topic_identifier, date, display_name, log_project = _prepare_pipeline_args(payload)
+        topic_identifier, date, display_name, log_project = prepare_pipeline_args(payload, PROJECT_MANAGER)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
@@ -1328,7 +667,7 @@ def query_endpoint():
 @app.post("/api/fetch")
 def fetch_endpoint():
     payload = request.get_json(silent=True) or {}
-    valid, error = _require_fields(payload, "start", "end")
+    valid, error = require_fields(payload, "start", "end")
     if not valid:
         return jsonify(error), 400
 
@@ -1338,7 +677,7 @@ def fetch_endpoint():
         return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
 
     try:
-        topic_identifier, display_name, log_project, _ = _resolve_topic_identifier(payload)
+        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
@@ -1367,7 +706,7 @@ def fetch_endpoint():
 @app.post("/api/analyze")
 def analyze_endpoint():
     payload = request.get_json(silent=True) or {}
-    valid, error = _require_fields(payload, "start", "end")
+    valid, error = require_fields(payload, "start", "end")
     if not valid:
         return jsonify(error), 400
 
@@ -1377,7 +716,7 @@ def analyze_endpoint():
         return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
 
     try:
-        topic_identifier, display_name, log_project, _ = _resolve_topic_identifier(payload)
+        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
@@ -1420,18 +759,18 @@ def get_analyze_results():
     }
 
     try:
-        topic_identifier, display_name, _, _ = _resolve_topic_identifier(payload)
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
     except ValueError:
         topic_identifier = (raw_topic or "").strip()
         if not topic_identifier:
-            return _error("Missing required query parameters: topic or project")
+            return error("Missing required query parameters: topic or project")
         display_name = raw_topic or raw_project or topic_identifier
 
     topic_display = display_name or raw_topic or raw_project or topic_identifier
 
     start = (request.args.get("start") or "").strip()
     if not start:
-        return _error("Missing required query parameters: start")
+        return error("Missing required query parameters: start")
 
     end = (request.args.get("end") or "").strip() or None
     function_alias = (request.args.get("function") or "").strip().lower() or None
@@ -1439,11 +778,11 @@ def get_analyze_results():
 
     folder_name = _compose_analyze_folder(start, end)
     if not folder_name:
-        return _error("Invalid start date supplied")
+        return error("Invalid start date supplied")
 
     analyze_root = bucket("analyze", topic_identifier, folder_name)
     if not analyze_root.exists():
-        return _error("未找到对应的分析结果目录", status_code=404)
+        return error("未找到对应的分析结果目录", status_code=404)
 
     def _match_target(name: str) -> bool:
         if not target_alias:
@@ -1497,7 +836,7 @@ def get_analyze_results():
             results.append({"name": func_name, "targets": targets})
 
     if not results:
-        return _error("未找到匹配的分析结果文件", status_code=404)
+        return error("未找到匹配的分析结果文件", status_code=404)
 
     response_payload = {
         "topic": topic_display,
@@ -1507,7 +846,7 @@ def get_analyze_results():
         },
         "functions": results,
     }
-    return _success(response_payload)
+    return success(response_payload)
 
 
 @app.get("/api/projects")
@@ -1603,7 +942,7 @@ def project_date_range(name: str):
 def update_project_dataset_mapping(name: str, dataset_id: str):
     payload = request.get_json(silent=True) or {}
     raw_mapping = payload.get("column_mapping", payload)
-    mapping = _parse_column_mapping_payload(raw_mapping)
+    mapping = parse_column_mapping_payload(raw_mapping)
     if not mapping:
         for key in ("date", "title", "content", "author"):
             value = payload.get(key)
@@ -1612,7 +951,7 @@ def update_project_dataset_mapping(name: str, dataset_id: str):
 
     topic_label = None
     if "topic_label" in payload:
-        topic_label = _normalise_topic_label(payload.get("topic_label"))
+        topic_label = normalise_topic_label(payload.get("topic_label"))
 
     try:
         updated = update_dataset_column_mapping(
@@ -1644,8 +983,8 @@ def upload_project_dataset(name: str):
     if not file or not getattr(file, "filename", ""):
         return jsonify({"status": "error", "message": "请选择需要上传的表格文件"}), 400
 
-    mapping_hints = _parse_column_mapping_from_form(request.form)
-    topic_label_hint = _normalise_topic_label(request.form.get("topic_label"))
+    mapping_hints = parse_column_mapping_from_form(request.form)
+    topic_label_hint = normalise_topic_label(request.form.get("topic_label"))
 
     try:
         dataset = store_uploaded_dataset(
