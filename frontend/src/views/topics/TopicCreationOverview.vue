@@ -90,13 +90,21 @@ const stages = [
   {
     index: 2,
     title: '数据预处理',
-    subtitle: '执行合并、清洗与筛选',
+    subtitle: '执行 Merge 与 Clean',
     description:
-      '根据当前处理日期执行 Merge、Clean、Filter 三个步骤，生成符合分析标准的结构化数据。',
+      '根据当前处理日期执行 Merge、Clean 两个步骤，生成符合分析标准的结构化数据。',
     route: { name: 'topic-create-preprocess' }
   },
   {
     index: 3,
+    title: '筛选数据',
+    subtitle: '配置提示词并执行筛选',
+    description:
+      '管理 AI 提示词模板，独立运行 Filter 流程，获取与专题高度相关的内容。',
+    route: { name: 'topic-create-filter' }
+  },
+  {
+    index: 4,
     title: '入库',
     subtitle: '上传至数据库',
     description:

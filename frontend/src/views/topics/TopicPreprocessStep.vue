@@ -3,7 +3,7 @@
     <header class="flex flex-wrap items-center justify-between gap-3">
       <div class="space-y-1">
         <h1 class="text-2xl font-semibold text-primary">数据预处理</h1>
-        <p class="text-sm text-secondary">按日期依次执行 Merge、Clean、Filter，生成标准化结果。</p>
+        <p class="text-sm text-secondary">按日期依次执行 Merge、Clean，生成标准化结果。</p>
       </div>
       <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
         <FunnelIcon class="h-4 w-4" />
@@ -59,7 +59,7 @@
       <div class="card-surface flex flex-wrap items-center justify-between gap-3 p-6">
         <div class="space-y-1">
           <h2 class="text-xl font-semibold text-primary">预处理执行</h2>
-          <p class="text-sm text-secondary">可单独运行每个步骤，或使用一键执行快速完成全部流程。</p>
+          <p class="text-sm text-secondary">可单独运行每个步骤，或使用一键执行快速完成 Merge 与 Clean。</p>
         </div>
         <button
           type="button"
@@ -115,7 +115,7 @@
 
       <p v-if="pipeline.message" :class="[
         'rounded-2xl px-4 py-2 text-sm',
-        pipeline.success ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
+          pipeline.success ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
       ]">
         {{ pipeline.message }}
       </p>
@@ -130,7 +130,6 @@ import {
   FunnelIcon,
   ArrowPathRoundedSquareIcon,
   TrashIcon,
-  AdjustmentsHorizontalIcon,
   SparklesIcon
 } from '@heroicons/vue/24/outline'
 
@@ -168,26 +167,18 @@ const operations = [
     label: 'Clean',
     title: '清洗 Clean',
     subtitle: 'Step 02',
-    description: '执行数据清洗，补齐字段与格式，移除重复与异常值，确保数据稳定。',
+    description: '执行数据清洗，补齐字段与格式，移除重复与异常值，为下一步筛选做好准备。',
     endpoint: `${API_BASE_URL}/clean`,
     icon: TrashIcon
-  },
-  {
-    key: 'filter',
-    label: 'Filter',
-    title: '筛选 Filter',
-    subtitle: 'Step 03',
-    description: '调用 AI 相关性筛选模型，保留与专题高度关联的数据。',
-    endpoint: `${API_BASE_URL}/filter`,
-    icon: AdjustmentsHorizontalIcon
   }
 ]
 
-const statuses = reactive({
-  merge: { running: false, success: null, message: '' },
-  clean: { running: false, success: null, message: '' },
-  filter: { running: false, success: null, message: '' }
-})
+const statuses = reactive(
+  operations.reduce((acc, operation) => {
+    acc[operation.key] = { running: false, success: null, message: '' }
+    return acc
+  }, {})
+)
 
 const pipeline = reactive({
   running: false,
@@ -395,7 +386,7 @@ const runPipeline = async () => {
     const result = await response.json()
     const ok = response.ok && result.status !== 'error'
     pipeline.success = ok
-    pipeline.message = ok ? 'Pipeline 执行成功，所有步骤均已完成。' : (result.message || 'Pipeline 执行失败')
+    pipeline.message = ok ? 'Pipeline 执行成功，Merge 与 Clean 均已完成。' : (result.message || 'Pipeline 执行失败')
   } catch (err) {
     pipeline.success = false
     pipeline.message = err instanceof Error ? err.message : 'Pipeline 执行失败'

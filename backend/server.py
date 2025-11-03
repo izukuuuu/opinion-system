@@ -4,6 +4,7 @@ import json
 import logging
 import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -52,6 +53,261 @@ ANALYZE_FILE_MAP = {
 }
 DEFAULT_ANALYZE_FILENAME = "result.json"
 DATA_PROJECTS_ROOT = BACKEND_DIR / "data" / "projects"
+FILTER_PROMPT_DIR = BACKEND_DIR / "configs" / "prompt" / "filter"
+FILTER_PROGRESS_DIR = SRC_DIR / "filter"
+FILTER_SUMMARY_FILENAME = "_summary.json"
+_RECENT_RECORD_LIMIT = 40
+_IRRELEVANT_SAMPLE_LIMIT = 10
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _filter_template_path(topic: str) -> Path:
+    safe_topic = str(topic or "").strip()
+    if not safe_topic:
+        raise ValueError("Missing topic identifier")
+    normalised = safe_topic.replace("/", "_").replace("\\", "_")
+    FILTER_PROMPT_DIR.mkdir(parents=True, exist_ok=True)
+    return FILTER_PROMPT_DIR / f"{normalised}.yaml"
+
+
+def _build_filter_template_text(theme: str, categories: List[str]) -> str:
+    subject = (theme or "").strip() or "该专题"
+    cleaned_categories = [str(item).strip() for item in categories if str(item or "").strip()]
+
+    lines = [
+        f"你是一名舆情筛选助手，请判断以下文本是否与“{subject}”专题相关，并输出 JSON 结果：",
+        "规则：",
+        f"1. 判断文本是否与{subject}相关，相关返回true，否则返回false；",
+    ]
+    if cleaned_categories:
+        option_text = "、".join(cleaned_categories)
+        lines.append(f"2. 如果文本相关，请从以下分类中选择最贴切的一项：{option_text}。")
+        lines.append('返回格式: {"相关": true或false, "分类": "<分类名称，必须来自上述列表>"}')
+    else:
+        lines.append("2. 如果文本相关，请给出合适的分类描述。")
+        lines.append('返回格式: {"相关": true或false, "分类": "分类名称"}')
+    lines.append("文本：{text}")
+    return "\n".join(lines)
+
+
+def _load_filter_template_config(topic: str) -> Dict[str, Any]:
+    path = _filter_template_path(topic)
+    if not path.exists():
+        return {
+            "topic": topic,
+            "exists": False,
+            "template": "",
+            "topic_theme": "",
+            "categories": [],
+            "metadata": {},
+        }
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            payload = yaml.safe_load(fh) or {}
+    except Exception as exc:
+        raise ValueError(f"读取提示词配置失败: {exc}") from exc
+
+    template = str(payload.get("template") or "")
+    metadata = payload.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    theme = str(metadata.get("topic_theme") or metadata.get("theme") or "")
+    categories = metadata.get("categories") or []
+    if not isinstance(categories, list):
+        categories = []
+    parsed_categories = [str(item).strip() for item in categories if str(item or "").strip()]
+
+    return {
+        "topic": topic,
+        "exists": True,
+        "template": template,
+        "topic_theme": theme,
+        "categories": parsed_categories,
+        "metadata": metadata,
+        "updated_at": metadata.get("updated_at"),
+        "path": str(path),
+    }
+
+
+def _persist_filter_template_config(
+    topic: str,
+    theme: str,
+    categories: List[str],
+    template_text: Optional[str] = None,
+) -> Dict[str, Any]:
+    path = _filter_template_path(topic)
+    clean_theme = (theme or "").strip()
+    clean_categories = [str(item).strip() for item in categories if str(item or "").strip()]
+    final_template = (
+        str(template_text).strip()
+        if isinstance(template_text, str) and str(template_text).strip()
+        else _build_filter_template_text(clean_theme, clean_categories)
+    )
+
+    payload = {
+        "template": final_template,
+        "metadata": {
+            "topic_theme": clean_theme,
+            "categories": clean_categories,
+            "updated_at": _utc_now(),
+            "version": 1,
+        },
+    }
+
+    with path.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(payload, fh, allow_unicode=True, sort_keys=False)
+
+    return _load_filter_template_config(topic)
+
+
+def _count_jsonl_rows(path: Path) -> int:
+    if not path.exists():
+        return 0
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            return sum(1 for line in fh if line.strip())
+    except Exception:
+        return 0
+
+
+def _load_filter_summary_data(topic: str, date: str) -> Dict[str, Any]:
+    filter_dir = bucket("filter", topic, date)
+    summary_path = filter_dir / FILTER_SUMMARY_FILENAME
+    payload: Dict[str, Any] = {}
+    if summary_path.exists():
+        try:
+            with summary_path.open("r", encoding="utf-8") as fh:
+                raw = json.load(fh) or {}
+            if isinstance(raw, dict):
+                payload = raw
+        except Exception:
+            payload = {}
+
+    summary = {
+        "topic": topic,
+        "date": date,
+        "total_rows": int(payload.get("total_rows") or 0),
+        "kept_rows": int(payload.get("kept_rows") or 0),
+        "discarded_rows": int(payload.get("discarded_rows") or 0),
+        "irrelevant_samples": payload.get("irrelevant_samples")
+        if isinstance(payload.get("irrelevant_samples"), list)
+        else [],
+        "completed": bool(payload.get("completed")),
+        "updated_at": payload.get("updated_at"),
+    }
+    return summary
+
+
+def _collect_filter_status(topic: str, date: str) -> Dict[str, Any]:
+    clean_dir = bucket("clean", topic, date)
+    filter_dir = bucket("filter", topic, date)
+
+    channels: List[Dict[str, Any]] = []
+    combined_recent: List[Dict[str, Any]] = []
+
+    total_rows = 0
+    completed_rows = 0
+    failed_rows = 0
+    kept_rows = 0
+    running = False
+
+    clean_files = sorted(clean_dir.glob("*.jsonl")) if clean_dir.exists() else []
+    for file_path in clean_files:
+        channel = file_path.stem
+        if channel == "all":
+            continue
+
+        progress_path = FILTER_PROGRESS_DIR / f"{topic}_{date}_{channel}_progress.json"
+        progress_data: Dict[str, Any] = {}
+        if progress_path.exists():
+            try:
+                with progress_path.open("r", encoding="utf-8") as fh:
+                    raw = json.load(fh) or {}
+                if isinstance(raw, dict):
+                    progress_data = raw
+            except Exception:
+                progress_data = {}
+
+        channel_total = progress_data.get("total_count")
+        if not isinstance(channel_total, int):
+            channel_total = _count_jsonl_rows(file_path)
+
+        channel_completed = progress_data.get("completed_count")
+        if not isinstance(channel_completed, int):
+            channel_completed = len(progress_data.get("completed_indices", []))
+
+        channel_failed = progress_data.get("failed_count")
+        if not isinstance(channel_failed, int):
+            channel_failed = len(progress_data.get("failed_indices", []))
+
+        channel_kept = _count_jsonl_rows(filter_dir / f"{channel}.jsonl")
+
+        total_rows += channel_total
+        completed_rows += min(channel_total, channel_completed)
+        failed_rows += min(channel_total, channel_failed)
+        kept_rows += channel_kept
+
+        recent_items = progress_data.get("recent_records") or []
+        if isinstance(recent_items, list):
+            combined_recent.extend(item for item in recent_items if isinstance(item, dict))
+
+        channel_running = progress_path.exists() and (channel_total == 0 or channel_completed < channel_total)
+        running = running or channel_running
+
+        channels.append({
+            "channel": channel,
+            "total": channel_total,
+            "completed": channel_completed,
+            "failed": channel_failed,
+            "kept": channel_kept,
+            "updated_at": progress_data.get("updated_at"),
+        })
+
+    summary = _load_filter_summary_data(topic, date)
+    if not summary["total_rows"]:
+        summary["total_rows"] = total_rows
+    if not summary["kept_rows"]:
+        summary["kept_rows"] = kept_rows
+    summary["discarded_rows"] = max(summary["total_rows"] - summary["kept_rows"], 0)
+
+    combined_recent.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+    recent_records = combined_recent[:_RECENT_RECORD_LIMIT]
+    irrelevant_samples = (summary.get("irrelevant_samples") or [])[:_IRRELEVANT_SAMPLE_LIMIT]
+
+    progress_overview = {
+        "total": total_rows,
+        "completed": completed_rows,
+        "failed": failed_rows,
+        "kept": kept_rows,
+        "percentage": (completed_rows / total_rows * 100) if total_rows else 0,
+    }
+
+    return {
+        "topic": topic,
+        "date": date,
+        "running": running,
+        "channels": channels,
+        "recent_records": recent_records,
+        "summary": summary,
+        "progress": progress_overview,
+        "irrelevant_samples": irrelevant_samples,
+    }
+
+
+def _filter_ai_overview() -> Dict[str, Any]:
+    cfg = _load_llm_config().get("filter_llm", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    return {
+        "provider": str(cfg.get("provider") or "").strip() or "qwen",
+        "model": str(cfg.get("model") or "").strip(),
+        "qps": cfg.get("qps"),
+        "batch_size": cfg.get("batch_size"),
+        "truncation": cfg.get("truncation"),
+    }
 
 
 def _load_config() -> Dict[str, Any]:
@@ -558,7 +814,7 @@ def _persist_llm_config(config: Dict[str, Any]) -> None:
 
 def _run_data_pipeline(topic: str, date: str, *, project: Optional[str] = None, topic_label: Optional[str] = None) -> Dict[str, Any]:
     """
-    Run Merge → Clean → Filter → Upload sequentially.
+    Run Merge → Clean sequentially.
 
     Args:
         topic: Project/topic identifier.
@@ -571,14 +827,10 @@ def _run_data_pipeline(topic: str, date: str, *, project: Optional[str] = None, 
     """
     from src.merge import run_merge  # type: ignore
     from src.clean import run_clean  # type: ignore
-    from src.filter import run_filter  # type: ignore
-    from src.update import run_update  # type: ignore
 
     pipeline_steps = [
         ("merge", run_merge),
         ("clean", run_clean),
-        ("filter", run_filter),
-        ("upload", run_update),
     ]
 
     log_project = project or topic
@@ -764,6 +1016,97 @@ def update_llm_filter():
     config["filter_llm"] = filter_llm
     _persist_llm_config(config)
     return _success({"data": filter_llm})
+
+
+@app.get("/api/filter/template")
+def get_filter_template():
+    topic_param = str(request.args.get("topic", "") or "").strip()
+    project_param = str(request.args.get("project", "") or "").strip()
+
+    if not topic_param and not project_param:
+        return _error("Missing required field(s): topic or project")
+
+    resolution_payload: Dict[str, Any] = {}
+    if topic_param:
+        resolution_payload["topic"] = topic_param
+    if project_param:
+        resolution_payload["project"] = project_param
+
+    try:
+        topic_identifier, _, _, _ = _resolve_topic_identifier(resolution_payload)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    try:
+        data = _load_filter_template_config(topic_identifier)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    return _success({"data": data})
+
+
+@app.post("/api/filter/template")
+def upsert_filter_template():
+    payload = request.get_json(silent=True) or {}
+    topic_param = str(payload.get("topic") or payload.get("project") or "").strip()
+    project_param = str(payload.get("project") or "").strip()
+    theme = str(payload.get("topic_theme") or payload.get("theme") or "").strip()
+    categories_value = payload.get("categories", [])
+
+    if not topic_param:
+        return _error("Missing required field(s): topic")
+    if not theme:
+        return _error("Missing required field(s): topic_theme")
+    if not isinstance(categories_value, list):
+        return _error("Field 'categories' must be a list")
+
+    categories = [str(item).strip() for item in categories_value if str(item or "").strip()]
+
+    resolution_payload: Dict[str, Any] = {"topic": topic_param}
+    if project_param:
+        resolution_payload["project"] = project_param
+    if payload.get("dataset_id"):
+        resolution_payload["dataset_id"] = payload.get("dataset_id")
+
+    try:
+        topic_identifier, _, _, _ = _resolve_topic_identifier(resolution_payload)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    template_override = payload.get("template")
+    try:
+        data = _persist_filter_template_config(topic_identifier, theme, categories, template_override)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    return _success({"data": data})
+
+
+@app.get("/api/filter/status")
+def filter_status():
+    topic_param = str(request.args.get("topic", "") or "").strip()
+    project_param = str(request.args.get("project", "") or "").strip()
+    date_param = str(request.args.get("date", "") or "").strip()
+
+    if not topic_param and not project_param:
+        return _error("Missing required field(s): topic or project")
+    if not date_param:
+        return _error("Missing required field(s): date")
+
+    resolution_payload: Dict[str, Any] = {}
+    if topic_param:
+        resolution_payload["topic"] = topic_param
+    if project_param:
+        resolution_payload["project"] = project_param
+
+    try:
+        topic_identifier, _, _, _ = _resolve_topic_identifier(resolution_payload)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    status_payload = _collect_filter_status(topic_identifier, date_param)
+    status_payload["ai_config"] = _filter_ai_overview()
+    return _success({"data": status_payload})
 
 
 @app.post("/api/settings/llm/presets")

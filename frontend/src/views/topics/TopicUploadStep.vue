@@ -23,7 +23,7 @@
       </dl>
     </header>
 
-    <nav class="grid gap-3 sm:grid-cols-3">
+    <nav class="grid gap-3 sm:grid-cols-4">
       <div class="group flex items-start gap-3 rounded-3xl border border-brand bg-brand-soft px-5 py-4 shadow-sm">
         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-white text-sm font-semibold">1</span>
         <div class="space-y-1">
@@ -35,11 +35,18 @@
         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-muted">2</span>
         <div class="space-y-1">
           <p class="text-sm font-semibold text-secondary">数据预处理</p>
-          <p class="text-xs text-muted">数据清洗、字段映射与质量检测。</p>
+          <p class="text-xs text-muted">执行 Merge、Clean，输出标准化结果。</p>
         </div>
       </div>
       <div class="group flex items-start gap-3 rounded-3xl border border-dashed border-soft px-5 py-4 text-secondary transition hover:border-brand-soft">
         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-muted">3</span>
+        <div class="space-y-1">
+          <p class="text-sm font-semibold text-secondary">筛选数据</p>
+          <p class="text-xs text-muted">配置提示词模板，独立执行 AI 筛选。</p>
+        </div>
+      </div>
+      <div class="group flex items-start gap-3 rounded-3xl border border-dashed border-soft px-5 py-4 text-secondary transition hover:border-brand-soft">
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-muted">4</span>
         <div class="space-y-1">
           <p class="text-sm font-semibold text-secondary">数据入库</p>
           <p class="text-xs text-muted">写入业务数据库并生成分析指标。</p>

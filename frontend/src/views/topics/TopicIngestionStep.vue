@@ -7,7 +7,7 @@
       </div>
       <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
         <ArrowTrendingUpIcon class="h-4 w-4" />
-        <span>步骤 3 · 入库</span>
+        <span>步骤 4 · 入库</span>
       </div>
     </header>
 

@@ -66,6 +66,7 @@ import {
   ArrowTrendingUpIcon,
   CloudArrowUpIcon,
   FunnelIcon,
+  AdjustmentsHorizontalIcon,
   ChevronRightIcon,
   Squares2X2Icon,
   ChevronLeftIcon
@@ -88,7 +89,13 @@ const steps = [
     label: '数据预处理',
     to: { name: 'topic-create-preprocess' },
     icon: FunnelIcon,
-    description: '清洗并筛选关键字段'
+    description: '执行 Merge 与 Clean，生成标准化数据'
+  },
+  {
+    label: '筛选',
+    to: { name: 'topic-create-filter' },
+    icon: AdjustmentsHorizontalIcon,
+    description: '配置提示词并执行 AI 相关性筛选'
   },
   {
     label: '入库',
@@ -96,7 +103,7 @@ const steps = [
     icon: ArrowTrendingUpIcon,
     description: '提交数据写入业务数据库'
   },
-  // 基本分析迁移到项目数据模块，此处保留前三个操作步骤
+  // 基本分析迁移到项目数据模块，此处保留核心四个操作步骤
 ]
 
 const route = useRoute()

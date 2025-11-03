@@ -116,12 +116,18 @@
 每个接口返回 `{"status":"ok","operation":"...", "data": ...}` 代表成功；若返回 `status: "error"`，`message` 字段携带失败原因。
 
 ### 备选方案：`POST /api/pipeline`
-- **说明**：后端在一次调用中串行执行四个步骤，适用于脚本化或后台批量任务。
+- **说明**：后端在一次调用中串行执行 Merge、Clean 两个步骤，适用于脚本化或后台批量任务；Filter 与 Upload 需按需单独触发。
 - **请求体**：
   ```json
   { "topic": "campaign_x", "date": "2024-04-01" }
   ```
-- **响应**：`data.steps` 数组逐步列出每个阶段的 `success`、`result` 信息，便于排错；任一阶段失败会返回 `status: "error"` 与失败步骤提示。
+- **响应**：`data.steps` 数组逐步列出已执行阶段的 `success`、`result` 信息，便于排错；任一阶段失败会返回 `status: "error"` 与失败步骤提示。
+
+
+### 筛选配置与状态
+- `GET /api/filter/template`：读取指定专题的筛选模板，支持 `topic` 或 `project` 参数。
+- `POST /api/filter/template`：创建或更新筛选模板，请求体包含 `project/topic_theme/categories`。
+- `GET /api/filter/status`：查看筛选执行进度、汇总统计及无关样本，需要 `topic/project` 与 `date` 参数。
 
 ---
 

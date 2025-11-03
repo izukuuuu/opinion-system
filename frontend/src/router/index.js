@@ -4,6 +4,7 @@ import TopicCreationLayout from '../views/topics/TopicCreationLayout.vue'
 import TopicCreationOverview from '../views/topics/TopicCreationOverview.vue'
 import TopicUploadStep from '../views/topics/TopicUploadStep.vue'
 import TopicPreprocessStep from '../views/topics/TopicPreprocessStep.vue'
+import TopicFilterStep from '../views/topics/TopicFilterStep.vue'
 import TopicIngestionStep from '../views/topics/TopicIngestionStep.vue'
 import ProjectDataView from '../views/ProjectDataView.vue'
 import ProjectBasicAnalysisView from '../views/ProjectBasicAnalysisView.vue'
@@ -55,6 +56,15 @@ export const routes = [
         meta: {
           title: '数据预处理',
           breadcrumb: '数据预处理'
+        }
+      },
+      {
+        path: 'filter',
+        name: 'topic-create-filter',
+        component: TopicFilterStep,
+        meta: {
+          title: '筛选数据',
+          breadcrumb: '筛选数据'
         }
       },
       {

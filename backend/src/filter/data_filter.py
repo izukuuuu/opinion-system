@@ -1,26 +1,32 @@
 """
 AI相关性筛选功能
 """
-import json
 import asyncio
+import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from ..utils.setting.paths import bucket, ensure_bucket
-from ..utils.logging.logging import (
-    setup_logger,
-    log_success,
-    log_error,
-    log_skip,
-    log_module_start,
-)
-from ..utils.setting.settings import settings
-from ..utils.io.excel import write_jsonl, read_jsonl
-from ..utils.ai import QwenClient, OpenAIClient
+from ..utils.ai import OpenAIClient, QwenClient
 from ..utils.ai.token import count_tokens
+from ..utils.io.excel import read_jsonl, write_jsonl
+from ..utils.logging.logging import (
+    log_error,
+    log_module_start,
+    log_skip,
+    log_success,
+    setup_logger,
+)
+from ..utils.setting.paths import bucket, ensure_bucket
+from ..utils.setting.settings import settings
+
+
+def _current_timestamp() -> str:
+    """Return ISO 8601 timestamp in UTC."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _load_progress(topic: str, date: str, channel: str) -> Dict[str, Any]:
@@ -42,7 +48,15 @@ def _load_progress(topic: str, date: str, channel: str) -> Dict[str, Any]:
                 return json.load(f)
         except Exception:
             pass
-    return {"completed_indices": [], "failed_indices": [], "total_count": 0, "results": []}
+    return {
+        "completed_indices": [],
+        "failed_indices": [],
+        "total_count": 0,
+        "results": [],
+        "recent_records": [],
+        "irrelevant_samples": [],
+        "updated_at": _current_timestamp(),
+    }
 
 
 def _save_progress(topic: str, date: str, channel: str, progress: Dict[str, Any]) -> None:
@@ -61,6 +75,20 @@ def _save_progress(topic: str, date: str, channel: str, progress: Dict[str, Any]
             json.dump(progress, f, ensure_ascii=False, indent=2)
     except Exception as exc:  # pragma: no cover - 记录失败不影响流程
         print(f"保存进度记录失败: {exc}")
+
+
+def _write_filter_summary(topic: str, date: str, summary: Dict[str, Any]) -> None:
+    """
+    将筛选统计信息写入汇总文件，方便前端读取。
+    """
+    try:
+        dst = ensure_bucket("filter", topic, date)
+        summary_file = dst / "_summary.json"
+        summary.setdefault("updated_at", _current_timestamp())
+        with summary_file.open("w", encoding="utf-8") as fh:
+            json.dump(summary, fh, ensure_ascii=False, indent=2)
+    except Exception as exc:  # pragma: no cover - 写入汇总失败不影响主流程
+        print(f"保存筛选汇总失败: {exc}")
 
 
 def _save_partial_results(topic: str, date: str, channel: str, results_df: pd.DataFrame) -> None:
@@ -143,6 +171,18 @@ def _truncate(text: str, max_tokens: int, min_keep: int) -> str:
     if len(cut) >= min_keep:
         return cut
     return text[:max_tokens]
+
+
+def _summarise_text(value: Any, limit: int = 120) -> str:
+    """
+    截断文本以便前端展示。
+    """
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
 
 
 def _parse_response(raw: str) -> Dict[str, Any]:
@@ -289,6 +329,9 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
     total_tasks = 0
     successful_tasks = 0
     total_tokens = 0
+    summary_total_rows = 0
+    summary_kept_rows = 0
+    aggregated_irrelevant_samples: List[Dict[str, Any]] = []
 
     # QPS控制
     last_request_time = time.time()
@@ -405,11 +448,13 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
             if df.empty:
                 log_skip(logger, f"{channel} 空数据，跳过", "Filter")
                 continue
+            summary_total_rows += len(df)
 
             # 加载进度记录
             progress = _load_progress(topic, date, channel)
             completed_indices = set(progress.get("completed_indices", []))
             failed_indices = set(progress.get("failed_indices", []))
+            recent_records: List[Dict[str, Any]] = progress.get("recent_records", [])
 
             # 构建 prompts 并过滤已完成的任务
             texts: List[str] = []
@@ -431,6 +476,9 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                 progress["completed_indices"] = list(completed_indices)
                 progress["failed_indices"] = list(failed_indices)
                 progress["total_count"] = len(df)
+                progress["completed_count"] = len(completed_indices)
+                progress["failed_count"] = len(failed_indices)
+                progress["updated_at"] = _current_timestamp()
                 _save_progress(topic, date, channel, progress)
 
                 if completed_indices:
@@ -465,6 +513,8 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
 
                     batch_tokens = 0
                     batch_responses: List[Optional[str]] = []
+                    batch_records: List[Dict[str, Any]] = []
+                    batch_irrelevant: List[Dict[str, Any]] = []
                     for (idx, response, tokens, success), original_idx in zip(
                         current_batch_results, batch_indices
                     ):
@@ -500,11 +550,68 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                         else:
                             to_save = relevant_batch.drop(columns=["rel_raw", "rel_score"], errors="ignore")
                         _save_partial_results(topic, date, channel, to_save)
+                        summary_kept_rows += len(to_save)
+
+                    for row_idx, row in batch_df.iterrows():
+                        status = "kept" if bool(row.get("rel_score")) else "discarded"
+                        title = row.get("title") or row.get("headline") or ""
+                        preview_source = (
+                            row.get("contents")
+                            or row.get("content")
+                            or row.get("summary")
+                            or row.get("text")
+                            or ""
+                        )
+                        try:
+                            index_value = int(row_idx)
+                        except Exception:
+                            index_value = row_idx
+                        record = {
+                            "channel": channel,
+                            "index": index_value,
+                            "status": status,
+                            "title": _summarise_text(title, 80),
+                            "preview": _summarise_text(preview_source, 120),
+                            "classification": row.get("classification") or "",
+                            "updated_at": _current_timestamp(),
+                        }
+                        batch_records.append(record)
+
+                        if status == "discarded" and len(aggregated_irrelevant_samples) < 20:
+                            sample = {
+                                "channel": channel,
+                                "index": index_value,
+                                "title": record["title"],
+                                "preview": record["preview"],
+                            }
+                            aggregated_irrelevant_samples.append(sample)
+                            batch_irrelevant.append(sample)
 
                     progress["completed_indices"] = list(completed_indices)
                     progress["failed_indices"] = list(failed_indices)
                     progress["total_count"] = len(df)
+                    progress["completed_count"] = len(completed_indices)
+                    progress["failed_count"] = len(failed_indices)
+                    progress["recent_records"] = (batch_records + recent_records)[:50]
+                    if batch_irrelevant:
+                        existing_irrelevant = progress.get("irrelevant_samples", [])
+                        progress["irrelevant_samples"] = (batch_irrelevant + existing_irrelevant)[:20]
+                    progress["updated_at"] = _current_timestamp()
+                    recent_records = progress["recent_records"]
                     _save_progress(topic, date, channel, progress)
+                    _write_filter_summary(
+                        topic,
+                        date,
+                        {
+                            "topic": topic,
+                            "date": date,
+                            "total_rows": summary_total_rows,
+                            "kept_rows": summary_kept_rows,
+                            "discarded_rows": max(summary_total_rows - summary_kept_rows, 0),
+                            "irrelevant_samples": aggregated_irrelevant_samples[:20],
+                            "completed": False,
+                        },
+                    )
 
                     log_success(
                         logger,
@@ -517,6 +624,9 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                 progress["completed_indices"] = list(completed_indices)
                 progress["failed_indices"] = list(failed_indices)
                 progress["total_count"] = len(df)
+                progress["completed_count"] = len(completed_indices)
+                progress["failed_count"] = len(failed_indices)
+                progress["updated_at"] = _current_timestamp()
                 _save_progress(topic, date, channel, progress)
                 raise
             except Exception as exc:
@@ -524,6 +634,9 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                 progress["completed_indices"] = list(completed_indices)
                 progress["failed_indices"] = list(failed_indices)
                 progress["total_count"] = len(df)
+                progress["completed_count"] = len(completed_indices)
+                progress["failed_count"] = len(failed_indices)
+                progress["updated_at"] = _current_timestamp()
                 _save_progress(topic, date, channel, progress)
                 continue
 
@@ -578,6 +691,17 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
             "Filter",
         )
         log_success(logger, "部分渠道未完成，进度记录已保存，可重新运行继续处理", "Filter")
+
+    summary_payload = {
+        "topic": topic,
+        "date": date,
+        "total_rows": summary_total_rows,
+        "kept_rows": summary_kept_rows,
+        "discarded_rows": max(summary_total_rows - summary_kept_rows, 0),
+        "irrelevant_samples": aggregated_irrelevant_samples[:20],
+        "completed": all_channels_fully_completed,
+    }
+    _write_filter_summary(topic, date, summary_payload)
 
     return successful_tasks > 0
 
