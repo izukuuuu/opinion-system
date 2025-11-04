@@ -14,6 +14,7 @@ import TestView from '../views/TestView.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
 import SettingsDatabasesView from '../views/settings/SettingsDatabasesView.vue'
 import SettingsAiView from '../views/settings/SettingsAiView.vue'
+import SettingsThemeView from '../views/settings/SettingsThemeView.vue'
 import PlaceholderModuleView from '../views/PlaceholderModuleView.vue'
 
 export const routes = [
@@ -220,7 +221,16 @@ export const routes = [
     children: [
       {
         path: '',
-        redirect: { name: 'settings-databases' }
+        redirect: { name: 'settings-theme' }
+      },
+      {
+        path: 'appearance/theme',
+        name: 'settings-theme',
+        component: SettingsThemeView,
+        meta: {
+          title: '主题颜色',
+          breadcrumb: '主题颜色'
+        }
       },
       {
         path: 'databases',

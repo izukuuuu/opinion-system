@@ -77,31 +77,31 @@ const steps = [
     label: '流程概览',
     to: { name: 'topic-create-overview' },
     icon: Squares2X2Icon,
-    description: '快速了解专题创建的核心步骤'
+    description: '快速了解'
   },
   {
     label: '上传',
     to: { name: 'topic-create-upload' },
     icon: CloudArrowUpIcon,
-    description: '导入原始文件，启动流程'
+    description: '导入原始数据文件'
   },
   {
     label: '数据预处理',
     to: { name: 'topic-create-preprocess' },
     icon: FunnelIcon,
-    description: '执行 Merge 与 Clean，生成标准化数据'
+    description: '数据合并与数据清洗'
   },
   {
     label: '筛选',
     to: { name: 'topic-create-filter' },
     icon: AdjustmentsHorizontalIcon,
-    description: '配置提示词并执行 AI 相关性筛选'
+    description: 'AI 剔除无关内容'
   },
   {
     label: '入库',
     to: { name: 'topic-create-ingest' },
     icon: ArrowTrendingUpIcon,
-    description: '提交数据写入业务数据库'
+    description: '写入远程舆情数据库'
   },
   // 基本分析迁移到项目数据模块，此处保留核心四个操作步骤
 ]

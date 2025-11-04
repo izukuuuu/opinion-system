@@ -1,26 +1,14 @@
 <template>
   <div class="space-y-10">
-    <header class="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-soft bg-white/80 p-6 shadow-sm">
-      <div class="space-y-2">
-        <div class="inline-flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
-          <CloudArrowUpIcon class="h-4 w-4" />
-          <span>步骤 1 · 上传</span>
-        </div>
-        <div>
-          <h1 class="text-2xl font-semibold text-primary">上传原始数据</h1>
-          <p class="text-sm text-secondary">创建专题并上传 Excel/CSV 文件，生成标准化存档。</p>
-        </div>
+    <header class="flex flex-wrap items-center justify-between gap-3">
+      <div class="space-y-1">
+        <h1 class="text-2xl font-semibold text-primary">上传原始数据</h1>
+        <p class="text-sm text-secondary">创建专题并上传 Excel/CSV 文件，生成标准化存档。</p>
       </div>
-      <dl class="grid gap-3 text-xs text-secondary sm:grid-cols-2">
-        <div class="rounded-2xl bg-surface-muted px-4 py-3">
-          <dt class="text-[11px] uppercase tracking-widest text-muted">当前专题</dt>
-          <dd class="mt-1 text-sm font-semibold text-primary">{{ topicName || '未填写' }}</dd>
-        </div>
-        <div class="rounded-2xl bg-surface-muted px-4 py-3">
-          <dt class="text-[11px] uppercase tracking-widest text-muted">标签选择</dt>
-          <dd class="mt-1 text-sm font-semibold text-primary">{{ selectedTags.length ? selectedTags.join('，') : '未选择' }}</dd>
-        </div>
-      </dl>
+      <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
+        <CloudArrowUpIcon class="h-4 w-4" />
+        <span>步骤 1 · 上传</span>
+      </div>
     </header>
 
     <nav class="grid gap-3 sm:grid-cols-4">

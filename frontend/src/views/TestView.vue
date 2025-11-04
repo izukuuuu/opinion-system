@@ -66,12 +66,10 @@ import {
   ChartBarIcon,
   ChevronRightIcon,
   SparklesIcon,
-  Squares2X2Icon,
-  SwatchIcon
+  Squares2X2Icon
 } from '@heroicons/vue/24/outline'
 import ApiWorkbench from '../components/ApiWorkbench.vue'
 import AnalyzeWorkbench from '../components/AnalyzeWorkbench.vue'
-import ThemeColorPalette from '../components/ThemeColorPalette.vue'
 
 const panels = [
   {
@@ -89,14 +87,6 @@ const panels = [
     description: '组合查询条件，调用 Analyze 服务完成快速洞察与分析。',
     icon: ChartBarIcon,
     component: AnalyzeWorkbench
-  },
-  {
-    id: 'palette',
-    label: '主题色板',
-    heading: '主题色板',
-    description: '浏览 colors.css 中的主题色变量，确保设计系统的统一性。',
-    icon: SwatchIcon,
-    component: ThemeColorPalette
   }
 ]
 

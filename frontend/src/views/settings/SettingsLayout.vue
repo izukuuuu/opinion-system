@@ -47,10 +47,16 @@ import {
   ChevronRightIcon,
   Cog6ToothIcon,
   CircleStackIcon,
-  CpuChipIcon
+  CpuChipIcon,
+  SwatchIcon
 } from '@heroicons/vue/24/outline'
 
 const navigationItems = [
+  {
+    label: '主题颜色',
+    to: { name: 'settings-theme' },
+    icon: SwatchIcon
+  },
   {
     label: '数据库连接',
     to: { name: 'settings-databases' },
