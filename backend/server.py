@@ -357,6 +357,33 @@ def update_llm_filter():
     return success({"data": filter_llm})
 
 
+@app.put("/api/settings/llm/assistant")
+def update_llm_assistant():
+    payload = request.get_json(silent=True) or {}
+    config = load_llm_config()
+    assistant = config.get("assistant", {})
+
+    for field in ["provider", "model", "base_url"]:
+        if field in payload:
+            assistant[field] = str(payload[field]).strip()
+
+    if "max_tokens" in payload:
+        try:
+            assistant["max_tokens"] = int(payload["max_tokens"])
+        except (TypeError, ValueError):
+            return error("Field 'max_tokens' must be an integer")
+
+    if "temperature" in payload:
+        try:
+            assistant["temperature"] = float(payload["temperature"])
+        except (TypeError, ValueError):
+            return error("Field 'temperature' must be a number")
+
+    config["assistant"] = assistant
+    persist_llm_config(config)
+    return success({"data": assistant})
+
+
 @app.get("/api/filter/template")
 def get_filter_template():
     topic_param = str(request.args.get("topic", "") or "").strip()

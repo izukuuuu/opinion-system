@@ -13,12 +13,26 @@ from src.utils.setting.editor import (  # type: ignore
 )
 from src.utils.setting.settings import settings  # type: ignore
 
-from .paths import CONFIG_PATH
+from .paths import CONFIG_PATH, CONFIGS_DIR
 
 LOGGER = logging.getLogger(__name__)
 
 DATABASES_CONFIG_NAME = "databases"
 LLM_CONFIG_NAME = "llm"
+
+
+def _load_static_llm_config() -> Dict[str, Any]:
+    """Load the default LLM configuration bundled with the backend."""
+
+    static_path = CONFIGS_DIR / f"{LLM_CONFIG_NAME}.yaml"
+    if not static_path.is_file():
+        return {}
+
+    with static_path.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+    if not isinstance(data, dict):
+        return {}
+    return data
 
 
 def load_config() -> Dict[str, Any]:
@@ -62,14 +76,31 @@ def load_llm_config() -> Dict[str, Any]:
     """Return the configured large language model presets."""
 
     config = load_settings_config(LLM_CONFIG_NAME)
-    presets = config.get("presets") or []
-    if not isinstance(presets, list):
-        presets = []
-    config["presets"] = presets
-    filter_llm = config.get("filter_llm") or {}
-    if not isinstance(filter_llm, dict):
-        filter_llm = {}
+    static_config = _load_static_llm_config()
+
+    presets = config.get("presets")
+    if not isinstance(presets, list) or any(not isinstance(item, dict) for item in presets):
+        presets = static_config.get("presets") if isinstance(static_config.get("presets"), list) else []
+    config["presets"] = presets or []
+
+    filter_llm: Dict[str, Any] = {}
+    static_filter = static_config.get("filter_llm")
+    if isinstance(static_filter, dict):
+        filter_llm.update(static_filter)
+    dynamic_filter = config.get("filter_llm")
+    if isinstance(dynamic_filter, dict):
+        filter_llm.update(dynamic_filter)
     config["filter_llm"] = filter_llm
+
+    assistant: Dict[str, Any] = {}
+    static_assistant = static_config.get("assistant")
+    if isinstance(static_assistant, dict):
+        assistant.update(static_assistant)
+    dynamic_assistant = config.get("assistant")
+    if isinstance(dynamic_assistant, dict):
+        assistant.update(dynamic_assistant)
+    config["assistant"] = assistant
+
     return config
 
 

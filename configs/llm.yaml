@@ -5,6 +5,12 @@ filter_llm:
   qps: 10
   batch_size: 16
   truncation: 512
+assistant:
+  provider: ""
+  model: ""
+  base_url: ""
+  max_tokens: 0
+  temperature: 0.7
 presets:
   - id: "default"
     name: "默认预设"

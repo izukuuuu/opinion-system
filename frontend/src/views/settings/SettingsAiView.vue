@@ -217,7 +217,7 @@ const submitLlmFilter = async () => {
   llmState.error = ''
   try {
     const response = await fetch(`${API_BASE_URL}/settings/llm/filter`, {
-      method: 'POST',
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(llmState.filter)
     })
@@ -235,7 +235,7 @@ const submitLlmAssistant = async () => {
   llmState.error = ''
   try {
     const response = await fetch(`${API_BASE_URL}/settings/llm/assistant`, {
-      method: 'POST',
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(llmState.assistant)
     })
@@ -258,8 +258,16 @@ const fetchLlmSettings = async () => {
     }
     const payload = await response.json()
     const result = payload && typeof payload === 'object' ? payload.data ?? {} : {}
-    if (result.filter && typeof result.filter === 'object') {
-      Object.assign(llmState.filter, result.filter)
+    const filterConfig =
+      result && typeof result === 'object'
+        ? (result.filter_llm && typeof result.filter_llm === 'object'
+            ? result.filter_llm
+            : result.filter && typeof result.filter === 'object'
+              ? result.filter
+              : {})
+        : {}
+    if (filterConfig && typeof filterConfig === 'object') {
+      Object.assign(llmState.filter, filterConfig)
     }
     if (!llmState.filter.provider) {
       llmState.filter.provider = 'qwen'
