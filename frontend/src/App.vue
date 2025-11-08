@@ -58,17 +58,29 @@
       </nav>
     </aside>
 
-    <button
-      v-if="sidebarCollapsed"
-      type="button"
-      class="fixed left-4 top-6 z-40 inline-flex items-center gap-2 rounded-md border border-soft bg-surface/90 px-3 py-2 text-xs font-medium text-secondary shadow-sm backdrop-blur transition hover:border-brand-soft hover:text-primary focus-ring-accent lg:hidden"
-      :aria-expanded="!sidebarCollapsed"
-      :aria-label="sidebarToggleLabel"
-      @click="toggleSidebar"
+    <header
+      class="fixed inset-x-0 top-0 z-20 border-b border-soft bg-surface/95 px-4 py-3 shadow-sm backdrop-blur lg:hidden"
     >
-      <ChevronDoubleRightIcon class="h-4 w-4" />
-      <span>展开侧边栏</span>
-    </button>
+      <div class="flex items-center gap-3">
+        <button
+          type="button"
+          class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-soft bg-surface text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+          :aria-expanded="!sidebarCollapsed"
+          :aria-label="sidebarToggleLabel"
+          @click="toggleSidebar"
+        >
+          <ChevronDoubleRightIcon class="h-5 w-5" />
+        </button>
+        <div class="flex min-w-0 flex-1 flex-col">
+          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Opinion System</p>
+          <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
+        </div>
+        <ActiveProjectSwitcher
+          class="ml-auto shrink-0"
+          :show-label="false"
+        />
+      </div>
+    </header>
 
     <Transition
       enter-active-class="transition duration-200 ease-out"
@@ -134,15 +146,15 @@
 
     <div class="flex min-h-screen">
       <div
-        :class="[
-          'flex min-h-screen flex-1 flex-col px-0',
+          :class="[
+          'flex min-h-screen flex-1 flex-col px-0 pt-[4rem] lg:pt-0',
           sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'
         ]"
       >
         <header class="flex flex-col gap-4 border-b border-soft bg-surface px-6 py-6">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <p class="text-sm font-semibold uppercase tracking-[0.3em] text-muted">舆情监测系统</p>
-            <ActiveProjectSwitcher />
+            <ActiveProjectSwitcher class="hidden lg:inline-flex" />
           </div>
           <h1 class="text-2xl font-semibold text-primary md:text-3xl">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
         </header>
