@@ -137,12 +137,21 @@
       </div>
     </Transition>
 
-    <div
-      v-if="!sidebarCollapsed"
-      class="fixed inset-0 z-30 bg-slate-900/30 backdrop-blur-sm transition lg:hidden"
-      @click="toggleSidebar"
-      aria-hidden="true"
-    ></div>
+    <Transition
+      enter-active-class="transition-opacity duration-200 ease-out"
+      enter-from-class="opacity-0"
+      enter-to-class="opacity-100"
+      leave-active-class="transition-opacity duration-150 ease-in"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
+      <div
+        v-if="!sidebarCollapsed"
+        class="fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-sm lg:hidden"
+        @click="toggleSidebar"
+        aria-hidden="true"
+      ></div>
+    </Transition>
 
     <div class="flex min-h-screen">
       <div

@@ -1,9 +1,10 @@
 """
 数据查询功能
 """
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -66,6 +67,45 @@ def _serialise_preview(df: pd.DataFrame, max_rows: int = PREVIEW_ROW_LIMIT) -> D
         rows.append(normalised)
 
     return {"columns": columns, "rows": rows}
+
+
+MAX_TABLE_WORKERS = 6
+
+
+def _fetch_table_info(
+    db_manager: DatabaseManager,
+    db_name: str,
+    table_name: str,
+    logger: Any,
+) -> Dict[str, Any]:
+    """Fetch the row count and sample for a single table."""
+
+    table_info: Dict[str, Any] = {"name": table_name}
+
+    try:
+        count_query = f"SELECT COUNT(*) as record_count FROM `{db_name}`.`{table_name}`"
+        count_result = db_manager.execute_query(count_query)
+        record_count = count_result["record_count"].iloc[0]
+        table_info["record_count"] = int(record_count)
+        log_success(logger, f"表 {db_name}.{table_name} 包含 {record_count} 条记录", "Query")
+    except Exception as e:
+        table_info["error"] = str(e)
+        log_error(logger, f"查询表 {db_name}.{table_name} 信息失败: {e}", "Query")
+        return table_info
+
+    try:
+        preview_query = f"SELECT * FROM `{db_name}`.`{table_name}` LIMIT {PREVIEW_ROW_LIMIT}"
+        preview_result = db_manager.execute_query(preview_query)
+        table_info["preview"] = _serialise_preview(preview_result)
+    except Exception as preview_error:
+        table_info["preview_error"] = str(preview_error)
+        log_error(
+            logger,
+            f"查询表 {db_name}.{table_name} 预览数据失败: {preview_error}",
+            "Query",
+        )
+
+    return table_info
 
 
 def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
@@ -169,34 +209,29 @@ def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
                 "Query",
             )
 
-            # 遍历每个表
-            for table_name in table_names:
-                table_info: Dict[str, Any] = {"name": table_name}
-                try:
-                    # 获取表记录数
-                    count_query = f"SELECT COUNT(*) as record_count FROM `{db_name}`.`{table_name}`"
-                    count_result = db_manager.execute_query(count_query)
-                    record_count = count_result['record_count'].iloc[0]
-                    table_info["record_count"] = int(record_count)
-                    log_success(logger, f"表 {db_name}.{table_name} 包含 {record_count} 条记录", "Query")
-                except Exception as e:
-                    table_info["error"] = str(e)
-                    log_error(logger, f"查询表 {db_name}.{table_name} 信息失败: {e}", "Query")
+            table_workers = min(MAX_TABLE_WORKERS, len(table_names)) or 1
+            futures: Dict[Any, Tuple[int, str]] = {}
+            with ThreadPoolExecutor(max_workers=table_workers) as executor:
+                for index, table_name in enumerate(table_names):
+                    future = executor.submit(_fetch_table_info, db_manager, db_name, table_name, logger)
+                    futures[future] = (index, table_name)
 
-                if "error" not in table_info:
+                table_results: List[Tuple[int, Dict[str, Any]]] = []
+                for future in as_completed(futures):
+                    index, table_name = futures[future]
                     try:
-                        preview_query = f"SELECT * FROM `{db_name}`.`{table_name}` LIMIT {PREVIEW_ROW_LIMIT}"
-                        preview_result = db_manager.execute_query(preview_query)
-                        table_info["preview"] = _serialise_preview(preview_result)
-                    except Exception as preview_error:
-                        table_info["preview_error"] = str(preview_error)
+                        table_info = future.result()
+                    except Exception as exc:
                         log_error(
                             logger,
-                            f"查询表 {db_name}.{table_name} 预览数据失败: {preview_error}",
+                            f"查询表 {db_name}.{table_name} 过程中发生异常: {exc}",
                             "Query",
                         )
+                        table_info = {"name": table_name, "error": str(exc)}
+                    table_results.append((index, table_info))
 
-                database_overview["tables"].append(table_info)
+            table_results.sort(key=lambda pair: pair[0])
+            database_overview["tables"] = [info for _, info in table_results]
 
             stats = _summarise_tables(database_overview["tables"])
             database_overview.update(stats)

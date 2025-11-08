@@ -84,7 +84,7 @@
         ></div>
       </section>
 
-      <section v-if="hasData" class="space-y-6">
+      <section v-if="hasData" class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         <article
           v-for="database in databases"
           :key="database.name"
@@ -99,7 +99,7 @@
               {{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行
             </p>
           </header>
-          <ul class="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
+          <ul class="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-2 2xl:grid-cols-3">
             <li
               v-for="table in database.tables"
               :key="table.name"

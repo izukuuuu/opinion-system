@@ -8,7 +8,7 @@
       @click.stop="toggleDropdown"
     >
       <BriefcaseIcon class="h-4 w-4 text-muted" />
-      <span class="font-medium text-muted">当前项目：</span>
+      <span v-if="showLabel" class="font-medium text-muted">当前项目：</span>
       <span class="font-semibold text-primary">
         {{ displayName }}
       </span>
@@ -84,6 +84,13 @@ import {
   ChevronDownIcon
 } from '@heroicons/vue/24/outline'
 import { useActiveProject } from '../composables/useActiveProject'
+
+const { showLabel } = defineProps({
+  showLabel: {
+    type: Boolean,
+    default: true
+  }
+})
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
