@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 from src.utils.setting.paths import bucket  # type: ignore
 
+from .filter_jobs import is_filter_job_running
 from .paths import FILTER_PROGRESS_DIR, FILTER_SUMMARY_FILENAME
 
 _RECENT_RECORD_LIMIT = 40
@@ -47,6 +48,7 @@ def load_filter_summary_data(topic: str, date: str) -> Dict[str, Any]:
         "total_rows": int(payload.get("total_rows") or 0),
         "kept_rows": int(payload.get("kept_rows") or 0),
         "discarded_rows": int(payload.get("discarded_rows") or 0),
+        "token_usage": int(payload.get("token_usage") or 0),
         "irrelevant_samples": payload.get("irrelevant_samples")
         if isinstance(payload.get("irrelevant_samples"), list)
         else [],
@@ -134,13 +136,18 @@ def collect_filter_status(topic: str, date: str) -> Dict[str, Any]:
     recent_records = combined_recent[:_RECENT_RECORD_LIMIT]
     irrelevant_samples = (summary.get("irrelevant_samples") or [])[:_IRRELEVANT_SAMPLE_LIMIT]
 
+    token_usage = int(summary.get("token_usage") or 0)
+
     progress_overview = {
         "total": total_rows,
         "completed": completed_rows,
         "failed": failed_rows,
         "kept": kept_rows,
         "percentage": (completed_rows / total_rows * 100) if total_rows else 0,
+        "token_usage": token_usage,
     }
+
+    running = running or is_filter_job_running(topic, date)
 
     return {
         "topic": topic,

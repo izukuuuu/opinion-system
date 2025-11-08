@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_cors import CORS
 
 # 注意：所有新的辅助函数请存放在 ``backend/server_support`` 包中，
@@ -33,6 +35,7 @@ from src.project import (  # type: ignore
 from src.utils.setting.paths import bucket  # type: ignore
 
 from server_support import (  # type: ignore
+    collect_project_archives,
     collect_filter_status,
     error,
     evaluate_success,
@@ -49,9 +52,12 @@ from server_support import (  # type: ignore
     persist_llm_config,
     prepare_pipeline_args,
     resolve_topic_identifier,
+    resolve_stage_processing_date,
     require_fields,
     serialise_result,
     success,
+    mark_filter_job_running,
+    mark_filter_job_finished,
 )
 
 PROJECT_MANAGER = get_project_manager()
@@ -133,6 +139,83 @@ def _compose_analyze_folder(start: str, end: Optional[str]) -> str:
     return start
 
 
+def _summarise_api_key(value: Optional[str]) -> Dict[str, Any]:
+    if not value:
+        return {"configured": False, "last_four": ""}
+    last_four = value[-4:] if len(value) >= 4 else value
+    return {"configured": True, "last_four": last_four}
+
+
+def _resolve_filter_status_inputs(
+    topic_param: str, project_param: str, date_param: str
+) -> Tuple[str, str, Optional[str]]:
+    if not topic_param and not project_param:
+        raise ValueError("Missing required field(s): topic or project")
+
+    resolution_payload: Dict[str, Any] = {}
+    if topic_param:
+        resolution_payload["topic"] = topic_param
+    if project_param:
+        resolution_payload["project"] = project_param
+
+    topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
+    resolved_date, fallback_from = resolve_stage_processing_date(topic_identifier, "filter", date_param or None)
+    return topic_identifier, resolved_date, fallback_from
+
+
+def _build_filter_status_payload(
+    topic_identifier: str,
+    resolved_date: str,
+    fallback_from: Optional[str],
+) -> Dict[str, Any]:
+    status_payload = collect_filter_status(topic_identifier, resolved_date)
+    status_payload["ai_config"] = filter_ai_overview()
+    if fallback_from:
+        context = status_payload.setdefault("context", {})
+        if isinstance(context, dict):
+            context["resolved_date"] = resolved_date
+            context["requested_date"] = fallback_from
+    return status_payload
+
+
+def _submit_filter_job(
+    run_callable: Callable[[str, str, Optional[Any]], Any],
+    *,
+    topic_identifier: str,
+    resolved_date: str,
+    log_project: str,
+    display_name: str,
+) -> concurrent.futures.Future:
+    """
+    Execute the filter pipeline in a worker thread so that the API request
+    can return immediately while streaming endpoints keep receiving updates.
+    """
+
+    def _job():
+        try:
+            _execute_operation(
+                "filter",
+                run_callable,
+                topic_identifier,
+                resolved_date,
+                log_context={
+                    "project": log_project,
+                    "params": {
+                        "date": resolved_date,
+                        "source": "api",
+                        "topic": display_name,
+                        "bucket": topic_identifier,
+                    },
+                },
+            )
+        except Exception:  # pragma: no cover - background diagnostics
+            LOGGER.exception("Filter job failed for %s@%s", topic_identifier, resolved_date)
+        finally:
+            mark_filter_job_finished(topic_identifier, resolved_date)
+
+    return FILTER_EXECUTOR.submit(_job)
+
+
 app = Flask(__name__)
 CORS(app)
 
@@ -140,6 +223,9 @@ CONFIG = load_config()
 
 DATABASES_CONFIG_NAME = "databases"
 LLM_CONFIG_NAME = "llm"
+FILTER_STATUS_STREAM_INTERVAL = 1.0
+FILTER_STATUS_STREAM_TIMEOUT = 300.0
+FILTER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 
 def _load_json_file(path: Path) -> Any:
@@ -332,7 +418,65 @@ def activate_database_connection(connection_id: str):
 @app.get("/api/settings/llm")
 def get_llm_settings():
     config = load_llm_config()
-    return success({"data": config})
+    response_payload = dict(config)
+    response_payload.pop("credentials", None)
+    return success({"data": response_payload})
+
+
+@app.get("/api/settings/llm/credentials")
+def get_llm_credentials():
+    config = load_llm_config()
+    credentials = config.get("credentials", {})
+    qwen_key = credentials.get("qwen_api_key") or credentials.get("dashscope_api_key")
+    openai_key = credentials.get("openai_api_key") or credentials.get("opinion_openai_api_key")
+    return success({
+        "data": {
+            "qwen": _summarise_api_key(qwen_key if isinstance(qwen_key, str) else None),
+            "openai": _summarise_api_key(openai_key if isinstance(openai_key, str) else None),
+            "openai_base_url": str(credentials.get("openai_base_url") or ""),
+        }
+    })
+
+
+@app.put("/api/settings/llm/credentials")
+def update_llm_credentials():
+    payload = request.get_json(silent=True) or {}
+    config = load_llm_config()
+    credentials = dict(config.get("credentials", {}))
+
+    def _update_text_field(field: str) -> None:
+        if field not in payload:
+            return
+        value = payload.get(field)
+        text = ""
+        if isinstance(value, str):
+            text = value.strip()
+        elif value is None:
+            text = ""
+        else:
+            text = str(value).strip()
+
+        if text:
+            credentials[field] = text
+        else:
+            credentials.pop(field, None)
+
+    _update_text_field("qwen_api_key")
+    _update_text_field("dashscope_api_key")
+    _update_text_field("openai_api_key")
+    _update_text_field("opinion_openai_api_key")
+    _update_text_field("openai_base_url")
+
+    config["credentials"] = credentials
+    persist_llm_config(config)
+
+    return success({
+        "data": {
+            "qwen": _summarise_api_key(credentials.get("qwen_api_key") or credentials.get("dashscope_api_key")),
+            "openai": _summarise_api_key(credentials.get("openai_api_key") or credentials.get("opinion_openai_api_key")),
+            "openai_base_url": str(credentials.get("openai_base_url") or ""),
+        }
+    })
 
 
 @app.put("/api/settings/llm/filter")
@@ -454,25 +598,66 @@ def filter_status():
     project_param = str(request.args.get("project", "") or "").strip()
     date_param = str(request.args.get("date", "") or "").strip()
 
-    if not topic_param and not project_param:
-        return error("Missing required field(s): topic or project")
-    if not date_param:
-        return error("Missing required field(s): date")
-
-    resolution_payload: Dict[str, Any] = {}
-    if topic_param:
-        resolution_payload["topic"] = topic_param
-    if project_param:
-        resolution_payload["project"] = project_param
-
     try:
-        topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
+        topic_identifier, resolved_date, fallback_from = _resolve_filter_status_inputs(
+            topic_param, project_param, date_param
+        )
     except ValueError as exc:
         return error(str(exc))
 
-    status_payload = collect_filter_status(topic_identifier, date_param)
-    status_payload["ai_config"] = filter_ai_overview()
+    status_payload = _build_filter_status_payload(topic_identifier, resolved_date, fallback_from)
     return success({"data": status_payload})
+
+
+@app.get("/api/filter/status/stream")
+def filter_status_stream():
+    topic_param = str(request.args.get("topic", "") or "").strip()
+    project_param = str(request.args.get("project", "") or "").strip()
+    date_param = str(request.args.get("date", "") or "").strip()
+    interval_param = str(request.args.get("interval", "") or "").strip()
+
+    try:
+        topic_identifier, resolved_date, fallback_from = _resolve_filter_status_inputs(
+            topic_param, project_param, date_param
+        )
+    except ValueError as exc:
+        return error(str(exc))
+
+    try:
+        interval = float(interval_param) if interval_param else FILTER_STATUS_STREAM_INTERVAL
+    except ValueError:
+        interval = FILTER_STATUS_STREAM_INTERVAL
+    interval = max(0.5, min(5.0, interval))
+
+    def _stream():
+        start_time = time.time()
+        last_snapshot = ""
+        yield f"retry: {int(interval * 1500)}\n\n"
+        while True:
+            try:
+                status_payload = _build_filter_status_payload(topic_identifier, resolved_date, fallback_from)
+            except Exception as exc:  # pragma: no cover - defensive
+                error_payload = {"message": str(exc)}
+                yield f"event: error\ndata: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
+                break
+
+            message = json.dumps({"data": status_payload}, ensure_ascii=False)
+            if message != last_snapshot:
+                yield f"data: {message}\n\n"
+                last_snapshot = message
+
+            if not status_payload.get("running"):
+                break
+            if (time.time() - start_time) >= FILTER_STATUS_STREAM_TIMEOUT:
+                break
+            time.sleep(interval)
+
+        yield "event: done\ndata: {}\n\n"
+
+    response = Response(stream_with_context(_stream()), mimetype="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
 
 
 @app.post("/api/settings/llm/presets")
@@ -571,27 +756,40 @@ def merge_endpoint():
 def clean_endpoint():
     payload = request.get_json(silent=True) or {}
     try:
-        topic_identifier, date, display_name, log_project = prepare_pipeline_args(payload, PROJECT_MANAGER)
+        topic_identifier, date, display_name, log_project = prepare_pipeline_args(
+            payload,
+            PROJECT_MANAGER,
+            allow_missing_date=True,
+        )
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
     from src.clean import run_clean  # type: ignore
 
+    try:
+        resolved_date, fallback_from = resolve_stage_processing_date(topic_identifier, "clean", date or None)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
     response, code = _execute_operation(
         "clean",
         run_clean,
         topic_identifier,
-        date,
+        resolved_date,
         log_context={
             "project": log_project,
             "params": {
-                "date": date,
+                "date": resolved_date,
                 "source": "api",
                 "topic": display_name,
                 "bucket": topic_identifier,
             },
         },
     )
+    if fallback_from and response.get("status") == "ok":
+        metadata = response.setdefault("context", {})
+        metadata["resolved_date"] = resolved_date
+        metadata["requested_date"] = fallback_from
     return jsonify(response), code
 
 
@@ -599,28 +797,53 @@ def clean_endpoint():
 def filter_endpoint():
     payload = request.get_json(silent=True) or {}
     try:
-        topic_identifier, date, display_name, log_project = prepare_pipeline_args(payload, PROJECT_MANAGER)
+        topic_identifier, date, display_name, log_project = prepare_pipeline_args(
+            payload,
+            PROJECT_MANAGER,
+            allow_missing_date=True,
+        )
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
     from src.filter import run_filter  # type: ignore
 
-    response, code = _execute_operation(
-        "filter",
-        run_filter,
-        topic_identifier,
-        date,
-        log_context={
-            "project": log_project,
-            "params": {
-                "date": date,
-                "source": "api",
-                "topic": display_name,
-                "bucket": topic_identifier,
-            },
+    try:
+        resolved_date, fallback_from = resolve_stage_processing_date(topic_identifier, "filter", date or None)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    mark_filter_job_running(topic_identifier, resolved_date)
+    try:
+        _submit_filter_job(
+            run_filter,
+            topic_identifier=topic_identifier,
+            resolved_date=resolved_date,
+            log_project=log_project,
+            display_name=display_name,
+        )
+    except Exception as exc:  # pragma: no cover - executor failure
+        mark_filter_job_finished(topic_identifier, resolved_date)
+        LOGGER.exception("Failed to enqueue filter job")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+    context: Dict[str, Any] = {}
+    if fallback_from:
+        context["resolved_date"] = resolved_date
+        context["requested_date"] = fallback_from
+
+    response_payload: Dict[str, Any] = {
+        "status": "ok",
+        "operation": "filter",
+        "message": "筛选任务已提交，稍后可在进度面板查看实时状态。",
+        "data": {
+            "topic": topic_identifier,
+            "date": resolved_date,
+            "queued": True,
         },
-    )
-    return jsonify(response), code
+    }
+    if context:
+        response_payload["context"] = context
+    return jsonify(response_payload), 202
 
 
 @app.post("/api/upload")
@@ -638,6 +861,7 @@ def upload_endpoint():
         run_update,
         topic_identifier,
         date,
+        dataset_name=display_name,
         log_context={
             "project": log_project,
             "params": {
@@ -963,6 +1187,42 @@ def project_date_range(name: str):
     payload: Dict[str, Any] = {"status": "ok", "topic": name}
     payload.update(summary)
     return jsonify(payload)
+
+
+@app.get("/api/projects/<string:name>/archives")
+def project_archives(name: str):
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    layers_param = str(request.args.get("layers") or "").strip()
+
+    resolution_payload: Dict[str, Any] = {"project": name}
+    if dataset_id:
+        resolution_payload["dataset_id"] = dataset_id
+
+    try:
+        topic_identifier, display_name, log_project, dataset_meta = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    requested_layers = [layer.strip() for layer in layers_param.split(",") if layer.strip()] or None
+
+    archives = collect_project_archives(
+        topic_identifier,
+        layers=requested_layers,
+        dataset_id=str(dataset_meta.get("id") or dataset_id or "").strip() or None,
+    )
+    latest = {
+        layer: (entries[0]["date"] if entries else None)
+        for layer, entries in archives.items()
+    }
+
+    return jsonify({
+        "status": "ok",
+        "project": log_project,
+        "topic": topic_identifier,
+        "display_name": display_name,
+        "archives": archives,
+        "latest": latest,
+    })
 
 
 @app.put("/api/projects/<string:name>/datasets/<string:dataset_id>/mapping")

@@ -52,6 +52,7 @@ filter_llm:
 - “筛选模型配置” 与 “对话模型配置” 两个表单使用下拉框明确区分 `阿里通义千问` 与 `OpenAI/兼容 API`。
 - `provider` 字段默认值为 `qwen`，成功读取后端配置时若缺失会自动回落到该默认值。
 - 根据当前 Provider 动态更新模型输入框的占位提示（如 `gpt-3.5-turbo`、`qwen-plus`），减少误填概率。
+- 新增 “API 密钥配置” 卡片可直接写入/清空 DashScope 与 OpenAI API Key，并在同一处维护 `OPENAI_BASE_URL`。成功保存后端会落盘到 `configs/llm.yaml` 的 `credentials` 字段，`env_loader` 会自动优先读取该值。
 
 ## 7. 集成建议
 1. **测试流程**：在切换 Provider 前，确认 `.env` 中已经配置对应的 API Key，并运行一遍 `python backend/server.py` 或相关脚本验证调用。

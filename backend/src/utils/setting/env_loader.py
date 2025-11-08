@@ -5,8 +5,10 @@
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 # 避免循环导入，在函数内部导入
+
+from .editor import load_config as load_settings_config
 
 def load_env_file(env_file_path: Optional[str] = None) -> bool:
     """
@@ -82,7 +84,12 @@ def get_api_key() -> Optional[str]:
         api_key = os.environ.get('DASHSCOPE_API_KEY')
         if api_key and api_key != 'your_qwen_api_key_here':
             return api_key
-    
+
+    credentials = _load_llm_credentials()
+    api_key = credentials.get("qwen_api_key") or credentials.get("dashscope_api_key")
+    if api_key and api_key != 'your_qwen_api_key_here':
+        return api_key
+
     return None
 
 def validate_api_key() -> bool:
@@ -114,6 +121,21 @@ def _lookup_env_var(*names: str) -> Optional[str]:
     return None
 
 
+def _load_llm_credentials() -> Dict[str, str]:
+    """
+    Load LLM credentials persisted via the settings editor.
+    """
+    try:
+        config = load_settings_config("llm")
+    except Exception:
+        return {}
+
+    credentials = config.get("credentials")
+    if isinstance(credentials, dict):
+        return credentials
+    return {}
+
+
 def get_openai_api_key() -> Optional[str]:
     """
     获取 OpenAI API 密钥，支持 OPENAI_API_KEY 或 OPINION_OPENAI_API_KEY。
@@ -127,6 +149,11 @@ def get_openai_api_key() -> Optional[str]:
 
     if load_env_file():
         return _lookup_env_var("OPENAI_API_KEY", "OPINION_OPENAI_API_KEY")
+
+    credentials = _load_llm_credentials()
+    api_key = credentials.get("openai_api_key") or credentials.get("opinion_openai_api_key")
+    if api_key and api_key not in ("your_openai_api_key_here",):
+        return api_key
 
     return None
 
@@ -144,5 +171,10 @@ def get_openai_base_url() -> Optional[str]:
 
     if load_env_file():
         return _lookup_env_var("OPENAI_BASE_URL", "OPINION_OPENAI_BASE_URL")
+
+    credentials = _load_llm_credentials()
+    base_url = credentials.get("openai_base_url")
+    if base_url:
+        return base_url
 
     return None

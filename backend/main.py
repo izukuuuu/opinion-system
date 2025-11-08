@@ -117,7 +117,12 @@ def upload(topic, date):
     result = run_update(topic, date)
     _log_project_event(topic, "upload", {"date": date, "source": "cli"}, _as_success(result))
     if not _as_success(result):
-        print(f"上传失败: {topic} - {date}")
+        extra = ""
+        if isinstance(result, dict):
+            message = result.get("message")
+            if message:
+                extra = f" - {message}"
+        print(f"上传失败: {topic} - {date}{extra}")
 
 
 @cli.command('Query')
@@ -288,5 +293,4 @@ def show_projects():
 
 if __name__ == "__main__":
     main()
-
 

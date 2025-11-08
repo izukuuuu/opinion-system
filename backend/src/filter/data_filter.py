@@ -23,6 +23,9 @@ from ..utils.logging.logging import (
 from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.setting.settings import settings
 
+# Path(__file__).resolve() -> .../backend/src/filter/data_filter.py
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+
 
 def _current_timestamp() -> str:
     """Return ISO 8601 timestamp in UTC."""
@@ -55,6 +58,7 @@ def _load_progress(topic: str, date: str, channel: str) -> Dict[str, Any]:
         "results": [],
         "recent_records": [],
         "irrelevant_samples": [],
+        "token_usage": 0,
         "updated_at": _current_timestamp(),
     }
 
@@ -298,7 +302,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
     )
 
     # 读取提示词模板
-    prompt_config_path = Path(f"configs/prompt/filter/{topic}.yaml")
+    prompt_config_path = BACKEND_DIR / "configs" / "prompt" / "filter" / f"{topic}.yaml"
     if not prompt_config_path.exists():
         log_error(logger, f"未找到提示词配置文件: {prompt_config_path}", "Filter")
         return False
@@ -478,6 +482,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                 progress["total_count"] = len(df)
                 progress["completed_count"] = len(completed_indices)
                 progress["failed_count"] = len(failed_indices)
+                progress["token_usage"] = progress.get("token_usage", 0)
                 progress["updated_at"] = _current_timestamp()
                 _save_progress(topic, date, channel, progress)
 
@@ -521,11 +526,11 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                         total_tasks += 1
                         batch_tokens += tokens
                         channel_tokens += tokens
+                        total_tokens += tokens
                         batch_responses.append(response)
 
                         if response and success:
                             successful_tasks += 1
-                            total_tokens += tokens
                             completed_indices.add(idx)
                             failed_indices.discard(idx)
                         else:
@@ -596,6 +601,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                     if batch_irrelevant:
                         existing_irrelevant = progress.get("irrelevant_samples", [])
                         progress["irrelevant_samples"] = (batch_irrelevant + existing_irrelevant)[:20]
+                    progress["token_usage"] = channel_tokens
                     progress["updated_at"] = _current_timestamp()
                     recent_records = progress["recent_records"]
                     _save_progress(topic, date, channel, progress)
@@ -609,6 +615,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                             "kept_rows": summary_kept_rows,
                             "discarded_rows": max(summary_total_rows - summary_kept_rows, 0),
                             "irrelevant_samples": aggregated_irrelevant_samples[:20],
+                            "token_usage": total_tokens,
                             "completed": False,
                         },
                     )
@@ -626,6 +633,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                 progress["total_count"] = len(df)
                 progress["completed_count"] = len(completed_indices)
                 progress["failed_count"] = len(failed_indices)
+                progress["token_usage"] = channel_tokens
                 progress["updated_at"] = _current_timestamp()
                 _save_progress(topic, date, channel, progress)
                 raise
@@ -636,6 +644,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                 progress["total_count"] = len(df)
                 progress["completed_count"] = len(completed_indices)
                 progress["failed_count"] = len(failed_indices)
+                progress["token_usage"] = channel_tokens
                 progress["updated_at"] = _current_timestamp()
                 _save_progress(topic, date, channel, progress)
                 continue
@@ -699,6 +708,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
         "kept_rows": summary_kept_rows,
         "discarded_rows": max(summary_total_rows - summary_kept_rows, 0),
         "irrelevant_samples": aggregated_irrelevant_samples[:20],
+        "token_usage": total_tokens,
         "completed": all_channels_fully_completed,
     }
     _write_filter_summary(topic, date, summary_payload)

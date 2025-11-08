@@ -82,12 +82,34 @@
 数据存储于 `configs/settings/llm.yaml`。
 
 ### `GET /api/settings/llm`
-- **说明**：返回完整的 LLM 配置（包含 `filter_llm`、`presets` 等）。
+- **说明**：返回完整的 LLM 配置（包含 `filter_llm`、`presets` 等），出于安全考虑不包含 API 凭证信息。
 
 ### `PUT /api/settings/llm/filter`
 - **说明**：更新筛选模型的核心参数。
 - **可选字段**：`provider`、`model`（字符串），`qps`、`batch_size`、`truncation`（整数）。
 - **返回**：更新后的 `filter_llm` 对象。
+
+### `GET /api/settings/llm/credentials`
+- **说明**：查询千问 DashScope 与 OpenAI API Key 的配置状态，以及当前的 `openai_base_url`。
+- **响应示例**：
+  ```json
+  {
+    "status": "ok",
+    "data": {
+      "qwen": { "configured": true, "last_four": "abcd" },
+      "openai": { "configured": false, "last_four": "" },
+      "openai_base_url": "https://api.example.com/v1"
+    }
+  }
+  ```
+
+### `PUT /api/settings/llm/credentials`
+- **说明**：保存或清空 API 凭证。未在请求体中出现的字段将保持不变。
+- **可选字段**：
+  - `qwen_api_key` / `dashscope_api_key`
+  - `openai_api_key`
+  - `openai_base_url`
+- **返回**：与 `GET /api/settings/llm/credentials` 相同的结构，方便前端刷新状态。
 
 ### `POST /api/settings/llm/presets`
 - **说明**：新增模型预设，字段 `id`、`name`、`provider`、`model` 必填。
@@ -104,7 +126,10 @@
 ## 4. 数据入库流水线
 
 ### 推荐顺序：逐步调用四个接口
-所有接口共用请求体 `{ "topic": string, "date": "YYYY-MM-DD" }`，上一环节失败时应立即终止流程。
+所有接口共用基础请求体 `{ "topic": string, "date": "YYYY-MM-DD" }`，上一环节失败时应立即终止流程。  
+可选字段：
+- `project`：已有项目名称，用于在 `projects.json` 中记录操作日志。
+- `topic_label`：专题展示名称，仅用于日志与回显，不会改变实际存储目录。
 
 | 步骤 | 接口 | 说明 |
 | ---- | ---- | ---- |

@@ -162,24 +162,54 @@
             {{ datasetsError }}
           </p>
         </label>
-        <label class="space-y-1 text-sm">
-          <span class="font-medium text-secondary">处理日期</span>
-          <div class="flex flex-wrap items-center gap-3">
-            <input
-              v-model="processingDate"
-              type="date"
-              class="rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-            />
+        <div class="space-y-2 text-sm">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span class="font-medium text-secondary">选择 Clean 存档</span>
+              <p class="text-xs text-muted">请选择要执行筛选的 Clean 输出日期。</p>
+            </div>
             <button
               type="button"
-              class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-              @click.prevent="refreshProcessingDate"
+              class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="cleanArchivesState.loading"
+              @click.prevent="fetchCleanArchives({ force: true })"
             >
-              <ClockIcon class="h-4 w-4" />
-              使用今日
+              {{ cleanArchivesState.loading ? '刷新中…' : '刷新存档' }}
             </button>
           </div>
-        </label>
+          <p v-if="cleanArchivesState.error" class="rounded-2xl bg-rose-100 px-3 py-1 text-xs text-rose-600">
+            {{ cleanArchivesState.error }}
+          </p>
+          <div v-if="cleanArchivesState.loading" class="rounded-2xl bg-surface-muted px-3 py-2 text-xs text-muted">
+            存档加载中…
+          </div>
+          <p v-else-if="!cleanArchivesState.data.length" class="rounded-2xl bg-surface-muted px-3 py-2 text-xs text-muted">
+            暂未找到 Clean 存档，请确认已完成清洗。
+          </p>
+          <div v-else class="flex flex-wrap gap-2">
+            <button
+              v-for="archive in cleanArchivesState.data"
+              :key="archive.date"
+              type="button"
+              class="inline-flex flex-col gap-1 rounded-2xl border px-3 py-2 text-left text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              :class="selectedCleanDate === archive.date
+                ? 'border-brand-soft bg-brand-soft/70 text-brand-700 shadow-sm'
+                : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:text-brand-600'"
+              @click="selectedCleanDate = archive.date"
+            >
+              <span class="text-sm font-semibold text-primary">{{ archive.date }}</span>
+              <span class="text-[11px] text-muted">
+                {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
+              </span>
+              <span
+                v-if="archive.matches_dataset"
+                class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+              >
+                匹配当前数据集
+              </span>
+            </button>
+          </div>
+        </div>
       </form>
 
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -228,7 +258,7 @@
             :style="{ width: `${progressPercent}%` }"
           ></div>
         </div>
-        <dl class="grid gap-3 text-xs text-secondary sm:grid-cols-3">
+        <dl class="grid gap-3 text-xs text-secondary sm:grid-cols-4">
           <div class="rounded-2xl bg-surface-muted px-4 py-3">
             <dt class="text-[11px] uppercase tracking-widest text-muted">总任务</dt>
             <dd class="mt-1 text-base font-semibold text-primary">{{ statusState.progress.total }}</dd>
@@ -240,6 +270,13 @@
           <div class="rounded-2xl bg-surface-muted px-4 py-3">
             <dt class="text-[11px] uppercase tracking-widest text-muted">保留</dt>
             <dd class="mt-1 text-base font-semibold text-primary">{{ statusState.progress.kept }}</dd>
+          </div>
+          <div class="rounded-2xl bg-surface-muted px-4 py-3">
+            <dt class="text-[11px] uppercase tracking-widest text-muted">Token 消耗</dt>
+            <dd class="mt-1 text-base font-semibold text-primary">
+              {{ tokenUsageDisplay }}
+              <span class="ml-1 text-xs text-muted">token</span>
+            </dd>
           </div>
         </dl>
       </div>
@@ -360,23 +397,30 @@ import {
   AdjustmentsHorizontalIcon,
   SparklesIcon,
   PlusIcon,
-  XMarkIcon,
-  ClockIcon
+  XMarkIcon
 } from '@heroicons/vue/24/outline'
 import { useActiveProject } from '../../composables/useActiveProject'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
-const POLL_INTERVAL = 4000
+const POLL_INTERVAL = 1000
 const RECENT_LIMIT = 40
 
 const { activeProjectName } = useActiveProject()
 
-const processingDate = ref(getProcessingDate())
 const datasets = ref([])
 const datasetsLoading = ref(false)
 const datasetsError = ref('')
 const selectedDatasetId = ref('')
 const lastFetchedProjectName = ref('')
+const cleanArchivesState = reactive({
+  loading: false,
+  error: '',
+  data: [],
+  latest: '',
+  lastProject: '',
+  lastDataset: ''
+})
+const selectedCleanDate = ref('')
 
 const templateState = reactive({
   loading: false,
@@ -403,13 +447,15 @@ const statusState = reactive({
     completed: 0,
     kept: 0,
     failed: 0,
-    percentage: 0
+    percentage: 0,
+    tokens: 0
   },
   recentRecords: [],
   summary: {
     total_rows: 0,
     kept_rows: 0,
     discarded_rows: 0,
+    token_usage: 0,
     completed: false,
     updated_at: ''
   },
@@ -432,6 +478,9 @@ const triggerState = reactive({
 
 const statusLoading = ref(false)
 let pollHandle = null
+const supportsEventSource = typeof window !== 'undefined' && typeof window.EventSource !== 'undefined'
+const statusStream = ref(null)
+const usingPollingFallback = ref(!supportsEventSource)
 
 const datasetTimestampFormatter = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric',
@@ -449,6 +498,7 @@ const summaryTimestampFormatter = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
   second: '2-digit'
 })
+const tokenNumberFormatter = new Intl.NumberFormat('zh-CN')
 
 const currentProjectName = computed(() => activeProjectName.value || '')
 
@@ -521,8 +571,49 @@ const filteredOutCount = computed(() => {
   return total > kept ? total - kept : 0
 })
 
+const tokenUsageDisplay = computed(() => {
+  const value = Number(statusState.summary.token_usage || statusState.progress.tokens || 0)
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0'
+  }
+  return tokenNumberFormatter.format(value)
+})
+
 const summaryUpdatedAt = computed(() => formatTimestamp(statusState.summary.updated_at))
 const recentLimit = computed(() => RECENT_LIMIT)
+
+function applyStatusPayload(raw) {
+  const data = raw && typeof raw === 'object' ? raw : {}
+  statusState.running = Boolean(data.running)
+  const progress = data.progress || {}
+  statusState.progress = {
+    total: Number(progress.total || 0),
+    completed: Number(progress.completed || 0),
+    kept: Number(progress.kept || 0),
+    failed: Number(progress.failed || 0),
+    percentage: Number(progress.percentage || 0),
+    tokens: Number(progress.token_usage || 0)
+  }
+  const recent = Array.isArray(data.recent_records) ? data.recent_records : []
+  statusState.recentRecords = recent.slice(0, RECENT_LIMIT)
+  const summary = data.summary || {}
+  statusState.summary = {
+    total_rows: Number(summary.total_rows || 0),
+    kept_rows: Number(summary.kept_rows || 0),
+    discarded_rows: Number(summary.discarded_rows || 0),
+    token_usage: Number(summary.token_usage || statusState.progress.tokens || 0),
+    completed: Boolean(summary.completed),
+    updated_at: summary.updated_at || ''
+  }
+  statusState.irrelevantSamples = Array.isArray(data.irrelevant_samples) ? data.irrelevant_samples : []
+  statusState.aiConfig = {
+    provider: data.ai_config?.provider || '',
+    model: data.ai_config?.model || '',
+    qps: data.ai_config?.qps ?? null,
+    batch_size: data.ai_config?.batch_size ?? null,
+    truncation: data.ai_config?.truncation ?? null
+  }
+}
 
 watch(
   () => [templateState.theme, templateState.categories],
@@ -536,6 +627,7 @@ watch(
 watch(
   () => statusState.running,
   (running) => {
+    if (!usingPollingFallback.value) return
     if (running) {
       startPolling()
     } else {
@@ -548,7 +640,9 @@ watch(
   currentProjectName,
   (project) => {
     stopPolling()
+    closeStatusStream()
     resetDatasetState()
+    resetArchivesState()
     resetStatusState()
     templateState.theme = ''
     templateState.categories = []
@@ -563,31 +657,34 @@ watch(
     fetchProjectDatasets(project, { force: true })
     loadTemplate(project)
     loadFilterStatus()
+    openStatusStream()
   },
   { immediate: true }
 )
 
-watch(processingDate, () => {
-  if (currentProjectName.value) {
-    loadFilterStatus({ silent: true })
+watch(
+  selectedDatasetId,
+  () => {
+    fetchCleanArchives({ force: true })
   }
-})
+)
+
+watch(
+  selectedCleanDate,
+  (date) => {
+    if (currentProjectName.value && date) {
+      loadFilterStatus({ silent: true })
+      openStatusStream()
+    } else {
+      closeStatusStream()
+    }
+  }
+)
 
 onBeforeUnmount(() => {
   stopPolling()
+  closeStatusStream()
 })
-
-function getProcessingDate() {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function refreshProcessingDate() {
-  processingDate.value = getProcessingDate()
-}
 
 function formatDatasetTimestamp(value) {
   if (!value) return ''
@@ -665,6 +762,7 @@ async function fetchProjectDatasets(projectName, { force = false } = {}) {
     } else {
       selectedDatasetId.value = ''
     }
+    fetchCleanArchives({ force: true })
   } catch (err) {
     datasets.value = []
     datasetsError.value = err instanceof Error ? err.message : '无法加载专题数据集'
@@ -679,6 +777,77 @@ function refreshDatasets() {
   const projectName = currentProjectName.value
   if (!projectName) return
   fetchProjectDatasets(projectName, { force: true })
+}
+
+function resetArchivesState() {
+  cleanArchivesState.loading = false
+  cleanArchivesState.error = ''
+  cleanArchivesState.data = []
+  cleanArchivesState.latest = ''
+  cleanArchivesState.lastProject = ''
+  cleanArchivesState.lastDataset = ''
+  selectedCleanDate.value = ''
+}
+
+function syncCleanArchiveSelection() {
+  const archives = Array.isArray(cleanArchivesState.data) ? cleanArchivesState.data : []
+  if (!archives.length) {
+    selectedCleanDate.value = ''
+    return
+  }
+  if (!selectedCleanDate.value || !archives.some((item) => item.date === selectedCleanDate.value)) {
+    const preferred = archives.find((item) => item.matches_dataset)
+    selectedCleanDate.value =
+      (preferred && preferred.date) || cleanArchivesState.latest || archives[0]?.date || ''
+  }
+}
+
+async function fetchCleanArchives({ force = false } = {}) {
+  const projectName = (currentProjectName.value || '').trim()
+  if (!projectName) {
+    resetArchivesState()
+    return
+  }
+  const datasetId = (selectedDatasetId.value || '').trim()
+  if (
+    !force &&
+    cleanArchivesState.lastProject === projectName &&
+    cleanArchivesState.lastDataset === datasetId &&
+    cleanArchivesState.data.length
+  ) {
+    return
+  }
+
+  cleanArchivesState.loading = true
+  cleanArchivesState.error = ''
+  try {
+    const params = new URLSearchParams({ layers: 'clean' })
+    if (datasetId) {
+      params.append('dataset_id', datasetId)
+    }
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${encodeURIComponent(projectName)}/archives?${params.toString()}`
+    )
+    const result = await response.json()
+    if (!response.ok || result.status !== 'ok') {
+      throw new Error(result.message || '无法获取 Clean 存档')
+    }
+    const archives = result.archives || {}
+    cleanArchivesState.data = Array.isArray(archives.clean) ? archives.clean : []
+    cleanArchivesState.latest = result.latest?.clean || ''
+    cleanArchivesState.lastProject = projectName
+    cleanArchivesState.lastDataset = datasetId
+    syncCleanArchiveSelection()
+  } catch (err) {
+    cleanArchivesState.error = err instanceof Error ? err.message : '无法获取 Clean 存档'
+    cleanArchivesState.data = []
+    cleanArchivesState.latest = ''
+    cleanArchivesState.lastProject = ''
+    cleanArchivesState.lastDataset = ''
+    selectedCleanDate.value = ''
+  } finally {
+    cleanArchivesState.loading = false
+  }
 }
 
 async function loadTemplate(projectName) {
@@ -759,7 +928,9 @@ async function saveTemplate() {
 }
 
 async function loadFilterStatus({ silent = false } = {}) {
-  if (!currentProjectName.value || !processingDate.value) {
+  const projectName = (currentProjectName.value || '').trim()
+  const dateValue = (selectedCleanDate.value || '').trim()
+  if (!projectName || !dateValue) {
     resetStatusState()
     return
   }
@@ -770,44 +941,15 @@ async function loadFilterStatus({ silent = false } = {}) {
 
   try {
     const params = new URLSearchParams({
-      project: currentProjectName.value.trim(),
-      date: processingDate.value
+      project: projectName,
+      date: dateValue
     })
     const response = await fetch(`${API_BASE_URL}/filter/status?${params.toString()}`)
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
       throw new Error(result.message || '无法获取筛选状态')
     }
-    const data = result.data || {}
-    statusState.running = Boolean(data.running)
-    const progress = data.progress || {}
-    statusState.progress = {
-      total: Number(progress.total || 0),
-      completed: Number(progress.completed || 0),
-      kept: Number(progress.kept || 0),
-      failed: Number(progress.failed || 0),
-      percentage: Number(progress.percentage || 0)
-    }
-    const recent = Array.isArray(data.recent_records) ? data.recent_records : []
-    statusState.recentRecords = recent.slice(0, RECENT_LIMIT)
-    const summary = data.summary || {}
-    statusState.summary = {
-      total_rows: Number(summary.total_rows || 0),
-      kept_rows: Number(summary.kept_rows || 0),
-      discarded_rows: Number(summary.discarded_rows || 0),
-      completed: Boolean(summary.completed),
-      updated_at: summary.updated_at || ''
-    }
-    statusState.irrelevantSamples = Array.isArray(data.irrelevant_samples)
-      ? data.irrelevant_samples
-      : []
-    statusState.aiConfig = {
-      provider: data.ai_config?.provider || '',
-      model: data.ai_config?.model || '',
-      qps: data.ai_config?.qps ?? null,
-      batch_size: data.ai_config?.batch_size ?? null,
-      truncation: data.ai_config?.truncation ?? null
-    }
+    applyStatusPayload(result.data)
     statusState.message = ''
   } catch (err) {
     if (!silent) {
@@ -827,6 +969,7 @@ function resetDatasetState() {
   datasetsLoading.value = false
   selectedDatasetId.value = ''
   lastFetchedProjectName.value = ''
+  resetArchivesState()
 }
 
 function resetStatusState() {
@@ -835,13 +978,15 @@ function resetStatusState() {
     completed: 0,
     kept: 0,
     failed: 0,
-    percentage: 0
+    percentage: 0,
+    tokens: 0
   }
   statusState.recentRecords = []
   statusState.summary = {
     total_rows: 0,
     kept_rows: 0,
     discarded_rows: 0,
+    token_usage: 0,
     completed: false,
     updated_at: ''
   }
@@ -864,6 +1009,71 @@ function stopPolling() {
   }
 }
 
+function disablePollingFallback() {
+  if (!usingPollingFallback.value) {
+    stopPolling()
+    return
+  }
+  usingPollingFallback.value = false
+  stopPolling()
+}
+
+function enablePollingFallback() {
+  if (usingPollingFallback.value) return
+  usingPollingFallback.value = true
+  if (statusState.running) {
+    startPolling()
+  }
+}
+
+function closeStatusStream() {
+  if (statusStream.value) {
+    statusStream.value.close()
+    statusStream.value = null
+  }
+}
+
+function openStatusStream() {
+  if (!supportsEventSource) {
+    enablePollingFallback()
+    return
+  }
+  const projectName = (currentProjectName.value || '').trim()
+  const dateValue = (selectedCleanDate.value || '').trim()
+  if (!projectName || !dateValue) {
+    closeStatusStream()
+    return
+  }
+  disablePollingFallback()
+  const params = new URLSearchParams({
+    project: projectName,
+    date: dateValue
+  })
+  closeStatusStream()
+  const source = new EventSource(`${API_BASE_URL}/filter/status/stream?${params.toString()}`)
+  statusStream.value = source
+  source.onmessage = (event) => {
+    if (!event.data) return
+    try {
+      const payload = JSON.parse(event.data)
+      if (payload && payload.data) {
+        applyStatusPayload(payload.data)
+        statusState.message = ''
+      }
+    } catch {
+      // ignore malformed chunks
+    }
+  }
+  source.addEventListener('done', () => {
+    closeStatusStream()
+  })
+  source.addEventListener('error', () => {
+    closeStatusStream()
+    enablePollingFallback()
+    loadFilterStatus({ silent: true })
+  })
+}
+
 function ensureParameters() {
   if (!currentProjectName.value.trim()) {
     triggerState.success = false
@@ -880,9 +1090,9 @@ function ensureParameters() {
     triggerState.message = '请先保存提示词模板'
     return false
   }
-  if (!processingDate.value) {
+  if (!selectedCleanDate.value) {
     triggerState.success = false
-    triggerState.message = '请填写处理日期'
+    triggerState.message = '请选择需要筛选的 Clean 存档'
     return false
   }
   triggerState.message = ''
@@ -900,7 +1110,7 @@ async function runFilter() {
     const payload = {
       topic: currentProjectName.value.trim(),
       project: currentProjectName.value.trim(),
-      date: processingDate.value
+      date: selectedCleanDate.value
     }
     if (selectedDatasetId.value) {
       payload.dataset_id = selectedDatasetId.value
@@ -921,6 +1131,7 @@ async function runFilter() {
     if (ok) {
       statusState.running = true
       loadFilterStatus()
+      openStatusStream()
     }
   } catch (err) {
     triggerState.success = false

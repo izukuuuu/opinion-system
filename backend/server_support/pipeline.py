@@ -21,7 +21,8 @@ def resolve_topic_identifier(
     """Resolve topic identifiers and project context from the API payload."""
 
     project_name = str(payload.get("project") or "").strip()
-    topic_label = str(payload.get("topic") or "").strip()
+    topic_value = str(payload.get("topic") or "").strip()
+    topic_label = str(payload.get("topic_label") or "").strip()
     dataset_meta = resolve_dataset_payload(project_name, payload.get("dataset_id"))
 
     candidates = []
@@ -46,6 +47,9 @@ def resolve_topic_identifier(
         candidates.append(normalise_project_name(project_name))
         candidates.append(project_name)
 
+    if topic_value:
+        candidates.append(topic_value)
+
     if topic_label:
         candidates.append(topic_label)
 
@@ -64,12 +68,8 @@ def resolve_topic_identifier(
     if canonical_topic:
         resolved_topic = canonical_topic
 
-    display_name = (
-        topic_label
-        or (dataset_meta.get("topic_label") if isinstance(dataset_meta.get("topic_label"), str) else None)
-        or project_name
-        or resolved_topic
-    )
+    dataset_topic_label = dataset_meta.get("topic_label") if isinstance(dataset_meta.get("topic_label"), str) else None
+    display_name = topic_label or dataset_topic_label or project_name or topic_value or resolved_topic
 
     log_project = project_name or dataset_meta.get("project") or resolved_topic
 
@@ -79,14 +79,17 @@ def resolve_topic_identifier(
 def prepare_pipeline_args(
     payload: Dict[str, Any],
     project_manager,
+    *,
+    allow_missing_date: bool = False,
 ) -> Tuple[str, str, str]:
     """Validate payload and prepare merge/clean pipeline arguments."""
 
     topic_identifier, display_name, log_project, dataset_meta = resolve_topic_identifier(payload, project_manager)
     date = str(payload.get("date") or "").strip()
-    if not date:
+    if not date and not allow_missing_date:
         raise ValueError("Missing required field(s): date")
-    ensure_raw_dataset_availability(topic_identifier, date, dataset_meta)
+    if date:
+        ensure_raw_dataset_availability(topic_identifier, date, dataset_meta)
     return topic_identifier, date, display_name or topic_identifier, log_project or topic_identifier
 
 

@@ -101,6 +101,11 @@ def load_llm_config() -> Dict[str, Any]:
         assistant.update(dynamic_assistant)
     config["assistant"] = assistant
 
+    credentials = config.get("credentials")
+    if not isinstance(credentials, dict):
+        credentials = {}
+    config["credentials"] = credentials
+
     return config
 
 

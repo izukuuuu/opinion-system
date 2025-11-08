@@ -1,5 +1,10 @@
 """Shared helper utilities for :mod:`backend.server` routes."""
 
+from .archives import (  # type: ignore
+    collect_layer_archives,
+    collect_project_archives,
+    resolve_stage_processing_date,
+)
 from .configuration import (
     filter_ai_overview,
     load_config,
@@ -17,6 +22,11 @@ from .dataset_files import (
     resolve_dataset_payload,
     resolve_dataset_source_path,
     update_dataset_source_references,
+)
+from .filter_jobs import (
+    is_filter_job_running,
+    mark_filter_job_finished,
+    mark_filter_job_running,
 )
 from .filter_progress import collect_filter_status
 from .filter_templates import (
@@ -47,6 +57,10 @@ from .responses import (
 )
 
 __all__ = [
+    # Archive helpers
+    "collect_layer_archives",
+    "collect_project_archives",
+    "resolve_stage_processing_date",
     # Configuration helpers
     "filter_ai_overview",
     "load_config",
@@ -65,7 +79,10 @@ __all__ = [
     "update_dataset_source_references",
     # Filter helpers
     "collect_filter_status",
+    "is_filter_job_running",
     "load_filter_template_config",
+    "mark_filter_job_finished",
+    "mark_filter_job_running",
     "persist_filter_template_config",
     # Paths
     "BACKEND_DIR",

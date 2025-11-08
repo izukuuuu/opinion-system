@@ -55,6 +55,134 @@
 <p v-if="parameterError" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">{{ parameterError }}</p>
     </section>
 
+    <section class="card-surface space-y-5 p-6">
+      <header class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-xl font-semibold text-primary">存档管理</h2>
+          <p class="text-sm text-secondary">系统会列出 Raw、Merge、Clean 三个阶段的历史存档，供后续步骤复用。</p>
+        </div>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="archivesState.loading"
+          @click="fetchProjectArchives({ force: true })"
+        >
+          {{ archivesState.loading ? '刷新中…' : '刷新存档' }}
+        </button>
+      </header>
+      <p v-if="archivesState.error" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">
+        {{ archivesState.error }}
+      </p>
+      <div class="grid gap-6 lg:grid-cols-3">
+        <article class="space-y-3 rounded-3xl border border-dashed border-soft bg-white/80 p-5">
+          <header class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-muted">RAW</p>
+              <h3 class="text-base font-semibold text-primary">原始数据存档</h3>
+              <p class="text-xs text-secondary">请选择需要执行 Merge 的日期。</p>
+            </div>
+            <span class="text-xs text-muted">
+              {{ archivesState.data.raw.length ? `共 ${archivesState.data.raw.length} 份` : '暂无' }}
+            </span>
+          </header>
+          <div v-if="archivesState.loading" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
+            存档加载中…
+          </div>
+          <p v-else-if="!archivesState.data.raw.length" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
+            暂未找到原始数据存档，请先上传或刷新后重试。
+          </p>
+          <div v-else class="flex flex-wrap gap-2">
+            <button
+              v-for="archive in archivesState.data.raw"
+              :key="archive.date"
+              type="button"
+              class="inline-flex flex-col gap-1 rounded-2xl border px-3 py-2 text-left text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              :class="archiveSelection.mergeDate === archive.date
+                ? 'border-brand-soft bg-brand-soft/70 text-brand-700 shadow-sm'
+                : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:text-brand-600'"
+              @click="archiveSelection.mergeDate = archive.date"
+            >
+              <span class="text-sm font-semibold text-primary">{{ archive.date }}</span>
+              <span class="text-[11px] text-muted">
+                {{ archive.file_count || 0 }} 文件 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
+              </span>
+              <span
+                v-if="archive.matches_dataset"
+                class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+              >
+                匹配当前数据集
+              </span>
+            </button>
+          </div>
+        </article>
+        <article class="space-y-3 rounded-3xl border border-dashed border-soft bg-white/80 p-5">
+          <header class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-muted">MERGE</p>
+              <h3 class="text-base font-semibold text-primary">Merge 输出存档</h3>
+              <p class="text-xs text-secondary">选择需要进行 Clean 的 Merge 存档。</p>
+            </div>
+            <span class="text-xs text-muted">
+              {{ archivesState.data.merge.length ? `共 ${archivesState.data.merge.length} 份` : '暂无' }}
+            </span>
+          </header>
+          <div v-if="archivesState.loading" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
+            存档加载中…
+          </div>
+          <p v-else-if="!archivesState.data.merge.length" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
+            暂未找到 Merge 存档，请先执行 Merge。
+          </p>
+          <div v-else class="flex flex-wrap gap-2">
+            <button
+              v-for="archive in archivesState.data.merge"
+              :key="archive.date"
+              type="button"
+              class="inline-flex flex-col gap-1 rounded-2xl border px-3 py-2 text-left text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              :class="archiveSelection.cleanDate === archive.date
+                ? 'border-brand-soft bg-brand-soft/70 text-brand-700 shadow-sm'
+                : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:text-brand-600'"
+              @click="archiveSelection.cleanDate = archive.date"
+            >
+              <span class="text-sm font-semibold text-primary">{{ archive.date }}</span>
+              <span class="text-[11px] text-muted">
+                {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
+              </span>
+            </button>
+          </div>
+        </article>
+        <article class="space-y-3 rounded-3xl border border-dashed border-soft bg-white/80 p-5">
+          <header class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-muted">CLEAN</p>
+              <h3 class="text-base font-semibold text-primary">Clean 输出存档</h3>
+              <p class="text-xs text-secondary">供筛选步骤使用，当前页面仅展示概览。</p>
+            </div>
+            <span class="text-xs text-muted">
+              {{ archivesState.data.clean.length ? `共 ${archivesState.data.clean.length} 份` : '暂无' }}
+            </span>
+          </header>
+          <div v-if="archivesState.loading" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
+            存档加载中…
+          </div>
+          <p v-else-if="!archivesState.data.clean.length" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
+            暂未找到 Clean 存档。
+          </p>
+          <ul v-else class="space-y-2 text-xs text-secondary">
+            <li
+              v-for="archive in archivesState.data.clean"
+              :key="`clean-${archive.date}`"
+              class="rounded-2xl border border-soft bg-surface px-3 py-2"
+            >
+              <p class="text-sm font-semibold text-primary">{{ archive.date }}</p>
+              <p class="text-[11px] text-muted">
+                {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
+              </p>
+            </li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
     <section class="space-y-5">
       <div class="card-surface flex flex-wrap items-center justify-between gap-3 p-6">
         <div class="space-y-1">
@@ -135,7 +263,6 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
-const processingDate = ref('')
 const parameterError = ref('')
 const { activeProjectName } = useActiveProject()
 const datasets = ref([])
@@ -186,19 +313,27 @@ const pipeline = reactive({
   message: ''
 })
 
-const getProcessingDate = () => {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
+const archivesState = reactive({
+  loading: false,
+  error: '',
+  data: {
+    raw: [],
+    merge: [],
+    clean: []
+  },
+  latest: {
+    raw: '',
+    merge: '',
+    clean: ''
+  },
+  lastProject: '',
+  lastDataset: ''
+})
 
-const refreshProcessingDate = () => {
-  processingDate.value = getProcessingDate()
-}
-
-refreshProcessingDate()
+const archiveSelection = reactive({
+  mergeDate: '',
+  cleanDate: ''
+})
 
 const currentProjectName = computed(() => activeProjectName.value || 'GLOBAL')
 const datasetOptions = computed(() =>
@@ -236,7 +371,7 @@ const resetDatasetState = () => {
   datasetsLoading.value = false
   selectedDatasetId.value = ''
   lastFetchedProjectName.value = ''
-  refreshProcessingDate()
+  resetArchivesState()
 }
 
 const fetchProjectDatasets = async (projectName, { force = false } = {}) => {
@@ -271,6 +406,7 @@ const fetchProjectDatasets = async (projectName, { force = false } = {}) => {
     } else {
       selectedDatasetId.value = ''
     }
+    fetchProjectArchives({ force: true })
   } catch (err) {
     datasets.value = []
     datasetsError.value = err instanceof Error ? err.message : '无法加载专题数据集'
@@ -287,6 +423,108 @@ const refreshDatasets = () => {
   fetchProjectDatasets(projectName, { force: true })
 }
 
+const resetArchivesState = () => {
+  archivesState.loading = false
+  archivesState.error = ''
+  archivesState.data = {
+    raw: [],
+    merge: [],
+    clean: []
+  }
+  archivesState.latest = {
+    raw: '',
+    merge: '',
+    clean: ''
+  }
+  archivesState.lastProject = ''
+  archivesState.lastDataset = ''
+  archiveSelection.mergeDate = ''
+  archiveSelection.cleanDate = ''
+}
+
+const syncArchiveSelection = () => {
+  const rawArchives = Array.isArray(archivesState.data.raw) ? archivesState.data.raw : []
+  if (!rawArchives.length) {
+    archiveSelection.mergeDate = ''
+  } else if (!rawArchives.some((item) => item.date === archiveSelection.mergeDate)) {
+    const match = rawArchives.find((item) => item.matches_dataset)
+    archiveSelection.mergeDate = (match && match.date) || rawArchives[0]?.date || ''
+  }
+
+  const mergeArchives = Array.isArray(archivesState.data.merge) ? archivesState.data.merge : []
+  if (!mergeArchives.length) {
+    archiveSelection.cleanDate = ''
+  } else if (!mergeArchives.some((item) => item.date === archiveSelection.cleanDate)) {
+    archiveSelection.cleanDate = mergeArchives[0]?.date || ''
+  }
+}
+
+const fetchProjectArchives = async ({ force = false } = {}) => {
+  const projectName = (currentProjectName.value || '').trim()
+  if (!projectName) {
+    resetArchivesState()
+    return
+  }
+  const datasetId = (selectedDatasetId.value || '').trim()
+  if (
+    !force &&
+    archivesState.lastProject === projectName &&
+    archivesState.lastDataset === datasetId &&
+    (archivesState.data.raw.length || archivesState.data.merge.length || archivesState.data.clean.length)
+  ) {
+    return
+  }
+
+  archivesState.loading = true
+  archivesState.error = ''
+  try {
+    const params = new URLSearchParams({ layers: 'raw,merge,clean' })
+    if (datasetId) {
+      params.append('dataset_id', datasetId)
+    }
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${encodeURIComponent(projectName)}/archives?${params.toString()}`
+    )
+    const result = await response.json()
+    if (!response.ok || result.status !== 'ok') {
+      throw new Error(result.message || '无法获取存档信息')
+    }
+    const records = result.archives || {}
+    archivesState.data = {
+      raw: Array.isArray(records.raw) ? records.raw : [],
+      merge: Array.isArray(records.merge) ? records.merge : [],
+      clean: Array.isArray(records.clean) ? records.clean : []
+    }
+    const latest = result.latest || {}
+    archivesState.latest = {
+      raw: latest.raw || '',
+      merge: latest.merge || '',
+      clean: latest.clean || ''
+    }
+    archivesState.lastProject = projectName
+    archivesState.lastDataset = datasetId
+    syncArchiveSelection()
+  } catch (err) {
+    archivesState.error = err instanceof Error ? err.message : '无法获取存档信息'
+    archivesState.data = {
+      raw: [],
+      merge: [],
+      clean: []
+    }
+    archivesState.latest = {
+      raw: '',
+      merge: '',
+      clean: ''
+    }
+    archivesState.lastProject = ''
+    archivesState.lastDataset = ''
+    archiveSelection.mergeDate = ''
+    archiveSelection.cleanDate = ''
+  } finally {
+    archivesState.loading = false
+  }
+}
+
 watch(
   currentProjectName,
   (projectName) => {
@@ -297,12 +535,15 @@ watch(
   { immediate: true }
 )
 
-watch(selectedDatasetId, (datasetId) => {
-  if (!datasetId) return
-  refreshProcessingDate()
-})
+watch(
+  selectedDatasetId,
+  () => {
+    fetchProjectArchives({ force: true })
+  },
+  { immediate: false }
+)
 
-const ensureParameters = () => {
+const ensureParameters = (stageKey) => {
   const projectName = currentProjectName.value ? currentProjectName.value.trim() : ''
   if (!projectName) {
     parameterError.value = '请先选择项目'
@@ -312,13 +553,27 @@ const ensureParameters = () => {
     parameterError.value = '请选择需要处理的数据集'
     return false
   }
-  refreshProcessingDate()
+  if ((stageKey === 'merge' || stageKey === 'pipeline') && !archiveSelection.mergeDate) {
+    parameterError.value = '请选择需要 Merge 的原始存档日期'
+    return false
+  }
+  if (stageKey === 'clean' && !archiveSelection.cleanDate) {
+    parameterError.value = '请选择需要 Clean 的 Merge 存档日期'
+    return false
+  }
   parameterError.value = ''
   return true
 }
 
+const resolveOperationDate = (key) => {
+  if (key === 'clean') {
+    return archiveSelection.cleanDate
+  }
+  return archiveSelection.mergeDate
+}
+
 const runOperation = async (key) => {
-  if (!ensureParameters()) return
+  if (!ensureParameters(key)) return
   const operation = operations.find((item) => item.key === key)
   if (!operation) return
 
@@ -329,9 +584,10 @@ const runOperation = async (key) => {
 
   try {
     const projectName = currentProjectName.value ? currentProjectName.value.trim() : ''
+    const operationDate = resolveOperationDate(key)
     const payload = {
       topic: projectName,
-      date: processingDate.value
+      date: operationDate
     }
     if (projectName) {
       payload.project = projectName
@@ -350,6 +606,9 @@ const runOperation = async (key) => {
     const ok = response.ok && result.status !== 'error'
     state.success = ok
     state.message = ok ? `${operation.label} 执行成功` : (result.message || `${operation.label} 执行失败`)
+    if (ok) {
+      fetchProjectArchives({ force: true })
+    }
   } catch (err) {
     state.success = false
     state.message = err instanceof Error ? err.message : `${operation.label} 执行失败`
@@ -359,16 +618,17 @@ const runOperation = async (key) => {
 }
 
 const runPipeline = async () => {
-  if (!ensureParameters()) return
+  if (!ensureParameters('pipeline')) return
   pipeline.running = true
   pipeline.message = ''
   pipeline.success = null
 
   try {
     const projectName = currentProjectName.value ? currentProjectName.value.trim() : ''
+    const operationDate = archiveSelection.mergeDate
     const payload = {
       topic: projectName,
-      date: processingDate.value
+      date: operationDate
     }
     if (projectName) {
       payload.project = projectName
@@ -387,6 +647,9 @@ const runPipeline = async () => {
     const ok = response.ok && result.status !== 'error'
     pipeline.success = ok
     pipeline.message = ok ? 'Pipeline 执行成功，Merge 与 Clean 均已完成。' : (result.message || 'Pipeline 执行失败')
+    if (ok) {
+      fetchProjectArchives({ force: true })
+    }
   } catch (err) {
     pipeline.success = false
     pipeline.message = err instanceof Error ? err.message : 'Pipeline 执行失败'
