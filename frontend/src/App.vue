@@ -11,7 +11,7 @@
         </div>
         <RouterLink
           :to="backendEntryRoute"
-          class="inline-flex items-center justify-center rounded-full bg-primary px-6 py-2 text-sm font-semibold text-surface shadow-sm transition hover:bg-primary/90 focus-ring-accent"
+          class="inline-flex items-center justify-center rounded-full bg-white px-6 py-2 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary/90 hover:text-gray-600 focus-ring-accent"
         >
           进入后台
         </RouterLink>
@@ -204,6 +204,7 @@ import {
   ChartBarIcon
 } from '@heroicons/vue/24/outline'
 import ActiveProjectSwitcher from './components/ActiveProjectSwitcher.vue'
+import './assets/colors.css'
 
 const navigationGroups = [
   {
@@ -263,6 +264,11 @@ const navigationGroups = [
         label: '基础分析',
         description: '查看专题基础指标',
         to: { name: 'project-data-analysis' },
+        match: [
+          'project-data-analysis',
+          'project-data-analysis-run',
+          'project-data-analysis-view'
+        ],
         icon: PresentationChartLineIcon
       },
       {
@@ -310,12 +316,6 @@ const navigationGroups = [
         description: '查看库表与连接状态',
         to: { name: 'database' },
         icon: CircleStackIcon
-      },
-      {
-        label: '测试工具',
-        description: '未上线功能测试',
-        to: { name: 'test' },
-        icon: BeakerIcon
       },
       {
         label: '系统设置',

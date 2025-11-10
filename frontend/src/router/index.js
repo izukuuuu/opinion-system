@@ -13,7 +13,6 @@ import ProjectBasicAnalysisRun from '../views/analysis/basic/ProjectBasicAnalysi
 import ProjectBasicAnalysisResults from '../views/analysis/basic/ProjectBasicAnalysisResults.vue'
 import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
 import DatabaseDatasetsView from '../views/DatabaseDatasetsView.vue'
-import TestView from '../views/TestView.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
 import SettingsDatabasesView from '../views/settings/SettingsDatabasesView.vue'
 import SettingsAiView from '../views/settings/SettingsAiView.vue'
@@ -230,14 +229,6 @@ export const routes = [
     meta: {
       title: '数据集概览',
       breadcrumb: '数据集'
-    }
-  },
-  {
-    path: '/test',
-    name: 'test',
-    component: TestView,
-    meta: {
-      title: '测试工具'
     }
   },
   {
