@@ -260,6 +260,13 @@ const navigationGroups = [
         label: '新建专题',
         description: '上传数据并完成初始化流程',
         to: { name: 'topic-create-overview' },
+        match: [
+          'topic-create-overview',
+          'topic-create-upload',
+          'topic-create-preprocess',
+          'topic-create-filter',
+          'topic-create-ingest'
+        ],
         icon: Squares2X2Icon
       },
       {
