@@ -30,7 +30,7 @@
   }
 
   .btn-base {
-    @apply inline-flex items-center justify-center rounded-full border border-transparent text-sm font-semibold shadow transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2;
+    @apply inline-flex items-center justify-center rounded-full border border-transparent text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2;
   }
 
   .btn-base:disabled {
