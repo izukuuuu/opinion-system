@@ -13,7 +13,8 @@
     <p v-if="credentialState.error" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">{{ credentialState.error }}</p>
     <p v-if="credentialState.message" class="rounded-2xl bg-emerald-100 px-4 py-3 text-sm text-emerald-600">{{ credentialState.message }}</p>
 
-    <form class="space-y-4 card-surface p-5" @submit.prevent="submitCredentials">
+    <!-- API 密钥配置卡片 -->
+    <form class="space-y-4 card-surface p-5 config-card" @submit.prevent="submitCredentials">
       <header class="space-y-1">
         <h3 class="text-lg font-semibold text-slate-900">API 密钥配置</h3>
         <p class="text-sm text-slate-500">集中管理千问 DashScope 与 OpenAI 兼容接口的 API Key 以及 Base URL。</p>
@@ -85,7 +86,7 @@
       <div class="flex flex-wrap gap-3">
         <button
           type="submit"
-          class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500 disabled:opacity-60"
+          class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60 no-shadow"
           :disabled="credentialState.loading"
         >
           保存 API 凭证
@@ -93,7 +94,8 @@
       </div>
     </form>
 
-    <form class="space-y-4 card-surface p-5" @submit.prevent="submitLlmFilter">
+    <!-- 筛选模型配置卡片 -->
+    <form class="space-y-4 card-surface p-5 config-card" @submit.prevent="submitLlmFilter">
       <header class="space-y-1">
         <h3 class="text-lg font-semibold text-slate-900">筛选模型配置</h3>
         <p class="text-sm text-slate-500">用于舆情筛选流程的 LLM 服务参数。</p>
@@ -164,13 +166,14 @@
         </label>
       </div>
       <div class="flex flex-wrap gap-3">
-        <button type="submit" class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500">
+        <button type="submit" class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 no-shadow">
           保存筛选配置
         </button>
       </div>
     </form>
 
-    <form class="space-y-4 card-surface p-5" @submit.prevent="submitLlmAssistant">
+    <!-- 对话模型配置卡片 -->
+    <form class="space-y-4 card-surface p-5 config-card" @submit.prevent="submitLlmAssistant">
       <header class="space-y-1">
         <h3 class="text-lg font-semibold text-slate-900">对话模型配置</h3>
         <p class="text-sm text-slate-500">用于项目汇报与问答交互的模型参数。</p>
@@ -233,7 +236,7 @@
         </label>
       </div>
       <div class="flex flex-wrap gap-3">
-        <button type="submit" class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500">
+        <button type="submit" class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 no-shadow">
           保存对话配置
         </button>
       </div>
@@ -496,3 +499,12 @@ onMounted(() => {
   fetchLlmCredentials()
 })
 </script>
+
+<style scoped>
+.config-card {
+  border-radius: 14px !important;
+}
+.no-shadow {
+  box-shadow: none !important;
+}
+</style>

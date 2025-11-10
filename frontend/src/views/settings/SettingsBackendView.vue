@@ -21,7 +21,7 @@
       <div class="flex flex-wrap gap-3">
         <button
           type="submit"
-          class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow transition hover:bg-indigo-500 disabled:opacity-60"
+          class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-60"
           :disabled="saving"
         >
           {{ saving ? '保存中…' : '保存配置' }}
@@ -44,7 +44,7 @@
       {{ message.error }}
     </p>
 
-    <dl class="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 md:grid-cols-2">
+    <dl class="grid gap-4 rounded-[14px] border border-slate-200 bg-white p-4 text-sm text-slate-600 md:grid-cols-2">
       <div>
         <dt class="text-xs uppercase tracking-[0.4em] text-slate-400">当前基础地址</dt>
         <dd class="mt-2 font-semibold text-slate-900">{{ backendBase }}</dd>
