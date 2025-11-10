@@ -28,9 +28,6 @@
             {{ activeProjectName || '尚未选择' }}
           </span>
         </p>
-        <p class="text-muted">
-          为防止误操作，执行前请确认 Filter 目录内的 JSONL 已最终定版。
-        </p>
       </div>
 
       <div class="grid gap-6 md:grid-cols-2">
@@ -42,15 +39,14 @@
             class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
             placeholder="例如：校园安全专项-筛选结果"
           />
-          <p class="text-xs text-muted">用于记录上传批次的显示名称，不等同于数据库标识。</p>
+          <p class="text-xs text-muted">上传到远程数据库的数据集将使用此字段命名。</p>
         </label>
-
         <label class="space-y-2 text-sm">
-          <span class="font-medium text-secondary">数据存储标识（数据库名 / Bucket）</span>
+          <span class="font-medium text-secondary">数据存储标识</span>
           <div class="rounded-2xl border border-dashed border-soft bg-surface-muted px-4 py-2 text-sm">
             {{ bucketName || '请选择一个项目后自动填充' }}
           </div>
-          <p class="text-xs text-muted">自动与当前项目的 Filter 目录保持一致，不可手动修改。</p>
+          <p class="text-xs text-muted">自动与当前项目的后台目录（数据存储标识）保持一致，不可手动修改。</p>
         </label>
       </div>
 
@@ -70,7 +66,7 @@
             </option>
           </select>
           <p class="text-xs text-muted">
-            选项来自项目记录（projects.json / storage），默认选中最近一次筛选。
+            选项来自项目筛选记录，默认选中最近一次筛选。
           </p>
         </template>
         <template v-else>
@@ -95,46 +91,12 @@
         class="rounded-3xl border border-dashed border-brand-soft bg-brand-soft-muted px-5 py-4 text-xs leading-relaxed text-secondary"
       >
         <p class="font-semibold text-brand-700">
-          预计读取目录：
+          待入库本地目录：
           <code class="rounded bg-white/70 px-2 py-0.5 text-[11px] text-brand-700">
             {{ inferredFilterPath || 'backend/data/projects/<topic>/filter/<date>' }}
           </code>
         </p>
-        <p class="mt-2 text-muted">
-          决策逻辑：系统将为每个 JSONL（以频道命名）创建/追加
-          <code class="rounded bg-white px-1 py-0.5 text-[11px] text-secondary">topic.channel</code>
-          表，并使用标准字段结构。在运行前请确认数据库具备写入权限。
-        </p>
       </div>
-    </section>
-
-    <section class="card-surface space-y-6 p-6">
-      <header class="space-y-2">
-        <h2 class="text-xl font-semibold text-primary">执行入库</h2>
-        <p class="text-sm text-secondary">
-          按照步骤核对数据后点击按钮即可写入数据库；如需在服务器上人工执行，可参考下方命令。
-        </p>
-      </header>
-
-      <div class="rounded-3xl border border-dashed border-soft bg-surface-muted/60 p-5 text-sm text-secondary">
-        <p class="text-xs uppercase tracking-[0.3em] text-muted">执行提示</p>
-        <ol class="mt-3 space-y-2 pl-5">
-          <li class="marker:text-brand-500">
-            确认上一步的筛选结果已经整理完毕，目录与上方“预计读取目录”一致。
-          </li>
-          <li class="marker:text-brand-500">
-            点击下方“一键入库”，系统会调用 <code class="rounded bg-white px-1 py-0.5 text-[11px] text-primary">/api/upload</code>、自动建表并写入数据。
-          </li>
-          <li class="marker:text-brand-500">
-            如果希望在服务器上手动执行，可输入：
-            <code class="mt-1 block rounded bg-white px-2 py-1 text-[11px] text-primary">{{ cliCommand }}</code>
-          </li>
-        </ol>
-        <p class="mt-3 text-xs text-muted">
-          * 入库完成后会显示成功/失败信息，并在下方的运行记录中保留本次操作。
-        </p>
-      </div>
-
       <div class="space-y-4">
         <button
           type="button"
@@ -142,7 +104,7 @@
           :disabled="uploadState.running"
           @click="runUpload"
         >
-          {{ uploadState.running ? '执行中…' : '执行 /api/upload 入库' }}
+          {{ uploadState.running ? '执行中…' : '入库' }}
         </button>
 
         <p
@@ -161,16 +123,6 @@
         >
           {{ uploadState.message }}
         </p>
-
-        <div
-          v-if="uploadState.lastResponse"
-          class="rounded-3xl border border-dashed border-soft bg-white/80 p-4 text-xs text-secondary"
-        >
-          <p class="mb-2 text-[11px] font-semibold uppercase tracking-widest text-muted">响应详情</p>
-          <pre class="max-h-60 overflow-y-auto whitespace-pre-wrap break-words">
-{{ formattedResponse }}
-          </pre>
-        </div>
       </div>
     </section>
 
@@ -182,9 +134,6 @@
             {{ runHistory.length ? `保留最近 ${runHistory.length} 次` : '暂无记录' }}
           </span>
         </div>
-        <p class="text-sm text-secondary">
-          记录包含执行时间、专题与日期，便于快速复查某一次入库的状态。
-        </p>
       </header>
 
       <div
