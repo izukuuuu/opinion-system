@@ -1,13 +1,17 @@
 """
 数据提取功能
 """
+from datetime import date, datetime
+from typing import List, Optional, Tuple
+
 import pandas as pd
-from ..utils.setting.paths import bucket, ensure_bucket
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine.url import make_url
+
+from ..utils.setting.paths import ensure_bucket
 from ..utils.setting.settings import settings
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_skip
 from ..utils.io.excel import write_jsonl, read_jsonl
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine.url import make_url
 
 
 def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, logger=None) -> bool:
@@ -158,6 +162,54 @@ def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, lo
         engine.dispose()
 
 
+def _format_date(value: Optional[date]) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)
+
+
+def _query_table_date_range(conn, table_name: str, topic: str, logger=None) -> Tuple[Optional[date], Optional[date]]:
+    if not table_exists(conn, table_name, topic):
+        log_skip(logger, f"表 {topic}.{table_name} 不存在", "Fetch")
+        return None, None
+
+    query = f"""
+    SELECT
+        MIN(DATE(published_at)) AS start_date,
+        MAX(DATE(published_at)) AS end_date
+    FROM {table_name}
+    """
+    result = conn.execute(text(query)).mappings().first()
+    if not result:
+        return None, None
+    return result.get("start_date"), result.get("end_date")
+
+
+def _list_topic_tables(conn, topic: str, logger=None) -> List[str]:
+    """
+    获取专题数据库中包含 published_at 字段的所有表。
+    """
+    query = """
+    SELECT DISTINCT TABLE_NAME AS table_name
+    FROM information_schema.columns
+    WHERE table_schema = :schema AND column_name = 'published_at'
+    ORDER BY TABLE_NAME
+    """
+    try:
+        result = conn.execute(text(query), {"schema": topic}).mappings()
+        tables = [row.get("table_name") for row in result if row and row.get("table_name")]
+        if not tables:
+            log_skip(logger, f"专题 {topic} 未找到包含 published_at 字段的表", "Fetch")
+        return tables
+    except Exception as e:
+        log_error(logger, f"查询专题 {topic} 表结构失败: {e}", "Fetch")
+        return []
+
+
 def table_exists(conn, table_name: str, topic: str) -> bool:
     """
     检查表是否存在
@@ -179,6 +231,102 @@ def table_exists(conn, table_name: str, topic: str) -> bool:
         return (result.scalar() or 0) > 0
     except Exception:
         return False
+
+
+def get_available_date_range(topic: str, table_name: str, logger=None):
+    """
+    查询指定专题下表的可用日期区间（最早/最晚发布时间）
+
+    Args:
+        topic (str): 专题名称（数据库名）
+        table_name (str): 表名
+        logger: 日志记录器
+
+    Returns:
+        tuple[str | None, str | None]: (最早日期, 最晚日期)。若表不存在或无数据则返回 (None, None)
+    """
+    db_config = settings.get('databases', {})
+    db_url = db_config.get('db_url')
+    if not db_url:
+        log_error(logger, "未找到数据库连接配置", "Fetch")
+        return None, None
+
+    base_url = make_url(db_url)
+    db_url_with_db = base_url.set(database=topic)
+    engine = create_engine(db_url_with_db)
+
+    try:
+        with engine.connect() as conn:
+            if not table_exists(conn, table_name, topic):
+                log_skip(logger, f"表 {topic}.{table_name} 不存在", "Fetch")
+                return None, None
+
+            start_date, end_date = _query_table_date_range(conn, table_name, topic, logger)
+            return _format_date(start_date), _format_date(end_date)
+    except Exception as e:
+        log_error(logger, f"查询表 {table_name} 日期区间失败: {e}", "Fetch")
+        return None, None
+    finally:
+        engine.dispose()
+
+
+def get_topic_available_date_range(topic: str, logger=None):
+    """
+    汇总专题下所有渠道表的可用日期范围
+
+    Args:
+        topic (str): 专题名称（数据库名）
+        logger: 日志记录器
+
+    Returns:
+        dict: {
+            "start": Optional[str],
+            "end": Optional[str],
+            "channels": Dict[str, Dict[str, Optional[str]]]
+        }
+    """
+    db_config = settings.get('databases', {})
+    db_url = db_config.get('db_url')
+    if not db_url:
+        log_error(logger, "未找到数据库连接配置", "Fetch")
+        return {"start": None, "end": None, "channels": {}}
+
+    base_url = make_url(db_url)
+    db_url_with_db = base_url.set(database=topic)
+    engine = create_engine(db_url_with_db)
+
+    table_ranges = {}
+    min_date: Optional[date] = None
+    max_date: Optional[date] = None
+
+    try:
+        with engine.connect() as conn:
+            tables = _list_topic_tables(conn, topic, logger)
+            if not tables:
+                log_skip(logger, f"专题 {topic} 无可用表，返回默认空区间", "Fetch")
+            for table_name in tables:
+                start_value, end_value = _query_table_date_range(conn, table_name, topic, logger)
+                table_ranges[table_name] = {
+                    "start": _format_date(start_value),
+                    "end": _format_date(end_value)
+                }
+                if start_value:
+                    if min_date is None or start_value < min_date:
+                        min_date = start_value
+                if end_value:
+                    if max_date is None or end_value > max_date:
+                        max_date = end_value
+    except Exception as e:
+        log_error(logger, f"汇总专题 {topic} 日期区间失败: {e}", "Fetch")
+    finally:
+        engine.dispose()
+
+    return {
+        "start": _format_date(min_date),
+        "end": _format_date(max_date),
+        "tables": table_ranges,
+        "channels": table_ranges,  # 向后兼容旧字段
+    }
 
 
 def run_fetch(topic: str, start: str, end: str, logger=None) -> bool:

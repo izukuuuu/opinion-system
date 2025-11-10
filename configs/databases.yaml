@@ -1,8 +1,0 @@
-# Database connection definitions for Opinion System
-connections:
-  - id: "local"
-    name: "本地数据库"
-    engine: "sqlite"
-    url: "sqlite:///backend/data/opinion.db"
-    description: "项目默认的本地SQLite数据库"
-active: "local"

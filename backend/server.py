@@ -915,6 +915,38 @@ def query_endpoint():
     return jsonify(response), code
 
 
+@app.get("/api/fetch/availability")
+def fetch_availability_endpoint():
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    if not any([topic, project, dataset_id]):
+        return error("Missing required field(s): topic/project/dataset_id")
+
+    payload = {
+        "topic": topic,
+        "project": project,
+        "dataset_id": dataset_id,
+    }
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return error(str(exc))
+
+    from src.fetch import get_topic_available_date_range  # type: ignore
+
+    availability = get_topic_available_date_range(topic_identifier)
+    return success(
+        {
+            "data": {
+                "topic": display_name or topic_identifier,
+                "bucket": topic_identifier,
+                "range": availability,
+            }
+        }
+    )
+
+
 @app.post("/api/fetch")
 def fetch_endpoint():
     payload = request.get_json(silent=True) or {}

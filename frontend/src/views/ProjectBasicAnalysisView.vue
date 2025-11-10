@@ -52,6 +52,27 @@
             <input v-model="fetchForm.end" type="date" required />
           </label>
         </div>
+        <p
+          class="field-hint availability-hint"
+          :class="{ error: Boolean(availableRange.error) }"
+          aria-live="polite"
+        >
+          <template v-if="!fetchForm.topic">
+            请选择远程专题以查看可用日期区间。
+          </template>
+          <template v-else-if="availableRange.loading">
+            正在查询该专题的可用日期区间…
+          </template>
+          <template v-else-if="availableRange.error">
+            无法获取可用日期：{{ availableRange.error }}
+          </template>
+          <template v-else-if="availableRange.start && availableRange.end">
+            可用数据区间：{{ availableRange.start }} → {{ availableRange.end }}
+          </template>
+          <template v-else>
+            当前专题暂无 published_at 日期，可能尚未写入远程数据。
+          </template>
+        </p>
         <div class="panel__actions">
           <button type="submit" class="btn primary" :disabled="fetchState.loading">
             {{ fetchState.loading ? '提取中…' : '执行 Fetch' }}
@@ -293,6 +314,14 @@ const analyzeForm = reactive({
   end: ''
 })
 
+const availableRange = reactive({
+  loading: false,
+  error: '',
+  start: '',
+  end: ''
+})
+let availabilityRequestId = 0
+
 const fetchState = reactive({ loading: false })
 const analyzeState = reactive({ running: false })
 const loadState = reactive({ loading: false })
@@ -314,9 +343,50 @@ const ensureTopicSelection = () => {
   }
 }
 
+const resetAvailableRange = () => {
+  availableRange.start = ''
+  availableRange.end = ''
+}
+
+const clearAvailableRange = () => {
+  availabilityRequestId += 1
+  resetAvailableRange()
+  availableRange.error = ''
+  availableRange.loading = false
+}
+
+const loadAvailableRange = async () => {
+  const topic = (fetchForm.topic || '').trim()
+  if (!topic) {
+    availableRange.loading = false
+    clearAvailableRange()
+    return
+  }
+  const requestId = ++availabilityRequestId
+  availableRange.loading = true
+  availableRange.error = ''
+  try {
+    const params = new URLSearchParams({ topic })
+    const response = await callApi(`/api/fetch/availability?${params.toString()}`, { method: 'GET' })
+    if (requestId !== availabilityRequestId) return
+    const range = response?.data?.range ?? {}
+    availableRange.start = range.start || ''
+    availableRange.end = range.end || ''
+  } catch (error) {
+    if (requestId !== availabilityRequestId) return
+    resetAvailableRange()
+    availableRange.error = error instanceof Error ? error.message : String(error)
+  } finally {
+    if (requestId === availabilityRequestId) {
+      availableRange.loading = false
+    }
+  }
+}
+
 const loadTopics = async () => {
   topicsState.loading = true
   topicsState.error = ''
+  const previousTopic = fetchForm.topic
   try {
     const response = await callApi('/api/query', { method: 'POST', body: JSON.stringify({}) })
     const databases = response?.data?.databases ?? []
@@ -324,11 +394,15 @@ const loadTopics = async () => {
       .map((db) => String(db?.name || '').trim())
       .filter((name, index, arr) => name && arr.indexOf(name) === index)
     ensureTopicSelection()
+    if (fetchForm.topic === previousTopic) {
+      await loadAvailableRange()
+    }
   } catch (error) {
     topicsState.error = error instanceof Error ? error.message : '加载远程数据源失败'
     topicsState.options = []
     fetchForm.topic = ''
     analyzeForm.topic = ''
+    clearAvailableRange()
   } finally {
     topicsState.loading = false
   }
@@ -347,8 +421,13 @@ watch(topicOptions, () => {
 watch(
   () => fetchForm.topic,
   (value) => {
-    if (value) {
-      analyzeForm.topic = value
+    const topicValue = (value || '').trim()
+    if (topicValue) {
+      analyzeForm.topic = topicValue
+      loadAvailableRange()
+    } else {
+      analyzeForm.topic = ''
+      loadAvailableRange()
     }
   }
 )
@@ -780,6 +859,10 @@ const analysisSections = computed(() => {
   margin-top: 0.35rem;
   font-size: 0.8rem;
   color: var(--color-text-muted);
+}
+
+.availability-hint {
+  margin-bottom: 0;
 }
 
 .field-hint.error {
