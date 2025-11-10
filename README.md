@@ -16,7 +16,6 @@
 - [项目结构](#项目结构)
 - [配置说明](#配置说明)
 - [日志管理](#日志管理)
-- [前端开发](#前端开发)
 
 ---
 
@@ -133,7 +132,7 @@ python -m venv venv
 
 # 激活虚拟环境
 # Windows:
-.\\venv\\Scripts\\activate
+.\venv\Scripts\activate
 # Linux/Mac:
 source venv/bin/activate
 
@@ -231,6 +230,9 @@ python main.py Upload --topic 控烟 --date 2025-01-15
 ```bash
 python main.py Query
 ```
+**可选参数**:
+- `--json` 输出完整JSON详情
+- `--save result.json` 将结果写入指定文件
 
 ---
 
@@ -255,6 +257,19 @@ python main.py AnalyzePipeline --topic 控烟 --start 2025-01-01 --end 2025-01-3
 python main.py Fetch --topic 控烟 --start 2025-01-01 --end 2025-01-31
 ```
 输出: `data/fetch/{专题}/{时间范围}/各渠道.csv`
+
+#### 1.1 查询可用日期区间
+在提数前可以先确认数据库中每个渠道/专题的可用时间范围，避免输入无数据的区间。
+
+```bash
+# 查询整个专题的可用区间
+python main.py FetchAvailability --topic 控烟
+
+# 仅查看单个渠道表
+python main.py FetchAvailability --topic 控烟 --table 新闻
+```
+**可选参数**:
+- `--json` 输出JSON格式的区间明细
 
 #### 2. 数据分析
 
@@ -406,30 +421,60 @@ python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31
 
 **运行单个解读**:
 ```bash
-# 情感分析解读
+# 声量分析解读
+python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31 --func volume
+
+# 情感态度解读
 python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31 --func attitude
+
+# 趋势分析解读
+python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31 --func trends
 
 # 关键词分析解读
 python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31 --func keywords
 
-# 趋势分析解读
-python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31 --func trends
+# 地域分析解读
+python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31 --func geography
+
+# 发布者分析解读
+python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31 --func publishers
+
+# 话题分类解读
+python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31 --func classification
+
+# 内容分析解读
+python main.py Explain --topic 控烟 --start 2025-01-01 --end 2025-01-31 --func contentanalyze
 ```
 
 **输出结果**:
 ```
 data/explain/{专题}/{时间范围}/
-├── attitude/        # 情感解读
+├── volume/          # 声量分析解读
+│   ├── 总体/volume.json
+│   ├── 微信/volume.json
+│   ├── 微博/volume.json
+│   └── ...
+├── attitude/        # 情感态度解读
 │   ├── 总体/attitude.json
 │   ├── 微信/attitude.json
 │   ├── 微博/attitude.json
 │   └── ...
-├── keywords/        # 关键词解读
+├── trends/          # 趋势分析解读
+│   ├── 总体/trends.json
+│   ├── 微信/trends.json
+│   └── ...
+├── keywords/        # 关键词分析解读
 │   ├── 总体/keywords.json
 │   ├── 微信/keywords.json
 │   └── ...
-├── trends/          # 趋势解读
-│   ├── 总体/trends.json
+├── geography/       # 地域分析解读
+│   ├── 总体/geography.json
+│   └── ...
+├── publishers/      # 发布者分析解读
+│   ├── 总体/publishers.json
+│   └── ...
+├── classification/  # 话题分类解读
+│   ├── 总体/classification.json
 │   └── ...
 └── contentanalyze/  # 内容分析解读
     ├── 微信/contentanalyze.json
@@ -962,44 +1007,6 @@ log_error(logger, "错误描述", "模块")
 
 ---
 
-## 前端开发
-
-前端子仓位于 `frontend/`，提供基于 **Vue 3 + Vite** 的管理面板。该界面在同步主仓 README 的同时保留了独立章节，方便前端同学快速上手。
-
-### 目录简介
-
-```
-frontend/
-├── package.json              # 已集成 @heroicons/vue、vue-router、pinia 等依赖
-├── package-lock.json
-├── src/
-│   ├── App.vue               # 带侧边栏与内容区的双栏布局
-│   ├── components/
-│   │   └── ProjectDashboard.vue 等业务组件
-│   ├── views/
-│   │   ├── ProjectBoardView.vue  # 项目面板
-│   │   ├── ProjectDataView.vue   # 数据归档页
-│   │   └── TestView.vue          # 测试/实验页
-│   └── router/index.js       # 前端路由配置
-└── vite.config.js
-```
-
-### 开发与构建
-
-```bash
-cd frontend
-npm install             # 安装依赖
-npm run dev             # 启动开发服务器（默认 5173 端口）
-npm run build           # 生成生产构建
-npm run preview         # 预览生产构建
-```
-
-- 在 `.env.local` 中设置 `VITE_API_BASE_URL` 可自定义后端接口地址，默认为 `http://localhost:8000/api`。
-- 前端组件通过 REST API 与后端交互，可结合 `SERVER_API.md` 了解接口细节。
-- 推荐在开发阶段配合后端的 `DataPipeline`、`AnalyzePipeline` 命令使用，以获取完整的项目数据集和日志信息。
-
----
-
 ## 许可证
 
 本项目仅供内部使用。
@@ -1011,3 +1018,5 @@ npm run preview         # 预览生产构建
 如有问题或建议，请联系项目维护团队。
 
 ---
+
+**最后更新**: 2025-01-12

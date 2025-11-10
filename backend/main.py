@@ -1,8 +1,8 @@
 """
 OpinionSystem 舆情分析系统主程序
 """
-import json
 import sys
+import json
 import click
 import asyncio
 import warnings
@@ -22,7 +22,6 @@ def _ensure_src_on_path() -> None:
 
 def _as_success(result) -> bool:
     """将步骤执行结果转换为布尔值。"""
-
     if isinstance(result, bool):
         return result
     if isinstance(result, dict):
@@ -35,10 +34,8 @@ def _as_success(result) -> bool:
 
 def _log_project_event(project: str, operation: str, params=None, success: bool = True) -> None:
     """记录项目操作信息。"""
-
     if not project:
         return
-
     try:
         from src.project import get_project_manager  # type: ignore
 
@@ -61,6 +58,7 @@ def cli():
     """
     pass
 
+
 @cli.command('Merge')
 @click.option('--topic', required=True, help='专题名称')
 @click.option('--date', required=True, help='日期 (YYYY-MM-DD)')
@@ -69,7 +67,7 @@ def trs_merge(topic, date):
     合并TRS Excel文件
     """
     from src.merge import run_merge
-
+    
     result = run_merge(topic, date)
     _log_project_event(topic, "merge", {"date": date, "source": "cli"}, _as_success(result))
     if not _as_success(result):
@@ -84,7 +82,7 @@ def clean(topic, date):
     清洗数据
     """
     from src.clean import run_clean
-
+    
     result = run_clean(topic, date)
     _log_project_event(topic, "clean", {"date": date, "source": "cli"}, _as_success(result))
     if not _as_success(result):
@@ -99,7 +97,7 @@ def ai_filter(topic, date):
     AI相关性筛选
     """
     from src.filter import run_filter
-
+    
     result = run_filter(topic, date)
     _log_project_event(topic, "filter", {"date": date, "source": "cli"}, _as_success(result))
     if not _as_success(result):
@@ -114,7 +112,7 @@ def upload(topic, date):
     上传数据到数据库
     """
     from src.update import run_update
-
+    
     result = run_update(topic, date)
     _log_project_event(topic, "upload", {"date": date, "source": "cli"}, _as_success(result))
     if not _as_success(result):
@@ -197,7 +195,7 @@ def fetch(topic, start, end):
     从数据库获取数据
     """
     from src.fetch import run_fetch
-
+    
     result = run_fetch(topic, start, end)
     _log_project_event(
         topic,
@@ -286,7 +284,7 @@ def analyze(topic, start, end, func):
     运行数据分析
     """
     from src.analyze import run_Analyze
-
+    
     result = run_Analyze(topic, start, end_date=end, only_function=func)
     _log_project_event(
         topic,
@@ -296,6 +294,53 @@ def analyze(topic, start, end, func):
     )
     if not _as_success(result):
         print(f"分析失败: {topic} - {start} 到 {end}")
+
+
+@cli.command('ContentAnalyze')
+@click.option('--topic', required=True, help='专题名称')
+@click.option('--start', required=True, help='开始日期 (YYYY-MM-DD)')
+@click.option('--end', required=True, help='结束日期 (YYYY-MM-DD)')
+def content_analyze(topic, start, end):
+    """
+    运行内容分析
+    """
+    from src.contentanalyze import run_content_analysis_sync
+    
+    result = run_content_analysis_sync(topic, start, end)
+    if not result:
+        print(f"内容分析失败: {topic} - {start} 到 {end}")
+
+
+@cli.command('Explain')
+@click.option('--topic', required=True, help='专题名称')
+@click.option('--start', required=True, help='开始日期 (YYYY-MM-DD)')
+@click.option('--end', required=True, help='结束日期 (YYYY-MM-DD)')
+@click.option('--func', help='指定解读函数')
+def explain(topic, start, end, func):
+    """
+    运行数据解读
+    """
+    import asyncio
+    from src.explain import run_Explain
+    
+    result = asyncio.run(run_Explain(topic, start, end_date=end, only_function=func))
+    if not result:
+        print(f"解读失败: {topic} - {start} 到 {end}")
+
+
+@cli.command('Report')
+@click.option('--topic', required=True, help='专题名称')
+@click.option('--start', required=True, help='开始日期 (YYYY-MM-DD)')
+@click.option('--end', required=True, help='结束日期 (YYYY-MM-DD)')
+def report(topic, start, end):
+    """
+    生成DOCX报告
+    """
+    from src.report import run_report
+    
+    result = run_report(topic, start, end)
+    if not result:
+        print(f"报告生成失败: {topic} - {start} 到 {end}")
 
 
 @cli.command('DataPipeline')
@@ -313,31 +358,31 @@ def data_pipeline(topic, date):
     # 1. 合并TRS数据
     merge_success = run_merge(topic, date)
     _log_project_event(topic, "merge", {"date": date, "source": "pipeline"}, _as_success(merge_success))
-    if not merge_success:
+    if not _as_success(merge_success):
         print("合并步骤失败")
         return False
-
+    
     # 2. 数据清洗
     clean_success = run_clean(topic, date)
     _log_project_event(topic, "clean", {"date": date, "source": "pipeline"}, _as_success(clean_success))
-    if not clean_success:
+    if not _as_success(clean_success):
         print("清洗步骤失败")
         return False
-
+    
     # 3. AI筛选
     filter_success = run_filter(topic, date)
     _log_project_event(topic, "filter", {"date": date, "source": "pipeline"}, _as_success(filter_success))
-    if not filter_success:
+    if not _as_success(filter_success):
         print("筛选步骤失败")
         return False
-
+    
     # 4. 数据上传
     upload_success = run_update(topic, date)
     _log_project_event(topic, "upload", {"date": date, "source": "pipeline"}, _as_success(upload_success))
-    if not upload_success:
+    if not _as_success(upload_success):
         print("上传步骤失败")
         return False
-
+    
     return True
 
 
@@ -360,10 +405,10 @@ def analysis_pipeline(topic, start, end):
         {"start": start, "end": end, "source": "analysis_pipeline"},
         _as_success(fetch_success),
     )
-    if not fetch_success:
+    if not _as_success(fetch_success):
         print("提取步骤失败")
         return False
-
+    
     # 2. 数据分析
     analyze_success = run_Analyze(topic, start, end_date=end)
     _log_project_event(
@@ -372,40 +417,126 @@ def analysis_pipeline(topic, start, end):
         {"start": start, "end": end, "source": "analysis_pipeline"},
         _as_success(analyze_success),
     )
-    if not analyze_success:
+    if not _as_success(analyze_success):
         print("分析步骤失败")
         return False
-
+    
     return True
 
 
-@cli.command('Projects')
-def show_projects():
-    """列出当前已记录的项目及其最近状态"""
+@cli.command('TagVectorize')
+@click.option('--topic', default='控烟', help='RAG主题名称（如"控烟"）')
+def tagrag(topic):
+    """
+    运行TagRAG向量化功能
+    """
+    from src.utils.rag.tagrag.tag_vec_data import vectorize_and_store
+    
+    try:
+        dataset = vectorize_and_store(topic_name=topic)
+        return True
+    except Exception as e:
+        return False
 
-    _ensure_src_on_path()
-    from src.project import get_project_manager  # type: ignore
 
-    manager = get_project_manager()
-    projects = manager.list_projects()
-    if not projects:
-        click.echo("暂无项目记录。")
-        return
+# 后续将融入系统中，后续可删除
+@cli.command('TagRetrieve')
+@click.option('--query', required=True, help='查询语句')
+@click.option('--topic', default='控烟', help='RAG主题名称（如"控烟"）')
+@click.option('--search-column', default='tag_vec', help='搜索列 (tag_vec 或 text_vec)')
+@click.option('--top-k', default=1, help='返回个数')
+@click.option('--return-columns', help='返回列，用逗号分隔 (如: id,text)')
+def tag_retrieve_command(query, topic, search_column, top_k, return_columns):
+    """
+    运行TagRAG检索功能
+    """
+    from src.utils.rag.tagrag.tag_retrieve_data import tag_retrieve
+    
+    try:
+        # 处理返回列参数
+        return_cols = None
+        if return_columns:
+            return_cols = [col.strip() for col in return_columns.split(',')]
+        
+        # 执行检索
+        result = tag_retrieve(
+            query=query,
+            topic_name=topic,
+            search_column=search_column,
+            top_k=int(top_k),
+            return_columns=return_cols
+        )
+        
+        # 输出结果
+        if result['status'] == 'success':
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(f"TagRetrieve: {result['error']}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"TagRetrieve检索处理失败: {e}")
+        return False
 
-    for project in projects:
-        click.echo(f"- {project['name']} ({project['status']}) 更新于 {project['updated_at']}")
-        if project.get('description'):
-            click.echo(f"  描述: {project['description']}")
-        dates = project.get('dates') or []
-        if dates:
-            click.echo(f"  涉及日期: {', '.join(dates)}")
-        last = project.get('last_operation')
-        if last:
-            status = "成功" if last.get('success') else "失败"
-            click.echo(
-                f"  最近操作: {last.get('operation')} ({status}) @ {last.get('timestamp')}"
-            )
-        click.echo("")
+
+@cli.command('RouterVectorize')
+@click.option('--topic', default='默认', help='RAG主题名称（如"默认"）')
+def ragrouter_command(topic):
+    """
+    运行RagRouter向量化处理功能
+    """
+    from src.utils.rag.ragrouter.router_vec_data import run_ragrouter
+    
+    try:
+        result = run_ragrouter(topic_name=topic)
+        return True
+    except Exception as e:
+        print(f"RouterVectorize处理失败: {e}")
+        return False
+
+
+# 后续将融入系统中，后续可删除 
+@cli.command('RouterRetrieve')
+@click.option('--topic', required=True, help='检索主题（如：控烟）')
+@click.option('--query', required=True, help='查询语句')
+@click.option('--mode', default='mixed', type=click.Choice(['mixed', 'graphrag', 'normalrag', 'tagrag']),
+              help='检索模式 (默认: mixed)')
+@click.option('--topk-graphrag', default=3, type=int, help='GraphRAG返回的核心实体数量 (默认: 3)')
+@click.option('--topk-normalrag', default=10, type=int, help='NormalRAG返回的句子数量 (默认: 5)')
+@click.option('--topk-tagrag', default=3, type=int, help='TagRAG返回的文本块数量 (默认: 5)')
+@click.option('--no-llm-summary', is_flag=True, help='禁用LLM整理结果')
+@click.option('--llm-summary-mode', default='supplement', type=click.Choice(['strict', 'supplement']),
+              help='LLM整理模式 (默认: strict)')
+@click.option('--return-format', default='llm_only', type=click.Choice(['both', 'llm_only', 'index_only']),
+              help='返回格式: both(全部), llm_only(仅LLM), index_only(仅索引) (默认: both)')
+def router_retrieve_command(topic, query, mode, topk_graphrag, topk_normalrag, topk_tagrag,
+                           no_llm_summary, llm_summary_mode, return_format):
+    """
+    运行RagRouter检索功能
+    """
+    from src.utils.rag.ragrouter.router_retrieve_data import router_retrieve
+    
+    try:
+        # 执行检索
+        results = router_retrieve(
+            topic=topic,
+            query=query,
+            mode=mode,
+            topk_graphrag=topk_graphrag,
+            topk_normalrag=topk_normalrag,
+            topk_tagrag=topk_tagrag,
+            enable_llm_summary=not no_llm_summary,
+            llm_summary_mode=llm_summary_mode,
+            return_format=return_format
+        )
+    
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+        return True
+        
+    except Exception as e:
+        print(f"RouterRetrieve检索失败: {e}")
+        return False
 
 
 if __name__ == "__main__":
