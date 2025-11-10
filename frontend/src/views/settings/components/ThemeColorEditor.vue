@@ -82,10 +82,18 @@
     </div>
 
     <div class="theme-editor__tools">
-      <button type="button" class="ghost-button" @click="triggerImport">
+      <button
+        type="button"
+        class="rounded-full border border-slate-200 px-4 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
+        @click="triggerImport"
+      >
         读取配置
       </button>
-      <button type="button" class="ghost-button" @click="handleExport">
+      <button
+        type="button"
+        class="rounded-full border border-slate-200 px-4 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
+        @click="handleExport"
+      >
         导出配置
       </button>
     </div>
@@ -397,45 +405,45 @@ defineExpose({
 .theme-editor__groups {
   display: flex;
   flex-direction: column;
-  gap: 1rem; /* 原1.5rem */
+  gap: 1rem;
 }
 
 .theme-editor__group {
-  border-radius: 14px; /* 原22px */
+  border-radius: 14px;
   border: 1px solid var(--color-border-soft);
   background-color: var(--color-surface);
-  padding: 1rem;       /* 原1.5rem */
+  padding: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;         /* 原1.25rem */
+  gap: 0.8rem;
 }
 
 .theme-editor__group-header h3 {
   margin: 0;
-  font-size: 1.05rem;  /* 原1.2rem */
+  font-size: 1.05rem;
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .theme-editor__group-header p {
-  margin: 0.2rem 0 0;  /* 原0.35rem */
+  margin: 0.2rem 0 0;
   color: var(--color-text-muted);
-  font-size: 0.85rem;  /* 原0.9rem */
+  font-size: 0.85rem;
 }
 
 .theme-editor__tokens {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;         /* 原0.9rem */
+  gap: 0.5rem;
 }
 
 .theme-editor__token {
   display: grid;
-  grid-template-columns: minmax(0, 120px) minmax(0, 1fr) auto; /* 原180px */
+  grid-template-columns: minmax(0, 120px) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.7rem;         /* 原1rem */
-  padding: 0.55rem 0.7rem; /* 原0.9rem 1.1rem */
-  border-radius: 10px; /* 原16px */
+  gap: 0.7rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
   background-color: rgba(243, 245, 248, 0.85);
   border: 1px solid rgba(148, 163, 184, 0.14);
   font-size: 0.92em;
@@ -445,10 +453,10 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 36px;        /* 原52px */
-  border-radius: 8px;  /* 原14px */
+  height: 36px;
+  border-radius: 8px;
   font-weight: 600;
-  font-size: 0.82rem;  /* 原0.9rem */
+  font-size: 0.82rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   border: 1px solid transparent;
@@ -467,25 +475,25 @@ defineExpose({
 
 .theme-editor__details code {
   display: block;
-  margin-top: 0.18rem; /* 原0.35rem */
-  font-size: 0.78rem;  /* 原0.82rem */
+  margin-top: 0.18rem;
+  font-size: 0.78rem;
   color: var(--color-text-muted);
   background-color: rgba(255, 255, 255, 0.8);
-  padding: 0.15rem 0.35rem; /* 原0.25rem 0.5rem */
-  border-radius: 6px;  /* 原10px */
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
 }
 
 .theme-editor__controls {
   display: flex;
   align-items: center;
-  gap: 0.5rem;         /* 原0.75rem */
+  gap: 0.5rem;
 }
 
 .theme-editor__color-picker input {
-  width: 28px;         /* 原42px */
-  height: 28px;        /* 原42px */
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 7px;  /* 原12px */
+  border-radius: 7px;
   background: transparent;
   cursor: pointer;
   padding: 0;
@@ -493,25 +501,25 @@ defineExpose({
 
 @media (max-width: 960px) {
   .theme-editor__token {
-    gap: 0.5rem;           /* 原0.75rem */
-    padding: 0.5rem 0.5rem;/* 原0.9rem 1.1rem */
+  gap: 0.5rem;
+  padding: 0.5rem 0.5rem;
   }
   .theme-editor__preview {
-    height: 28px;          /* 原52px */
+  height: 28px;
     font-size: 0.78rem;
   }
 }
 
 @media (max-width: 640px) {
   .theme-editor__tools {
-    gap: 0.5rem;           /* 原0.75rem */
+    gap: 0.5rem;
   }
   .theme-editor__token {
-    padding: 0.45rem;      /* 原0.85rem */
+    padding: 0.45rem;
   }
   .theme-editor__color-picker input {
-    width: 22px;           /* 原36px */
-    height: 22px;          /* 原36px */
+    width: 22px;
+    height: 22px;
   }
 }
 </style>
