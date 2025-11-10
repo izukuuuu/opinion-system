@@ -93,7 +93,6 @@
         </template>
         <p class="text-xs text-muted">最近刷新：{{ lastLoaded || '尚未读取' }}</p>
       </header>
-      <AnalysisLogList :logs="viewLogs" empty-label="暂无查看记录。" />
     </section>
 
     <section class="card-surface space-y-4 p-6">
@@ -177,13 +176,11 @@
 <script setup>
 import { nextTick, onMounted, ref, watch } from 'vue'
 import AnalysisChartPanel from '../../../components/AnalysisChartPanel.vue'
-import AnalysisLogList from '../../../components/analysis/AnalysisLogList.vue'
 import { useBasicAnalysis } from '../../../composables/useBasicAnalysis'
 
 const {
   analysisSummary,
   analysisSections,
-  viewLogs,
   topicsState,
   topicOptions,
   analysisHistory,

@@ -615,7 +615,6 @@ const loadResults = async (range) => {
     const response = await callApi(`/api/analyze/results?${params.toString()}`, { method: 'GET' })
     analysisData.value = response
     lastLoaded.value = new Date().toLocaleString()
-    appendLog(viewLogs, { label: '查看', message: `已载入 ${topic} ${start}→${end}`, status: 'ok' })
     viewManualForm.topic = topic
     viewManualForm.start = start
     viewManualForm.end = end
