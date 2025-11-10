@@ -4,7 +4,7 @@
       <div class="space-y-1">
         <h1 class="text-2xl font-semibold text-primary">数据入库</h1>
         <p class="text-sm text-secondary">
-          读取筛选后的 JSONL 并写入业务库表，可直接调用 `/api/upload` 校验整个“入库”环节。
+          将本地筛选后的数据集上传到远程数据库。
         </p>
       </div>
       <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
@@ -16,9 +16,6 @@
     <section class="card-surface space-y-6 p-6">
       <header class="space-y-2">
         <h2 class="text-xl font-semibold text-primary">准备入库参数</h2>
-        <p class="text-sm text-secondary">
-          请选择需要写入的专题与日期，系统将默认读取 Filter 阶段产物并写入同名数据库。
-        </p>
       </header>
 
       <div class="space-y-2 text-xs text-secondary">
