@@ -12,17 +12,21 @@
           <select
             v-model="viewSelection.topic"
             class="input"
-            :disabled="topicsState.loading || !topicOptions.length"
+            :disabled="topicsState.loading || !selectableTopicOptions.length"
             required
           >
             <option value="" disabled>请选择远程专题</option>
-            <option v-for="option in topicOptions" :key="`view-topic-${option}`" :value="option">
+            <option
+              v-for="option in selectableTopicOptions"
+              :key="`view-topic-${option}`"
+              :value="option"
+            >
               {{ option }}
             </option>
           </select>
           <p class="text-xs text-muted">
             <span v-if="topicsState.loading">正在加载专题列表…</span>
-            <span v-else-if="!topicOptions.length">暂无可用专题，请先完成远程数据拉取。</span>
+            <span v-else-if="!selectableTopicOptions.length">暂无可用专题，请先完成远程数据拉取。</span>
             <span v-else>选择专题后可读取对应的分析记录。</span>
           </p>
         </label>
@@ -174,9 +178,10 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AnalysisChartPanel from '../../../components/AnalysisChartPanel.vue'
 import { useBasicAnalysis } from '../../../composables/useBasicAnalysis'
+import { useActiveProject } from '../../../composables/useActiveProject'
 
 const {
   analysisSummary,
@@ -196,7 +201,19 @@ const {
   lastLoaded
 } = useBasicAnalysis()
 
+const { activeProjectName } = useActiveProject()
+
+const selectableTopicOptions = computed(() => {
+  const options = Array.isArray(topicOptions.value) ? topicOptions.value.slice() : []
+  const activeName = (activeProjectName.value || '').trim()
+  if (activeName && !options.includes(activeName)) {
+    return [activeName, ...options]
+  }
+  return options
+})
+
 const highlightedSection = ref('')
+const autoSelectedTopic = ref('')
 
 const focusSection = async (sectionName) => {
   if (!sectionName) return
@@ -215,6 +232,32 @@ const selectHistory = (recordId) => {
   if (!recordId || recordId === selectedHistoryId.value) return
   selectedHistoryId.value = recordId
 }
+
+watch(
+  () => activeProjectName.value,
+  (name) => {
+    const trimmed = (name || '').trim()
+    if (!trimmed) return
+    if (!viewSelection.topic || viewSelection.topic === autoSelectedTopic.value) {
+      autoSelectedTopic.value = trimmed
+      viewSelection.topic = trimmed
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => viewSelection.topic,
+  (value) => {
+    if (!value) {
+      autoSelectedTopic.value = ''
+      return
+    }
+    if (autoSelectedTopic.value && value !== autoSelectedTopic.value) {
+      autoSelectedTopic.value = ''
+    }
+  }
+)
 
 watch(
   analysisSections,

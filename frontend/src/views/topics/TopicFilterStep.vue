@@ -186,16 +186,23 @@
           <p v-else-if="!cleanArchivesState.data.length" class="rounded-2xl bg-surface-muted px-3 py-2 text-xs text-muted">
             暂未找到 Clean 存档，请确认已完成清洗。
           </p>
-          <div v-else class="flex flex-wrap gap-2">
+          <div
+            v-else
+            class="flex flex-wrap gap-2"
+            role="radiogroup"
+            aria-label="Clean 存档"
+          >
             <button
               v-for="archive in cleanArchivesState.data"
               :key="archive.date"
               type="button"
+              role="radio"
               class="inline-flex flex-col gap-1 rounded-2xl border px-3 py-2 text-left text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
               :class="selectedCleanDate === archive.date
                 ? 'border-brand-soft bg-brand-soft/70 text-brand-700 shadow-sm'
                 : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:text-brand-600'"
-              @click="selectedCleanDate = archive.date"
+              :aria-checked="selectedCleanDate === archive.date"
+              @click="selectCleanArchive(archive.date)"
             >
               <span class="text-sm font-semibold text-primary">{{ archive.date }}</span>
               <span class="text-[11px] text-muted">
@@ -283,7 +290,7 @@
 
       <div class="space-y-3">
         <div class="flex items-center justify-between text-sm">
-          <span class="font-medium text-secondary">最近处理记录</span>
+          <span class="font-medium text-secondary">当前处理状态</span>
           <span class="text-xs text-muted">
             {{ statusState.recentRecords.length ? `展示最近 ${statusState.recentRecords.length} 条` : '暂无记录' }}
           </span>
@@ -785,6 +792,14 @@ function refreshDatasets() {
   fetchProjectDatasets(projectName, { force: true })
 }
 
+function selectCleanArchive(date, { force = false } = {}) {
+  const nextValue = typeof date === 'string' ? date.trim() : ''
+  if (!force && nextValue === selectedCleanDate.value) {
+    return
+  }
+  selectedCleanDate.value = nextValue
+}
+
 function resetArchivesState() {
   cleanArchivesState.loading = false
   cleanArchivesState.error = ''
@@ -792,19 +807,19 @@ function resetArchivesState() {
   cleanArchivesState.latest = ''
   cleanArchivesState.lastProject = ''
   cleanArchivesState.lastDataset = ''
-  selectedCleanDate.value = ''
+  selectCleanArchive('', { force: true })
 }
 
 function syncCleanArchiveSelection() {
   const archives = Array.isArray(cleanArchivesState.data) ? cleanArchivesState.data : []
   if (!archives.length) {
-    selectedCleanDate.value = ''
+    selectCleanArchive('', { force: true })
     return
   }
   if (!selectedCleanDate.value || !archives.some((item) => item.date === selectedCleanDate.value)) {
     const preferred = archives.find((item) => item.matches_dataset)
-    selectedCleanDate.value =
-      (preferred && preferred.date) || cleanArchivesState.latest || archives[0]?.date || ''
+    const fallback = (preferred && preferred.date) || cleanArchivesState.latest || archives[0]?.date || ''
+    selectCleanArchive(fallback, { force: true })
   }
 }
 
@@ -849,7 +864,7 @@ async function fetchCleanArchives({ force = false } = {}) {
     cleanArchivesState.latest = ''
     cleanArchivesState.lastProject = ''
     cleanArchivesState.lastDataset = ''
-    selectedCleanDate.value = ''
+    selectCleanArchive('', { force: true })
   } finally {
     cleanArchivesState.loading = false
   }

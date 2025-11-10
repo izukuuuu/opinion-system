@@ -196,7 +196,7 @@
           @click="runPipeline"
         >
           <SparklesIcon class="h-4 w-4" />
-          <span>{{ pipeline.running ? '执行中…' : '一键执行 Pipeline' }}</span>
+          <span>{{ pipeline.running ? '执行中…' : '一键执行' }}</span>
         </button>
       </div>
 
