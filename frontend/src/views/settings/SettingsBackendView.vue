@@ -4,7 +4,7 @@
       <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">后端服务</p>
       <h2 class="text-xl font-semibold text-slate-900">后端地址配置</h2>
       <p class="text-sm text-slate-500">
-        前端请求的 API 地址只在这里配置。默认使用 <code>http://127.0.0.1:8000</code>，你可以在部署时改成公网地址。
+        前端请求的 API 地址配置。默认使用 <code>http://127.0.0.1:8000</code>，部署时需更改为对应公网地址和端口。
       </p>
     </header>
 

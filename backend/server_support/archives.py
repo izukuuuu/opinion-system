@@ -15,6 +15,7 @@ __all__ = [
 ]
 
 _DEFAULT_LAYERS: Tuple[str, ...] = ("raw", "merge", "clean", "filter")
+_ALLOWED_LAYERS: Tuple[str, ...] = _DEFAULT_LAYERS + ("fetch", "analyze", "reports", "results")
 _STAGE_DEPENDENCIES = {
     "clean": "merge",
     "filter": "clean",
@@ -110,7 +111,7 @@ def collect_project_archives(
 ) -> Dict[str, List[Dict[str, Any]]]:
     """Return archive metadata for multiple layers of a project."""
 
-    selected_layers = tuple(item for item in (layers or _DEFAULT_LAYERS) if item in _DEFAULT_LAYERS)
+    selected_layers = tuple(item for item in (layers or _DEFAULT_LAYERS) if item in _ALLOWED_LAYERS)
     data: Dict[str, List[Dict[str, Optional[str]]]] = {}
     for layer in selected_layers:
         data[layer] = collect_layer_archives(topic_identifier, layer, dataset_id=dataset_id)

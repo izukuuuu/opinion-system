@@ -180,8 +180,18 @@
   }
 
   .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    border: none;
+    padding: 0.55rem 1.4rem;
+    font-weight: 600;
+    font-size: 0.95rem;
     background-color: var(--color-brand-600-hex);
     color: #ffffff;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
   }
 
   .btn-primary:hover {
@@ -189,13 +199,67 @@
   }
 
   .btn-secondary {
-    background-color: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    border-radius: 999px;
     border: 1px solid var(--color-border-soft);
+    padding: 0.55rem 1.4rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    background-color: transparent;
     color: var(--color-text-secondary);
+    transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
   }
 
   .btn-secondary:hover {
     background-color: rgb(var(--color-brand-100) / 0.4);
+  }
+
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    padding: 0.55rem 1.4rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    background-color: rgb(var(--color-brand-100) / 0.4);
+    color: var(--color-text-primary);
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--color-border-soft);
+    background-color: rgb(var(--color-brand-100) / 0.7);
+  }
+
+  .btn-primary:disabled,
+  .btn-secondary:disabled,
+  .btn-ghost:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .input {
+    width: 100%;
+    border-radius: 1.5rem;
+    border: 1px solid var(--color-border-soft);
+    padding: 0.55rem 1rem;
+    font-size: 0.95rem;
+    background-color: var(--color-surface);
+    color: var(--color-text-primary);
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .input:focus {
+    border-color: rgb(var(--color-brand-400) / 1);
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--color-brand-100) / 1);
   }
 
   .bg-gradient-brand {

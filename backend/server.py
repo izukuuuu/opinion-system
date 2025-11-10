@@ -33,7 +33,7 @@ from src.project import (  # type: ignore
     update_dataset_column_mapping,
     store_uploaded_dataset,
 )
-from src.utils.setting.paths import bucket  # type: ignore
+from src.utils.setting.paths import bucket, get_data_root, _normalise_topic  # type: ignore
 
 from server_support import (  # type: ignore
     collect_project_archives,
@@ -139,6 +139,20 @@ def _compose_analyze_folder(start: str, end: Optional[str]) -> str:
     return start
 
 
+def _split_analyze_folder(folder: str) -> Tuple[str, str]:
+    folder = (folder or "").strip()
+    if not folder:
+        return "", ""
+    if "_" in folder:
+        start, end = folder.split("_", 1)
+        start = start.strip()
+        end = end.strip() or start
+    else:
+        start = folder
+        end = folder
+    return start, end
+
+
 def _summarise_api_key(value: Optional[str]) -> Dict[str, Any]:
     if not value:
         return {"configured": False, "last_four": ""}
@@ -176,6 +190,59 @@ def _build_filter_status_payload(
             context["resolved_date"] = resolved_date
             context["requested_date"] = fallback_from
     return status_payload
+
+
+def _collect_analyze_history(
+    topic_identifier: str,
+    topic_label: str,
+    aliases: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    data_root = get_data_root() / "projects"
+    data_root.mkdir(parents=True, exist_ok=True)
+    candidate_names: List[str] = [topic_identifier]
+    if aliases:
+        candidate_names.extend(aliases)
+    candidate_names.extend([_normalise_name(name) for name in candidate_names if name])
+
+    seen_dirs: set[str] = set()
+    records: List[Dict[str, Any]] = []
+
+    for name in candidate_names:
+        cleaned = (name or "").strip()
+        if not cleaned or cleaned in seen_dirs:
+            continue
+        seen_dirs.add(cleaned)
+        analyze_dir = data_root / cleaned / "analyze"
+        if not analyze_dir.exists():
+            continue
+        for entry in analyze_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            start, end = _split_analyze_folder(entry.name)
+            if not start:
+                continue
+            stats = entry.stat()
+            records.append(
+                {
+                    "id": f"{cleaned}:{entry.name}",
+                    "topic": topic_label,
+                    "topic_identifier": cleaned,
+                    "start": start,
+                    "end": end,
+                    "folder": entry.name,
+                    "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats.st_mtime)),
+                    "_updated_ts": stats.st_mtime,
+                }
+            )
+
+    records.sort(key=lambda item: item.get("_updated_ts", 0), reverse=True)
+    for record in records:
+        record.pop("_updated_ts", None)
+    return records
+
+
+def _normalise_name(value: Optional[str]) -> str:
+    return _normalise_topic(value or "")
 
 
 def _submit_filter_job(
@@ -1054,6 +1121,37 @@ def analyze_endpoint():
         },
     )
     return jsonify(response), code
+
+
+@app.get("/api/analyze/history")
+def get_analyze_history():
+    raw_topic = request.args.get("topic")
+    raw_project = request.args.get("project")
+    raw_dataset_id = request.args.get("dataset_id")
+
+    payload = {
+        "topic": raw_topic,
+        "project": raw_project,
+        "dataset_id": raw_dataset_id,
+    }
+
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError:
+        topic_identifier = (raw_topic or "").strip()
+        if not topic_identifier:
+            return error("Missing required query parameters: topic or project")
+        display_name = raw_topic or raw_project or topic_identifier
+
+    aliases = [alias for alias in (raw_topic, raw_project) if alias]
+    records = _collect_analyze_history(topic_identifier, display_name, aliases)
+    return success(
+        {
+            "records": records,
+            "topic": display_name,
+            "topic_identifier": topic_identifier,
+        }
+    )
 
 
 @app.get("/api/analyze/results")

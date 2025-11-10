@@ -7,7 +7,10 @@ import TopicPreprocessStep from '../views/topics/TopicPreprocessStep.vue'
 import TopicFilterStep from '../views/topics/TopicFilterStep.vue'
 import TopicIngestionStep from '../views/topics/TopicIngestionStep.vue'
 import ProjectDataView from '../views/ProjectDataView.vue'
-import ProjectBasicAnalysisView from '../views/ProjectBasicAnalysisView.vue'
+import ProjectBasicAnalysisLayout from '../views/analysis/basic/ProjectBasicAnalysisLayout.vue'
+import ProjectBasicAnalysisOverview from '../views/analysis/basic/ProjectBasicAnalysisOverview.vue'
+import ProjectBasicAnalysisRun from '../views/analysis/basic/ProjectBasicAnalysisRun.vue'
+import ProjectBasicAnalysisResults from '../views/analysis/basic/ProjectBasicAnalysisResults.vue'
 import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
 import DatabaseDatasetsView from '../views/DatabaseDatasetsView.vue'
 import TestView from '../views/TestView.vue'
@@ -90,11 +93,36 @@ export const routes = [
   },
   {
     path: '/analysis/basic',
-    name: 'project-data-analysis',
-    component: ProjectBasicAnalysisView,
-    meta: {
-      title: '专题基础分析'
-    }
+    component: ProjectBasicAnalysisLayout,
+    children: [
+      {
+        path: '',
+        name: 'project-data-analysis',
+        component: ProjectBasicAnalysisOverview,
+        meta: {
+          title: '基础分析 · 流程概览',
+          breadcrumb: '流程概览'
+        }
+      },
+      {
+        path: 'run',
+        name: 'project-data-analysis-run',
+        component: ProjectBasicAnalysisRun,
+        meta: {
+          title: '基础分析 · 运行分析',
+          breadcrumb: '运行分析'
+        }
+      },
+      {
+        path: 'view',
+        name: 'project-data-analysis-view',
+        component: ProjectBasicAnalysisResults,
+        meta: {
+          title: '基础分析 · 查看分析',
+          breadcrumb: '查看分析'
+        }
+      }
+    ]
   },
   {
     path: '/analysis/interpretation',
