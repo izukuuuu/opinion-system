@@ -1,6 +1,7 @@
 """
 OpinionSystem 舆情分析系统主程序
 """
+import json
 import sys
 import click
 import asyncio
@@ -126,16 +127,65 @@ def upload(topic, date):
 
 
 @cli.command('Query')
-def query():
+@click.option('--json', 'show_json', is_flag=True, help='以JSON格式输出完整结果')
+@click.option(
+    '--save',
+    'save_path',
+    type=click.Path(dir_okay=False, writable=True, resolve_path=True),
+    help='将查询结果写入指定JSON文件',
+)
+def query(show_json, save_path):
     """
     查询数据库信息
     """
     from src.query import run_query
 
     result = run_query()
-    _log_project_event("GLOBAL", "query", {"source": "cli"}, _as_success(result))
-    if not _as_success(result):
+    success = _as_success(result)
+    _log_project_event("GLOBAL", "query", {"source": "cli"}, success)
+    if not success:
         print("查询失败")
+        if isinstance(result, dict):
+            message = result.get("message")
+            if message:
+                print(f"详情: {message}")
+        return
+
+    if isinstance(result, dict):
+        summary = result.get("summary") or {}
+        db_count = summary.get("database_count", 0)
+        table_count = summary.get("table_count", 0)
+        row_count = summary.get("row_count", 0)
+        print(f"成功查询 {db_count} 个数据库，{table_count} 张表，共 {row_count} 条记录")
+
+        databases = result.get("databases") or []
+        max_preview = 10
+        if databases:
+            print("数据库概览:")
+            for database in databases[:max_preview]:
+                db_name = database.get("name", "<unknown>")
+                table_total = database.get("table_count", len(database.get("tables") or []))
+                row_total = database.get("total_rows", 0)
+                print(f"- {db_name}: {table_total} 表 / {row_total} 行")
+            if len(databases) > max_preview:
+                print(f"... 其余 {len(databases) - max_preview} 个数据库已省略，使用 --json 查看全部内容。")
+
+    if show_json or save_path:
+        try:
+            payload = json.dumps(result, ensure_ascii=False, indent=2)
+        except TypeError as exc:
+            print(f"结果JSON序列化失败: {exc}")
+            payload = None
+        if payload:
+            if show_json:
+                print(payload)
+            if save_path:
+                target = Path(save_path)
+                try:
+                    target.write_text(payload, encoding="utf-8")
+                    print(f"已写入查询结果到 {target}")
+                except OSError as exc:
+                    print(f"写入 {target} 失败: {exc}")
 
 
 @cli.command('Fetch')
@@ -157,6 +207,73 @@ def fetch(topic, start, end):
     )
     if not _as_success(result):
         print(f"提取失败: {topic} - {start} 到 {end}")
+
+
+@cli.command('FetchAvailability')
+@click.option('--topic', required=True, help='专题名称（数据库名）')
+@click.option('--table', help='可选渠道表名，仅查看该表的可用区间')
+@click.option('--json', 'show_json', is_flag=True, help='以JSON格式输出结果')
+def fetch_availability(topic, table, show_json):
+    """
+    查看各渠道或专题的可用日期区间
+    """
+    from src.fetch import get_available_date_range, get_topic_available_date_range
+
+    payload = {}
+    message = None
+    success = True
+
+    try:
+        if table:
+            start, end = get_available_date_range(topic, table)
+            payload = {"topic": topic, "table": table, "start": start, "end": end}
+            if not start and not end:
+                message = f"表 {topic}.{table} 无可用 published_at 数据"
+        else:
+            payload = get_topic_available_date_range(topic) or {}
+            tables = payload.get("tables") or {}
+            if not tables:
+                message = f"专题 {topic} 未找到包含 published_at 字段的表"
+    except Exception as exc:
+        success = False
+        message = f"查询失败: {exc}"
+
+    _log_project_event(
+        topic,
+        "fetch_availability",
+        {"table": table, "source": "cli"},
+        success,
+    )
+
+    if not success:
+        print(message or "可用日期区间查询失败")
+        return
+
+    if show_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        if message:
+            print(message)
+        return
+
+    if table:
+        start = payload.get("start") or "-"
+        end = payload.get("end") or "-"
+        print(f"{topic}.{table} 可用日期: {start} ~ {end}")
+    else:
+        start = payload.get("start") or "-"
+        end = payload.get("end") or "-"
+        print(f"专题 {topic} 可用日期: {start} ~ {end}")
+        tables = payload.get("tables") or {}
+        if tables:
+            print("包含的表:")
+            for name in sorted(tables.keys()):
+                info = tables[name] or {}
+                t_start = info.get("start") or "-"
+                t_end = info.get("end") or "-"
+                print(f"- {name}: {t_start} ~ {t_end}")
+
+    if message:
+        print(message)
 
 
 @cli.command('Analyze')
@@ -293,4 +410,3 @@ def show_projects():
 
 if __name__ == "__main__":
     main()
-
