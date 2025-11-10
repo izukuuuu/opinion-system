@@ -129,12 +129,11 @@ def _execute_operation(
 
 
 def _compose_analyze_folder(start: str, end: Optional[str]) -> str:
-    end = end or ""
     start = start.strip()
-    end = end.strip()
+    end = (end or "").strip()
     if not start:
         return ""
-    if end and end != start:
+    if end:
         return f"{start}_{end}"
     return start
 
@@ -1071,7 +1070,15 @@ def get_analyze_results():
 
     analyze_root = bucket("analyze", topic_identifier, folder_name)
     if not analyze_root.exists():
-        return error("未找到对应的分析结果目录", status_code=404)
+        fallback_root: Optional[Path] = None
+        if end:
+            single_day_folder = start.strip()
+            if single_day_folder and single_day_folder != folder_name:
+                fallback_root = bucket("analyze", topic_identifier, single_day_folder)
+        if fallback_root and fallback_root.exists():
+            analyze_root = fallback_root
+        else:
+            return error("未找到对应的分析结果目录", status_code=404)
 
     def _match_target(name: str) -> bool:
         if not target_alias:

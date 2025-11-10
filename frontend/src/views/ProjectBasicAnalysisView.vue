@@ -6,7 +6,7 @@
           <BeakerIcon class="h-4 w-4" />
           专题分析
         </p>
-        <h1>远程专题基础分析</h1>
+        <h1>专题基础分析</h1>
         <p>选定专题、抓取时间段，然后直接查看情感、声量、地域等基础指标。</p>
       </div>
     </header>
@@ -284,7 +284,7 @@ const analysisFunctions = [
   {
     id: 'trends',
     label: '趋势分析 trends',
-    description: '按日期统计声量趋势，依赖 published_at。'
+    description: '按日期统计声量趋势。'
   },
   {
     id: 'volume',
@@ -628,9 +628,15 @@ const ensureNumber = (value) => {
   return Number.isFinite(num) ? num : 0
 }
 
+const HORIZONTAL_BAR_FUNCTIONS = ['geography', 'publishers', 'keywords', 'classification']
+
+const sortRowsDescending = (rows) =>
+  [...rows].sort((a, b) => ensureNumber(rowValue(b)) - ensureNumber(rowValue(a)))
+
 const buildBarOption = (title, rows, orientation = 'vertical', categoryLabel = '类别', valueLabel = '数量') => {
-  const categories = rows.map((row) => rowName(row))
-  const values = rows.map((row) => ensureNumber(rowValue(row)))
+  const orderedRows = orientation === 'horizontal' ? sortRowsDescending(rows) : rows
+  const categories = orderedRows.map((row) => rowName(row))
+  const values = orderedRows.map((row) => ensureNumber(rowValue(row)))
   const isVertical = orientation !== 'horizontal'
   const catAxis = {
     type: 'category',
@@ -652,7 +658,7 @@ const buildBarOption = (title, rows, orientation = 'vertical', categoryLabel = '
     yAxis: isVertical ? valAxis : catAxis,
     dataset: {
       dimensions: [categoryLabel, valueLabel],
-      source: rows.map((row) => ({ name: rowName(row), value: ensureNumber(rowValue(row)) }))
+      source: orderedRows.map((row) => ({ name: rowName(row), value: ensureNumber(rowValue(row)) }))
     },
     series: [
       {
@@ -709,8 +715,7 @@ const buildFallbackOption = (funcName, rows, targetLabel) => {
   const title = `${funcName} · ${targetLabel}`
   if (funcName === 'trends') return buildLineOption(title, rows)
   if (funcName === 'attitude') return buildPieOption(title, rows)
-  const horizontalFunctions = ['geography', 'publishers', 'keywords', 'classification']
-  const orientation = horizontalFunctions.includes(funcName) ? 'horizontal' : 'vertical'
+  const orientation = HORIZONTAL_BAR_FUNCTIONS.includes(funcName) ? 'horizontal' : 'vertical'
   return buildBarOption(title, rows, orientation)
 }
 
@@ -724,13 +729,16 @@ const analysisSections = computed(() => {
     }
     const targets = func.targets.map((target) => {
       const rows = extractRows(target.data)
+      const hasCustomOption = Boolean(target.data?.echarts)
+      const shouldSortDescending = !hasCustomOption && HORIZONTAL_BAR_FUNCTIONS.includes(func.name)
+      const displayRows = shouldSortDescending ? sortRowsDescending(rows) : rows
       return {
         target: target.target,
         title: `${meta.label} · ${target.target}`,
         subtitle: `结果文件：${target.file}`,
-        option: target.data?.echarts || buildFallbackOption(func.name, rows, target.target),
+        option: target.data?.echarts || buildFallbackOption(func.name, displayRows, target.target),
         hasData: rows.length > 0,
-        rows: rows.slice(0, 12),
+        rows: displayRows.slice(0, 12),
         rawText: JSON.stringify(target.data ?? {}, null, 2)
       }
     })

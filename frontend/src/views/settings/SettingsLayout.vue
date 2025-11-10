@@ -53,11 +53,6 @@ import {
 
 const navigationItems = [
   {
-    label: '主题颜色',
-    to: { name: 'settings-theme' },
-    icon: SwatchIcon
-  },
-  {
     label: '数据库连接',
     to: { name: 'settings-databases' },
     icon: CircleStackIcon
@@ -66,6 +61,11 @@ const navigationItems = [
     label: 'AI 服务配置',
     to: { name: 'settings-ai' },
     icon: CpuChipIcon
+  },
+    {
+    label: '主题颜色',
+    to: { name: 'settings-theme' },
+    icon: SwatchIcon
   }
 ]
 
