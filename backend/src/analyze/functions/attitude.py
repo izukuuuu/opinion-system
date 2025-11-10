@@ -4,6 +4,7 @@
 import pandas as pd
 from typing import Dict, List, Any
 from ...utils.logging.logging import setup_logger, log_success, log_error, log_module_start
+from .echarts_common import build_pie_option
 
 def _normalize_attitude_column(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -88,6 +89,8 @@ def analyze_attitude_overall(df: pd.DataFrame, logger=None) -> Dict[str, Any]:
         result = {
             "data": attitude_data
         }
+        if attitude_data:
+            result["echarts"] = build_pie_option("情感分布 · 总体", attitude_data)
 
         log_success(logger, "attitude | 总体 分析完成", "Analyze")
         return result
@@ -123,6 +126,8 @@ def analyze_attitude_by_channel(df: pd.DataFrame, channel_name: str, logger=None
         result = {
             "data": attitude_data
         }
+        if attitude_data:
+            result["echarts"] = build_pie_option(f"情感分布 · {channel_name}", attitude_data)
 
         log_success(logger, f"attitude | {channel_name} 分析完成", "Analyze")
         return result
@@ -132,6 +137,5 @@ def analyze_attitude_by_channel(df: pd.DataFrame, channel_name: str, logger=None
         return {
             "data": []
         }
-
 
 

@@ -4,6 +4,7 @@
 import pandas as pd
 from typing import Dict, Any, List
 from ...utils.logging.logging import log_success, log_error, log_skip
+from .echarts_common import build_bar_option
 
 
 def analyze_classification_overall(df: pd.DataFrame, logger) -> Dict[str, Any]:
@@ -49,6 +50,14 @@ def analyze_classification_overall(df: pd.DataFrame, logger) -> Dict[str, Any]:
         result = {
             "data": data_list
         }
+        if data_list:
+            result["echarts"] = build_bar_option(
+                title="分类统计 · 总体",
+                data=data_list,
+                orientation="horizontal",
+                category_label="分类",
+                value_label="数量",
+            )
         
         log_success(logger, "classification | 总体 分析完成", "Analyze")
         return result
@@ -102,6 +111,14 @@ def analyze_classification_by_channel(df: pd.DataFrame, channel_name: str, logge
         result = {
             "data": data_list
         }
+        if data_list:
+            result["echarts"] = build_bar_option(
+                title=f"分类统计 · {channel_name}",
+                data=data_list,
+                orientation="horizontal",
+                category_label="分类",
+                value_label="数量",
+            )
         
         log_success(logger, f"classification | {channel_name} 分析完成", "Analyze")
         return result

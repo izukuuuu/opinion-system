@@ -927,6 +927,12 @@ def fetch_endpoint():
     if not start or not end:
         return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
 
+    topic = str(payload.get("topic") or "").strip()
+    project = str(payload.get("project") or "").strip()
+    dataset_id = str(payload.get("dataset_id") or "").strip()
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+
     try:
         topic_identifier, display_name, log_project, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
     except ValueError as exc:

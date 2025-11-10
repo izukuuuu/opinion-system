@@ -8,6 +8,7 @@ from typing import Dict, List, Any
 from ...utils.logging.logging import setup_logger, log_success, log_error, log_module_start
 from ...utils.setting.paths import bucket
 from ...utils.io.excel import read_jsonl
+from .echarts_common import build_bar_option
 
 
 def analyze_volume_overall(df: pd.DataFrame, topic: str, date: str, logger=None, end_date: str = None) -> Dict[str, Any]:
@@ -63,6 +64,13 @@ def analyze_volume_overall(df: pd.DataFrame, topic: str, date: str, logger=None,
         # 转换为要求的格式
         data = [{"name": k, "value": v} for k, v in channel_counts.items()]
         result = {"data": data}
+        if data:
+            result["echarts"] = build_bar_option(
+                title=f"声量对比 · 总体",
+                data=data,
+                category_label="渠道",
+                value_label="声量",
+            )
         
         log_success(logger, f"volume | 总体 分析完成", "Analyze")
         return result
@@ -109,6 +117,13 @@ def analyze_volume_by_channel(df: pd.DataFrame, channel_name: str, topic: str, d
         # 转换为要求的格式
         data = [{"name": channel_name, "value": record_count}]
         result = {"data": data}
+        if data:
+            result["echarts"] = build_bar_option(
+                title=f"声量对比 · {channel_name}",
+                data=data,
+                category_label="渠道",
+                value_label="声量",
+            )
         
         log_success(logger, f"volume | {channel_name} 分析完成", "Analyze")
         return result

@@ -8,6 +8,7 @@ import pandas as pd
 from ...utils.logging.logging import setup_logger, log_success, log_error, log_module_start
 from ...utils.setting.paths import bucket
 from ...utils.io.excel import read_csv
+from .echarts_common import build_bar_option
 
 def _analyze_publishers(df: pd.DataFrame, channel_name: str, logger=None) -> Dict[str, Any]:
     """
@@ -38,6 +39,14 @@ def _analyze_publishers(df: pd.DataFrame, channel_name: str, logger=None) -> Dic
         # 转换为要求的格式
         data = [{"name": pub, "value": count} for pub, count in top_publishers]
         result = {"data": data}
+        if data:
+            result["echarts"] = build_bar_option(
+                title=f"发布主体 TOP20 · {channel_name}",
+                data=data,
+                orientation="horizontal",
+                category_label="发布主体",
+                value_label="数量",
+            )
         
         log_success(logger, f"publishers | {channel_name} 分析完成", "Analyze")
         return result
@@ -72,5 +81,4 @@ def analyze_publishers_by_channel(df: pd.DataFrame, channel_name: str, logger=No
         Dict[str, Any]: 发布机构分析结果
     """
     return _analyze_publishers(df, channel_name, logger)
-
 
