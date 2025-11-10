@@ -242,8 +242,13 @@ import {
   ArrowTrendingUpIcon
 } from '@heroicons/vue/24/outline'
 import { useActiveProject } from '../../composables/useActiveProject'
+import { useApiBase } from '../../composables/useApiBase'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
+const buildApiUrl = async (path) => {
+  const baseUrl = await ensureApiBase()
+  return `${baseUrl}${path}`
+}
 const HISTORY_LIMIT = 6
 
 const { activeProject, activeProjectName } = useActiveProject()
@@ -455,7 +460,8 @@ const runUpload = async () => {
   uploadState.lastResponse = null
 
   try {
-    const response = await fetch(`${API_BASE_URL}/upload`, {
+    const endpoint = await buildApiUrl('/upload')
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

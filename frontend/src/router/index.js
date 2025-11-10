@@ -15,6 +15,7 @@ import SettingsLayout from '../views/settings/SettingsLayout.vue'
 import SettingsDatabasesView from '../views/settings/SettingsDatabasesView.vue'
 import SettingsAiView from '../views/settings/SettingsAiView.vue'
 import SettingsThemeView from '../views/settings/SettingsThemeView.vue'
+import SettingsBackendView from '../views/settings/SettingsBackendView.vue'
 import PlaceholderModuleView from '../views/PlaceholderModuleView.vue'
 
 export const routes = [
@@ -221,7 +222,16 @@ export const routes = [
     children: [
       {
         path: '',
-        redirect: { name: 'settings-theme' }
+        redirect: { name: 'settings-backend' }
+      },
+      {
+        path: 'backend',
+        name: 'settings-backend',
+        component: SettingsBackendView,
+        meta: {
+          title: '后端地址',
+          breadcrumb: '后端地址'
+        }
       },
       {
         path: 'appearance/theme',

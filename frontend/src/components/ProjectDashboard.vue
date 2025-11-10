@@ -156,6 +156,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
+import { useApiBase } from '../composables/useApiBase'
 
 const props = defineProps({
   project: {
@@ -178,7 +179,7 @@ const props = defineProps({
 
 const emit = defineEmits(['project-created', 'cancel'])
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
 
 const form = reactive({
   name: '',
@@ -307,7 +308,8 @@ const submit = async () => {
       metadata: parseMetadata()
     }
 
-    const response = await fetch(`${API_BASE_URL}/projects`, {
+    const baseUrl = await ensureApiBase()
+    const response = await fetch(`${baseUrl}/projects`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

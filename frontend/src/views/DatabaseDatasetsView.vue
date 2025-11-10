@@ -230,9 +230,9 @@ import {
 } from '@heroicons/vue/24/outline'
 
 import AppModal from '../components/AppModal.vue'
-import { useBackendClient } from '../composables/useBackendClient'
+import { useApiBase } from '../composables/useApiBase'
 
-const { callApi } = useBackendClient()
+const { callApi } = useApiBase()
 
 const loading = ref(false)
 const error = ref('')

@@ -120,9 +120,9 @@
 import { reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
-import { useBackendClient } from '../composables/useBackendClient'
+import { useApiBase } from '../composables/useApiBase'
 
-const { callApi } = useBackendClient()
+const { callApi } = useApiBase()
 
 const loading = reactive({
   status: false,

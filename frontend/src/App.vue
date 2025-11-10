@@ -122,14 +122,21 @@
                 v-for="link in group.links"
                 :key="link.label"
                 :to="link.to"
-                class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-secondary transition hover:bg-brand-soft hover:text-primary focus-ring-accent"
-                active-class="bg-brand-soft text-brand-600"
+                custom
+                v-slot="{ href, navigate }"
               >
-                <component :is="link.icon" class="h-5 w-5 text-muted" />
-                <div class="flex flex-col">
-                  <span>{{ link.label }}</span>
-                  <span class="text-xs font-normal text-muted">{{ link.description }}</span>
-                </div>
+                <a
+                  :href="href"
+                  @click="navigate"
+                  class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-secondary transition hover:bg-brand-soft hover:text-primary focus-ring-accent"
+                  :class="isGlobalLinkActive(link) ? 'bg-brand-soft text-brand-600' : ''"
+                >
+                  <component :is="link.icon" class="h-5 w-5 text-muted" />
+                  <div class="flex flex-col">
+                    <span>{{ link.label }}</span>
+                    <span class="text-xs font-normal text-muted">{{ link.description }}</span>
+                  </div>
+                </a>
               </RouterLink>
             </section>
           </nav>
@@ -314,6 +321,7 @@ const navigationGroups = [
         label: '系统设置',
         description: '配置数据库与模型参数',
         to: { name: 'settings-databases' },
+        match: ['settings', 'settings-backend', 'settings-databases', 'settings-ai', 'settings-theme'],
         icon: Cog6ToothIcon
       }
     ]
@@ -330,6 +338,19 @@ const isLandingLayout = computed(() => route.meta?.layout === 'landing')
 const backendEntryRoute = { name: 'overview-datasets' }
 
 const pageTitle = computed(() => route.meta?.title ?? '')
+
+const isGlobalLinkActive = (link) => {
+  if (Array.isArray(link.match) && link.match.length) {
+    return link.match.includes(route.name)
+  }
+  if (link.to?.name && route.name === link.to.name) {
+    return true
+  }
+  if (link.to?.name && Array.isArray(route.matched)) {
+    return route.matched.some((record) => record.name === link.to.name)
+  }
+  return false
+}
 
 const mediaQuery =
   typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)') : null

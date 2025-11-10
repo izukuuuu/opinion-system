@@ -84,6 +84,7 @@ import {
   ChevronDownIcon
 } from '@heroicons/vue/24/outline'
 import { useActiveProject } from '../composables/useActiveProject'
+import { useApiBase } from '../composables/useApiBase'
 
 const { showLabel } = defineProps({
   showLabel: {
@@ -92,7 +93,7 @@ const { showLabel } = defineProps({
   }
 })
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
 
 const { activeProjectName, setActiveProject, clearActiveProject } = useActiveProject()
 
@@ -132,7 +133,8 @@ const fetchProjects = async () => {
   loading.value = true
   error.value = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/projects`)
+    const baseUrl = await ensureApiBase()
+    const response = await fetch(`${baseUrl}/projects`)
     if (!response.ok) {
       throw new Error('获取项目列表失败')
     }

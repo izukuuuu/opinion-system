@@ -376,8 +376,13 @@ import { ArrowPathIcon, EllipsisHorizontalIcon, EyeIcon, PencilSquareIcon, PlusI
 import AppModal from '../components/AppModal.vue'
 import ProjectDashboard from '../components/ProjectDashboard.vue'
 import { useActiveProject } from '../composables/useActiveProject'
+import { useApiBase } from '../composables/useApiBase'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
+const buildApiUrl = async (path) => {
+  const baseUrl = await ensureApiBase()
+  return `${baseUrl}${path}`
+}
 
 const projects = ref([])
 const loading = ref(false)
@@ -407,7 +412,8 @@ const fetchProjects = async () => {
   loading.value = true
   error.value = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/projects`)
+    const endpoint = await buildApiUrl('/projects')
+    const response = await fetch(endpoint)
     if (!response.ok) {
       throw new Error('获取项目列表失败')
     }
@@ -540,7 +546,8 @@ const confirmDeleteProject = async (name) => {
   error.value = ''
   isDeleting.value = true
   try {
-    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(targetName)}`, {
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(targetName)}`)
+    const response = await fetch(endpoint, {
       method: 'DELETE'
     })
     if (!response.ok) {

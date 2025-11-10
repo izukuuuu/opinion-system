@@ -253,7 +253,7 @@ import { BeakerIcon } from '@heroicons/vue/24/outline'
 import { computed, reactive, ref, watch, onMounted } from 'vue'
 
 import AnalysisChartPanel from '../components/AnalysisChartPanel.vue'
-import { useBackendClient } from '../composables/useBackendClient'
+import { useApiBase } from '../composables/useApiBase'
 
 const analysisFunctions = [
   {
@@ -293,7 +293,7 @@ const analysisFunctions = [
   }
 ]
 
-const { callApi } = useBackendClient()
+const { callApi } = useApiBase()
 
 const topicsState = reactive({
   loading: false,

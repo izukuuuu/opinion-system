@@ -243,8 +243,13 @@
 
 <script setup>
 import { computed, onMounted, reactive, watch } from 'vue'
+import { useApiBase } from '../../composables/useApiBase'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
+const buildApiUrl = async (path) => {
+  const baseUrl = await ensureApiBase()
+  return `${baseUrl}${path}`
+}
 const providerOptions = [
   { label: '阿里通义千问（DashScope）', value: 'qwen' },
   { label: 'OpenAI / 兼容 API', value: 'openai' }
@@ -330,7 +335,8 @@ const fetchLlmCredentials = async () => {
   credentialState.error = ''
   credentialState.message = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/settings/llm/credentials`)
+    const endpoint = await buildApiUrl('/settings/llm/credentials')
+    const response = await fetch(endpoint)
     if (!response.ok) {
       throw new Error('读取 API 凭证失败')
     }
@@ -352,7 +358,8 @@ const updateCredentials = async (payload, successMessage = 'API 凭证已更新'
   credentialState.error = ''
   credentialState.message = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/settings/llm/credentials`, {
+    const endpoint = await buildApiUrl('/settings/llm/credentials')
+    const response = await fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -412,7 +419,8 @@ const submitLlmFilter = async () => {
   llmState.message = ''
   llmState.error = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/settings/llm/filter`, {
+    const endpoint = await buildApiUrl('/settings/llm/filter')
+    const response = await fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(llmState.filter)
@@ -430,7 +438,8 @@ const submitLlmAssistant = async () => {
   llmState.message = ''
   llmState.error = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/settings/llm/assistant`, {
+    const endpoint = await buildApiUrl('/settings/llm/assistant')
+    const response = await fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(llmState.assistant)
@@ -448,7 +457,8 @@ const fetchLlmSettings = async () => {
   llmState.loading = true
   llmState.error = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/settings/llm`)
+    const endpoint = await buildApiUrl('/settings/llm')
+    const response = await fetch(endpoint)
     if (!response.ok) {
       throw new Error('读取模型配置失败')
     }

@@ -400,8 +400,13 @@ import {
   XMarkIcon
 } from '@heroicons/vue/24/outline'
 import { useActiveProject } from '../../composables/useActiveProject'
+import { useApiBase } from '../../composables/useApiBase'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
+const buildApiUrl = async (path) => {
+  const baseUrl = await ensureApiBase()
+  return `${baseUrl}${path}`
+}
 const POLL_INTERVAL = 1000
 const RECENT_LIMIT = 40
 
@@ -743,7 +748,8 @@ async function fetchProjectDatasets(projectName, { force = false } = {}) {
   datasetsLoading.value = true
   datasetsError.value = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(trimmed)}/datasets`)
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(trimmed)}/datasets`)
+    const response = await fetch(endpoint)
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
       throw new Error(result.message || '无法加载专题数据集')
@@ -825,9 +831,8 @@ async function fetchCleanArchives({ force = false } = {}) {
     if (datasetId) {
       params.append('dataset_id', datasetId)
     }
-    const response = await fetch(
-      `${API_BASE_URL}/projects/${encodeURIComponent(projectName)}/archives?${params.toString()}`
-    )
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(projectName)}/archives?${params.toString()}`)
+    const response = await fetch(endpoint)
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
       throw new Error(result.message || '无法获取 Clean 存档')
@@ -856,7 +861,8 @@ async function loadTemplate(projectName) {
   templateState.success = ''
   try {
     const params = new URLSearchParams({ project: projectName })
-    const response = await fetch(`${API_BASE_URL}/filter/template?${params.toString()}`)
+    const endpoint = await buildApiUrl(`/filter/template?${params.toString()}`)
+    const response = await fetch(endpoint)
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
       throw new Error(result.message || '无法加载模板')
@@ -902,7 +908,8 @@ async function saveTemplate() {
       topic_theme: templateState.theme.trim(),
       categories: templateState.categories.slice()
     }
-    const response = await fetch(`${API_BASE_URL}/filter/template`, {
+    const endpoint = await buildApiUrl('/filter/template')
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -944,7 +951,8 @@ async function loadFilterStatus({ silent = false } = {}) {
       project: projectName,
       date: dateValue
     })
-    const response = await fetch(`${API_BASE_URL}/filter/status?${params.toString()}`)
+    const endpoint = await buildApiUrl(`/filter/status?${params.toString()}`)
+    const response = await fetch(endpoint)
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
       throw new Error(result.message || '无法获取筛选状态')
@@ -1033,7 +1041,7 @@ function closeStatusStream() {
   }
 }
 
-function openStatusStream() {
+async function openStatusStream() {
   if (!supportsEventSource) {
     enablePollingFallback()
     return
@@ -1050,7 +1058,8 @@ function openStatusStream() {
     date: dateValue
   })
   closeStatusStream()
-  const source = new EventSource(`${API_BASE_URL}/filter/status/stream?${params.toString()}`)
+  const endpoint = await buildApiUrl(`/filter/status/stream?${params.toString()}`)
+  const source = new EventSource(endpoint)
   statusStream.value = source
   source.onmessage = (event) => {
     if (!event.data) return
@@ -1115,7 +1124,8 @@ async function runFilter() {
     if (selectedDatasetId.value) {
       payload.dataset_id = selectedDatasetId.value
     }
-    const response = await fetch(`${API_BASE_URL}/filter`, {
+    const endpoint = await buildApiUrl('/filter')
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

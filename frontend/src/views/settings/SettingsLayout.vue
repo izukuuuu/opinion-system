@@ -19,18 +19,25 @@
           v-for="item in navigationItems"
           :key="item.label"
           :to="item.to"
-          class="inline-flex items-center justify-between rounded-2xl border border-soft px-4 py-3 text-sm font-semibold transition focus-ring-accent"
-          :class="[
-            isActive(item.to)
-              ? 'border-brand-soft bg-brand-soft text-brand-600 shadow-sm'
-              : 'bg-surface text-secondary hover:border-brand-soft hover:bg-accent-faint hover:text-brand-600'
-          ]"
+          custom
+          v-slot="{ href, navigate, isActive: linkActive }"
         >
-          <span class="flex items-center gap-2">
-            <component :is="item.icon" class="h-4 w-4" />
-            <span>{{ item.label }}</span>
-          </span>
-          <ChevronRightIcon class="h-4 w-4 text-muted" />
+          <a
+            :href="href"
+            @click="navigate"
+            class="inline-flex items-center justify-between rounded-2xl border border-soft px-4 py-3 text-sm font-semibold transition focus-ring-accent"
+            :class="[
+              linkActive
+                ? 'border-brand-soft bg-brand-soft text-brand-600 shadow-sm'
+                : 'bg-surface text-secondary hover:border-brand-soft hover:bg-accent-faint hover:text-brand-600'
+            ]"
+          >
+            <span class="flex items-center gap-2">
+              <component :is="item.icon" class="h-4 w-4" />
+              <span>{{ item.label }}</span>
+            </span>
+            <ChevronRightIcon class="h-4 w-4 text-muted" />
+          </a>
         </RouterLink>
       </aside>
       <div class="min-w-0 flex-1">
@@ -48,6 +55,7 @@ import {
   Cog6ToothIcon,
   CircleStackIcon,
   CpuChipIcon,
+  ServerStackIcon,
   SwatchIcon
 } from '@heroicons/vue/24/outline'
 
@@ -63,6 +71,11 @@ const navigationItems = [
     icon: CpuChipIcon
   },
     {
+    label: '后端地址',
+    to: { name: 'settings-backend' },
+    icon: ServerStackIcon
+  },
+  {
     label: '主题颜色',
     to: { name: 'settings-theme' },
     icon: SwatchIcon
@@ -71,15 +84,6 @@ const navigationItems = [
 
 const route = useRoute()
 const router = useRouter()
-
-const isActive = (target) => {
-  if (!target?.name) return false
-  if (route.name === target.name) return true
-  if (Array.isArray(route.matched)) {
-    return route.matched.some((record) => record.name === target.name)
-  }
-  return false
-}
 
 const currentBreadcrumb = computed(() => route.meta?.breadcrumb || route.meta?.title || '')
 

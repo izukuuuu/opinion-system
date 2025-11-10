@@ -330,8 +330,9 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { CloudArrowUpIcon, DocumentArrowUpIcon, TagIcon } from '@heroicons/vue/24/outline'
+import { useApiBase } from '../../composables/useApiBase'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
 
 const topicName = ref('')
 const topicDescription = ref('')
@@ -366,6 +367,11 @@ const suggestedTags = Object.freeze([
   '关键事件',
   '专家研判'
 ])
+
+const buildApiUrl = async (path) => {
+  const baseUrl = await ensureApiBase()
+  return `${baseUrl}${path}`
+}
 
 const canUpload = computed(() => Boolean(createSuccess.value))
 
@@ -460,16 +466,16 @@ const saveColumnMapping = async () => {
   }
 
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/projects/${encodeURIComponent(latestDataset.value.project)}/datasets/${encodeURIComponent(latestDataset.value.id)}/mapping`,
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      }
+    const endpoint = await buildApiUrl(
+      `/projects/${encodeURIComponent(latestDataset.value.project)}/datasets/${encodeURIComponent(latestDataset.value.id)}/mapping`
     )
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
       throw new Error(result.message || '字段映射保存失败')
@@ -513,7 +519,8 @@ const createTopic = async () => {
   createSuccess.value = ''
 
   try {
-    const response = await fetch(`${API_BASE_URL}/projects`, {
+    const endpoint = await buildApiUrl('/projects')
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -563,7 +570,8 @@ const uploadDataset = async () => {
   formData.append('file', uploadFile.value)
 
   try {
-    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(topicName.value)}/datasets`, {
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(topicName.value)}/datasets`)
+    const response = await fetch(endpoint, {
       method: 'POST',
       body: formData
     })

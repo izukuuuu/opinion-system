@@ -595,8 +595,13 @@ import { FlexRender, getCoreRowModel, useVueTable } from '@tanstack/vue-table'
 import { ChevronLeftIcon, EllipsisVerticalIcon, PencilSquareIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useActiveProject } from '../composables/useActiveProject'
+import { useApiBase } from '../composables/useApiBase'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
+const buildApiUrl = async (path) => {
+  const baseUrl = await ensureApiBase()
+  return `${baseUrl}${path}`
+}
 
 const projects = ref([])
 const projectLoading = ref(false)
@@ -876,7 +881,8 @@ const submitProjectEdit = async () => {
       description: projectForm.description || '',
       metadata
     }
-    const response = await fetch(`${API_BASE_URL}/projects`, {
+    const endpoint = await buildApiUrl('/projects')
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -914,7 +920,8 @@ const deleteProject = async () => {
   projectDeleteError.value = ''
   const targetName = deletingProject.value.name
   try {
-    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(targetName)}`, {
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(targetName)}`)
+    const response = await fetch(endpoint, {
       method: 'DELETE'
     })
     const result = await response.json().catch(() => null)
@@ -977,16 +984,16 @@ const saveSelectedDatasetMapping = async () => {
   }
 
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/projects/${encodeURIComponent(dataset.project)}/datasets/${encodeURIComponent(dataset.id)}/mapping`,
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      }
+    const endpoint = await buildApiUrl(
+      `/projects/${encodeURIComponent(dataset.project)}/datasets/${encodeURIComponent(dataset.id)}/mapping`
     )
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
     const result = await response.json().catch(() => null)
     if (!response.ok || !result || result.status !== 'ok') {
       const message = result?.message || '字段映射保存失败'
@@ -1068,9 +1075,10 @@ const fetchDatasetPreview = async (datasetId, pageArg = previewPage.value, pageS
       page: String(pageArg),
       page_size: String(pageSizeArg)
     })
-    const response = await fetch(
-      `${API_BASE_URL}/projects/${encodeURIComponent(activeProjectName.value)}/datasets/${encodeURIComponent(datasetId)}/preview?${params.toString()}`
+    const endpoint = await buildApiUrl(
+      `/projects/${encodeURIComponent(activeProjectName.value)}/datasets/${encodeURIComponent(datasetId)}/preview?${params.toString()}`
     )
+    const response = await fetch(endpoint)
     const payload = await response.json().catch(() => null)
     if (!response.ok || !payload || payload.status !== 'ok') {
       const message = payload?.message || '无法加载数据集预览'
@@ -1162,7 +1170,8 @@ const fetchProjects = async () => {
   projectError.value = ''
   projectActionMenu.value = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/projects`)
+    const endpoint = await buildApiUrl('/projects')
+    const response = await fetch(endpoint)
     const payload = await response.json().catch(() => null)
     if (!response.ok || !payload || payload.status !== 'ok') {
       const message = payload?.message || '项目列表获取失败'
@@ -1203,7 +1212,8 @@ const fetchDatasets = async (projectName) => {
   datasetLoading.value = true
   datasetError.value = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projectName)}/datasets`)
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(projectName)}/datasets`)
+    const response = await fetch(endpoint)
     const payload = await response.json().catch(() => null)
     if (!response.ok || !payload || payload.status !== 'ok') {
       const message = payload?.message || '读取数据集失败'
@@ -1268,13 +1278,11 @@ const uploadDataset = async () => {
     const formData = new FormData()
     formData.append('file', uploadFile.value)
 
-    const response = await fetch(
-      `${API_BASE_URL}/projects/${encodeURIComponent(activeProjectName.value)}/datasets`,
-      {
-        method: 'POST',
-        body: formData
-      }
-    )
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(activeProjectName.value)}/datasets`)
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      body: formData
+    })
 
     const payload = await response.json().catch(() => null)
     if (!response.ok || !payload || payload.status !== 'ok') {

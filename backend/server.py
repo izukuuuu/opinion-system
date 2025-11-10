@@ -5,6 +5,7 @@ import json
 import logging
 import sys
 import time
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -225,6 +226,27 @@ LLM_CONFIG_NAME = "llm"
 FILTER_STATUS_STREAM_INTERVAL = 1.0
 FILTER_STATUS_STREAM_TIMEOUT = 300.0
 FILTER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
+
+def _resolve_runtime_binding() -> Tuple[str, int]:
+    """Determine which host/port the Flask app should bind to."""
+
+    host = "0.0.0.0"
+
+    port_value = os.environ.get("OPINION_BACKEND_PORT")
+    if port_value:
+        try:
+            port = int(port_value)
+        except ValueError:
+            LOGGER.warning(
+                "Invalid OPINION_BACKEND_PORT=%s provided. Falling back to 8000.",
+                port_value,
+            )
+            port = 8000
+    else:
+        port = 8000
+
+    return host, port
 
 
 def _load_json_file(path: Path) -> Any:
@@ -1380,10 +1402,8 @@ def root():
 
 
 def main() -> None:
-    backend_cfg = CONFIG.get("backend", {})
-    host = backend_cfg.get("host", "127.0.0.1")
-    port = int(backend_cfg.get("port", 8000))
-    LOGGER.info("Starting OpinionSystem backend on %s:%s", host, port)
+    host, port = _resolve_runtime_binding()
+    LOGGER.info("Starting OpinionSystem backend on %s:%s (set OPINION_BACKEND_PORT to override)", host, port)
     try:
         app.run(host=host, port=port)
     except OSError as exc:  # pragma: no cover - defensive handling for production issues
@@ -1394,7 +1414,7 @@ def main() -> None:
             LOGGER.error(
                 "Unable to bind OpinionSystem backend to %s:%s. "
                 "The port is either already in use or blocked by your operating system. "
-                "Please choose a different port in config.yaml or free the existing one.",
+                "Please choose a different port via OPINION_BACKEND_PORT or free the existing one.",
                 host,
                 port,
             )

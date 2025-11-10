@@ -140,7 +140,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 
-import { useBackendClient } from '../composables/useBackendClient'
+import { useApiBase } from '../composables/useApiBase'
 
 const analyzeFunctions = [
   {
@@ -208,7 +208,7 @@ const lastRefreshed = ref('')
 const runLoading = ref(false)
 const fetchLoading = ref(false)
 
-const { callApi } = useBackendClient()
+const { callApi } = useApiBase()
 
 const enrichedResults = computed(() => {
   if (!results.value?.functions) return []

@@ -149,8 +149,13 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import AppModal from '../../components/AppModal.vue'
+import { useApiBase } from '../../composables/useApiBase'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
+const buildApiUrl = async (path) => {
+  const baseUrl = await ensureApiBase()
+  return `${baseUrl}${path}`
+}
 
 const databaseState = reactive({
   connections: [],
@@ -199,7 +204,8 @@ const fetchDatabaseConnections = async () => {
   databaseState.loading = true
   databaseState.error = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/settings/databases`)
+    const endpoint = await buildApiUrl('/settings/databases')
+    const response = await fetch(endpoint)
     if (!response.ok) {
       throw new Error('获取数据库连接失败')
     }
@@ -283,8 +289,8 @@ const handleDatabaseModalConfirm = async () => {
   try {
     const endpoint =
       databaseModalMode.value === 'create'
-        ? `${API_BASE_URL}/settings/databases`
-        : `${API_BASE_URL}/settings/databases/${encodeURIComponent(trimmed.id)}`
+        ? await buildApiUrl('/settings/databases')
+        : await buildApiUrl(`/settings/databases/${encodeURIComponent(trimmed.id)}`)
     const method = databaseModalMode.value === 'create' ? 'POST' : 'PUT'
     const response = await fetch(endpoint, {
       method,
@@ -308,7 +314,8 @@ const handleDatabaseModalConfirm = async () => {
 const activateConnection = async (connectionId) => {
   databaseState.error = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/settings/databases/${encodeURIComponent(connectionId)}/activate`, {
+    const endpoint = await buildApiUrl(`/settings/databases/${encodeURIComponent(connectionId)}/activate`)
+    const response = await fetch(endpoint, {
       method: 'POST'
     })
     if (!response.ok) {
@@ -325,7 +332,8 @@ const deleteDatabaseConnection = async (connectionId) => {
   if (!window.confirm('确定要删除该连接吗？')) return
   databaseState.error = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/settings/databases/${encodeURIComponent(connectionId)}`, {
+    const endpoint = await buildApiUrl(`/settings/databases/${encodeURIComponent(connectionId)}`)
+    const response = await fetch(endpoint, {
       method: 'DELETE'
     })
     if (!response.ok) {

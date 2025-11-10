@@ -254,6 +254,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useActiveProject } from '../../composables/useActiveProject'
+import { useApiBase } from '../../composables/useApiBase'
 import {
   FunnelIcon,
   ArrowPathRoundedSquareIcon,
@@ -261,7 +262,7 @@ import {
   SparklesIcon
 } from '@heroicons/vue/24/outline'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const { ensureApiBase } = useApiBase()
 
 const parameterError = ref('')
 const { activeProjectName } = useActiveProject()
@@ -279,6 +280,11 @@ const datasetTimestampFormatter = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit'
 })
 
+const buildApiUrl = async (path) => {
+  const baseUrl = await ensureApiBase()
+  return `${baseUrl}${path}`
+}
+
 const operations = [
   {
     key: 'merge',
@@ -286,7 +292,7 @@ const operations = [
     title: '合并 Merge',
     subtitle: 'Step 01',
     description: '整合 TRS 导出的多份原始 Excel，生成标准化的主题数据表。',
-    endpoint: `${API_BASE_URL}/merge`,
+    path: '/merge',
     icon: ArrowPathRoundedSquareIcon
   },
   {
@@ -295,7 +301,7 @@ const operations = [
     title: '清洗 Clean',
     subtitle: 'Step 02',
     description: '执行数据清洗，补齐字段与格式，移除重复与异常值，为下一步筛选做好准备。',
-    endpoint: `${API_BASE_URL}/clean`,
+    path: '/clean',
     icon: TrashIcon
   }
 ]
@@ -387,7 +393,8 @@ const fetchProjectDatasets = async (projectName, { force = false } = {}) => {
   datasetsLoading.value = true
   datasetsError.value = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(trimmed)}/datasets`)
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(trimmed)}/datasets`)
+    const response = await fetch(endpoint)
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
       throw new Error(result.message || '无法加载专题数据集')
@@ -482,9 +489,8 @@ const fetchProjectArchives = async ({ force = false } = {}) => {
     if (datasetId) {
       params.append('dataset_id', datasetId)
     }
-    const response = await fetch(
-      `${API_BASE_URL}/projects/${encodeURIComponent(projectName)}/archives?${params.toString()}`
-    )
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(projectName)}/archives?${params.toString()}`)
+    const response = await fetch(endpoint)
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
       throw new Error(result.message || '无法获取存档信息')
@@ -595,7 +601,8 @@ const runOperation = async (key) => {
     if (selectedDatasetId.value) {
       payload.dataset_id = selectedDatasetId.value
     }
-    const response = await fetch(operation.endpoint, {
+    const endpoint = await buildApiUrl(operation.path)
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -636,7 +643,8 @@ const runPipeline = async () => {
     if (selectedDatasetId.value) {
       payload.dataset_id = selectedDatasetId.value
     }
-    const response = await fetch(`${API_BASE_URL}/pipeline`, {
+    const endpoint = await buildApiUrl('/pipeline')
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
