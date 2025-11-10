@@ -5,6 +5,7 @@ export const themeGroups = [
     description: '界面背景、表面与文字的基础配色。',
     tokens: [
       { label: '背景底色', variable: '--color-bg-base', default: '#eef2f6', format: 'hex' },
+      { label: '柔和背景', variable: '--color-bg-base-soft', default: '#f8fafb', format: 'hex' },
       { label: '内容表面', variable: '--color-surface', default: '#ffffff', format: 'hex' },
       { label: '柔和表面', variable: '--color-surface-muted', default: '#e2e9f1', format: 'hex' },
       { label: '柔和边框', variable: '--color-border-soft', default: '#d0d5d9', format: 'hex', variant: 'outline' },

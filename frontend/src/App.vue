@@ -24,7 +24,7 @@
     <template v-else>
     <aside
       v-if="sidebarCollapsed"
-      class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-20 lg:flex-col lg:border-r border-soft lg:bg-surface"
+      class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-20 lg:flex-col lg:border-r border-soft lg:bg-base-soft"
     >
       <div class="flex flex-col items-center gap-3 border-b border-soft px-3 py-4">
         <button
@@ -92,7 +92,7 @@
     >
       <div
         v-if="!sidebarCollapsed"
-        class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-soft bg-surface shadow-lg lg:w-72 lg:shadow-sm"
+        class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-soft bg-base-soft shadow-lg lg:w-72 lg:shadow-sm"
       >
         <div class="flex items-center justify-between border-b border-soft px-5 py-4">
           <div class="flex flex-col h-10 justify-center overflow-hidden">
@@ -110,7 +110,13 @@
           </button>
         </div>
 
-        <div class="flex flex-1 flex-col gap-8 overflow-y-auto px-5 pb-8 pt-6">
+        <div
+          ref="sidebarScrollEl"
+          :class="[
+            'sidebar-scroll flex flex-1 flex-col gap-8 overflow-y-auto px-5 pb-8 pt-6',
+            { 'sidebar-scroll--hidden': !isSidebarScrollbarVisible }
+          ]"
+        >
           <nav class="space-y-8">
             <section
               v-for="group in navigationGroups"
@@ -184,7 +190,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   BeakerIcon,
@@ -205,6 +211,13 @@ import {
 } from '@heroicons/vue/24/outline'
 import ActiveProjectSwitcher from './components/ActiveProjectSwitcher.vue'
 import './assets/colors.css'
+
+const isClient = typeof window !== 'undefined'
+const SIDEBAR_SCROLLBAR_HIDE_DELAY = 2000
+const sidebarScrollEl = ref(null)
+const isSidebarScrollbarVisible = ref(true)
+let sidebarScrollbarHideTimer = null
+let cleanupSidebarScrollListeners
 
 const navigationGroups = [
   {
@@ -371,6 +384,82 @@ const sidebarToggleLabel = computed(() =>
   sidebarCollapsed.value ? '展开侧边栏' : '收起侧边栏'
 )
 
+const clearSidebarScrollbarTimer = () => {
+  if (!isClient || !sidebarScrollbarHideTimer) return
+  window.clearTimeout(sidebarScrollbarHideTimer)
+  sidebarScrollbarHideTimer = null
+}
+
+const scheduleSidebarScrollbarHide = () => {
+  if (!isClient) return
+  clearSidebarScrollbarTimer()
+  sidebarScrollbarHideTimer = window.setTimeout(() => {
+    isSidebarScrollbarVisible.value = false
+  }, SIDEBAR_SCROLLBAR_HIDE_DELAY)
+}
+
+const handleSidebarActivity = () => {
+  if (!isClient) return
+  isSidebarScrollbarVisible.value = true
+  scheduleSidebarScrollbarHide()
+}
+
+const detachSidebarScrollListeners = () => {
+  if (typeof cleanupSidebarScrollListeners === 'function') {
+    cleanupSidebarScrollListeners()
+    cleanupSidebarScrollListeners = undefined
+  }
+}
+
+const attachSidebarScrollListeners = (element) => {
+  if (!element) return
+  const passiveEvents = ['scroll', 'wheel', 'touchstart']
+  const activeEvents = ['pointermove', 'mouseenter']
+
+  passiveEvents.forEach((eventName) => {
+    element.addEventListener(eventName, handleSidebarActivity, { passive: true })
+  })
+  activeEvents.forEach((eventName) => {
+    element.addEventListener(eventName, handleSidebarActivity)
+  })
+
+  cleanupSidebarScrollListeners = () => {
+    passiveEvents.forEach((eventName) => {
+      element.removeEventListener(eventName, handleSidebarActivity)
+    })
+    activeEvents.forEach((eventName) => {
+      element.removeEventListener(eventName, handleSidebarActivity)
+    })
+  }
+}
+
+watch(
+  () => sidebarScrollEl.value,
+  (element, previous) => {
+    if (previous) {
+      detachSidebarScrollListeners()
+    }
+    if (element && isClient) {
+      attachSidebarScrollListeners(element)
+      handleSidebarActivity()
+    }
+  }
+)
+
+watch(
+  () => sidebarCollapsed.value,
+  (collapsed) => {
+    if (collapsed) {
+      clearSidebarScrollbarTimer()
+      isSidebarScrollbarVisible.value = false
+      return
+    }
+    if (sidebarScrollEl.value) {
+      handleSidebarActivity()
+    }
+  }
+)
+
 onMounted(() => {
   if (!mediaQuery) return
 
@@ -399,5 +488,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   cleanupMediaQueryListener?.()
+  clearSidebarScrollbarTimer()
+  detachSidebarScrollListeners()
 })
 </script>
