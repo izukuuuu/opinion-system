@@ -9,6 +9,8 @@ __pycache__/
 *.pyd
 *.env
 .env
+.env.*
+.env.local
 
 # Node
 frontend/node_modules/
@@ -24,3 +26,4 @@ backend/logs/*
 
 # OS
 .DS_Store
+frontend/.env.local
