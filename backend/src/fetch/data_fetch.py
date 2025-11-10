@@ -172,18 +172,36 @@ def _format_date(value: Optional[date]) -> Optional[str]:
     return str(value)
 
 
+def _quote_identifier(conn, identifier: str) -> str:
+    """使用底层方言的规则对对象名加引号，避免特殊字符导致 SQL 报错。"""
+    try:
+        preparer = getattr(conn.dialect, "identifier_preparer", None)
+        if preparer:
+            return preparer.quote(identifier)
+    except Exception:
+        pass
+    safe = identifier.replace('"', '""').replace("`", "``")
+    return f'"{safe}"'
+
+
 def _query_table_date_range(conn, table_name: str, topic: str, logger=None) -> Tuple[Optional[date], Optional[date]]:
     if not table_exists(conn, table_name, topic):
         log_skip(logger, f"表 {topic}.{table_name} 不存在", "Fetch")
         return None, None
 
+    quoted_table = _quote_identifier(conn, table_name)
     query = f"""
     SELECT
         MIN(DATE(published_at)) AS start_date,
         MAX(DATE(published_at)) AS end_date
-    FROM {table_name}
+    FROM {quoted_table}
     """
-    result = conn.execute(text(query)).mappings().first()
+    try:
+        result = conn.execute(text(query)).mappings().first()
+    except Exception as exc:
+        log_error(logger, f"查询表 {table_name} 日期区间失败: {exc}", "Fetch")
+        return None, None
+
     if not result:
         return None, None
     return result.get("start_date"), result.get("end_date")

@@ -355,6 +355,13 @@ const clearAvailableRange = () => {
   availableRange.loading = false
 }
 
+const applyAvailableRangeToForms = () => {
+  const startValue = availableRange.start || ''
+  const endValue = availableRange.end || startValue || ''
+  fetchForm.start = startValue
+  fetchForm.end = endValue
+}
+
 const loadAvailableRange = async () => {
   const topic = (fetchForm.topic || '').trim()
   if (!topic) {
@@ -372,6 +379,7 @@ const loadAvailableRange = async () => {
     const range = response?.data?.range ?? {}
     availableRange.start = range.start || ''
     availableRange.end = range.end || ''
+    applyAvailableRangeToForms()
   } catch (error) {
     if (requestId !== availabilityRequestId) return
     resetAvailableRange()
@@ -410,8 +418,12 @@ const loadTopics = async () => {
 
 const resetFetchForm = () => {
   fetchForm.topic = topicOptions.value[0] || ''
-  fetchForm.start = ''
-  fetchForm.end = ''
+  if (availableRange.start || availableRange.end) {
+    applyAvailableRangeToForms()
+  } else {
+    fetchForm.start = ''
+    fetchForm.end = ''
+  }
 }
 
 watch(topicOptions, () => {
