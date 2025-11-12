@@ -1,10 +1,24 @@
 <template>
   <div class="space-y-8">
     <section class="card-surface space-y-5 p-6">
-      <header class="space-y-2">
-        <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Select</p>
-        <h2 class="text-2xl font-semibold text-primary">选择分析记录</h2>
-        <p class="text-sm text-secondary">先选择专题，系统会列出该专题所有已生成的分析存档，点击任意卡片即可立即刷新结果。</p>
+      <header class="flex flex-wrap items-start justify-between gap-3">
+        <div class="space-y-2">
+          <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Select</p>
+          <h2 class="text-2xl font-semibold text-primary">选择分析记录</h2>
+          <p class="text-sm text-secondary">先选择专题，系统会列出该专题所有已生成的分析存档，点击任意卡片即可立即刷新结果。</p>
+        </div>
+        <button
+          type="button"
+          class="btn-secondary inline-flex items-center gap-2 whitespace-nowrap px-4 py-2 text-xs font-semibold sm:text-sm"
+          :disabled="historyState.loading || loadState.loading || !viewSelection.topic"
+          @click="refreshHistory"
+        >
+          <ArrowPathIcon
+            class="h-4 w-4"
+            :class="historyState.loading ? 'animate-spin' : ''"
+          />
+          <span>{{ historyState.loading ? '刷新中…' : '刷新记录' }}</span>
+        </button>
       </header>
       <div class="space-y-6 text-sm">
         <label class="space-y-2 text-secondary">
@@ -179,6 +193,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { ArrowPathIcon } from '@heroicons/vue/24/outline'
 import AnalysisChartPanel from '../../../components/AnalysisChartPanel.vue'
 import { useBasicAnalysis } from '../../../composables/useBasicAnalysis'
 import { useActiveProject } from '../../../composables/useActiveProject'
@@ -195,6 +210,7 @@ const {
   loadResultsFromManual,
   historyState,
   historyOptions,
+  loadHistory,
   selectedHistoryId,
   applyHistorySelection,
   loadState,
@@ -231,6 +247,16 @@ const focusSection = async (sectionName) => {
 const selectHistory = (recordId) => {
   if (!recordId || recordId === selectedHistoryId.value) return
   selectedHistoryId.value = recordId
+}
+
+const refreshHistory = async () => {
+  if (historyState.loading || loadState.loading) return
+  const topic = (viewSelection.topic || '').trim()
+  if (!topic) return
+  await loadHistory(topic)
+  if (selectedHistoryId.value) {
+    await applyHistorySelection(selectedHistoryId.value, { shouldLoad: true })
+  }
 }
 
 watch(
