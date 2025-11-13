@@ -1,4 +1,23 @@
-"""In-memory registry that tracks running filter tasks for progress reporting."""
+"""
+过滤任务运行状态模块
+
+本模块用于在内存中跟踪舆情分析系统的过滤（filter）任务运行状态，便于进度上报与并发控制，主要功能包括：
+
+1. 记录正在运行的过滤任务（按专题和日期唯一标识）。
+2. 支持任务开始、结束的状态变更，线程安全。
+3. 提供查询接口，判断某个过滤任务是否正在运行。
+4. 适用于后端接口、任务调度与前端进度轮询等场景。
+
+主要导出函数：
+- mark_filter_job_running：标记过滤任务为运行中
+- mark_filter_job_finished：标记过滤任务已结束
+- is_filter_job_running：判断过滤任务是否运行中
+
+适用场景：
+- 过滤任务进度上报
+- 并发任务控制
+- 后端接口与前端轮询
+"""
 
 from __future__ import annotations
 

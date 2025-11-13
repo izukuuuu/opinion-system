@@ -1,4 +1,27 @@
-"""Helpers for dataset metadata normalisation and file management."""
+"""
+数据集元数据标准化与文件管理辅助模块
+
+本模块为舆情分析系统的数据集上传、归档与处理流程提供元数据标准化、文件路径解析、原始文件准备等通用工具，主要功能包括：
+
+1. 解析和标准化列名映射（支持JSON、dict、表单等多种输入格式），便于后续数据处理自动识别关键信息列。
+2. 数据集元数据的查找与补全，支持按项目或全局范围定位数据集。
+3. 数据集源文件路径的解析与规范化，自动补全文件后缀、重命名、并同步更新元数据与manifest。
+4. 保证原始数据集文件在raw目录下的可用性，自动复制/准备原始输入文件，支持多种异常场景下的容错处理。
+5. 提供唯一字符串去重、表单映射解析等常用工具函数，提升接口健壮性与兼容性。
+
+主要导出函数：
+- parse_column_mapping_payload/parse_column_mapping_from_form：解析列名映射
+- iter_unique_strings：唯一字符串去重
+- resolve_dataset_payload：查找数据集元数据
+- resolve_dataset_source_path：规范化数据集源文件路径
+- update_dataset_source_references：同步更新元数据与manifest
+- ensure_raw_dataset_availability：保证raw目录下原始文件可用
+
+适用场景：
+- 数据集上传与归档
+- 数据处理流水线自动化
+- 后端接口与管理后台
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,26 @@
-"""Configuration helpers shared by the backend server endpoints."""
+"""
+后端服务配置辅助模块
+
+为舆情分析系统后端接口提供统一的配置加载、保存与刷新工具，支持静态配置文件与动态运行时配置的读写，主要功能包括：
+
+1. 加载/保存数据库连接配置（支持多数据库连接结构）。
+2. 加载/保存大语言模型（LLM）相关配置，包括模型预设、过滤模型、助手模型、API凭证等。
+3. 支持静态配置（如 configs/llm.yaml）与动态配置（如 settings/）的合并与优先级处理。
+4. 提供配置热加载能力，保证运行时配置变更后即时生效。
+5. 提供过滤AI（filter_llm）当前配置的简要概览，便于前端展示。
+6. 兼容异常处理，保证接口健壮性。
+
+主要导出函数：
+- load_config/load_databases_config/load_llm_config：加载各类配置
+- persist_databases_config/persist_llm_config：保存并刷新配置
+- reload_settings：刷新运行时配置
+- filter_ai_overview：获取过滤AI配置摘要
+
+适用场景：
+- 后端接口配置管理
+- 管理后台配置编辑
+- 动态参数热加载
+"""
 
 from __future__ import annotations
 

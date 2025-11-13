@@ -1,4 +1,26 @@
-"""Helper functions for managing filter prompt templates."""
+"""
+过滤提示词模板管理辅助模块
+
+本模块为舆情分析系统的过滤（filter）环节提供提示词模板的生成、加载、保存与规范化等工具，主要功能包括：
+
+1. 生成默认的过滤提示词模板文本，支持自定义主题和分类。
+2. 读取和持久化每个专题的过滤模板配置（YAML格式），包含模板内容、主题、分类、元数据等。
+3. 支持模板的自动路径规范化，保证不同专题模板文件互不冲突。
+4. 提供模板的元数据结构化读取，便于前端展示和后端接口调用。
+5. 兼容异常处理，保证配置读写健壮性。
+
+主要导出函数：
+- build_filter_template_text：生成默认过滤模板文本
+- filter_template_path：获取专题模板文件路径
+- load_filter_template_config：加载过滤模板配置
+- persist_filter_template_config：保存过滤模板配置
+- utc_now：获取当前UTC时间戳
+
+适用场景：
+- 过滤提示词模板管理
+- 后端接口与管理后台
+- 专题自定义筛选规则
+"""
 
 from __future__ import annotations
 

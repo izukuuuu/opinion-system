@@ -1,4 +1,26 @@
-"""Helpers for summarising project pipeline archives and resolving stage dates."""
+"""
+项目归档辅助工具
+
+本模块用于舆情分析系统的数据归档与阶段处理相关的元数据汇总与日期解析，主要功能包括：
+
+1. 汇总指定主题下各数据处理层（如 raw, merge, clean, filter 等）的归档目录和文件信息，统计文件数量、总大小、更新时间等元数据。
+2. 按层级（layer）和数据集ID（dataset_id）筛选归档信息，便于前端或接口快速获取项目各阶段的数据状态。
+
+主要导出函数：
+- collect_layer_archives: 获取单层归档元数据列表
+- collect_project_archives: 获取多层归档元数据字典
+- resolve_stage_processing_date: 解析阶段处理日期（含依赖关系）
+
+依赖说明：
+- 依赖 DATA_PROJECTS_ROOT 作为项目数据根目录
+- 支持自定义层级和数据集ID筛选
+- 兼容异常处理，保证接口健壮性
+
+适用场景：
+- 后台归档浏览
+- 流程编排与自动化
+- 阶段依赖检查与提示
+"""
 
 from __future__ import annotations
 
