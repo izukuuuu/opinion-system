@@ -1,8 +1,62 @@
 > ⚠️ **UNDER CONSTRUCTION** ⚠️
 
+
 # OpinionSystem - 舆情分析系统
 
 基于AI的智能舆情数据采集、分析与检索系统
+
+---
+
+## 🚀 前端使用说明
+
+前端基于 Vue3 + Vite + TailwindCSS 构建，位于 `frontend/` 目录。
+
+### 1. 运行前端
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### 2. 前端环境变量配置
+
+前端环境变量文件为 `frontend/.env.local`，需写入后端 API 地址，例如：
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000/api
+```
+
+如需自定义后端地址，请修改此项。
+
+### 3. 主要依赖
+
+- Vue 3
+- Vite
+- TailwindCSS
+- ECharts
+
+### 4. 组件与开发
+
+页面组件位于 `frontend/src/components/`。
+
+---
+
+## ⚙️ 后端与环境变量说明
+
+后端基于 Python，Flask 服务器入口为 `backend/server.py`。
+
+### 1. 后端环境变量
+
+后端环境变量文件为 `backend/.env`，需写入 API 密钥，例如：
+
+```env
+DASHSCOPE_API_KEY=your_api_key_here
+```
+
+如需使用阿里云通义千问等大模型服务，请在此处填写对应的 API Key。
+
+---
 
 ## 📋 目录
 
