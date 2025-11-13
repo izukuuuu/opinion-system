@@ -1,3 +1,5 @@
+> ⚠️ **UNDER CONSTRUCTION** ⚠️
+
 # OpinionSystem - 舆情分析系统
 
 基于AI的智能舆情数据采集、分析与检索系统
