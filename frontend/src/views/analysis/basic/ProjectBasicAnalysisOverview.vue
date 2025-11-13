@@ -31,7 +31,7 @@
         <h2 class="text-2xl font-semibold text-primary">基础分析流程</h2>
         <p class="text-sm text-secondary">请先针对各个专题运行各项基础分析功能之后，在查看分析界面查看基础统计</p>
       </header>
-      <div class="grid gap-6 md:grid-cols-3">
+      <div class="grid gap-6 md:grid-cols-2">
         <article
           v-for="step in steps"
           :key="step.title"
