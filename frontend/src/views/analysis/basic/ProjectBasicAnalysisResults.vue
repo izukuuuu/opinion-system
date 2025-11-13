@@ -274,13 +274,16 @@ watch(
 
 watch(
   () => viewSelection.topic,
-  (value) => {
+  async (value, previous) => {
     if (!value) {
       autoSelectedTopic.value = ''
       return
     }
     if (autoSelectedTopic.value && value !== autoSelectedTopic.value) {
       autoSelectedTopic.value = ''
+    }
+    if (value && value !== previous) {
+      await refreshHistory()
     }
   }
 )
