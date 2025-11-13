@@ -337,7 +337,8 @@ const loadTopics = async () => {
       .map((db) => String(db?.name || '').trim())
       .filter((name, index, arr) => name && arr.indexOf(name) === index)
     ensureTopicSelection()
-    if (fetchForm.topic === previousTopic) {
+    const hasInitialSelection = !previousTopic && (fetchForm.topic || '').trim()
+    if (hasInitialSelection || fetchForm.topic === previousTopic) {
       await loadAvailableRange()
     }
   } catch (error) {
