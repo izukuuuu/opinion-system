@@ -30,11 +30,24 @@
           </label>
           <label class="space-y-1 text-sm">
             <span class="font-medium text-secondary">专题说明（可选）</span>
+            <div
+              v-if="selectedTags.length"
+              class="flex flex-wrap items-center gap-2 rounded-2xl border border-soft bg-surface-muted px-3 py-2 text-xs text-secondary"
+            >
+              <span class="font-medium text-muted">标签：</span>
+              <span
+                v-for="tag in selectedTags"
+                :key="`prefix-${tag}`"
+                class="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-semibold text-brand-600"
+              >
+                #{{ tag }}
+              </span>
+            </div>
             <textarea
               v-model.trim="topicDescription"
               rows="3"
               class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              placeholder="补充专题背景、抓取渠道等信息。"
+              :placeholder="selectedTags.length ? '补充专题背景、抓取渠道等信息，将自动附加在标签前缀之后。' : '补充专题背景、抓取渠道等信息。'"
             ></textarea>
           </label>
           <div class="space-y-2 rounded-2xl border border-dashed border-brand-soft bg-surface-muted px-4 py-3 text-xs text-secondary">
@@ -71,14 +84,14 @@
             <span v-else>创建专题</span>
           </button>
         </div>
-        <div class="rounded-3xl border border-dashed border-brand-soft bg-surface-muted p-4 text-sm text-secondary">
-          <h3 class="text-sm font-semibold text-primary">提示</h3>
-          <ul class="mt-2 space-y-2 text-xs leading-relaxed text-secondary">
+        <aside class="rounded-2xl border border-dashed border-brand-soft/70 bg-surface-muted/60 p-3 text-xs leading-relaxed text-secondary">
+          <h3 class="text-[11px] font-semibold uppercase tracking-widest text-muted mb-2">提示</h3>
+          <ul class="space-y-1.5 text-xs">
             <li>专题名称将作为后续 API 调用的参数，建议使用字母、数字与短横线组合。</li>
             <li>可先创建专题再上传数据，也可直接上传，系统会在需要时自动创建专题。</li>
             <li>描述信息用于团队协作记录，可随时在设置中更新。</li>
           </ul>
-        </div>
+        </aside>
       </form>
       <p v-if="createError" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">{{ createError }}</p>
       <p v-if="createSuccess" class="rounded-2xl bg-emerald-100 px-4 py-2 text-sm text-emerald-600">{{ createSuccess }}</p>
@@ -89,7 +102,7 @@
         <div>
           <h2 class="text-xl font-semibold text-primary">上传原始表格</h2>
           <p class="text-sm text-secondary">
-            支持 .xlsx、.xls、.csv、.jsonl 文件。系统会自动生成 JSONL、PKL 与 Meta 清单。
+            支持 .xlsx、.xls、.csv 文件。
           </p>
         </div>
         <span v-if="topicName" class="badge-soft rounded-full px-3 py-1 text-xs font-semibold text-secondary">
@@ -357,14 +370,25 @@ const datasetColumns = computed(() => {
   return latestDataset.value.columns.map((column) => column.toString())
 })
 
+const tagPrefix = computed(() => {
+  if (!selectedTags.value.length) return ''
+  return selectedTags.value.map((item) => `#${item}`).join(' · ')
+})
+
+const descriptionPayload = computed(() => {
+  const prefix = tagPrefix.value
+  const body = topicDescription.value.trim()
+  if (prefix && body) {
+    return `${prefix}\n\n${body}`
+  }
+  return prefix || body
+})
+
 const toggleTag = (tag) => {
   if (selectedTags.value.includes(tag)) {
     selectedTags.value = selectedTags.value.filter((item) => item !== tag)
   } else {
     selectedTags.value = [...selectedTags.value, tag]
-  }
-  if (!topicDescription.value) {
-    topicDescription.value = selectedTags.value.map((item) => `#${item}`).join(' · ')
   }
 }
 
@@ -496,7 +520,7 @@ const createTopic = async () => {
       },
       body: JSON.stringify({
         name: topicName.value,
-        description: topicDescription.value || undefined,
+        description: descriptionPayload.value || undefined,
         metadata: selectedTags.value.length ? { tags: selectedTags.value } : undefined
       })
     })
