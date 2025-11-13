@@ -363,52 +363,11 @@
 
       <section class="space-y-8">
         <header class="space-y-2">
-          <h1 class="text-2xl font-semibold text-slate-900">项目数据归档</h1>
+          <h1 class="text-2xl font-semibold text-slate-900">项目数据</h1>
           <p class="text-sm text-slate-500">
-            导入 Excel/CSV/JSONL 文件并自动生成 JSONL 与 PKL 存档，全部保存在 backend/data/projects/&lt;project&gt;/uploads 下。
+            当前项目已上传的原始数据集，可以进行查看或重新上传操作。
           </p>
         </header>
-
-        <div class="card-surface space-y-6 p-6">
-          <div class="flex flex-wrap items-center justify-between gap-4">
-            <h2 class="text-lg font-semibold text-slate-900">上传表格</h2>
-            <span v-if="selectedProject" class="badge-soft bg-indigo-100 text-indigo-600">当前项目：{{ selectedProjectDisplayName }}</span>
-          </div>
-          <p class="text-sm text-slate-500">
-            支持 .xlsx、.xls、.csv、.jsonl 文件，系统会为每份数据生成同名的 JSONL 与 PKL 文件，方便在后续流程中直接读取。
-          </p>
-          <form class="space-y-4" @submit.prevent="uploadDataset">
-            <label
-              class="flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50/70 px-6 text-center text-sm text-slate-500 transition hover:border-indigo-300 hover:bg-indigo-50/40"
-              :class="{ 'border-indigo-300 bg-white shadow-inner text-indigo-600': uploadFile }"
-            >
-              <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.xls,.csv,.jsonl" @change="handleFileChange" />
-              <span class="text-sm font-medium">
-                {{ uploadFile ? uploadFile.name : '点击或拖拽文件到此处' }}
-              </span>
-              <span class="text-xs text-slate-400">最大支持 50MB</span>
-            </label>
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <button
-                type="submit"
-                class="inline-flex items-center justify-center rounded-full bg-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
-                :disabled="uploading"
-              >
-                {{ uploading ? '上传中…' : '上传并归档' }}
-              </button>
-              <div class="space-y-1 text-sm">
-                <p
-                  v-if="uploadHelper && !uploadError && !uploadSuccess"
-                  class="text-slate-500"
-                >
-                  {{ uploadHelper }}
-                </p>
-                <p v-if="uploadError" class="text-rose-600">{{ uploadError }}</p>
-                <p v-if="uploadSuccess" class="text-emerald-600">{{ uploadSuccess }}</p>
-              </div>
-            </div>
-          </form>
-        </div>
 
         <div class="card-surface space-y-6 p-6">
           <div class="flex flex-wrap items-center justify-between gap-4">
@@ -426,7 +385,7 @@
           <p v-else-if="!datasets.length" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">尚未上传任何数据集。</p>
           <div v-else class="space-y-4">
             <p class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
-              点击任何数据集卡片会在新的预览子页面中打开 Excel 的表格预览。
+              点击数据集卡片在新的预览子页面中打开 Excel 表格预览。
             </p>
             <ul class="space-y-4">
               <li
@@ -498,6 +457,47 @@
               </li>
             </ul>
           </div>
+        </div>
+
+        <div class="card-surface space-y-6 p-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold text-slate-900">上传表格</h2>
+            <span v-if="selectedProject" class="badge-soft bg-indigo-100 text-indigo-600">当前项目：{{ selectedProjectDisplayName }}</span>
+          </div>
+          <p class="text-sm text-slate-500">
+            支持 .xlsx、.xls、.csv、.jsonl 文件，系统会为每份数据生成同名的 JSONL 与 PKL 文件，方便在后续流程中直接读取。
+          </p>
+          <form class="space-y-4" @submit.prevent="uploadDataset">
+            <label
+              class="flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50/70 px-6 text-center text-sm text-slate-500 transition hover:border-indigo-300 hover:bg-indigo-50/40"
+              :class="{ 'border-indigo-300 bg-white shadow-inner text-indigo-600': uploadFile }"
+            >
+              <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.xls,.csv,.jsonl" @change="handleFileChange" />
+              <span class="text-sm font-medium">
+                {{ uploadFile ? uploadFile.name : '点击或拖拽文件到此处' }}
+              </span>
+              <span class="text-xs text-slate-400">最大支持 50MB</span>
+            </label>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="submit"
+                class="inline-flex items-center justify-center rounded-full bg-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                :disabled="uploading"
+              >
+                {{ uploading ? '上传中…' : '上传并归档' }}
+              </button>
+              <div class="space-y-1 text-sm">
+                <p
+                  v-if="uploadHelper && !uploadError && !uploadSuccess"
+                  class="text-slate-500"
+                >
+                  {{ uploadHelper }}
+                </p>
+                <p v-if="uploadError" class="text-rose-600">{{ uploadError }}</p>
+                <p v-if="uploadSuccess" class="text-emerald-600">{{ uploadSuccess }}</p>
+              </div>
+            </div>
+          </form>
         </div>
       </section>
     </div>

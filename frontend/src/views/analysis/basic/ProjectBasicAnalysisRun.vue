@@ -1,6 +1,14 @@
 <template>
   <div class="space-y-8">
-    <section class="card-surface space-y-6 p-6">
+    <section class="card-surface relative overflow-hidden space-y-6 p-6">
+
+      <div
+        v-if="fetchState.loading"
+        class="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white/80 backdrop-blur-sm"
+      >
+        <ArrowPathIcon class="h-10 w-10 animate-spin text-primary" />
+        <span class="text-sm font-medium text-secondary">正在拉取远程数据…</span>
+      </div>
       <header class="flex flex-col gap-2">
         <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Step 1</p>
         <h2 class="text-2xl font-semibold text-primary">拉取远程数据</h2>
@@ -12,29 +20,19 @@
         <div class="grid gap-4 md:grid-cols-3">
           <label class="space-y-2 text-secondary">
             <span class="text-xs font-semibold text-muted">专题 Topic *</span>
-            <div class="flex gap-2">
-              <select
-                v-model="fetchForm.topic"
-                class="input"
-                :disabled="topicsState.loading || !topicOptions.length"
-                required
-              >
-                <option value="" disabled>请选择远程专题</option>
-                <option v-for="option in topicOptions" :key="option" :value="option">{{ option }}</option>
-              </select>
-              <button
-                type="button"
-                class="btn-secondary whitespace-nowrap px-3 py-2 text-xs"
-                :disabled="topicsState.loading"
-                @click="loadTopics"
-              >
-                {{ topicsState.loading ? '加载中…' : '刷新' }}
-              </button>
-            </div>
+            <select
+              v-model="fetchForm.topic"
+              class="input"
+              :disabled="topicsState.loading || !topicOptions.length"
+              required
+            >
+              <option value="" disabled>请选择远程专题</option>
+              <option v-for="option in topicOptions" :key="option" :value="option">{{ option }}</option>
+            </select>
             <p class="text-xs text-muted">
               <span v-if="topicsState.loading">正在读取专题列表…</span>
               <span v-else-if="topicsState.error" class="text-danger">{{ topicsState.error }}</span>
-              <span v-else>下拉列表展示当前可用的远程专题。</span>
+              <span v-else>下拉列表展示当前可用的远程专题，可在下方操作区刷新。</span>
             </p>
           </label>
           <label class="space-y-2 text-secondary">
@@ -66,14 +64,25 @@
             当前专题暂无 published_at 日期，可能尚未写入远程数据。
           </template>
         </p>
-        <div class="flex flex-wrap gap-3 text-sm">
-          <button type="submit" class="btn-primary" :disabled="fetchState.loading">
-            {{ fetchState.loading ? '提取中…' : '执行 Fetch' }}
+        <div class="flex flex-wrap items-center justify-end gap-2 rounded-xl border border-dashed border-primary/20 bg-primary/5 p-4 text-sm">
+          <button
+            type="button"
+            class="btn-secondary flex items-center gap-2"
+            :disabled="topicsState.loading"
+            @click="loadTopics"
+          >
+            <ArrowPathIcon
+              class="h-4 w-4"
+              :class="topicsState.loading ? 'animate-spin text-primary' : 'text-primary'"
+            />
+            <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
           </button>
           <button type="button" class="btn-ghost" :disabled="fetchState.loading" @click="resetFetchForm">
             重置
           </button>
-          <span class="text-muted">执行后稍等片刻即可继续分析。</span>
+          <button type="submit" class="btn-primary" :disabled="fetchState.loading">
+            {{ fetchState.loading ? '提取中…' : '执行 Fetch' }}
+          </button>
         </div>
       </form>
       <AnalysisLogList :logs="fetchLogs" empty-label="暂无提取记录。" />
@@ -165,6 +174,7 @@
 
 <script setup>
 import { onMounted } from 'vue'
+import { ArrowPathIcon, PlayCircleIcon } from '@heroicons/vue/24/outline'
 import { useBasicAnalysis } from '../../../composables/useBasicAnalysis'
 import AnalysisLogList from '../../../components/analysis/AnalysisLogList.vue'
 

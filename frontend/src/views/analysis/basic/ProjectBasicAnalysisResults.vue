@@ -113,87 +113,101 @@
       </header>
     </section>
 
-    <section class="card-surface space-y-4 p-6">
+    <section
+      class="card-surface space-y-5 p-6"
+      :id="analysisSections.length ? 'analysis-section-content' : undefined"
+    >
       <header class="flex flex-col gap-1">
         <h3 class="text-lg font-semibold text-primary">分析模块列表</h3>
-        <p class="text-sm text-secondary">点击“查看详情”可快速定位到相应图表。</p>
+        <p class="text-sm text-secondary">点击模块卡片即可在下方查看对应图表。</p>
       </header>
-      <ul v-if="analysisSections.length" class="space-y-3 text-sm">
-        <li
-          v-for="section in analysisSections"
-          :key="section.name"
-          class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-soft bg-surface-muted px-4 py-3"
-        >
-          <div>
-            <p class="font-semibold text-primary">{{ section.label }}</p>
-            <p class="text-xs text-secondary">{{ section.description || '暂无描述' }}</p>
-          </div>
-          <div class="flex items-center gap-3 text-xs text-muted">
-            <span>{{ section.targets.length }} 个结果</span>
-            <button type="button" class="btn-secondary px-3 py-1" @click="focusSection(section.name)">查看详情</button>
-          </div>
-        </li>
-      </ul>
-      <p v-else class="text-xs text-muted">暂无分析结果。请先运行分析并刷新。</p>
-    </section>
-
-    <section v-if="analysisSections.length" class="space-y-6">
-      <div
-        v-for="section in analysisSections"
-        :key="section.name"
-        :id="`section-${section.name}`"
-        class="card-surface space-y-4 p-6"
-        :class="highlightedSection === section.name ? 'ring-2 ring-brand-300' : ''"
-      >
-        <header class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p class="text-xs uppercase tracking-[0.4em] text-muted">{{ section.name }}</p>
-            <h3 class="text-xl font-semibold text-primary">{{ section.label }}</h3>
-            <p class="text-sm text-secondary">{{ section.description }}</p>
-          </div>
-          <span class="text-xs text-muted">{{ section.targets.length }} 个结果</span>
-        </header>
-        <div class="grid gap-4 md:grid-cols-2">
-          <AnalysisChartPanel
-            v-for="target in section.targets"
-            :key="`${section.name}-${target.target}`"
-            :title="target.title"
-            :description="target.subtitle"
-            :option="target.option"
-            :has-data="target.hasData"
+      <div v-if="analysisSections.length" class="space-y-5">
+        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+          <button
+            v-for="section in analysisSections"
+            :key="section.name"
+            type="button"
+            class="flex flex-col gap-2 rounded-2xl border px-4 py-3 text-left transition"
+            :class="
+              section.name === activeSectionName
+                ? 'border-transparent bg-brand-soft/70 text-brand-700 shadow-sm ring-1 ring-brand-soft/80'
+                : 'border-soft text-secondary hover:border-brand-soft hover:bg-surface-muted'
+            "
+            @click="setActiveSection(section.name)"
           >
-            <template #default>
-              <div v-if="target.rows.length" class="rounded-2xl border border-soft">
-                <table class="min-w-full text-sm">
-                  <thead class="bg-surface-muted text-xs uppercase tracking-wide text-muted">
-                    <tr>
-                      <th class="px-3 py-2 text-left">名称</th>
-                      <th class="px-3 py-2 text-left">数值</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(row, index) in target.rows" :key="`${target.target}-${index}`" class="border-t border-soft text-secondary">
-                      <td class="px-3 py-2">{{ formatRowName(row) }}</td>
-                      <td class="px-3 py-2">{{ formatRowValue(row) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
+            <span
+              class="flex h-9 w-9 items-center justify-center rounded-full"
+              :class="section.name === activeSectionName ? 'bg-brand-600/10 text-brand-600' : 'bg-surface-muted text-muted'"
+            >
+              <component :is="getSectionIcon(section.name)" class="h-5 w-5" />
+            </span>
+            <span class="text-sm font-semibold text-primary">{{ getChineseTitle(section.label) }}</span>
+          </button>
+        </div>
+        <div v-if="activeSection" class="space-y-4 border-t border-soft pt-4">
+          <header class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <span class="flex h-11 w-11 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                <component :is="getSectionIcon(activeSection.name)" class="h-6 w-6" />
+              </span>
+              <div class="space-y-1">
+                <h3 class="text-xl font-semibold text-primary">{{ getChineseTitle(activeSection.label) }}</h3>
+                <p class="text-sm text-secondary">{{ activeSection.description }}</p>
               </div>
-              <details class="rounded-2xl border border-dashed border-soft px-3 py-2 text-xs">
-                <summary class="cursor-pointer text-brand-600">查看原始 JSON</summary>
-                <pre class="mt-2 max-h-56 overflow-auto bg-slate-900/90 p-3 text-brand-soft">{{ target.rawText }}</pre>
-              </details>
-            </template>
-          </AnalysisChartPanel>
+            </div>
+            <span class="text-xs text-muted">{{ activeSection.targets.length }} 个结果</span>
+          </header>
+          <div class="grid gap-4 md:grid-cols-2">
+            <AnalysisChartPanel
+              v-for="target in activeSection.targets"
+              :key="`${activeSection.name}-${target.target}`"
+              :title="target.title"
+              :description="target.subtitle"
+              :option="target.option"
+              :has-data="target.hasData"
+            >
+              <template #default>
+                <div v-if="target.rows.length" class="rounded-2xl border border-soft">
+                  <table class="min-w-full text-sm">
+                    <thead class="bg-surface-muted text-xs uppercase tracking-wide text-muted">
+                      <tr>
+                        <th class="px-3 py-2 text-left">名称</th>
+                        <th class="px-3 py-2 text-left">数值</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(row, index) in target.rows" :key="`${target.target}-${index}`" class="border-t border-soft text-secondary">
+                        <td class="px-3 py-2">{{ formatRowName(row) }}</td>
+                        <td class="px-3 py-2">{{ formatRowValue(row) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <details class="rounded-2xl border border-dashed border-soft px-3 py-2 text-xs">
+                  <summary class="cursor-pointer text-brand-600">查看原始 JSON</summary>
+                  <pre class="mt-2 max-h-56 overflow-auto bg-slate-900/90 p-3 text-brand-soft">{{ target.rawText }}</pre>
+                </details>
+              </template>
+            </AnalysisChartPanel>
+          </div>
         </div>
       </div>
+      <p v-else class="text-xs text-muted">暂无分析结果。请先运行分析并刷新。</p>
     </section>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { ArrowPathIcon } from '@heroicons/vue/24/outline'
+import {
+  ArrowPathIcon,
+  ChartBarIcon,
+  ChartPieIcon,
+  GlobeAltIcon,
+  HashtagIcon,
+  MegaphoneIcon,
+  UsersIcon
+} from '@heroicons/vue/24/outline'
 import AnalysisChartPanel from '../../../components/AnalysisChartPanel.vue'
 import { useBasicAnalysis } from '../../../composables/useBasicAnalysis'
 import { useActiveProject } from '../../../composables/useActiveProject'
@@ -228,19 +242,45 @@ const selectableTopicOptions = computed(() => {
   return options
 })
 
-const highlightedSection = ref('')
 const autoSelectedTopic = ref('')
+const activeSectionName = ref('')
 
-const focusSection = async (sectionName) => {
-  if (!sectionName) return
-  highlightedSection.value = sectionName
+const sectionIconMap = {
+  classification: ChartPieIcon,
+  attitude: ChartBarIcon,
+  trends: MegaphoneIcon,
+  publishers: UsersIcon,
+  keywords: HashtagIcon,
+  volume: MegaphoneIcon,
+  geography: GlobeAltIcon
+}
+
+const activeSection = computed(() => {
+  if (!analysisSections.value?.length) return null
+  return analysisSections.value.find((section) => section.name === activeSectionName.value) || analysisSections.value[0]
+})
+
+const getSectionIcon = (sectionName) => {
+  return sectionIconMap[sectionName] || ChartPieIcon
+}
+
+const getChineseTitle = (label) => {
+  if (!label) return '未命名'
+  const match = label.match(/^[\u4e00-\u9fa5·\s]+/)
+  if (match) {
+    return match[0].trim() || label
+  }
+  const splitted = label.split(/\s+/)
+  return splitted.length ? splitted[0] : label
+}
+
+const setActiveSection = async (sectionName) => {
+  if (!sectionName || sectionName === activeSectionName.value) return
+  activeSectionName.value = sectionName
   await nextTick()
-  const target = document.getElementById(`section-${sectionName}`)
+  const target = document.getElementById('analysis-section-content')
   if (target) {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    setTimeout(() => {
-      highlightedSection.value = ''
-    }, 1600)
   }
 }
 
@@ -292,9 +332,9 @@ watch(
   analysisSections,
   (sections) => {
     if (!sections?.length) {
-      highlightedSection.value = ''
-    } else if (!sections.some((section) => section.name === highlightedSection.value)) {
-      highlightedSection.value = ''
+      activeSectionName.value = ''
+    } else if (!sections.some((section) => section.name === activeSectionName.value)) {
+      activeSectionName.value = sections[0]?.name || ''
     }
   },
   { immediate: true }

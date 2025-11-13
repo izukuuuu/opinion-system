@@ -220,7 +220,7 @@
   padding: 0.55rem 1.4rem;
   font-weight: 600;
   font-size: 0.95rem;
-  background-color: var(--color-brand-600-hex);
+  background-color: var(--color-brand-700-hex);
   color: #ffffff;
   transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
