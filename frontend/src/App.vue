@@ -166,6 +166,26 @@
       ></div>
     </Transition>
 
+    <Transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0 -translate-y-2"
+      enter-to-class="opacity-100 translate-y-0"
+      leave-active-class="transition duration-150 ease-in"
+      leave-from-class="opacity-100 translate-y-0"
+      leave-to-class="opacity-0 -translate-y-2"
+    >
+      <header
+        v-if="showCompactHeader"
+        class="fixed inset-x-0 top-0 z-20 hidden items-center gap-3 border-b border-soft px-6 py-3 backdrop-blur lg:flex"
+        :style="[compactHeaderStyle, compactHeaderOffsetStyle]"
+      >
+        <div class="flex min-w-0 items-center gap-2">
+          <p class="shrink-0 text-xs font-semibold uppercase tracking-[0.3em] text-muted">Opinion System</p>
+          <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
+        </div>
+      </header>
+    </Transition>
+
     <div class="flex min-h-screen">
       <div
           :class="[
@@ -173,7 +193,10 @@
           sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'
         ]"
       >
-        <header class="flex flex-col gap-4 border-b border-soft bg-surface px-6 py-6">
+        <header
+          ref="mainHeaderEl"
+          class="flex flex-col gap-4 border-b border-soft bg-surface px-6 py-6"
+        >
           <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <p class="text-sm font-semibold uppercase tracking-[0.3em] text-muted">舆情监测系统</p>
             <ActiveProjectSwitcher class="hidden lg:inline-flex" />
@@ -384,7 +407,25 @@ const mediaQuery =
 
 const sidebarCollapsed = ref(mediaQuery ? !mediaQuery.matches : false)
 const lastDesktopSidebarState = ref(mediaQuery?.matches ? sidebarCollapsed.value : false)
+const isDesktop = ref(mediaQuery ? mediaQuery.matches : false)
 let cleanupMediaQueryListener
+let cleanupHeaderObserver
+const mainHeaderEl = ref(null)
+const isMainHeaderVisible = ref(true)
+
+const showCompactHeader = computed(
+  () => isDesktop.value && !isLandingLayout.value && !isMainHeaderVisible.value
+)
+
+const compactHeaderStyle = computed(() => ({
+  background: 'rgba(255, 255, 255, 0.6)'
+}))
+
+const compactHeaderOffsetStyle = computed(() => {
+  if (!isDesktop.value) return {}
+  const left = sidebarCollapsed.value ? '5rem' : '18rem'
+  return { left, right: '0' }
+})
 
 const toggleSidebar = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
@@ -474,14 +515,51 @@ watch(
   }
 )
 
+watch(
+  () => mainHeaderEl.value,
+  (element) => {
+    if (cleanupHeaderObserver) {
+      cleanupHeaderObserver()
+      cleanupHeaderObserver = undefined
+    }
+
+    if (!element || !isClient || !('IntersectionObserver' in window)) {
+      isMainHeaderVisible.value = true
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        isMainHeaderVisible.value = entry.isIntersecting
+      },
+      { threshold: [0, 0.01] }
+    )
+    observer.observe(element)
+    cleanupHeaderObserver = () => observer.disconnect()
+  }
+)
+
+watch(
+  () => isDesktop.value,
+  (desktop) => {
+    if (!desktop) {
+      isMainHeaderVisible.value = true
+    }
+  }
+)
+
 onMounted(() => {
   if (!mediaQuery) return
+
+  isDesktop.value = mediaQuery.matches
 
   if (mediaQuery.matches) {
     lastDesktopSidebarState.value = sidebarCollapsed.value
   }
 
   const listener = (event) => {
+    isDesktop.value = event.matches
+
     if (event.matches) {
       sidebarCollapsed.value = lastDesktopSidebarState.value
       return
@@ -504,5 +582,6 @@ onBeforeUnmount(() => {
   cleanupMediaQueryListener?.()
   clearSidebarScrollbarTimer()
   detachSidebarScrollListeners()
+  cleanupHeaderObserver?.()
 })
 </script>
