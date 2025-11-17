@@ -45,7 +45,7 @@
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="space-y-1">
               <h3 class="text-sm font-semibold text-primary">编码方案工作台</h3>
-              <p class="text-xs text-muted">先设置组（一级/二级 + 单/多选）→ 再逐条添加编码 → 即可生成提示词。</p>
+              <p class="text-xs text-muted">通过设置编码组（一级/二级，单选/多选）并添加对应编码项，完善提示词配置。</p>
             </div>
             <div class="flex flex-wrap gap-2 text-[11px] text-muted">
               <button type="button" class="btn-secondary px-3 py-1" @click="addBlock({ level: 'level1', selection: 'single' })">新增一级组</button>
@@ -55,12 +55,12 @@
 
           <div class="grid gap-4 md:grid-cols-4">
             <div class="rounded-2xl border border-dashed border-soft bg-white p-3 text-xs text-secondary md:col-span-1">
-              <div class="mb-2 text-sm font-semibold text-primary">设计提示</div>
+              <div class="mb-2 text-sm font-semibold text-primary">怎么搭建编码方案？</div>
               <ul class="list-disc space-y-1 pl-4">
-                <li>一级/二级可混用但务必命名清晰。</li>
-                <li>单选字段写明“只能选一项”。</li>
-                <li>多选字段给出主次/排序的判断逻辑。</li>
-                <li>强制规则写在“边界情况”里，优先级高的放前。</li>
+                <li>每个组对应一个要分析的字段，如“信息类别”或“议题编码”。建议把组名写清楚，方便后续统计。</li>
+                <li>“一级”字段适合简单分类，若要细分建议设为“二级编码”。可同时添加多个一级和二级组。</li>
+                <li>单选字段场景如“信息类别”、“报道体裁”，请选择“单选（唯一）”；类似“议题”需多选的请选择“多选（可多项）”。</li>
+                <li>如果某些情况必须选，或者有需要特殊处理的例外，可以写到“边界情况”里，让AI优先遵循。</li>
               </ul>
             </div>
             <div class="md:col-span-3 space-y-4">
@@ -115,7 +115,7 @@
                     </select>
                   </label>
                   <div class="flex flex-col justify-end gap-2">
-                    <button type="button" class="btn-ghost h-10 px-3 text-sm font-medium" @click="openModal(block)">
+                    <button type="button" class="btn-ghost h-10 px-3 text-sm font-medium" @click="addCode(block)">
                       <PlusSmallIcon class="mr-1 h-4 w-4" />
                       快速添加
                     </button>
@@ -133,7 +133,7 @@
                         <PlusSmallIcon class="mr-1 h-4 w-4" />
                         新增大类
                       </button>
-                      <button type="button" class="btn-ghost h-9 px-3 text-sm" @click="openModal(block)">
+                      <button v-if="block.level !== 'level2'" type="button" class="btn-ghost h-9 px-3 text-sm" @click="addCode(block)">
                         <PlusSmallIcon class="mr-1 h-4 w-4" />
                         新增编码
                       </button>
@@ -159,10 +159,37 @@
                           </div>
                           <div class="flex flex-wrap items-center gap-2 font-semibold text-muted">
                             <span>{{ group.codes.length }} 项</span>
-                            <button type="button" class="btn-ghost h-9 px-3 text-sm" @click="openModal(block, group.rawTitle || group.title)">
+                            <button
+                              type="button"
+                              class="btn-ghost h-9 px-3 text-sm"
+                              @click="addCode(block, { group: group.rawTitle || group.title || '' })"
+                            >
                               <PlusSmallIcon class="mr-1 h-4 w-4" />
                               新增子项
                             </button>
+                            <button
+                              type="button"
+                              class="btn-ghost h-9 px-3 text-sm text-danger"
+                              @click="toggleGroupDelete(block, group)"
+                            >
+                              删除大类
+                            </button>
+                          </div>
+                        </div>
+                        <div
+                          v-if="block.pendingGroupDelete === group.key"
+                          class="mb-3 rounded-xl border border-soft bg-surface px-3 py-2 text-xs text-danger"
+                        >
+                          <p>确认删除「{{ group.rawTitle || group.title }}」及其 {{ group.codes.length }} 个子项？</p>
+                          <div class="mt-2 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              class="btn-primary px-3 py-1 text-xs"
+                              @click="confirmGroupDelete(block, group)"
+                            >
+                              确认删除
+                            </button>
+                            <button type="button" class="btn-ghost px-3 py-1 text-xs" @click="cancelGroupDelete(block)">取消</button>
                           </div>
                         </div>
                         <div class="grid gap-3 md:grid-cols-2">
@@ -330,63 +357,6 @@
         </div>
       </div>
     </section>
-
-    <div v-if="modalState.visible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-      <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-        <h3 class="text-lg font-semibold text-primary">新增编码</h3>
-        <p class="mt-1 text-xs text-muted">填写编码值与描述，支持一级/二级组混用。</p>
-        <div class="mt-4 space-y-3 text-sm">
-          <label class="space-y-1">
-            <span class="text-xs font-semibold text-muted">编码值</span>
-            <input
-              v-model="modalState.form.code"
-              type="text"
-              class="w-full rounded-2xl border border-soft px-3 py-2 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              placeholder="如 1-12 / 3"
-            />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-semibold text-muted">描述</span>
-            <input
-              v-model="modalState.form.label"
-              type="text"
-              class="w-full rounded-2xl border border-soft px-3 py-2 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              placeholder="如 青少年 / 观点性报道"
-            />
-          </label>
-          <label class="space-y-2">
-            <span class="text-xs font-semibold text-muted">所属大类（可选）</span>
-            <div v-if="modalGroupOptions.length" class="flex flex-col gap-2">
-              <select
-                v-model="modalState.selectedGroupOption"
-                class="w-full rounded-2xl border border-soft bg-surface px-3 py-2 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              >
-                <option value="">选择已有大类</option>
-                <option v-for="option in modalGroupOptions" :key="option" :value="option">
-                  {{ option }}
-                </option>
-                <option value="__custom__">自定义输入…</option>
-              </select>
-            </div>
-            <input
-              v-model="modalState.form.group"
-              type="text"
-              class="w-full rounded-2xl border border-soft px-3 py-2 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              :placeholder="modalGroupOptions.length ? '未在列表时可自定义，如 控烟立场 / 烟草立场' : '如 控烟立场 / 烟草立场'"
-            />
-          </label>
-        </div>
-        <div class="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-          <span>将保存到：{{ modalState.targetBlock?.title || '未命名组' }}（{{ modalState.targetBlock?.level === 'level1' ? '一级' : '二级' }}）</span>
-          <div class="flex gap-2 text-sm">
-            <button class="btn-ghost" type="button" @click="modalState.visible = false">取消</button>
-            <button class="btn-primary" type="button" :disabled="!modalState.form.code || !modalState.form.label" @click="addCodeFromModal">
-              确认添加
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -423,17 +393,6 @@ const currentTopic = computed(() => (selectedTopic.value || '').trim())
 const builder = reactive({
   blocks: [],
   edgeCases: ''
-})
-
-const modalState = reactive({
-  visible: false,
-  targetBlock: null,
-  form: {
-    code: '',
-    label: '',
-    group: ''
-  },
-  selectedGroupOption: ''
 })
 
 const extractGroupFromLabel = (label = '') => {
@@ -503,25 +462,6 @@ const getGroupNameOptions = (block) => {
   return names
 }
 
-const modalGroupOptions = computed(() => {
-  if (!modalState.targetBlock) return []
-  return getGroupNameOptions(modalState.targetBlock)
-})
-
-watch(
-  () => modalState.selectedGroupOption,
-  (value) => {
-    if (!modalState.visible) return
-    if (!value || value === '__custom__') {
-      if (!value) {
-        modalState.form.group = ''
-      }
-      return
-    }
-    modalState.form.group = value
-  }
-)
-
 const updateGroupTitle = (block, group, nextTitle) => {
   const value = nextTitle.trim()
   group.codes.forEach((code) => {
@@ -547,6 +487,35 @@ const addGroup = (block) => {
   block.codes.push(createCode({ group: title }))
 }
 
+const toggleGroupDelete = (block, group) => {
+  const target = ensureBlockMeta(block)
+  target.pendingGroupDelete = target.pendingGroupDelete === group.key ? '' : group.key
+}
+
+const cancelGroupDelete = (block) => {
+  ensureBlockMeta(block).pendingGroupDelete = ''
+}
+
+const codeMatchesGroup = (code, group) => {
+  const rawTitle = (group.rawTitle || '').trim()
+  if (rawTitle) {
+    return (code.group || '').trim() === rawTitle
+  }
+  if (group.prefix) {
+    return getCodePrefix(code) === group.prefix
+  }
+  return false
+}
+
+const confirmGroupDelete = (block, group) => {
+  for (let i = block.codes.length - 1; i >= 0; i -= 1) {
+    if (codeMatchesGroup(block.codes[i], group)) {
+      block.codes.splice(i, 1)
+    }
+  }
+  cancelGroupDelete(block)
+}
+
 const draftKeyForTopic = (topic) => `content-prompt-draft:${topic}`
 
 const uuid = () => {
@@ -560,6 +529,13 @@ const createCode = (item = {}) => ({
   label: item.label || '',
   group: item.group || item.category || ''
 })
+
+const ensureBlockMeta = (block) => {
+  if (!Object.prototype.hasOwnProperty.call(block, 'pendingGroupDelete')) {
+    block.pendingGroupDelete = ''
+  }
+  return block
+}
 
 const resetPromptState = () => {
   promptState.system_prompt = ''
@@ -636,50 +612,19 @@ const addBlock = (preset) => {
     level: preset?.level || 'level1',
     codes
   })
+  ensureBlockMeta(builder.blocks[builder.blocks.length - 1])
 }
 
 const removeBlock = (index) => {
   builder.blocks.splice(index, 1)
 }
 
-const addCode = (block) => {
-  block.codes.push(createCode())
+const addCode = (block, defaults = {}) => {
+  block.codes.push(createCode(defaults))
 }
 
 const removeCode = (block, index) => {
   block.codes.splice(index, 1)
-}
-
-const openModal = (block, groupName = '') => {
-  modalState.visible = true
-  modalState.targetBlock = block
-  modalState.form.code = ''
-  modalState.form.label = ''
-  if (groupName) {
-    modalState.form.group = groupName
-    modalState.selectedGroupOption = groupName
-  } else {
-    const [firstGroup] = getGroupNameOptions(block)
-    if (firstGroup) {
-      modalState.form.group = firstGroup
-      modalState.selectedGroupOption = firstGroup
-    } else {
-      modalState.form.group = ''
-      modalState.selectedGroupOption = '__custom__'
-    }
-  }
-}
-
-const addCodeFromModal = () => {
-  if (!modalState.targetBlock) return
-  modalState.targetBlock.codes.push(
-    createCode({
-      code: modalState.form.code.trim(),
-      label: modalState.form.label.trim(),
-      group: modalState.form.group.trim()
-    })
-  )
-  modalState.visible = false
 }
 
 const applyEdgeCases = () => {

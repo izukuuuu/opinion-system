@@ -19,7 +19,7 @@ export const contentAnalysisPreset = {
   ].join('\n'),
   blocks: [
     {
-      title: '信息类别（单选）',
+      title: '信息类别',
       selection: 'single',
       level: 'level1',
       codes: [
@@ -29,7 +29,7 @@ export const contentAnalysisPreset = {
       ]
     },
     {
-      title: '议题编码（多选）',
+      title: '议题编码',
       selection: 'multi',
       level: 'level2',
       codes: [
@@ -57,7 +57,7 @@ export const contentAnalysisPreset = {
       ]
     },
     {
-      title: '信源编码（多选）',
+      title: '信源编码',
       selection: 'multi',
       level: 'level1',
       codes: [
@@ -78,7 +78,7 @@ export const contentAnalysisPreset = {
       ]
     },
     {
-      title: '报道体裁（单选）',
+      title: '报道体裁',
       selection: 'single',
       level: 'level1',
       codes: [
@@ -90,7 +90,7 @@ export const contentAnalysisPreset = {
       ]
     },
     {
-      title: '诉求方式（多选）',
+      title: '诉求方式',
       selection: 'multi',
       level: 'level1',
       codes: [
