@@ -335,25 +335,8 @@
           <span v-else-if="promptState.error" class="text-xs text-danger">{{ promptState.error }}</span>
           <span v-else-if="promptState.message" class="text-xs text-emerald-600">{{ promptState.message }}</span>
           <span v-else class="text-xs text-muted">
-            保存后即可在后端以 ContentAnalyze 运行；未填写时会保留已有配置。
+            保存后可用于内容分析；未填写时会保留已有配置。
           </span>
-        </div>
-
-        <div class="rounded-3xl border border-dashed border-soft bg-surface-muted p-4 text-xs text-secondary">
-          <div class="mb-2 flex items-center justify-between">
-            <span class="font-semibold text-primary">实时提示词预览</span>
-            <span v-if="promptState.path" class="text-[11px] text-muted">保存位置：{{ promptState.path }}</span>
-          </div>
-          <div class="grid gap-4 md:grid-cols-2">
-            <div class="rounded-2xl border border-soft bg-white p-3">
-              <div class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">System Prompt</div>
-              <pre class="max-h-52 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-primary">{{ promptState.system_prompt || '（未填写）' }}</pre>
-            </div>
-            <div class="rounded-2xl border border-soft bg-white p-3">
-              <div class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Analysis Prompt</div>
-              <pre class="max-h-52 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-primary">{{ promptState.analysis_prompt || '（未填写）' }}</pre>
-            </div>
-          </div>
         </div>
       </div>
     </section>

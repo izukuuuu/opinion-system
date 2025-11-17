@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
 
 .analysis-chart-card__canvas {
   width: 100%;
-  height: 300px;
+  height: 400px;
 }
 
 .analysis-chart-card__empty {

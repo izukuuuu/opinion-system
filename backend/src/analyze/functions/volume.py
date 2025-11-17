@@ -68,6 +68,7 @@ def analyze_volume_overall(df: pd.DataFrame, topic: str, date: str, logger=None,
             result["echarts"] = build_bar_option(
                 title=f"声量对比 · 总体",
                 data=data,
+                sort_desc=True,
                 category_label="渠道",
                 value_label="声量",
             )
@@ -121,6 +122,7 @@ def analyze_volume_by_channel(df: pd.DataFrame, channel_name: str, topic: str, d
             result["echarts"] = build_bar_option(
                 title=f"声量对比 · {channel_name}",
                 data=data,
+                sort_desc=True,
                 category_label="渠道",
                 value_label="声量",
             )

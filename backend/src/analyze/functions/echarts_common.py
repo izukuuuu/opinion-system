@@ -32,9 +32,15 @@ def build_bar_option(
     orientation: str = "vertical",
     category_label: str = "类别",
     value_label: str = "数量",
+    sort_desc: bool = False,
 ) -> Dict[str, Any]:
-    categories, values = _split_series(data)
+    # 横向条形图统一按数值降序排列，便于高值居上展示
     is_vertical = orientation != "horizontal"
+    ordered_data = list(data)
+    if sort_desc or not is_vertical:
+        ordered_data = sorted(ordered_data, key=lambda item: _coerce_number(item.get("value")), reverse=True)
+
+    categories, values = _split_series(ordered_data)
 
     x_axis = {
         "type": "category",
@@ -50,6 +56,7 @@ def build_bar_option(
 
     if not is_vertical:
         x_axis, y_axis = y_axis, x_axis
+        y_axis["inverse"] = True
 
     return {
         "color": ["#6366f1"],
