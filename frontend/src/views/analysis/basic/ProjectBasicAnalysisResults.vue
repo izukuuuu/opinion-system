@@ -166,6 +166,30 @@
       </template>
     </section>
 
+    <section v-if="aiSummaryItems.length" class="card-surface space-y-5 p-6">
+      <header class="flex flex-wrap items-start justify-between gap-3">
+        <div class="space-y-2">
+          <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">AI Summary</p>
+          <h3 class="text-xl font-semibold text-primary">AI 摘要解读</h3>
+          <p class="text-sm text-secondary">基于每个分析模块的文本快照，由大模型自动生成简要洞察。</p>
+        </div>
+        <div class="text-right text-xs text-muted">
+          <p v-if="aiSummaryTimestamp">生成时间：{{ aiSummaryTimestamp }}</p>
+          <p v-if="aiSummaryRangeText">覆盖区间：{{ aiSummaryRangeText }}</p>
+        </div>
+      </header>
+      <AiSummaryList :items="aiSummaryItems" />
+      <p class="text-[11px] text-muted">以上内容由 AI 自动生成，仅供参考，具体数据请以下方图表为准。</p>
+    </section>
+
+    <section
+      v-else-if="aiSummaryMeta"
+      class="card-surface space-y-3 p-6 text-sm text-secondary"
+    >
+      <p class="text-lg font-semibold text-primary">AI 摘要暂未生成</p>
+      <p>当前专题存在 AI 摘要文件，但未包含有效内容，请稍后刷新或重新运行分析。</p>
+    </section>
+
     <section
       class="card-surface space-y-5 p-6"
       :id="analysisSections.length ? 'analysis-section-content' : undefined"
@@ -265,12 +289,15 @@ import {
   UsersIcon
 } from '@heroicons/vue/24/outline'
 import AnalysisChartPanel from '../../../components/AnalysisChartPanel.vue'
+import AiSummaryList from '../../../components/analysis/AiSummaryList.vue'
 import { useBasicAnalysis } from '../../../composables/useBasicAnalysis'
 import { useActiveProject } from '../../../composables/useActiveProject'
 
 const {
+  analysisFunctions,
   analysisSummary,
   analysisSections,
+  analysisAiSummary,
   topicsState,
   topicOptions,
   analysisHistory,
@@ -319,6 +346,36 @@ const activeSection = computed(() => {
 const getSectionIcon = (sectionName) => {
   return sectionIconMap[sectionName] || ChartPieIcon
 }
+
+const aiSummaryMeta = analysisAiSummary
+
+const aiSummaryItems = computed(() => {
+  const summaries = aiSummaryMeta.value?.summaries
+  if (!Array.isArray(summaries) || !summaries.length) return []
+  return summaries.map((entry) => {
+    const meta = analysisFunctions.find((item) => item.id === entry.function) || {}
+    const label = meta.label || entry.function_label || entry.function
+    const target = entry.target || '总体'
+    return {
+      id: `${entry.function}-${target}`,
+      label,
+      target,
+      aiSummary: (entry.ai_summary || '').trim(),
+      textSnapshot: entry.text_snapshot || '',
+      icon: getSectionIcon(entry.function),
+      updatedAt: formatTimestamp(entry.updated_at)
+    }
+  })
+})
+
+const aiSummaryTimestamp = computed(() => formatTimestamp(aiSummaryMeta.value?.generated_at))
+
+const aiSummaryRangeText = computed(() => {
+  const range = aiSummaryMeta.value?.range
+  if (!range?.start) return ''
+  const end = range.end || range.start
+  return `${range.start} → ${end}`
+})
 
 const getChineseTitle = (label) => {
   if (!label) return '未命名'
@@ -409,6 +466,22 @@ onMounted(() => {
     applyHistorySelection(selectedHistoryId.value, { shouldLoad: true })
   }
 })
+
+const formatTimestamp = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 
 const formatRowName = (row) => {
   if (!row) return '-'

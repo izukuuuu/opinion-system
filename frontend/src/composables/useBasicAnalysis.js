@@ -125,6 +125,8 @@ const analysisSummary = computed(() => {
   }
 })
 
+const analysisAiSummary = computed(() => analysisData.value?.ai_summary || null)
+
 const analysisSections = computed(() => {
   const payload = analysisData.value?.functions
   if (!payload) return []
@@ -191,6 +193,7 @@ export const useBasicAnalysis = () => {
     viewSelection,
     viewManualForm,
     analysisSummary,
+    analysisAiSummary,
     analysisSections,
     loadTopics,
     resetFetchForm,
