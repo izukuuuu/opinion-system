@@ -369,18 +369,40 @@
         </div>
       </dl>
 
-      <div class="space-y-3">
-        <h3 class="text-sm font-medium text-secondary">无关内容示例</h3>
+      <div class="space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-medium text-secondary">样本摘要预览</h3>
+            <p class="text-xs text-muted">切换查看被保留与被剔除的代表性内容。</p>
+          </div>
+          <div class="inline-flex items-center gap-1 rounded-full bg-surface-muted p-1 text-xs font-semibold">
+            <button
+              v-for="tab in summaryTabOptions"
+              :key="tab.value"
+              type="button"
+              class="rounded-full px-3 py-1.5 transition"
+              :class="[
+                summaryTab === tab.value
+                  ? 'bg-white text-primary shadow-sm'
+                  : 'text-muted hover:text-primary'
+              ]"
+              @click="summaryTab = tab.value"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
+        </div>
+
         <div class="grid gap-3 md:grid-cols-2">
           <p
-            v-if="!statusState.irrelevantSamples.length"
+            v-if="!currentSummarySamples.length"
             class="rounded-2xl border border-dashed border-soft bg-surface-muted px-4 py-3 text-xs text-muted"
           >
-            尚未收集到无关样本。完成一次筛选后，可在此查看被剔除的代表性片段。
+            {{ summaryEmptyMessage }}
           </p>
           <article
-            v-for="(item, index) in statusState.irrelevantSamples"
-            :key="`${item.channel}-${index}`"
+            v-for="(item, index) in currentSummarySamples"
+            :key="`${summaryTab}-${item.channel}-${index}`"
             class="flex flex-col gap-2 rounded-2xl border border-soft bg-white px-4 py-3 text-sm text-secondary shadow-sm"
           >
             <div class="flex items-center justify-between text-xs text-muted">
@@ -471,6 +493,7 @@ const statusState = reactive({
     completed: false,
     updated_at: ''
   },
+  relevantSamples: [],
   irrelevantSamples: [],
   aiConfig: {
     provider: '',
@@ -594,6 +617,20 @@ const tokenUsageDisplay = computed(() => {
 const summaryUpdatedAt = computed(() => formatTimestamp(statusState.summary.updated_at))
 const recentLimit = computed(() => RECENT_LIMIT)
 
+const summaryTabOptions = [
+  { value: 'relevant', label: '有关摘要' },
+  { value: 'irrelevant', label: '无关摘要' }
+]
+const summaryTab = ref(summaryTabOptions[0].value)
+const currentSummarySamples = computed(() =>
+  summaryTab.value === 'relevant' ? statusState.relevantSamples : statusState.irrelevantSamples
+)
+const summaryEmptyMessage = computed(() =>
+  summaryTab.value === 'relevant'
+    ? '尚未收集到有关样本。执行筛选后，可在此查看保留内容摘要。'
+    : '尚未收集到无关样本。完成一次筛选后，可在此查看被剔除的代表性片段。'
+)
+
 function applyStatusPayload(raw) {
   const data = raw && typeof raw === 'object' ? raw : {}
   statusState.running = Boolean(data.running)
@@ -617,6 +654,7 @@ function applyStatusPayload(raw) {
     completed: Boolean(summary.completed),
     updated_at: summary.updated_at || ''
   }
+  statusState.relevantSamples = Array.isArray(data.relevant_samples) ? data.relevant_samples : []
   statusState.irrelevantSamples = Array.isArray(data.irrelevant_samples) ? data.irrelevant_samples : []
   statusState.aiConfig = {
     provider: data.ai_config?.provider || '',
@@ -634,6 +672,17 @@ watch(
     templateState.error = ''
   },
   { deep: true }
+)
+
+watch(
+  () => [statusState.relevantSamples.length, statusState.irrelevantSamples.length],
+  ([relevantCount, irrelevantCount]) => {
+    if (summaryTab.value === 'relevant' && !relevantCount && irrelevantCount) {
+      summaryTab.value = 'irrelevant'
+    } else if (summaryTab.value === 'irrelevant' && !irrelevantCount && relevantCount) {
+      summaryTab.value = 'relevant'
+    }
+  }
 )
 
 watch(
@@ -1013,9 +1062,11 @@ function resetStatusState() {
     completed: false,
     updated_at: ''
   }
+  statusState.relevantSamples = []
   statusState.irrelevantSamples = []
   statusState.message = ''
   statusState.running = false
+  summaryTab.value = summaryTabOptions[0].value
 }
 
 function startPolling() {
