@@ -166,20 +166,22 @@
       </template>
     </section>
 
-    <section v-if="aiSummaryItems.length" class="card-surface space-y-5 p-6">
-      <header class="flex flex-wrap items-start justify-between gap-3">
-        <div class="space-y-2">
-          <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">AI Summary</p>
-          <h3 class="text-xl font-semibold text-primary">AI 摘要解读</h3>
-          <p class="text-sm text-secondary">基于每个分析模块的文本快照，由大模型自动生成简要洞察。</p>
-        </div>
-        <div class="text-right text-xs text-muted">
-          <p v-if="aiSummaryTimestamp">生成时间：{{ aiSummaryTimestamp }}</p>
-          <p v-if="aiSummaryRangeText">覆盖区间：{{ aiSummaryRangeText }}</p>
+    <section v-if="aiSummaryItems.length" class="card-surface space-y-3 p-5 sm:p-6">
+      <header class="flex flex-wrap items-center justify-between gap-3 text-sm">
+        <h3 class="text-lg font-semibold text-primary">AI 摘要解读</h3>
+        <div class="flex flex-wrap items-center gap-3 text-xs text-muted">
+          <span v-if="aiSummaryTimestamp" class="inline-flex items-center gap-1 text-secondary">
+            <SparklesIcon class="h-4 w-4 text-brand-600" />
+            {{ aiSummaryTimestamp }}
+          </span>
+          <span v-if="aiSummaryRangeText" class="inline-flex items-center gap-1 text-secondary">
+            <CalendarDaysIcon class="h-4 w-4" />
+            {{ aiSummaryRangeText }}
+          </span>
         </div>
       </header>
+      <p class="text-[11px] text-muted">AI 生成解读仅供参考，具体请查看分析图表。</p>
       <AiSummaryList :items="aiSummaryItems" />
-      <p class="text-[11px] text-muted">以上内容由 AI 自动生成，仅供参考，具体数据请以下方图表为准。</p>
     </section>
 
     <section
@@ -195,8 +197,7 @@
       :id="analysisSections.length ? 'analysis-section-content' : undefined"
     >
       <header class="flex flex-col gap-1">
-        <h3 class="text-lg font-semibold text-primary">分析模块列表</h3>
-        <p class="text-sm text-secondary">点击模块卡片即可在下方查看对应图表。</p>
+        <h3 class="text-lg font-semibold text-primary">分析模块</h3>
       </header>
       <div v-if="analysisSections.length" class="space-y-5">
         <div class="flex flex-wrap gap-2">
@@ -222,14 +223,14 @@
           </button>
         </div>
         <div v-if="activeSection" class="space-y-4 border-t border-soft pt-4">
-          <header class="flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center gap-3">
-              <span class="flex h-11 w-11 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
-                <component :is="getSectionIcon(activeSection.name)" class="h-6 w-6" />
+          <header class="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <div class="flex items-center gap-2">
+              <span class="flex h-9 w-9 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                <component :is="getSectionIcon(activeSection.name)" class="h-5 w-5" />
               </span>
-              <div class="space-y-1">
-                <h3 class="text-xl font-semibold text-primary">{{ getChineseTitle(activeSection.label) }}</h3>
-                <p class="text-sm text-secondary">{{ activeSection.description }}</p>
+              <div class="space-y-0.5">
+                <h3 class="text-base font-semibold leading-tight text-primary">{{ getChineseTitle(activeSection.label) }}</h3>
+                <p class="text-xs text-secondary">{{ activeSection.description }}</p>
               </div>
             </div>
             <span class="text-xs text-muted">{{ activeSection.targets.length }} 个结果</span>
@@ -286,7 +287,8 @@ import {
   HashtagIcon,
   Squares2X2Icon,
   MegaphoneIcon,
-  UsersIcon
+  UsersIcon,
+  SparklesIcon
 } from '@heroicons/vue/24/outline'
 import AnalysisChartPanel from '../../../components/AnalysisChartPanel.vue'
 import AiSummaryList from '../../../components/analysis/AiSummaryList.vue'
@@ -393,7 +395,11 @@ const setActiveSection = async (sectionName) => {
   await nextTick()
   const target = document.getElementById('analysis-section-content')
   if (target) {
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const offset = target.getBoundingClientRect().top + window.scrollY - 48
+    window.scrollTo({
+      top: offset > 0 ? offset : 0,
+      behavior: 'smooth'
+    })
   }
 }
 

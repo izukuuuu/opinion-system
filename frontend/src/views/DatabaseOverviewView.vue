@@ -12,7 +12,7 @@
     </header>
 
     <div class="flex flex-col gap-6 lg:flex-row lg:items-start">
-      <aside class="flex w-full shrink-0 flex-col gap-3 lg:w-64">
+      <aside class="flex w-full shrink-0 flex-col gap-3 lg:w-64 lg:sticky lg:top-16">
         <button
           v-for="tab in tabs"
           :key="tab.key"

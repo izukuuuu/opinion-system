@@ -104,7 +104,6 @@ onBeforeUnmount(() => {
   border-radius: 24px;
   background: var(--color-surface);
   border: 1px solid var(--color-border-soft);
-  box-shadow: 0 20px 40px -28px rgba(16, 24, 40, 0.35);
 }
 
 .analysis-chart-card__header {
