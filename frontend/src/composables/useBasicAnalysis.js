@@ -1,5 +1,12 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useApiBase } from './useApiBase'
+import {
+  buildChartOption,
+  buildRawText,
+  extractRows,
+  isHorizontalBarFunction,
+  sortRowsDescending
+} from '../utils/chartBuilder'
 
 const analysisFunctions = [
   {
@@ -39,7 +46,6 @@ const analysisFunctions = [
   }
 ]
 
-const HORIZONTAL_BAR_FUNCTIONS = ['geography', 'publishers', 'keywords', 'classification']
 const MAX_HISTORY = 12
 
 const sanitizeLabel = (label) => {
@@ -138,8 +144,7 @@ const analysisSections = computed(() => {
     const displayLabel = sanitizeLabel(meta.label) || meta.label || func.name
     const targets = func.targets.map((target) => {
       const rows = extractRows(target.data)
-      const hasCustomOption = Boolean(target.data?.echarts)
-      const shouldSortDescending = !hasCustomOption && HORIZONTAL_BAR_FUNCTIONS.includes(func.name)
+      const shouldSortDescending = isHorizontalBarFunction(func.name)
       const displayRows = shouldSortDescending ? sortRowsDescending(rows) : rows
       const targetTitle = `${displayLabel} · ${target.target}`
       const targetSubtitle =
@@ -148,10 +153,10 @@ const analysisSections = computed(() => {
         target: target.target,
         title: targetTitle,
         subtitle: targetSubtitle,
-        option: target.data?.echarts || buildFallbackOption(func.name, displayRows, target.target),
+        option: buildChartOption(func.name, displayRows, targetTitle),
         hasData: rows.length > 0,
         rows: displayRows.slice(0, 12),
-        rawText: JSON.stringify(target.data ?? {}, null, 2)
+        rawText: buildRawText(target.data)
       }
     })
     return {
@@ -711,113 +716,3 @@ const applyHistorySelection = async (historyId, { shouldLoad = false } = {}) => 
   }
 }
 
-const extractRows = (payload) => {
-  if (!payload) return []
-  if (Array.isArray(payload)) return payload
-  if (Array.isArray(payload.data)) return payload.data
-  return []
-}
-
-const ensureNumber = (value) => {
-  const num = Number(value)
-  return Number.isFinite(num) ? num : 0
-}
-
-const sortRowsDescending = (rows) =>
-  [...rows].sort((a, b) => ensureNumber(rowValue(b)) - ensureNumber(rowValue(a)))
-
-const rowName = (row) => {
-  if (!row) return '-'
-  return row.name ?? row.label ?? row.key ?? '未命名'
-}
-
-const rowValue = (row) => {
-  if (!row) return 0
-  return row.value ?? row.count ?? row.total ?? 0
-}
-
-const buildBarOption = (title, rows, orientation = 'vertical', categoryLabel = '类别', valueLabel = '数量') => {
-  const orderedRows = orientation === 'horizontal' ? sortRowsDescending(rows) : rows
-  const categories = orderedRows.map((row) => rowName(row))
-  const values = orderedRows.map((row) => ensureNumber(rowValue(row)))
-  const isVertical = orientation !== 'horizontal'
-  const catAxis = {
-    type: 'category',
-    data: categories,
-    axisLabel: { interval: 0, color: '#303d47' },
-    axisLine: { lineStyle: { color: '#d0d5d9' } }
-  }
-  const valAxis = {
-    type: 'value',
-    axisLabel: { color: '#303d47' },
-    splitLine: { lineStyle: { color: '#e2e9f1' } }
-  }
-  return {
-    color: ['#9ab2cb'],
-    title: { text: title, left: 'center', textStyle: { color: '#1c252c' } },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 60, right: 30, top: 60, bottom: 60, containLabel: true },
-    xAxis: isVertical ? catAxis : valAxis,
-    yAxis: isVertical ? valAxis : catAxis,
-    dataset: {
-      dimensions: [categoryLabel, valueLabel],
-      source: orderedRows.map((row) => ({ name: rowName(row), value: ensureNumber(rowValue(row)) }))
-    },
-    series: [
-      {
-        type: 'bar',
-        data: values,
-        label: { show: true, color: '#303d47' }
-      }
-    ]
-  }
-}
-
-const buildLineOption = (title, rows, categoryLabel = '日期', valueLabel = '数量') => {
-  const categories = rows.map((row) => rowName(row))
-  const values = rows.map((row) => ensureNumber(rowValue(row)))
-  return {
-    color: ['#7babce'],
-    title: { text: title, left: 'center', textStyle: { color: '#1c252c' } },
-    tooltip: { trigger: 'axis' },
-    grid: { left: 50, right: 30, top: 60, bottom: 60, containLabel: true },
-    xAxis: { type: 'category', boundaryGap: false, data: categories, axisLabel: { color: '#303d47' } },
-    yAxis: { type: 'value', axisLabel: { color: '#303d47' }, splitLine: { lineStyle: { color: '#e2e9f1' } } },
-    dataset: {
-      dimensions: [categoryLabel, valueLabel],
-      source: rows.map((row) => ({ name: rowName(row), value: ensureNumber(rowValue(row)) }))
-    },
-    series: [
-      {
-        type: 'line',
-        smooth: true,
-        areaStyle: { opacity: 0.1 },
-        data: values
-      }
-    ]
-  }
-}
-
-const buildPieOption = (title, rows) => ({
-  title: { text: title, left: 'center', textStyle: { color: '#1c252c' } },
-  tooltip: { trigger: 'item' },
-  legend: { bottom: 0, type: 'scroll', textStyle: { color: '#303d47' } },
-  series: [
-    {
-      type: 'pie',
-      radius: ['40%', '70%'],
-      center: ['50%', '45%'],
-      data: rows.map((row) => ({ name: rowName(row), value: ensureNumber(rowValue(row)) })),
-      label: { formatter: '{b}: {d}%' }
-    }
-  ]
-})
-
-const buildFallbackOption = (funcName, rows, targetLabel) => {
-  if (!rows.length) return null
-  const title = `${funcName} · ${targetLabel}`
-  if (funcName === 'trends') return buildLineOption(title, rows)
-  if (funcName === 'attitude') return buildPieOption(title, rows)
-  const orientation = HORIZONTAL_BAR_FUNCTIONS.includes(funcName) ? 'horizontal' : 'vertical'
-  return buildBarOption(title, rows, orientation)
-}
