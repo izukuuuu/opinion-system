@@ -88,16 +88,23 @@ def _format_row_pair(row: Dict[str, Any]) -> str:
     return f"{name}: {value if value is not None else '-'}"
 
 
-def _build_text_snapshot(func_name: str, target: str, result: Any) -> str:
+def _build_text_snapshot(
+    func_name: str,
+    target: str,
+    result: Any,
+    max_rows: Optional[int] = MAX_SNAPSHOT_ROWS,
+    ellipsis: bool = True,
+) -> str:
     label = FUNCTION_LABELS.get(func_name, func_name)
     rows = _extract_rows(result)
     lines = [f"{label}（{target}）分析概览", f"记录数：{len(rows)}"]
     if rows:
         lines.append("关键条目：")
-        for row in rows[:MAX_SNAPSHOT_ROWS]:
+        selected_rows = rows if max_rows is None else rows[:max_rows]
+        for row in selected_rows:
             lines.append(f"- {_format_row_pair(row)}")
-        if len(rows) > MAX_SNAPSHOT_ROWS:
-            lines.append(f"……其余 {len(rows) - MAX_SNAPSHOT_ROWS} 条已省略")
+        if ellipsis and max_rows is not None and len(rows) > max_rows:
+            lines.append(f"……其余 {len(rows) - max_rows} 条已省略")
     else:
         lines.append("暂无有效数据")
     return "\n".join(lines)
@@ -190,7 +197,8 @@ def _post_process_result(func_name: str, target: str, target_dir: Path, result: 
     _write_text_snapshot(target_dir, snapshot)
     if target != '总体':
         return
-    ai_text = _generate_ai_summary(func_name, target, snapshot, logger)
+    full_snapshot = _build_text_snapshot(func_name, target, result or {}, max_rows=None, ellipsis=False)
+    ai_text = _generate_ai_summary(func_name, target, full_snapshot, logger)
     if _update_ai_summary_entry(ai_entries, func_name, target, snapshot, ai_text):
         ai_state['dirty'] = True
 
