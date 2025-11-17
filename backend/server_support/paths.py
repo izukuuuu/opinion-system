@@ -13,6 +13,7 @@ CONFIGS_DIR = BACKEND_DIR / "configs"
 DATA_PROJECTS_ROOT = BACKEND_DIR / "data" / "projects"
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 FILTER_PROMPT_DIR = CONFIGS_DIR / "prompt" / "filter"
+CONTENT_PROMPT_DIR = CONFIGS_DIR / "prompt" / "contentanalysis"
 FILTER_PROGRESS_DIR = SRC_DIR / "filter"
 FILTER_SUMMARY_FILENAME = "_summary.json"
 
@@ -21,6 +22,7 @@ __all__ = [
     "CONFIG_PATH",
     "DATA_PROJECTS_ROOT",
     "FILTER_PROMPT_DIR",
+    "CONTENT_PROMPT_DIR",
     "FILTER_PROGRESS_DIR",
     "FILTER_SUMMARY_FILENAME",
     "PROJECT_ROOT",

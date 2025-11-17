@@ -73,112 +73,123 @@
       <p v-if="archivesState.error" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">
         {{ archivesState.error }}
       </p>
-      <div class="grid gap-6 lg:grid-cols-3">
-        <article class="space-y-3 rounded-3xl border border-dashed border-soft bg-white/80 p-5">
-          <header class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-muted">RAW</p>
-              <h3 class="text-base font-semibold text-primary">原始数据存档</h3>
-              <p class="text-xs text-secondary">请选择需要执行 Merge 的日期。</p>
+      <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <!-- RAW 原始数据存档 -->
+        <article class="card-surface flex flex-col space-y-4 p-5 shadow-sm transition hover:shadow-md">
+          <header class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1 space-y-1.5">
+              <p class="text-xs uppercase tracking-[0.2em] text-muted">RAW</p>
+              <h3 class="text-base font-semibold leading-tight text-primary">原始数据存档</h3>
+              <p class="text-xs leading-relaxed text-secondary">请选择需要执行 Merge 的日期。</p>
             </div>
-            <span class="text-xs text-muted">
+            <span class="flex-shrink-0 whitespace-nowrap text-xs font-medium text-muted">
               {{ archivesState.data.raw.length ? `共 ${archivesState.data.raw.length} 份` : '暂无' }}
             </span>
           </header>
-          <div v-if="archivesState.loading" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
-            存档加载中…
-          </div>
-          <p v-else-if="!archivesState.data.raw.length" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
-            暂未找到原始数据存档，请先上传或刷新后重试。
-          </p>
-          <div v-else class="flex flex-wrap gap-2">
-            <button
-              v-for="archive in archivesState.data.raw"
-              :key="archive.date"
-              type="button"
-              class="inline-flex flex-col gap-1 rounded-2xl border px-3 py-2 text-left text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-              :class="archiveSelection.mergeDate === archive.date
-                ? 'border-brand-soft bg-brand-soft/70 text-brand-700 shadow-sm'
-                : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:text-brand-600'"
-              @click="archiveSelection.mergeDate = archive.date"
-            >
-              <span class="text-sm font-semibold text-primary">{{ archive.date }}</span>
-              <span class="text-[11px] text-muted">
-                {{ archive.file_count || 0 }} 文件 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
-              </span>
-              <span
-                v-if="archive.matches_dataset"
-                class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+          <div class="flex-1">
+            <div v-if="archivesState.loading" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs text-muted">
+              存档加载中…
+            </div>
+            <p v-else-if="!archivesState.data.raw.length" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs leading-relaxed text-muted">
+              暂未找到原始数据存档，请先上传或刷新后重试。
+            </p>
+            <div v-else class="flex flex-wrap gap-2">
+              <button
+                v-for="archive in archivesState.data.raw"
+                :key="archive.date"
+                type="button"
+                class="group relative inline-flex min-w-0 flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                :class="archiveSelection.mergeDate === archive.date
+                  ? 'border-brand bg-brand-soft/50 text-brand-700 shadow-sm'
+                  : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:bg-brand-soft/30 hover:text-brand-600'"
+                @click="archiveSelection.mergeDate = archive.date"
               >
-                匹配当前数据集
-              </span>
-            </button>
+                <span class="break-words text-sm font-semibold text-primary">{{ archive.date }}</span>
+                <span class="text-xs leading-snug text-muted">
+                  {{ archive.file_count || 0 }} 文件 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
+                </span>
+                <span
+                  v-if="archive.matches_dataset"
+                  class="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+                >
+                  匹配当前数据集
+                </span>
+              </button>
+            </div>
           </div>
         </article>
-        <article class="space-y-3 rounded-3xl border border-dashed border-soft bg-white/80 p-5">
-          <header class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-muted">MERGE</p>
-              <h3 class="text-base font-semibold text-primary">Merge 输出存档</h3>
-              <p class="text-xs text-secondary">选择需要进行 Clean 的 Merge 存档。</p>
+
+        <!-- MERGE 输出存档 -->
+        <article class="card-surface flex flex-col space-y-4 p-5 shadow-sm transition hover:shadow-md">
+          <header class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1 space-y-1.5">
+              <p class="text-xs uppercase tracking-[0.2em] text-muted">MERGE</p>
+              <h3 class="text-base font-semibold leading-tight text-primary">Merge 输出存档</h3>
+              <p class="text-xs leading-relaxed text-secondary">选择需要进行 Clean 的 Merge 存档。</p>
             </div>
-            <span class="text-xs text-muted">
+            <span class="flex-shrink-0 whitespace-nowrap text-xs font-medium text-muted">
               {{ archivesState.data.merge.length ? `共 ${archivesState.data.merge.length} 份` : '暂无' }}
             </span>
           </header>
-          <div v-if="archivesState.loading" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
-            存档加载中…
-          </div>
-          <p v-else-if="!archivesState.data.merge.length" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
-            暂未找到 Merge 存档，请先执行 Merge。
-          </p>
-          <div v-else class="flex flex-wrap gap-2">
-            <button
-              v-for="archive in archivesState.data.merge"
-              :key="archive.date"
-              type="button"
-              class="inline-flex flex-col gap-1 rounded-2xl border px-3 py-2 text-left text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-              :class="archiveSelection.cleanDate === archive.date
-                ? 'border-brand-soft bg-brand-soft/70 text-brand-700 shadow-sm'
-                : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:text-brand-600'"
-              @click="archiveSelection.cleanDate = archive.date"
-            >
-              <span class="text-sm font-semibold text-primary">{{ archive.date }}</span>
-              <span class="text-[11px] text-muted">
-                {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
-              </span>
-            </button>
+          <div class="flex-1">
+            <div v-if="archivesState.loading" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs text-muted">
+              存档加载中…
+            </div>
+            <p v-else-if="!archivesState.data.merge.length" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs leading-relaxed text-muted">
+              暂未找到 Merge 存档，请先执行 Merge。
+            </p>
+            <div v-else class="flex flex-wrap gap-2">
+              <button
+                v-for="archive in archivesState.data.merge"
+                :key="archive.date"
+                type="button"
+                class="group relative inline-flex min-w-0 flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                :class="archiveSelection.cleanDate === archive.date
+                  ? 'border-brand bg-brand-soft/50 text-brand-700 shadow-sm'
+                  : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:bg-brand-soft/30 hover:text-brand-600'"
+                @click="archiveSelection.cleanDate = archive.date"
+              >
+                <span class="break-words text-sm font-semibold text-primary">{{ archive.date }}</span>
+                <span class="text-xs leading-snug text-muted">
+                  {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
+                </span>
+              </button>
+            </div>
           </div>
         </article>
-        <article class="space-y-3 rounded-3xl border border-dashed border-soft bg-white/80 p-5">
-          <header class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-muted">CLEAN</p>
-              <h3 class="text-base font-semibold text-primary">Clean 输出存档</h3>
-              <p class="text-xs text-secondary">供筛选步骤使用，当前页面仅展示概览。</p>
+
+        <!-- CLEAN 输出存档 -->
+        <article class="card-surface flex flex-col space-y-4 p-5 shadow-sm transition hover:shadow-md">
+          <header class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1 space-y-1.5">
+              <p class="text-xs uppercase tracking-[0.2em] text-muted">CLEAN</p>
+              <h3 class="text-base font-semibold leading-tight text-primary">Clean 输出存档</h3>
+              <p class="text-xs leading-relaxed text-secondary">供筛选步骤使用，当前页面仅展示概览。</p>
             </div>
-            <span class="text-xs text-muted">
+            <span class="flex-shrink-0 whitespace-nowrap text-xs font-medium text-muted">
               {{ archivesState.data.clean.length ? `共 ${archivesState.data.clean.length} 份` : '暂无' }}
             </span>
           </header>
-          <div v-if="archivesState.loading" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
-            存档加载中…
+          <div class="flex-1">
+            <div v-if="archivesState.loading" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs text-muted">
+              存档加载中…
+            </div>
+            <p v-else-if="!archivesState.data.clean.length" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs leading-relaxed text-muted">
+              暂未找到 Clean 存档。
+            </p>
+            <ul v-else class="space-y-2">
+              <li
+                v-for="archive in archivesState.data.clean"
+                :key="`clean-${archive.date}`"
+                class="rounded-xl border border-soft bg-surface px-3 py-2.5 transition hover:border-brand-soft hover:bg-brand-soft/20"
+              >
+                <p class="break-words text-sm font-semibold text-primary">{{ archive.date }}</p>
+                <p class="mt-1 text-xs leading-snug text-muted">
+                  {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
+                </p>
+              </li>
+            </ul>
           </div>
-          <p v-else-if="!archivesState.data.clean.length" class="rounded-2xl bg-surface-muted px-4 py-3 text-xs text-muted">
-            暂未找到 Clean 存档。
-          </p>
-          <ul v-else class="space-y-2 text-xs text-secondary">
-            <li
-              v-for="archive in archivesState.data.clean"
-              :key="`clean-${archive.date}`"
-              class="rounded-2xl border border-soft bg-surface px-3 py-2"
-            >
-              <p class="text-sm font-semibold text-primary">{{ archive.date }}</p>
-              <p class="text-[11px] text-muted">
-                {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
-              </p>
-            </li>
-          </ul>
         </article>
       </div>
     </section>

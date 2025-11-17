@@ -11,12 +11,15 @@
       </div>
     </header>
 
-    <section class="card-surface space-y-6 p-6">
+    <section class="card-surface space-y-6 p-6 lg:mx-auto lg:max-w-5xl xl:mx-0 xl:max-w-none">
       <header class="space-y-2">
         <h2 class="text-xl font-semibold text-primary">创建专题</h2>
         <p class="text-sm text-secondary">填写专题名称后创建记录，系统将用于跟踪后续流程。</p>
       </header>
-      <form class="grid gap-4 sm:grid-cols-[minmax(0,320px)] lg:grid-cols-[minmax(0,400px),1fr]" @submit.prevent="createTopic">
+      <form
+        class="grid gap-4 sm:grid-cols-[minmax(0,320px)] lg:grid-cols-[minmax(0,420px),minmax(0,340px)] xl:grid-cols-[minmax(0,3fr),minmax(0,2fr)]"
+        @submit.prevent="createTopic"
+      >
         <div class="space-y-4">
           <label class="space-y-1 text-sm">
             <span class="font-medium text-secondary">专题名称</span>
@@ -30,28 +33,15 @@
           </label>
           <label class="space-y-1 text-sm">
             <span class="font-medium text-secondary">专题说明（可选）</span>
-            <div
-              v-if="selectedTags.length"
-              class="flex flex-wrap items-center gap-2 rounded-2xl border border-soft bg-surface-muted px-3 py-2 text-xs text-secondary"
-            >
-              <span class="font-medium text-muted">标签：</span>
-              <span
-                v-for="tag in selectedTags"
-                :key="`prefix-${tag}`"
-                class="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-semibold text-brand-600"
-              >
-                #{{ tag }}
-              </span>
-            </div>
             <textarea
               v-model.trim="topicDescription"
               rows="3"
-              class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+              class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200 resize-none"
               :placeholder="selectedTags.length ? '补充专题背景、抓取渠道等信息，将自动附加在标签前缀之后。' : '补充专题背景、抓取渠道等信息。'"
             ></textarea>
           </label>
-          <div class="space-y-2 rounded-2xl border border-dashed border-brand-soft bg-surface-muted px-4 py-3 text-xs text-secondary">
-            <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-muted">
+          <div class="space-y-2 rounded-xl border border-dashed border-soft bg-surface px-3.5 py-3 text-xs text-secondary">
+            <div class="flex items-center gap-2 text-[13px] font-medium text-secondary">
               <TagIcon class="h-4 w-4 text-brand-500" />
               推荐标签
             </div>
@@ -70,31 +60,45 @@
                 <span>{{ tag }}</span>
               </button>
             </div>
-            <div v-if="selectedTags.length" class="space-y-1 rounded-2xl bg-white/80 px-3 py-2 text-xs text-secondary">
+            <div v-if="selectedTags.length" class="space-y-1 rounded-xl bg-surface px-3 py-2 text-xs text-secondary">
               <p class="font-semibold text-primary">已选标签</p>
               <p class="text-muted">{{ selectedTags.join(' · ') }}</p>
             </div>
           </div>
-          <button
-            type="submit"
-            class="btn-base btn-tone-primary w-full gap-2 px-5 py-2"
-            :disabled="creating || !topicName"
-          >
-            <span v-if="creating">创建中…</span>
-            <span v-else>创建专题</span>
-          </button>
+          <div class="flex items-center justify-end pt-2">
+            <button
+              type="submit"
+              class="btn-base btn-tone-primary inline-flex items-center gap-2 px-5 py-2"
+              :disabled="creating || !topicName"
+            >
+              <span v-if="creating">创建中…</span>
+              <span v-else>创建专题</span>
+            </button>
+          </div>
         </div>
-        <aside class="rounded-2xl border border-dashed border-brand-soft/70 bg-surface-muted/60 p-3 text-xs leading-relaxed text-secondary">
-          <h3 class="text-[11px] font-semibold uppercase tracking-widest text-muted mb-2">提示</h3>
-          <ul class="space-y-1.5 text-xs">
+        <aside
+          class="rounded-xl border border-soft bg-surface px-4 py-3 text-xs leading-relaxed text-secondary lg:max-w-sm xl:max-w-none"
+        >
+          <h3 class="mb-2 text-xs font-medium text-secondary">填写说明</h3>
+          <ul class="list-disc list-inside space-y-1.5 text-xs text-muted">
             <li>专题名称将作为后续 API 调用的参数，建议使用字母、数字与短横线组合。</li>
             <li>可先创建专题再上传数据，也可直接上传，系统会在需要时自动创建专题。</li>
             <li>描述信息用于团队协作记录，可随时在设置中更新。</li>
           </ul>
         </aside>
       </form>
-      <p v-if="createError" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">{{ createError }}</p>
-      <p v-if="createSuccess" class="rounded-2xl bg-emerald-100 px-4 py-2 text-sm text-emerald-600">{{ createSuccess }}</p>
+      <p
+        v-if="createError"
+        class="mt-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-600"
+      >
+        {{ createError }}
+      </p>
+      <p
+        v-if="createSuccess"
+        class="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2 text-xs text-emerald-600"
+      >
+        {{ createSuccess }}
+      </p>
     </section>
 
     <section class="card-surface space-y-6 p-6">

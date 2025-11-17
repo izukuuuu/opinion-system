@@ -4,43 +4,53 @@ import { useApiBase } from './useApiBase'
 const analysisFunctions = [
   {
     id: 'attitude',
-    label: '情感分析 attitude',
+    label: '情感分析',
     description: '统计 Positive / Negative / Neutral 的占比。'
   },
   {
     id: 'classification',
-    label: '话题分类 classification',
+    label: '话题分类',
     description: '基于 classification 字段的数量分布。'
   },
   {
     id: 'geography',
-    label: '地域分析 geography',
+    label: '地域分析',
     description: '按地域字段统计声量，适合地图或水平条形图。'
   },
   {
     id: 'keywords',
-    label: '关键词分析 keywords',
+    label: '关键词分析',
     description: '从正文中提取高频关键词并统计词频。'
   },
   {
     id: 'publishers',
-    label: '发布者分析 publishers',
+    label: '发布者分析',
     description: '统计 author 列中高频的媒体/账号。'
   },
   {
     id: 'trends',
-    label: '趋势分析 trends',
+    label: '趋势洞察',
     description: '按日期统计声量趋势。'
   },
   {
     id: 'volume',
-    label: '声量分析 volume',
+    label: '声量概览',
     description: '按渠道统计 JSONL 行数，评估声量占比。'
   }
 ]
 
 const HORIZONTAL_BAR_FUNCTIONS = ['geography', 'publishers', 'keywords', 'classification']
 const MAX_HISTORY = 12
+
+const sanitizeLabel = (label) => {
+  if (!label) return ''
+  const match = String(label).match(/^[\u4e00-\u9fa5·\s]+/)
+  if (match) {
+    const value = match[0].trim()
+    if (value) return value
+  }
+  return String(label).trim()
+}
 
 const { callApi } = useApiBase()
 
@@ -123,15 +133,19 @@ const analysisSections = computed(() => {
       label: func.name,
       description: ''
     }
+    const displayLabel = sanitizeLabel(meta.label) || meta.label || func.name
     const targets = func.targets.map((target) => {
       const rows = extractRows(target.data)
       const hasCustomOption = Boolean(target.data?.echarts)
       const shouldSortDescending = !hasCustomOption && HORIZONTAL_BAR_FUNCTIONS.includes(func.name)
       const displayRows = shouldSortDescending ? sortRowsDescending(rows) : rows
+      const targetTitle = `${displayLabel} · ${target.target}`
+      const targetSubtitle =
+        target.target === '总体' ? '自动生成的分析图表' : `${target.target} 渠道自动分析`
       return {
         target: target.target,
-        title: `${meta.label} · ${target.target}`,
-        subtitle: `结果文件：${target.file}`,
+        title: targetTitle,
+        subtitle: targetSubtitle,
         option: target.data?.echarts || buildFallbackOption(func.name, displayRows, target.target),
         hasData: rows.length > 0,
         rows: displayRows.slice(0, 12),
@@ -403,12 +417,29 @@ const resetFetchForm = () => {
   }
 }
 
+const currentTimeString = () => new Date().toLocaleTimeString()
+
 const appendLog = (collection, payload) => {
-  const now = new Date().toLocaleTimeString()
-  collection.value = [
-    { id: `${payload.label}-${Date.now()}`, time: now, ...payload },
-    ...collection.value
-  ].slice(0, 8)
+  const entry = {
+    id: payload.id || `${payload.label || 'log'}-${Date.now()}`,
+    time: payload.time || currentTimeString(),
+    status: payload.status || 'pending',
+    ...payload
+  }
+  collection.value = [entry, ...collection.value].slice(0, 8)
+  return entry.id
+}
+
+const updateLogEntry = (collection, id, patch = {}) => {
+  if (!id) return
+  collection.value = collection.value.map((entry) => {
+    if (entry.id !== id) return entry
+    return {
+      ...entry,
+      ...patch,
+      time: patch.time || entry.time
+    }
+  })
 }
 
 const normalizeRange = (form) => {
@@ -546,7 +577,19 @@ const invokeAnalyze = async (functions) => {
   let hasSuccess = false
   try {
     for (const func of functions) {
+      const meta = analysisFunctions.find((item) => item.id === func)
+      const label = meta?.label || func
+      const logId = appendLog(analyzeLogs, {
+        label,
+        message: '排队中，等待执行…',
+        status: 'queued'
+      })
       try {
+        updateLogEntry(analyzeLogs, logId, {
+          status: 'running',
+          message: '正在运行…',
+          time: currentTimeString()
+        })
         await callApi('/api/analyze', {
           method: 'POST',
           body: JSON.stringify({
@@ -556,18 +599,17 @@ const invokeAnalyze = async (functions) => {
             function: func
           })
         })
-        const meta = analysisFunctions.find((item) => item.id === func)
-        appendLog(analyzeLogs, {
-          label: meta?.label || func,
-          message: '运行成功，结果已写入 analyze 目录',
-          status: 'ok'
+        updateLogEntry(analyzeLogs, logId, {
+          status: 'ok',
+          message: '分析完成，可前往“查看分析”刷新结果。',
+          time: currentTimeString()
         })
         hasSuccess = true
       } catch (error) {
-        appendLog(analyzeLogs, {
-          label: func,
+        updateLogEntry(analyzeLogs, logId, {
           message: error instanceof Error ? error.message : String(error),
-          status: 'error'
+          status: 'error',
+          time: currentTimeString()
         })
       }
     }

@@ -201,6 +201,7 @@ import {
   CloudArrowDownIcon,
   Cog6ToothIcon,
   DocumentArrowUpIcon,
+  DocumentTextIcon,
   ArrowsRightLeftIcon,
   PresentationChartLineIcon,
   Squares2X2Icon,
@@ -290,6 +291,12 @@ const navigationGroups = [
           'project-data-analysis-view'
         ],
         icon: PresentationChartLineIcon
+      },
+      {
+        label: '内容分析',
+        description: '配置内容编码提示词',
+        to: { name: 'content-analysis-prompt' },
+        icon: DocumentTextIcon
       },
       {
         label: '智能解读',

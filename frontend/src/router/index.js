@@ -11,6 +11,7 @@ import ProjectBasicAnalysisLayout from '../views/analysis/basic/ProjectBasicAnal
 import ProjectBasicAnalysisOverview from '../views/analysis/basic/ProjectBasicAnalysisOverview.vue'
 import ProjectBasicAnalysisRun from '../views/analysis/basic/ProjectBasicAnalysisRun.vue'
 import ProjectBasicAnalysisResults from '../views/analysis/basic/ProjectBasicAnalysisResults.vue'
+import ContentAnalysisPrompt from '../views/analysis/content/ContentAnalysisPrompt.vue'
 import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
 import DatabaseDatasetsView from '../views/DatabaseDatasetsView.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
@@ -118,10 +119,19 @@ export const routes = [
         component: ProjectBasicAnalysisResults,
         meta: {
           title: '基础分析 · 查看分析',
-          breadcrumb: '查看分析'
+        breadcrumb: '查看分析'
         }
       }
     ]
+  },
+  {
+    path: '/analysis/content',
+    name: 'content-analysis-prompt',
+    component: ContentAnalysisPrompt,
+    meta: {
+      title: '内容分析 · 提示词配置',
+      breadcrumb: '内容分析'
+    }
   },
   {
     path: '/analysis/interpretation',

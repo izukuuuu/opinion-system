@@ -57,9 +57,10 @@ def analyze_geography_overall(df: pd.DataFrame, logger=None) -> Dict[str, Any]:
     try:
         # 统计地域分布
         region_counts = _count_regions(df)
+        sorted_counts = sorted(region_counts.items(), key=lambda item: item[1], reverse=True)
 
         # 转换为JSON格式
-        region_data = [{"name": k, "value": v} for k, v in region_counts.items()]
+        region_data = [{"name": k, "value": v} for k, v in sorted_counts]
 
         result = {
             "data": region_data
@@ -98,9 +99,10 @@ def analyze_geography_by_channel(df: pd.DataFrame, channel_name: str, logger=Non
     try:
         # 统计地域分布
         region_counts = _count_regions(df)
+        sorted_counts = sorted(region_counts.items(), key=lambda item: item[1], reverse=True)
 
         # 转换为JSON格式
-        region_data = [{"name": k, "value": v} for k, v in region_counts.items()]
+        region_data = [{"name": k, "value": v} for k, v in sorted_counts]
 
         result = {
             "data": region_data

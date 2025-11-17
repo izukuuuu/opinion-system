@@ -58,13 +58,32 @@
               v-for="record in analysisHistory"
               :key="record.id"
               type="button"
-              class="flex flex-col gap-1 rounded-2xl border px-4 py-3 text-left transition"
-              :class="record.id === selectedHistoryId ? 'border-brand-soft bg-brand-soft/60 text-brand-700 shadow-sm' : 'border-soft text-secondary hover:border-brand-soft hover:bg-surface-muted'"
+              class="flex flex-col gap-1 rounded-2xl border px-4 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-soft/80"
+              :class="
+                record.id === selectedHistoryId
+                  ? 'border-transparent bg-brand-soft/80 text-brand-700 shadow-sm ring-1 ring-brand-soft/80'
+                  : 'border-soft text-secondary hover:border-brand-soft hover:bg-surface-muted'
+              "
               @click="selectHistory(record.id)"
             >
-              <span class="text-sm font-semibold text-primary">{{ record.start }} → {{ record.end }}</span>
-              <span class="text-xs text-muted">最新刷新：{{ record.updated_at || '未知' }}</span>
-              <span class="text-xs text-muted">存档目录：{{ record.folder || record.id }}</span>
+              <span
+                class="text-sm font-semibold"
+                :class="record.id === selectedHistoryId ? 'text-brand-700' : 'text-primary'"
+              >
+                {{ record.start }} → {{ record.end }}
+              </span>
+              <span
+                class="text-xs"
+                :class="record.id === selectedHistoryId ? 'text-brand-700/80' : 'text-muted'"
+              >
+                最新刷新：{{ record.updated_at || '未知' }}
+              </span>
+              <span
+                class="text-xs"
+                :class="record.id === selectedHistoryId ? 'text-brand-700/80' : 'text-muted'"
+              >
+                存档目录：{{ record.folder || record.id }}
+              </span>
             </button>
           </div>
           <p v-else class="text-xs text-muted">当前专题暂无分析存档，请先前往“运行分析”执行一次 Analyze。</p>
@@ -96,21 +115,55 @@
       </div>
     </section>
 
-    <section class="card-surface space-y-4 p-6">
-      <header class="flex flex-col gap-2">
-        <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Summary</p>
-        <template v-if="analysisSummary">
-          <h2 class="text-2xl font-semibold text-primary">
-            专题「{{ analysisSummary.topic }}」 · {{ analysisSummary.range.start }} → {{ analysisSummary.range.end }}
-          </h2>
-          <p class="text-sm text-secondary">共 {{ analysisSummary.functionCount }} 个分析结果，见下方列表。</p>
-        </template>
-        <template v-else>
-          <h2 class="text-2xl font-semibold text-primary">暂无可用结果</h2>
-          <p class="text-sm text-secondary">还未读取任何分析 JSON，请先选择历史记录或手动查询。</p>
-        </template>
-        <p class="text-xs text-muted">最近刷新：{{ lastLoaded || '尚未读取' }}</p>
-      </header>
+    <section class="card-surface space-y-6 p-6">
+      <template v-if="analysisSummary">
+        <dl class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div class="rounded-2xl border border-soft bg-surface-muted/40 p-5 shadow-sm transition hover:border-brand-soft">
+            <div class="flex flex-col gap-3">
+              <span class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                <BookmarkSquareIcon class="h-5 w-5" />
+              </span>
+              <div class="space-y-1">
+                <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">专题</dt>
+                <dd class="text-lg font-semibold leading-tight text-primary break-words md:text-xl md:break-normal">
+                  {{ analysisSummary.topic }}
+                </dd>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-2xl border border-soft bg-surface-muted/40 p-5 shadow-sm transition hover:border-brand-soft">
+            <div class="flex flex-col gap-3">
+              <span class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                <CalendarDaysIcon class="h-5 w-5" />
+              </span>
+              <div class="space-y-1">
+                <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">分析区间</dt>
+                <dd class="text-lg font-semibold leading-tight text-primary break-words md:text-xl md:flex md:flex-wrap md:items-center md:gap-2">
+                  <span class="block md:inline">{{ analysisSummary.range?.start || '未提供' }}</span>
+                  <span class="block text-muted md:inline">→</span>
+                  <span class="block md:inline">{{ analysisSummary.range?.end || '未提供' }}</span>
+                </dd>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-2xl border border-soft bg-surface-muted/40 p-5 shadow-sm transition hover:border-brand-soft">
+            <div class="flex flex-col gap-3">
+              <span class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                <Squares2X2Icon class="h-5 w-5" />
+              </span>
+              <div class="space-y-1">
+                <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">分析模块</dt>
+                <dd class="text-lg font-semibold leading-tight text-primary md:text-xl">{{ analysisSummary.functionCount }}</dd>
+              </div>
+            </div>
+          </div>
+        </dl>
+      </template>
+      <template v-else>
+        <div class="rounded-2xl border border-dashed border-soft bg-surface-muted/40 p-5 text-sm text-secondary">
+          还未读取任何分析 JSON，请先完成专题选择或手动查询。
+        </div>
+      </template>
     </section>
 
     <section
@@ -122,12 +175,12 @@
         <p class="text-sm text-secondary">点击模块卡片即可在下方查看对应图表。</p>
       </header>
       <div v-if="analysisSections.length" class="space-y-5">
-        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        <div class="flex flex-wrap gap-2">
           <button
             v-for="section in analysisSections"
             :key="section.name"
             type="button"
-            class="flex flex-col gap-2 rounded-2xl border px-4 py-3 text-left transition"
+            class="inline-flex flex-none items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition sm:text-[13px]"
             :class="
               section.name === activeSectionName
                 ? 'border-transparent bg-brand-soft/70 text-brand-700 shadow-sm ring-1 ring-brand-soft/80'
@@ -136,12 +189,12 @@
             @click="setActiveSection(section.name)"
           >
             <span
-              class="flex h-9 w-9 items-center justify-center rounded-full"
+              class="flex h-6 w-6 items-center justify-center rounded-full"
               :class="section.name === activeSectionName ? 'bg-brand-600/10 text-brand-600' : 'bg-surface-muted text-muted'"
             >
-              <component :is="getSectionIcon(section.name)" class="h-5 w-5" />
+              <component :is="getSectionIcon(section.name)" class="h-4 w-4" />
             </span>
-            <span class="text-sm font-semibold text-primary">{{ getChineseTitle(section.label) }}</span>
+            <span class="text-primary">{{ getChineseTitle(section.label) }}</span>
           </button>
         </div>
         <div v-if="activeSection" class="space-y-4 border-t border-soft pt-4">
@@ -201,10 +254,13 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   ArrowPathIcon,
+  BookmarkSquareIcon,
+  CalendarDaysIcon,
   ChartBarIcon,
   ChartPieIcon,
   GlobeAltIcon,
   HashtagIcon,
+  Squares2X2Icon,
   MegaphoneIcon,
   UsersIcon
 } from '@heroicons/vue/24/outline'

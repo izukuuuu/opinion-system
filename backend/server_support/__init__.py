@@ -33,10 +33,16 @@ from .filter_templates import (
     load_filter_template_config,
     persist_filter_template_config,
 )
+from .content_analysis_prompts import (
+    content_prompt_path,
+    load_content_prompt_config,
+    persist_content_prompt_config,
+)
 from .paths import (
     BACKEND_DIR,
     CONFIG_PATH,
     DATA_PROJECTS_ROOT,
+    CONTENT_PROMPT_DIR,
     FILTER_PROMPT_DIR,
     FILTER_PROGRESS_DIR,
     FILTER_SUMMARY_FILENAME,
@@ -69,6 +75,10 @@ __all__ = [
     "persist_databases_config",
     "persist_llm_config",
     "reload_settings",
+    # Content analysis prompt helpers
+    "content_prompt_path",
+    "load_content_prompt_config",
+    "persist_content_prompt_config",
     # Dataset helpers
     "ensure_raw_dataset_availability",
     "iter_unique_strings",
@@ -88,6 +98,7 @@ __all__ = [
     "BACKEND_DIR",
     "CONFIG_PATH",
     "DATA_PROJECTS_ROOT",
+    "CONTENT_PROMPT_DIR",
     "FILTER_PROMPT_DIR",
     "FILTER_PROGRESS_DIR",
     "FILTER_SUMMARY_FILENAME",

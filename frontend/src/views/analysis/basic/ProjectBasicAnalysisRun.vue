@@ -13,13 +13,28 @@
         <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Step 1</p>
         <h2 class="text-2xl font-semibold text-primary">拉取远程数据</h2>
         <p class="text-sm text-secondary">
-          选择专题与时间区间后触发 Fetch 接口，把远程数据库的数据同步到本地分析目录。
+          选择专题与时间区间后，系统会为你准备好对应的原始数据，用于后续分析。
         </p>
       </header>
+
       <form class="space-y-5 text-sm" @submit.prevent="runFetch">
         <div class="grid gap-4 md:grid-cols-3">
-          <label class="space-y-2 text-secondary">
-            <span class="text-xs font-semibold text-muted">专题 Topic *</span>
+          <label class="space-y-2 text-secondary md:col-span-3">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-semibold text-muted">专题 Topic *</span>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
+                :disabled="topicsState.loading"
+                @click="loadTopics"
+              >
+                <ArrowPathIcon
+                  class="h-3 w-3"
+                  :class="topicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
+                />
+                <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
+              </button>
+            </div>
             <select
               v-model="fetchForm.topic"
               class="input"
@@ -38,10 +53,12 @@
           <label class="space-y-2 text-secondary">
             <span class="text-xs font-semibold text-muted">开始日期 Start *</span>
             <input v-model="fetchForm.start" type="date" class="input" required />
+            <p class="text-xs text-muted">选择数据范围的起始日期（包含当天）。</p>
           </label>
           <label class="space-y-2 text-secondary">
             <span class="text-xs font-semibold text-muted">结束日期 End *</span>
             <input v-model="fetchForm.end" type="date" class="input" required />
+            <p class="text-xs text-muted">选择数据范围的结束日期（包含当天）。</p>
           </label>
         </div>
         <p
@@ -49,40 +66,35 @@
           :class="availableRange.error ? 'text-danger' : 'text-muted'"
         >
           <template v-if="!fetchForm.topic">
-            请选择远程专题以查看可用日期区间。
+            请选择专题以查看可用日期范围。
           </template>
           <template v-else-if="availableRange.loading">
-            正在查询该专题的可用日期区间…
+            正在查询该专题的可用日期范围…
           </template>
           <template v-else-if="availableRange.error">
-            无法获取可用日期：{{ availableRange.error }}
+            当前无法获取可用日期：{{ availableRange.error }}
           </template>
           <template v-else-if="availableRange.start && availableRange.end">
-            可用数据区间：{{ availableRange.start }} → {{ availableRange.end }}
+            当前可用数据时间：{{ availableRange.start }} → {{ availableRange.end }}
           </template>
           <template v-else>
-            当前专题暂无 published_at 日期，可能尚未写入远程数据。
+            当前专题暂未检测到可用时间范围，请确认数据是否已经准备完成。
           </template>
         </p>
-        <div class="flex flex-wrap items-center justify-end gap-2 rounded-xl border border-dashed border-primary/20 bg-primary/5 p-4 text-sm">
-          <button
-            type="button"
-            class="btn-secondary flex items-center gap-2"
-            :disabled="topicsState.loading"
-            @click="loadTopics"
-          >
-            <ArrowPathIcon
-              class="h-4 w-4"
-              :class="topicsState.loading ? 'animate-spin text-primary' : 'text-primary'"
-            />
-            <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
-          </button>
-          <button type="button" class="btn-ghost" :disabled="fetchState.loading" @click="resetFetchForm">
-            重置
-          </button>
-          <button type="submit" class="btn-primary" :disabled="fetchState.loading">
-            {{ fetchState.loading ? '提取中…' : '执行 Fetch' }}
-          </button>
+        <div
+          class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-soft bg-surface-muted px-4 py-3 text-xs md:text-sm"
+        >
+          <span class="text-[11px] text-muted md:text-xs">
+            本次拉取会更新当前专题在选定时间内的数据，请确认时间范围设置正确。
+          </span>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" class="btn-ghost" :disabled="fetchState.loading" @click="resetFetchForm">
+              重置
+            </button>
+            <button type="submit" class="btn-primary" :disabled="fetchState.loading">
+              {{ fetchState.loading ? '处理中…' : '开始拉取' }}
+            </button>
+          </div>
         </div>
       </form>
       <AnalysisLogList :logs="fetchLogs" empty-label="暂无提取记录。" />
@@ -135,19 +147,25 @@
         </div>
       </form>
 
-      <div class="grid gap-4 md:grid-cols-2">
-        <article
-          v-for="func in analysisFunctions"
-          :key="func.id"
-          class="rounded-2xl border border-soft bg-surface p-4"
-        >
-          <div class="flex items-start justify-between gap-4">
-            <label class="flex flex-col gap-1 text-sm">
+      <div class="rounded-2xl border border-soft bg-surface p-4">
+        <div class="mb-3 flex items-center justify-between gap-3 text-xs text-muted">
+          <span>在下方勾选需要的分析项，系统会在相同专题与时间范围内统一处理。</span>
+          <span class="hidden whitespace-nowrap md:inline">
+            已选 {{ selectedFunctions.length }} / {{ analysisFunctions.length }}
+          </span>
+        </div>
+        <div class="grid gap-3 md:grid-cols-2">
+          <article
+            v-for="func in analysisFunctions"
+            :key="func.id"
+            class="group flex items-start justify-between gap-4 rounded-xl border border-soft bg-surface-muted/60 px-4 py-3 transition hover:border-brand-soft hover:bg-surface-muted"
+          >
+            <label class="flex flex-1 cursor-pointer flex-col gap-1 text-sm">
               <span class="flex items-center gap-2 text-primary">
                 <input
                   type="checkbox"
                   :value="func.id"
-                  class="rounded border-soft"
+                  class="h-4 w-4 rounded border-soft text-brand-600 focus:ring-brand-500"
                   v-model="selectedFunctions"
                   :disabled="analyzeState.running"
                 />
@@ -157,17 +175,17 @@
             </label>
             <button
               type="button"
-              class="btn-secondary px-3 py-1 text-xs"
+              class="btn-ghost px-3 py-1 text-xs text-brand-600 group-hover:bg-brand-soft/20"
               :disabled="analyzeState.running"
               @click="runSingleFunction(func.id)"
             >
               单独运行
             </button>
-          </div>
-        </article>
+          </article>
+        </div>
       </div>
 
-      <AnalysisLogList :logs="analyzeLogs" empty-label="暂无 Analyze 调度记录。" />
+      <AnalysisLogList :logs="analyzeLogs" empty-label="暂无分析调度记录。" />
     </section>
   </div>
 </template>

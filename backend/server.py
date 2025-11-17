@@ -42,6 +42,7 @@ from server_support import (  # type: ignore
     evaluate_success,
     filter_ai_overview,
     load_config,
+    load_content_prompt_config,
     load_databases_config,
     load_filter_template_config,
     load_llm_config,
@@ -49,6 +50,7 @@ from server_support import (  # type: ignore
     parse_column_mapping_from_form,
     parse_column_mapping_payload,
     persist_databases_config,
+    persist_content_prompt_config,
     persist_filter_template_config,
     persist_llm_config,
     prepare_pipeline_args,
@@ -674,6 +676,65 @@ def upsert_filter_template():
     template_override = payload.get("template")
     try:
         data = persist_filter_template_config(topic_identifier, theme, categories, template_override)
+    except ValueError as exc:
+        return error(str(exc))
+
+    return success({"data": data})
+
+
+@app.get("/api/content/prompt")
+def get_content_prompt():
+    topic_param = str(request.args.get("topic", "") or "").strip()
+    project_param = str(request.args.get("project", "") or "").strip()
+
+    if not topic_param and not project_param:
+        return error("Missing required field(s): topic or project")
+
+    resolution_payload: Dict[str, Any] = {}
+    if topic_param:
+        resolution_payload["topic"] = topic_param
+    if project_param:
+        resolution_payload["project"] = project_param
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return error(str(exc))
+
+    try:
+        data = load_content_prompt_config(topic_identifier)
+    except ValueError as exc:
+        return error(str(exc))
+
+    return success({"data": data})
+
+
+@app.post("/api/content/prompt")
+def upsert_content_prompt():
+    payload = request.get_json(silent=True) or {}
+    topic_param = str(payload.get("topic") or payload.get("project") or "").strip()
+    project_param = str(payload.get("project") or "").strip()
+    system_prompt = str(payload.get("system_prompt") or "").strip()
+    analysis_prompt = str(payload.get("analysis_prompt") or "").strip()
+
+    if not topic_param:
+        return error("Missing required field(s): topic")
+    if not system_prompt and not analysis_prompt:
+        return error("Missing required field(s): system_prompt or analysis_prompt")
+
+    resolution_payload: Dict[str, Any] = {"topic": topic_param}
+    if project_param:
+        resolution_payload["project"] = project_param
+    if payload.get("dataset_id"):
+        resolution_payload["dataset_id"] = payload.get("dataset_id")
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return error(str(exc))
+
+    try:
+        data = persist_content_prompt_config(topic_identifier, system_prompt, analysis_prompt)
     except ValueError as exc:
         return error(str(exc))
 
