@@ -33,6 +33,7 @@ from .paths import FILTER_PROGRESS_DIR, FILTER_SUMMARY_FILENAME
 
 _RECENT_RECORD_LIMIT = 40
 _IRRELEVANT_SAMPLE_LIMIT = 10
+_RELEVANT_SAMPLE_LIMIT = 10
 
 
 def count_jsonl_rows(path: Path) -> int:
@@ -69,6 +70,9 @@ def load_filter_summary_data(topic: str, date: str) -> Dict[str, Any]:
         "kept_rows": int(payload.get("kept_rows") or 0),
         "discarded_rows": int(payload.get("discarded_rows") or 0),
         "token_usage": int(payload.get("token_usage") or 0),
+        "relevant_samples": payload.get("relevant_samples")
+        if isinstance(payload.get("relevant_samples"), list)
+        else [],
         "irrelevant_samples": payload.get("irrelevant_samples")
         if isinstance(payload.get("irrelevant_samples"), list)
         else [],
@@ -154,6 +158,7 @@ def collect_filter_status(topic: str, date: str) -> Dict[str, Any]:
 
     combined_recent.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
     recent_records = combined_recent[:_RECENT_RECORD_LIMIT]
+    relevant_samples = (summary.get("relevant_samples") or [])[:_RELEVANT_SAMPLE_LIMIT]
     irrelevant_samples = (summary.get("irrelevant_samples") or [])[:_IRRELEVANT_SAMPLE_LIMIT]
 
     token_usage = int(summary.get("token_usage") or 0)
@@ -177,6 +182,7 @@ def collect_filter_status(topic: str, date: str) -> Dict[str, Any]:
         "recent_records": recent_records,
         "summary": summary,
         "progress": progress_overview,
+        "relevant_samples": relevant_samples,
         "irrelevant_samples": irrelevant_samples,
     }
 

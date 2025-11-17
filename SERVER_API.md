@@ -152,7 +152,7 @@
 ### 筛选配置与状态
 - `GET /api/filter/template`：读取指定专题的筛选模板，支持 `topic` 或 `project` 参数。
 - `POST /api/filter/template`：创建或更新筛选模板，请求体包含 `project/topic_theme/categories`。
-- `GET /api/filter/status`：查看筛选执行进度、汇总统计及无关样本，需要 `topic/project` 与 `date` 参数。
+- `GET /api/filter/status`：查看筛选执行进度、汇总统计及保留/无关样本摘要，需要 `topic/project` 与 `date` 参数。
 
 ---
 

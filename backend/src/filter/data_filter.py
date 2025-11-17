@@ -58,6 +58,7 @@ def _load_progress(topic: str, date: str, channel: str) -> Dict[str, Any]:
         "results": [],
         "recent_records": [],
         "irrelevant_samples": [],
+        "relevant_samples": [],
         "token_usage": 0,
         "updated_at": _current_timestamp(),
     }
@@ -336,6 +337,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
     summary_total_rows = 0
     summary_kept_rows = 0
     aggregated_irrelevant_samples: List[Dict[str, Any]] = []
+    aggregated_relevant_samples: List[Dict[str, Any]] = []
 
     # QPS控制
     last_request_time = time.time()
@@ -520,6 +522,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                     batch_responses: List[Optional[str]] = []
                     batch_records: List[Dict[str, Any]] = []
                     batch_irrelevant: List[Dict[str, Any]] = []
+                    batch_relevant: List[Dict[str, Any]] = []
                     for (idx, response, tokens, success), original_idx in zip(
                         current_batch_results, batch_indices
                     ):
@@ -582,6 +585,15 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                         }
                         batch_records.append(record)
 
+                        if status == "kept" and len(aggregated_relevant_samples) < 20:
+                            sample = {
+                                "channel": channel,
+                                "index": index_value,
+                                "title": record["title"],
+                                "preview": record["preview"],
+                            }
+                            aggregated_relevant_samples.append(sample)
+                            batch_relevant.append(sample)
                         if status == "discarded" and len(aggregated_irrelevant_samples) < 20:
                             sample = {
                                 "channel": channel,
@@ -598,6 +610,9 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                     progress["completed_count"] = len(completed_indices)
                     progress["failed_count"] = len(failed_indices)
                     progress["recent_records"] = (batch_records + recent_records)[:50]
+                    if batch_relevant:
+                        existing_relevant = progress.get("relevant_samples", [])
+                        progress["relevant_samples"] = (batch_relevant + existing_relevant)[:20]
                     if batch_irrelevant:
                         existing_irrelevant = progress.get("irrelevant_samples", [])
                         progress["irrelevant_samples"] = (batch_irrelevant + existing_irrelevant)[:20]
@@ -614,6 +629,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                             "total_rows": summary_total_rows,
                             "kept_rows": summary_kept_rows,
                             "discarded_rows": max(summary_total_rows - summary_kept_rows, 0),
+                            "relevant_samples": aggregated_relevant_samples[:20],
                             "irrelevant_samples": aggregated_irrelevant_samples[:20],
                             "token_usage": total_tokens,
                             "completed": False,
@@ -707,6 +723,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
         "total_rows": summary_total_rows,
         "kept_rows": summary_kept_rows,
         "discarded_rows": max(summary_total_rows - summary_kept_rows, 0),
+        "relevant_samples": aggregated_relevant_samples[:20],
         "irrelevant_samples": aggregated_irrelevant_samples[:20],
         "token_usage": total_tokens,
         "completed": all_channels_fully_completed,
