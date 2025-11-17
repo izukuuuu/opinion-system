@@ -10,7 +10,6 @@ from typing import Dict, List, Any, Tuple
 from ...utils.logging.logging import setup_logger, log_success, log_error, log_module_start
 from ...utils.setting.paths import bucket
 from ...utils.io.excel import read_excel, read_csv
-from .echarts_common import build_bar_option
 
 # 导入jieba分词
 try:
@@ -158,14 +157,6 @@ def _analyze_keywords(df: pd.DataFrame, topic: str, channel_name: str, logger=No
         data = [{"name": word, "value": count} for word, count in top_keywords]
         
         result = {"data": data}
-        if data:
-            result["echarts"] = build_bar_option(
-                title=f"关键词 TOP20 · {channel_name}",
-                data=data,
-                orientation="horizontal",
-                category_label="关键词",
-                value_label="词频",
-            )
         
         log_success(logger, f"keywords | {channel_name} 分析完成", "Analyze")
         return result

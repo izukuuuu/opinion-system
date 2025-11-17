@@ -4,7 +4,6 @@
 import pandas as pd
 from typing import Dict, List, Any
 from ...utils.logging.logging import setup_logger, log_success, log_error, log_module_start
-from .echarts_common import build_bar_option
 
 def _detect_region_col(df: pd.DataFrame) -> str:
     """
@@ -65,14 +64,6 @@ def analyze_geography_overall(df: pd.DataFrame, logger=None) -> Dict[str, Any]:
         result = {
             "data": region_data
         }
-        if region_data:
-            result["echarts"] = build_bar_option(
-                title="地域分布 · 总体",
-                data=region_data,
-                orientation="horizontal",
-                category_label="地域",
-                value_label="声量",
-            )
 
         log_success(logger, "geography | 总体 分析完成", "Analyze")
         return result
@@ -107,14 +98,6 @@ def analyze_geography_by_channel(df: pd.DataFrame, channel_name: str, logger=Non
         result = {
             "data": region_data
         }
-        if region_data:
-            result["echarts"] = build_bar_option(
-                title=f"地域分布 · {channel_name}",
-                data=region_data,
-                orientation="horizontal",
-                category_label="地域",
-                value_label="声量",
-            )
 
         log_success(logger, f"geography | {channel_name} 分析完成", "Analyze")
         return result
