@@ -1,14 +1,17 @@
 """
 分析运行器模块
 """
+import asyncio
 import json
+from datetime import datetime, timezone
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from ..utils.setting.paths import bucket
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_save_success, log_skip
 from ..utils.setting.settings import settings
 from ..utils.io.excel import read_jsonl
+from ..utils.ai import get_qwen_client
 from .functions.volume import analyze_volume_overall, analyze_volume_by_channel
 from .functions.attitude import analyze_attitude_overall, analyze_attitude_by_channel
 from .functions.trends import analyze_trends_overall, analyze_trends_by_channel
@@ -16,6 +19,180 @@ from .functions.geography import analyze_geography_overall, analyze_geography_by
 from .functions.publishers import analyze_publishers_overall, analyze_publishers_by_channel
 from .functions.keywords import analyze_keywords_overall, analyze_keywords_by_channel
 from .functions.classification import analyze_classification_overall, analyze_classification_by_channel
+
+
+FUNCTION_LABELS = {
+    'volume': '声量概览',
+    'attitude': '情感分析',
+    'trends': '趋势洞察',
+    'keywords': '关键词分析',
+    'geography': '地域分析',
+    'publishers': '发布者分析',
+    'classification': '话题分类',
+}
+
+SUMMARY_FILENAME = "summary.txt"
+AI_SUMMARY_FILENAME = "ai_summary.json"
+MAX_SNAPSHOT_ROWS = 5
+
+_AI_CLIENT: Optional[Any] = None
+_AI_CLIENT_ERROR = False
+
+
+def _get_ai_client(logger) -> Optional[Any]:
+    global _AI_CLIENT, _AI_CLIENT_ERROR
+    if _AI_CLIENT_ERROR:
+        return None
+    if _AI_CLIENT is not None:
+        return _AI_CLIENT
+    try:
+        _AI_CLIENT = get_qwen_client()
+        return _AI_CLIENT
+    except Exception as exc:  # pragma: no cover - 外部依赖
+        _AI_CLIENT_ERROR = True
+        log_error(logger, f"AI摘要模块不可用：{exc}", "Analysis")
+        return None
+
+
+def _safe_async_call(coro):
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+
+def _extract_rows(result: Any) -> List[Dict[str, Any]]:
+    if isinstance(result, dict):
+        data = result.get('data')
+        if isinstance(data, list):
+            return data
+    if isinstance(result, list):
+        return result
+    return []
+
+
+def _format_row_pair(row: Dict[str, Any]) -> str:
+    if not isinstance(row, dict):
+        return str(row)
+    name = row.get('name') or row.get('label') or row.get('key') or '未命名'
+    value = row.get('value')
+    if value is None:
+        for key in ('count', 'total', 'ratio', 'percent'):
+            value = row.get(key)
+            if value is not None:
+                break
+    return f"{name}: {value if value is not None else '-'}"
+
+
+def _build_text_snapshot(func_name: str, target: str, result: Any) -> str:
+    label = FUNCTION_LABELS.get(func_name, func_name)
+    rows = _extract_rows(result)
+    lines = [f"{label}（{target}）分析概览", f"记录数：{len(rows)}"]
+    if rows:
+        lines.append("关键条目：")
+        for row in rows[:MAX_SNAPSHOT_ROWS]:
+            lines.append(f"- {_format_row_pair(row)}")
+        if len(rows) > MAX_SNAPSHOT_ROWS:
+            lines.append(f"……其余 {len(rows) - MAX_SNAPSHOT_ROWS} 条已省略")
+    else:
+        lines.append("暂无有效数据")
+    return "\n".join(lines)
+
+
+def _write_text_snapshot(target_dir: Path, snapshot: str):
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        with open(target_dir / SUMMARY_FILENAME, 'w', encoding='utf-8') as fh:
+            fh.write(snapshot)
+    except Exception:
+        # 文本快照写入失败不影响主流程
+        pass
+
+
+def _generate_ai_summary(func_name: str, target: str, snapshot: str, logger) -> str:
+    client = _get_ai_client(logger)
+    if not client or not snapshot.strip():
+        return ""
+    label = FUNCTION_LABELS.get(func_name, func_name)
+    prompt = (
+        "你是一名资深舆情分析师。基于以下统计快照，以不超过80字的中文总结核心洞察，不要输出列表或多段。"
+        f"\n模块：{label}"
+        f"\n范围：{target}"
+        f"\n统计数据：\n{snapshot}"
+        "\n请直接输出精炼结论。"
+    )
+    try:
+        response = _safe_async_call(client.call(prompt, model="qwen-plus", max_tokens=400))
+    except Exception as exc:  # pragma: no cover - 外部依赖
+        log_error(logger, f"AI摘要生成失败：{exc}", "Analysis")
+        return ""
+    if not response:
+        return ""
+    text = response.get('text') or ''
+    return text.strip()
+
+
+def _load_existing_ai_summary(path: Path) -> Dict[str, Dict[str, Any]]:
+    if not path.exists():
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            payload = json.load(fh)
+        entries = {}
+        for item in payload.get('summaries', []):
+            key = f"{item.get('function')}::{item.get('target', '总体')}"
+            entries[key] = item
+        return entries
+    except Exception:
+        return {}
+
+
+def _update_ai_summary_entry(entries: Dict[str, Dict[str, Any]], func_name: str, target: str, snapshot: str, ai_text: str) -> bool:
+    key = f"{func_name}::{target}"
+    label = FUNCTION_LABELS.get(func_name, func_name)
+    new_entry = {
+        "function": func_name,
+        "function_label": label,
+        "target": target,
+        "text_snapshot": snapshot,
+        "ai_summary": ai_text,
+        "updated_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+    }
+    previous = entries.get(key)
+    if previous == new_entry:
+        return False
+    entries[key] = new_entry
+    return True
+
+
+def _save_ai_summary_file(path: Path, topic: str, start: str, end: Optional[str], entries: Dict[str, Dict[str, Any]]):
+    if not entries:
+        return
+    payload = {
+        "topic": topic,
+        "range": {"start": start, "end": end or start},
+        "generated_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+        "summaries": [entries[key] for key in sorted(entries.keys())],
+    }
+    try:
+        with open(path, 'w', encoding='utf-8') as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _post_process_result(func_name: str, target: str, target_dir: Path, result: Any, ai_entries: Dict[str, Dict[str, Any]], ai_state: Dict[str, bool], logger):
+    snapshot = _build_text_snapshot(func_name, target, result or {})
+    _write_text_snapshot(target_dir, snapshot)
+    if target != '总体':
+        return
+    ai_text = _generate_ai_summary(func_name, target, snapshot, logger)
+    if _update_ai_summary_entry(ai_entries, func_name, target, snapshot, ai_text):
+        ai_state['dirty'] = True
 
 def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, end_date: str = None) -> bool:
     """
@@ -78,6 +255,10 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
         folder_name = date
     analyze_root = bucket("analyze", topic, folder_name)
     analyze_root.mkdir(parents=True, exist_ok=True)
+
+    ai_summary_file = analyze_root / AI_SUMMARY_FILENAME
+    ai_summary_entries = _load_existing_ai_summary(ai_summary_file)
+    ai_state = {"dirty": False}
     
     success_count = 0
     
@@ -139,7 +320,9 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
                 output_file = func_dir / filename
                 with open(output_file, 'w', encoding='utf-8') as f:
                     json.dump(result or {}, f, ensure_ascii=False, indent=2, default=str)
-                
+
+                _post_process_result(func_name, '总体', func_dir, result, ai_summary_entries, ai_state, logger)
+
                 success_count += 1
 
             elif target == '渠道':
@@ -190,7 +373,9 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
                     output_file = func_dir / filename
                     with open(output_file, 'w', encoding='utf-8') as f:
                         json.dump(result or {}, f, ensure_ascii=False, indent=2, default=str)
-                    
+
+                    _post_process_result(func_name, channel_name, func_dir, result, ai_summary_entries, ai_state, logger)
+
                     any_success = True
 
                 if any_success:
@@ -200,6 +385,9 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
             log_error(logger, f"{func_name}_{target}: {e}", "Analysis")
             continue
     
+    if ai_state.get('dirty'):
+        _save_ai_summary_file(ai_summary_file, topic, date, end_date, ai_summary_entries)
+
     # 输出最终统计信息
     log_success(logger, "模块执行完成", "Analyze")
     

@@ -1323,6 +1323,14 @@ def get_analyze_results():
         },
         "functions": results,
     }
+
+    ai_summary_path = analyze_root / "ai_summary.json"
+    if ai_summary_path.exists():
+        try:
+            response_payload["ai_summary"] = _load_json_file(ai_summary_path)
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("Failed to load AI summary file %s", ai_summary_path, exc_info=True)
+
     return success(response_payload)
 
 
