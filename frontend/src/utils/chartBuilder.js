@@ -28,14 +28,18 @@ export const sortRowsDescending = (rows) =>
   [...rows].sort((a, b) => ensureNumber(rowValue(b)) - ensureNumber(rowValue(a)))
 
 const buildBarOption = (title, rows, orientation = 'vertical', categoryLabel = '类别', valueLabel = '数量') => {
-  const orderedRows = orientation === 'horizontal' ? sortRowsDescending(rows) : rows
-  const categories = orderedRows.map((row) => rowName(row))
-  const values = orderedRows.map((row) => ensureNumber(rowValue(row)))
+  const orderedRows = sortRowsDescending(rows)
+  const displayRows = orientation === 'horizontal' ? [...orderedRows].reverse() : orderedRows
+  const categories = displayRows.map((row) => rowName(row))
+  const values = displayRows.map((row) => ensureNumber(rowValue(row)))
   const isVertical = orientation !== 'horizontal'
+  const grid = isVertical
+    ? { left: 30, right: 20, top: 20, bottom: 30, containLabel: true }
+    : { left: 50, right: 25, top: 20, bottom: 20, containLabel: true }
   const catAxis = {
     type: 'category',
     data: categories,
-    axisLabel: { interval: 0, color: '#303d47' },
+    axisLabel: { interval: 0, color: '#303d47', margin: 10 },
     axisLine: { lineStyle: { color: '#d0d5d9' } }
   }
   const valAxis = {
@@ -45,20 +49,23 @@ const buildBarOption = (title, rows, orientation = 'vertical', categoryLabel = '
   }
   return {
     color: ['#9ab2cb'],
-    title: { text: title, left: 'center', textStyle: { color: '#1c252c' } },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 60, right: 30, top: 60, bottom: 60, containLabel: true },
+    grid,
     xAxis: isVertical ? catAxis : valAxis,
     yAxis: isVertical ? valAxis : catAxis,
     dataset: {
       dimensions: [categoryLabel, valueLabel],
-      source: orderedRows.map((row) => ({ name: rowName(row), value: ensureNumber(rowValue(row)) }))
+      source: displayRows.map((row) => ({ name: rowName(row), value: ensureNumber(rowValue(row)) }))
     },
     series: [
       {
         type: 'bar',
         data: values,
-        label: { show: true, color: '#303d47' }
+        label: {
+          show: true,
+          color: '#303d47',
+          position: isVertical ? 'top' : 'right'
+        }
       }
     ]
   }
@@ -69,9 +76,8 @@ const buildLineOption = (title, rows, categoryLabel = '日期', valueLabel = '�
   const values = rows.map((row) => ensureNumber(rowValue(row)))
   return {
     color: ['#7babce'],
-    title: { text: title, left: 'center', textStyle: { color: '#1c252c' } },
     tooltip: { trigger: 'axis' },
-    grid: { left: 50, right: 30, top: 60, bottom: 60, containLabel: true },
+    grid: { left: 30, right: 15, top: 20, bottom: 30, containLabel: true },
     xAxis: { type: 'category', boundaryGap: false, data: categories, axisLabel: { color: '#303d47' } },
     yAxis: { type: 'value', axisLabel: { color: '#303d47' }, splitLine: { lineStyle: { color: '#e2e9f1' } } },
     dataset: {
@@ -90,7 +96,6 @@ const buildLineOption = (title, rows, categoryLabel = '日期', valueLabel = '�
 }
 
 const buildPieOption = (title, rows) => ({
-  title: { text: title, left: 'center', textStyle: { color: '#1c252c' } },
   tooltip: { trigger: 'item' },
   legend: { bottom: 0, type: 'scroll', textStyle: { color: '#303d47' } },
   series: [
