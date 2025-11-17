@@ -9,7 +9,6 @@ import pandas as pd
 from ...utils.logging.logging import setup_logger, log_success, log_error, log_module_start
 from ...utils.setting.paths import bucket
 from ...utils.io.excel import read_csv
-from .echarts_common import build_line_option
 
 def _analyze_trends(df: pd.DataFrame, channel_name: str, logger=None) -> Dict[str, Any]:
     """
@@ -53,13 +52,6 @@ def _analyze_trends(df: pd.DataFrame, channel_name: str, logger=None) -> Dict[st
         # 转换为要求的格式
         data = [{"name": str(k), "value": int(v)} for k, v in daily_counts.items()]
         result = {"data": data}
-        if data:
-            result["echarts"] = build_line_option(
-                title=f"声量趋势 · {channel_name}",
-                data=data,
-                category_label="日期",
-                value_label="声量",
-            )
         
         log_success(logger, f"trends | {channel_name} 分析完成", "Analyze")
         return result
