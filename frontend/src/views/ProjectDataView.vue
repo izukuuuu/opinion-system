@@ -67,15 +67,6 @@
               </p>
             </header>
             <div class="grid gap-4 sm:grid-cols-2">
-              <label class="space-y-1 text-xs sm:col-span-2">
-                <span class="font-medium text-slate-600">专题标识（自定义）</span>
-                <input
-                  v-model="mappingForm.topic"
-                  type="text"
-                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                  placeholder="例如：2024-两会专题"
-                />
-              </label>
               <label class="space-y-1 text-xs">
                 <span class="font-medium text-slate-600">日期列</span>
                 <select
