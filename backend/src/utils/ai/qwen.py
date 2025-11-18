@@ -22,7 +22,7 @@ class QwenClient:
         self.api_key = api_key or get_api_key()
 
         if not self.api_key:
-            raise ValueError("千问API密钥未配置，请设置环境变量 DASHSCOPE_API_KEY 或编辑 .env 文件")
+            raise ValueError("千问API密钥未配置，请在配置文件 credentials.qwen_api_key 中设置")
 
     async def call(self, prompt: str, model: str = "qwen-plus", max_tokens: int = 10000) -> Optional[Dict[str, Any]]:
         """

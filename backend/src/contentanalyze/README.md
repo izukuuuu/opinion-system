@@ -17,7 +17,7 @@
 ## 配置项
 - 提示词：`configs/prompt/contentanalysis/{topic}.yaml`。若无同名文件，则使用该目录下第一个 YAML。文件需至少包含 `system_prompt` 与 `analysis_prompt`。
 - 模型参数：从 `settings.get('llm.content_analysis_llm', {})` 读取，缺省值 `model=qwen-plus, qps=50, batch_size=32`。实际配置来源可放在 `configs/llm.yaml` 或运行时 `settings/llm.yaml`。
-- API 凭据：通过 `DASHSCOPE_API_KEY` 环境变量或运行时设置文件 `settings/llm.yaml` 中的 `credentials.qwen_api_key|dashscope_api_key` 提供。前端 `/settings/ai` 页面调用 `/api/settings/llm/credentials` 即可写入同一位置，因此无需额外新增配置项。
+- API 凭据：通过运行时设置文件 `settings/llm.yaml` 中的 `credentials.qwen_api_key|dashscope_api_key` 提供。前端 `/settings/ai` 页面调用 `/api/settings/llm/credentials` 即可写入同一位置，因此无需额外新增配置项。
 
 ## 现有调用方式（CLI）
 ```bash
