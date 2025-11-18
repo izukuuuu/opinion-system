@@ -92,7 +92,7 @@ def vectorize_and_store(topic_name: str = "控烟"):
         base_url = embedding_config.get('base_url', "https://dashscope.aliyuncs.com/compatible-mode/v1")
         
         if not api_key:
-            log_error(logger, "未找到API密钥，请设置DASHSCOPE_API_KEY环境变量", "TagRAG")
+            log_error(logger, "未找到API密钥，请在配置文件的 credentials.qwen_api_key 中设置", "TagRAG")
             raise ValueError("API密钥未配置")
         
         client = OpenAI(

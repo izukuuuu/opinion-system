@@ -725,7 +725,7 @@ class VectorizationPipeline:
         # 获取API密钥
         api_key = get_api_key()
         if not api_key:
-            raise ValueError("未配置DASHSCOPE_API_KEY")
+            raise ValueError("未配置千问 API 密钥，请在 credentials.qwen_api_key 设置")
         
         # 获取项目路径 - 每个主题有独立的数据库目录
         project_root = get_project_root()

@@ -37,7 +37,7 @@ class ContentAnalyze:
         # 获取API配置
         self.api_key = get_api_key()
         if not self.api_key:
-            raise ValueError("千问API密钥未配置，请设置环境变量 DASHSCOPE_API_KEY")
+            raise ValueError("千问API密钥未配置，请在配置文件 credentials.qwen_api_key 中设置")
         
         # 获取LLM配置
         llm_config = settings.get('llm.content_analysis_llm', {})

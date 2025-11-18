@@ -392,7 +392,7 @@ class ExplainBase:
             else:
                 log_error(self.logger, f"大模型调用失败，响应为空: {func_name}", "Explain")
                 log_error(self.logger, f"可能原因: 1)API密钥无效 2)网络连接问题 3)API限流 4)模型服务异常", "Explain")
-                log_error(self.logger, f"请检查: 1)环境变量DASHSCOPE_API_KEY 2)网络连接 3)API使用量", "Explain")
+                log_error(self.logger, f"请检查: 1)配置 credentials.qwen_api_key 是否填写 2)网络连接 3)API使用量", "Explain")
                 return None
                 
         except Exception as e:

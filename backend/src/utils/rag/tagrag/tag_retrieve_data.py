@@ -73,7 +73,7 @@ class Retriever:
             
             if not api_key:
                 if self.logger:
-                    log_error(self.logger, "未找到API密钥，请设置DASHSCOPE_API_KEY环境变量", "Retriever")
+                    log_error(self.logger, "未找到API密钥，请在配置文件的 credentials.qwen_api_key 中设置", "Retriever")
                 raise ValueError("API密钥未配置")
             
             self.client = OpenAI(

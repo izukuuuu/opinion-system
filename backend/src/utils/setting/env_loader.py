@@ -73,18 +73,6 @@ def get_api_key() -> Optional[str]:
     Returns:
         Optional[str]: API密钥，如果未配置则返回None
     """
-    # 首先尝试从环境变量获取
-    api_key = os.environ.get('DASHSCOPE_API_KEY')
-    
-    if api_key and api_key != 'your_qwen_api_key_here':
-        return api_key
-    
-    # 如果环境变量中没有，尝试加载.env文件
-    if load_env_file():
-        api_key = os.environ.get('DASHSCOPE_API_KEY')
-        if api_key and api_key != 'your_qwen_api_key_here':
-            return api_key
-
     credentials = _load_llm_credentials()
     api_key = credentials.get("qwen_api_key") or credentials.get("dashscope_api_key")
     if api_key and api_key != 'your_qwen_api_key_here':
