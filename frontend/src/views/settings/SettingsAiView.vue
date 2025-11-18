@@ -172,6 +172,66 @@
       </div>
     </form>
 
+    <!-- 向量化模型配置卡片 -->
+    <form class="space-y-4 card-surface p-5 config-card" @submit.prevent="submitLlmEmbedding">
+      <header class="space-y-1">
+        <h3 class="text-lg font-semibold text-slate-900">向量化模型配置</h3>
+        <p class="text-sm text-slate-500">用于 BertTopic、RAG 检索的向量化模型参数。</p>
+      </header>
+      <div class="grid gap-4 md:grid-cols-2">
+        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+          <span>服务提供方</span>
+          <select
+            v-model="llmState.embedding.provider"
+            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          >
+            <option
+              v-for="option in providerOptions"
+              :key="`embedding-${option.value}`"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label
+          v-if="llmState.embedding.provider === 'openai'"
+          class="flex flex-col gap-2 text-sm font-medium text-slate-600"
+        >
+          <span>API Base URL</span>
+          <input
+            v-model.trim="llmState.embedding.base_url"
+            type="text"
+            placeholder="https://api.example.com/v1"
+            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          />
+        </label>
+        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+          <span>模型名称</span>
+          <input
+            v-model.trim="llmState.embedding.model"
+            type="text"
+            :placeholder="embeddingModelPlaceholder"
+            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          />
+        </label>
+        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+          <span>向量维度</span>
+          <input
+            v-model.number="llmState.embedding.dimension"
+            type="number"
+            min="0"
+            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          />
+        </label>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <button type="submit" class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 no-shadow">
+          保存向量化配置
+        </button>
+      </div>
+    </form>
+
     <!-- 对话模型配置卡片 -->
     <form class="space-y-4 card-surface p-5 config-card" @submit.prevent="submitLlmAssistant">
       <header class="space-y-1">
@@ -274,6 +334,12 @@ const llmState = reactive({
     temperature: 0,
     base_url: ''
   },
+  embedding: {
+    provider: 'qwen',
+    model: '',
+    dimension: 0,
+    base_url: ''
+  },
   loading: false,
   error: '',
   message: ''
@@ -301,6 +367,9 @@ const filterModelPlaceholder = computed(() =>
 const assistantModelPlaceholder = computed(() =>
   llmState.assistant.provider === 'openai' ? '如：gpt-4o-mini' : '如：qwen-turbo'
 )
+const embeddingModelPlaceholder = computed(() =>
+  llmState.embedding.provider === 'openai' ? '如：text-embedding-3-small' : '如：text-embedding-v4'
+)
 
 watch(
   () => llmState.filter.provider,
@@ -316,6 +385,15 @@ watch(
   (provider) => {
     if (provider !== 'openai') {
       llmState.assistant.base_url = ''
+    }
+  }
+)
+
+watch(
+  () => llmState.embedding.provider,
+  (provider) => {
+    if (provider !== 'openai') {
+      llmState.embedding.base_url = ''
     }
   }
 )
@@ -456,6 +534,25 @@ const submitLlmAssistant = async () => {
   }
 }
 
+const submitLlmEmbedding = async () => {
+  llmState.message = ''
+  llmState.error = ''
+  try {
+    const endpoint = await buildApiUrl('/settings/llm/embedding')
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(llmState.embedding)
+    })
+    if (!response.ok) {
+      throw new Error('保存向量化配置失败')
+    }
+    llmState.message = '向量化配置已保存'
+  } catch (err) {
+    llmState.error = err instanceof Error ? err.message : '保存向量化配置失败'
+  }
+}
+
 const fetchLlmSettings = async () => {
   llmState.loading = true
   llmState.error = ''
@@ -486,6 +583,14 @@ const fetchLlmSettings = async () => {
     }
     if (!llmState.assistant.provider) {
       llmState.assistant.provider = 'qwen'
+    }
+    if (result.embedding_llm && typeof result.embedding_llm === 'object') {
+      Object.assign(llmState.embedding, result.embedding_llm)
+    } else if (result.embedding && typeof result.embedding === 'object') {
+      Object.assign(llmState.embedding, result.embedding)
+    }
+    if (!llmState.embedding.provider) {
+      llmState.embedding.provider = 'qwen'
     }
   } catch (err) {
     llmState.error = err instanceof Error ? err.message : '读取模型配置失败'

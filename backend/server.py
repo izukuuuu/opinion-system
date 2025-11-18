@@ -665,6 +665,29 @@ def update_llm_assistant():
     return success({"data": assistant})
 
 
+@app.put("/api/settings/llm/embedding")
+def update_llm_embedding():
+    payload = request.get_json(silent=True) or {}
+    config = load_llm_config()
+    embedding_llm = config.get("embedding_llm", {})
+    if not isinstance(embedding_llm, dict):
+        embedding_llm = {}
+
+    for field in ["provider", "model", "base_url"]:
+        if field in payload:
+            embedding_llm[field] = str(payload[field]).strip()
+
+    if "dimension" in payload:
+        try:
+            embedding_llm["dimension"] = int(payload["dimension"])
+        except (TypeError, ValueError):
+            return error("Field 'dimension' must be an integer")
+
+    config["embedding_llm"] = embedding_llm
+    persist_llm_config(config)
+    return success({"data": embedding_llm})
+
+
 @app.get("/api/filter/template")
 def get_filter_template():
     topic_param = str(request.args.get("topic", "") or "").strip()

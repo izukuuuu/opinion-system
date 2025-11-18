@@ -123,6 +123,15 @@ def load_llm_config() -> Dict[str, Any]:
         assistant.update(dynamic_assistant)
     config["assistant"] = assistant
 
+    embedding_llm: Dict[str, Any] = {}
+    static_embedding = static_config.get("embedding_llm")
+    if isinstance(static_embedding, dict):
+        embedding_llm.update(static_embedding)
+    dynamic_embedding = config.get("embedding_llm")
+    if isinstance(dynamic_embedding, dict):
+        embedding_llm.update(dynamic_embedding)
+    config["embedding_llm"] = embedding_llm
+
     credentials = config.get("credentials")
     if not isinstance(credentials, dict):
         credentials = {}
