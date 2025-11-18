@@ -15,8 +15,8 @@
           </div>
           <div class="ml-0 space-y-3 sm:ml-14 sm:pl-4">
             <p class="text-sm leading-relaxed text-slate-600">
-              一键打包或恢复被 git 忽略的关键配置文件，便于在不同环境间快速迁移或备份恢复。
-              存档将包含所有必要的环境配置和本地数据文件。
+              一键打包或恢复被 git 忽略的关键配置文件，便于在不同环境间快速迁移、备份恢复或项目初始化。
+              存档将包含所有必要的环境配置和本地数据文件，可用于新环境的初始化部署或还原。
             </p>
             <div class="flex flex-wrap gap-3">
               <span class="inline-flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
