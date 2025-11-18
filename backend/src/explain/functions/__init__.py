@@ -9,6 +9,7 @@ from .geography import explain_geography_overall, explain_geography_by_channel
 from .publishers import explain_publishers_overall, explain_publishers_by_channel
 from .classification import explain_classification_overall, explain_classification_by_channel
 from .contentanalyze import explain_contentanalyze_by_channel
+from .bertopic import explain_bertopic_overall
 
 __all__ = [
     'explain_volume_overall', 'explain_volume_by_channel',
@@ -18,5 +19,6 @@ __all__ = [
     'explain_geography_overall', 'explain_geography_by_channel',
     'explain_publishers_overall', 'explain_publishers_by_channel',
     'explain_classification_overall', 'explain_classification_by_channel',
-    'explain_contentanalyze_by_channel'
+    'explain_contentanalyze_by_channel',
+    'explain_bertopic_overall'
 ]

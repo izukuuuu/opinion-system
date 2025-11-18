@@ -16,10 +16,11 @@ from .functions.publishers import explain_publishers_overall, explain_publishers
 from .functions.keywords import explain_keywords_overall, explain_keywords_by_channel
 from .functions.classification import explain_classification_overall, explain_classification_by_channel
 from .functions.contentanalyze import explain_contentanalyze_by_channel
+from .functions.bertopic import explain_bertopic_overall
 from .functions.base import ExplainBase
 
 
-async def run_Explain(topic: str, date: str, logger=None, only_function: str = None, end_date: str = None) -> bool:
+async def run_Explain(topic: str, date: str, logger=None, only_function: str = None, end_date: str = None, only_overall: bool = False) -> bool:
     """
     运行解读任务
     
@@ -29,6 +30,7 @@ async def run_Explain(topic: str, date: str, logger=None, only_function: str = N
         logger: 日志记录器
         only_function (str, optional): 仅运行指定解读函数
         end_date (str, optional): 结束日期
+        only_overall (bool, optional): 仅运行总体类型的解读任务（不包括渠道）
     
     Returns:
         bool: 是否成功
@@ -64,6 +66,15 @@ async def run_Explain(topic: str, date: str, logger=None, only_function: str = N
         if not functions:
             log_error(logger, f"--func 未匹配到任何解读项：{only_function}", "Explain")
             return False
+    
+    # 若仅运行总体类型，过滤掉渠道类型的任务（但保留contentanalyze）
+    if only_overall:
+        before_count = len(functions)
+        functions = [f for f in functions if f.get('target') == '总体' or f.get('name') == 'contentanalyze']
+        if not functions:
+            log_error(logger, f"未找到任何总体类型的解读任务", "Explain")
+            return False
+        log_success(logger, f"仅运行总体类型解读 | 过滤前: {before_count} 个任务，过滤后: {len(functions)} 个任务（包含contentanalyze）", "Explain")
 
     # 创建输出目录
     if end_date:
@@ -95,36 +106,71 @@ async def run_Explain(topic: str, date: str, logger=None, only_function: str = N
         
         try:
             if target == '总体':
-                # 检查总体分析结果是否存在
-                analyze_dir = bucket("analyze", topic, folder_name)
-                overall_file = analyze_dir / func_name / "总体" / f"{func_name}.json"
-                
-                if not overall_file.exists():
-                    log_error(logger, f"总体分析结果文件不存在: {overall_file}", "Explain")
-                    continue
-                
-                # 检查文件内容是否有效
-                try:
-                    with open(overall_file, 'r', encoding='utf-8') as f:
-                        overall_data = json.load(f)
-                        if not overall_data or not overall_data.get('data'):
-                            log_error(logger, f"总体分析数据为空: {func_name}", "Explain")
+                if func_name == 'bertopic':
+                    # 主题分析特殊处理 - 数据来源是topic目录
+                    topic_dir = bucket("topic", topic, folder_name)
+                    recluster_file = topic_dir / "4大模型再聚类结果.json"
+                    keywords_file = topic_dir / "5大模型主题关键词.json"
+                    
+                    if not recluster_file.exists() or not keywords_file.exists():
+                        log_error(logger, f"主题分析文件不存在: {recluster_file} 或 {keywords_file}", "Explain")
+                        continue
+                    
+                    # 检查文件内容是否有效
+                    try:
+                        with open(recluster_file, 'r', encoding='utf-8') as f:
+                            recluster_data = json.load(f)
+                        with open(keywords_file, 'r', encoding='utf-8') as f:
+                            keywords_data = json.load(f)
+                        if not recluster_data or not keywords_data:
+                            log_error(logger, f"主题分析数据为空", "Explain")
                             continue
-                except Exception as e:
-                    log_error(logger, f"总体分析文件读取失败: {func_name} | {e}", "Explain")
-                    continue
-                
-                # 准备总体解读任务
-                prepared_tasks.append({
-                    'type': 'overall',
-                    'func_name': func_name,
-                    'data': overall_data,
-                    'target': target
-                })
+                    except Exception as e:
+                        log_error(logger, f"主题分析文件读取失败: {e}", "Explain")
+                        continue
+                    
+                    # 准备总体解读任务
+                    prepared_tasks.append({
+                        'type': 'overall',
+                        'func_name': func_name,
+                        'data': {
+                            "再聚类结果": recluster_data,
+                            "主题关键词": keywords_data
+                        },
+                        'target': target
+                    })
+                else:
+                    # 其他功能的总体处理
+                    # 检查总体分析结果是否存在
+                    analyze_dir = bucket("analyze", topic, folder_name)
+                    overall_file = analyze_dir / func_name / "总体" / f"{func_name}.json"
+                    
+                    if not overall_file.exists():
+                        log_error(logger, f"总体分析结果文件不存在: {overall_file}", "Explain")
+                        continue
+                    
+                    # 检查文件内容是否有效
+                    try:
+                        with open(overall_file, 'r', encoding='utf-8') as f:
+                            overall_data = json.load(f)
+                            if not overall_data or not overall_data.get('data'):
+                                log_error(logger, f"总体分析数据为空: {func_name}", "Explain")
+                                continue
+                    except Exception as e:
+                        log_error(logger, f"总体分析文件读取失败: {func_name} | {e}", "Explain")
+                        continue
+                    
+                    # 准备总体解读任务
+                    prepared_tasks.append({
+                        'type': 'overall',
+                        'func_name': func_name,
+                        'data': overall_data,
+                        'target': target
+                    })
                 
             elif target == '渠道':
                 if func_name == 'contentanalyze':
-                    # 内容分析特殊处理 - 只分析一个文件，保存到新闻目录
+                    # 内容分析特殊处理
                     contentanalyze_file = project_root / "data" / "contentanalyze" / topic / folder_name / "contentanalysis.json"
                     
                     if not contentanalyze_file.exists():
@@ -142,13 +188,22 @@ async def run_Explain(topic: str, date: str, logger=None, only_function: str = N
                         log_error(logger, f"内容分析文件读取失败: {e}", "Explain")
                         continue
                     
-                    # 内容分析只准备一个任务，保存到新闻目录
-                    prepared_tasks.append({
-                        'type': 'channel',
-                        'func_name': func_name,
-                        'channel_name': '新闻',
-                        'target': target
-                    })
+                    # 如果使用--only-overall，将contentanalyze作为总体任务处理
+                    if only_overall:
+                        prepared_tasks.append({
+                            'type': 'overall',
+                            'func_name': func_name,
+                            'data': contentanalyze_data,
+                            'target': '总体'
+                        })
+                    else:
+                        # 内容分析只准备一个任务，保存到新闻目录
+                        prepared_tasks.append({
+                            'type': 'channel',
+                            'func_name': func_name,
+                            'channel_name': '新闻',
+                            'target': target
+                        })
                 else:
                     # 其他功能的渠道处理
                     analyze_dir = bucket("analyze", topic, folder_name)
@@ -223,6 +278,20 @@ async def run_Explain(topic: str, date: str, logger=None, only_function: str = N
                 explanation = await explainer.generate_explanation(func_name, data, "总体")
                 if explanation:
                     explainer.save_explanation(func_name, "总体", explanation, date, end_date)
+                    
+                    # 生成RAG增强解读（二次解读）
+                    try:
+                        enhanced_explanation = await explainer.generate_rag_enhanced_explanation(
+                            func_name, explanation, data, "总体"
+                        )
+                        if enhanced_explanation:
+                            # 保存增强解读到单独的文件
+                            explainer.save_explanation(func_name, "总体", enhanced_explanation, date, end_date, rag_enhanced=True)
+                            log_success(logger, f"RAG增强解读生成成功: {func_name}", "Explain")
+                    except Exception as e:
+                        log_error(logger, f"RAG增强解读失败: {func_name} | {e}", "Explain")
+                        # RAG增强失败不影响主流程
+                    
                     completed_count += 1
                     progress = (completed_count / total_count) * 100
                     log_success(logger, f"任务进度: {completed_count}/{total_count} ({progress:.1f}%)", "Explain")
@@ -257,6 +326,20 @@ async def run_Explain(topic: str, date: str, logger=None, only_function: str = N
                     explanation = await explainer.generate_explanation(func_name, contentanalyze_data, "渠道", channel_name)
                     if explanation:
                         explainer.save_explanation(func_name, "渠道", explanation, date, end_date, channel_name)
+                        
+                        # 生成RAG增强解读（二次解读）
+                        try:
+                            enhanced_explanation = await explainer.generate_rag_enhanced_explanation(
+                                func_name, explanation, contentanalyze_data, "渠道", channel_name
+                            )
+                            if enhanced_explanation:
+                                # 保存增强解读到单独的文件
+                                explainer.save_explanation(func_name, "渠道", enhanced_explanation, date, end_date, channel_name, rag_enhanced=True)
+                                log_success(logger, f"RAG增强解读生成成功: {func_name} | {channel_name}", "Explain")
+                        except Exception as e:
+                            log_error(logger, f"RAG增强解读失败: {func_name} | {channel_name} | {e}", "Explain")
+                            # RAG增强失败不影响主流程
+                        
                         completed_count += 1
                         progress = (completed_count / total_count) * 100
                         log_success(logger, f"任务进度: {completed_count}/{total_count} ({progress:.1f}%)", "Explain")
@@ -286,6 +369,20 @@ async def run_Explain(topic: str, date: str, logger=None, only_function: str = N
                     explanation = await explainer.generate_explanation(func_name, channel_data, "渠道", channel_name)
                     if explanation:
                         explainer.save_explanation(func_name, "渠道", explanation, date, end_date, channel_name)
+                        
+                        # 生成RAG增强解读（二次解读）
+                        try:
+                            enhanced_explanation = await explainer.generate_rag_enhanced_explanation(
+                                func_name, explanation, channel_data, "渠道", channel_name
+                            )
+                            if enhanced_explanation:
+                                # 保存增强解读到单独的文件
+                                explainer.save_explanation(func_name, "渠道", enhanced_explanation, date, end_date, channel_name, rag_enhanced=True)
+                                log_success(logger, f"RAG增强解读生成成功: {func_name} | {channel_name}", "Explain")
+                        except Exception as e:
+                            log_error(logger, f"RAG增强解读失败: {func_name} | {channel_name} | {e}", "Explain")
+                            # RAG增强失败不影响主流程
+                        
                         completed_count += 1
                         progress = (completed_count / total_count) * 100
                         log_success(logger, f"渠道任务进度: {completed_count}/{total_count} ({progress:.1f}%)", "Explain")
