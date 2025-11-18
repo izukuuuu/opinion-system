@@ -194,7 +194,7 @@ const { ensureApiBase } = useApiBase()
 
 const buildApiUrl = async (path) => {
   const base = await ensureApiBase()
-  return `${base}/api${path}`
+  return `${base}${path}`
 }
 
 const exportState = reactive({
