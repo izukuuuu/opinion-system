@@ -323,6 +323,12 @@ const navigationGroups = [
         icon: DocumentTextIcon
       },
       {
+        label: '主题分析',
+        description: 'BERTopic 主题分析',
+        to: { name: 'topic-analysis-bertopic' },
+        icon: BeakerIcon
+      },
+      {
         label: '智能解读',
         description: '舆情特征智能解读',
         to: { name: 'data-interpretation-engine' },

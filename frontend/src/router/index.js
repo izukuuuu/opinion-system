@@ -144,6 +144,15 @@ export const routes = [
     }
   },
   {
+    path: '/analysis/topic/bertopic',
+    name: 'topic-analysis-bertopic',
+    component: PlaceholderModuleView,
+    meta: {
+      title: 'BERTopic 主题分析',
+      placeholder: 'BERTopic 主题分析模块建设中，敬请期待。'
+    }
+  },
+  {
     path: '/analysis/interpretation/tagrag',
     name: 'data-interpretation-tagrag',
     component: PlaceholderModuleView,
