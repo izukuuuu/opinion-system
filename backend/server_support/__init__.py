@@ -5,6 +5,10 @@ from .archives import (  # type: ignore
     collect_project_archives,
     resolve_stage_processing_date,
 )
+from .backups import (  # type: ignore
+    build_settings_backup,
+    restore_settings_backup,
+)
 from .configuration import (
     filter_ai_overview,
     load_config,
@@ -42,6 +46,7 @@ from .paths import (
     BACKEND_DIR,
     CONFIG_PATH,
     DATA_PROJECTS_ROOT,
+    CONFIGS_DIR,
     CONTENT_PROMPT_DIR,
     FILTER_PROMPT_DIR,
     FILTER_PROGRESS_DIR,
@@ -67,6 +72,9 @@ __all__ = [
     "collect_layer_archives",
     "collect_project_archives",
     "resolve_stage_processing_date",
+    # Backup helpers
+    "build_settings_backup",
+    "restore_settings_backup",
     # Configuration helpers
     "filter_ai_overview",
     "load_config",
@@ -98,6 +106,7 @@ __all__ = [
     "BACKEND_DIR",
     "CONFIG_PATH",
     "DATA_PROJECTS_ROOT",
+    "CONFIGS_DIR",
     "CONTENT_PROMPT_DIR",
     "FILTER_PROMPT_DIR",
     "FILTER_PROGRESS_DIR",

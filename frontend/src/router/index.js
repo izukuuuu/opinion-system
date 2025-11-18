@@ -19,6 +19,7 @@ import SettingsDatabasesView from '../views/settings/SettingsDatabasesView.vue'
 import SettingsAiView from '../views/settings/SettingsAiView.vue'
 import SettingsThemeView from '../views/settings/SettingsThemeView.vue'
 import SettingsBackendView from '../views/settings/SettingsBackendView.vue'
+import SettingsArchivesView from '../views/settings/SettingsArchivesView.vue'
 import PlaceholderModuleView from '../views/PlaceholderModuleView.vue'
 
 export const routes = [
@@ -260,6 +261,15 @@ export const routes = [
         meta: {
           title: '后端地址',
           breadcrumb: '后端地址'
+        }
+      },
+      {
+        path: 'archives',
+        name: 'settings-archives',
+        component: SettingsArchivesView,
+        meta: {
+          title: '存档导入导出',
+          breadcrumb: '存档导入导出'
         }
       },
       {

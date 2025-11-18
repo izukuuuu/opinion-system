@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from flask import Flask, Response, jsonify, request, stream_with_context
+from flask import Flask, Response, jsonify, request, send_file, stream_with_context
 from flask_cors import CORS
 
 # 注意：所有新的辅助函数请存放在 ``backend/server_support`` 包中，
@@ -41,6 +41,8 @@ from server_support import (  # type: ignore
     error,
     evaluate_success,
     filter_ai_overview,
+    build_settings_backup,
+    restore_settings_backup,
     load_config,
     load_content_prompt_config,
     load_databases_config,
@@ -402,6 +404,51 @@ def status():
 @app.get("/api/config")
 def get_config():
     return jsonify(CONFIG)
+
+
+@app.get("/api/settings/archives/export")
+def export_settings_archive():
+    try:
+        buffer, filename, manifest = build_settings_backup()
+    except Exception:  # pragma: no cover - runtime export errors surface to client
+        LOGGER.exception("Failed to build settings backup")
+        return error("导出存档失败，请检查后端日志", status_code=500)
+
+    response = send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=filename,
+    )
+    included = manifest.get("included_roots") or []
+    missing = manifest.get("missing_roots") or []
+    generated_at = manifest.get("generated_at")
+
+    if included:
+        response.headers["X-Backup-Roots"] = ",".join(included)
+    if missing:
+        response.headers["X-Backup-Missing"] = ",".join(missing)
+    if generated_at:
+        response.headers["X-Backup-Generated-At"] = str(generated_at)
+    response.headers["X-Backup-File-Count"] = str(manifest.get("file_count", 0))
+    return response
+
+
+@app.post("/api/settings/archives/import")
+def import_settings_archive():
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        return error("请上传 ZIP 存档文件")
+
+    try:
+        result = restore_settings_backup(upload.stream)
+    except ValueError as exc:
+        return error(str(exc))
+    except Exception:  # pragma: no cover - runtime import errors surface to client
+        LOGGER.exception("Failed to restore settings backup")
+        return error("导入存档失败，请检查后端日志", status_code=500)
+
+    return success({"data": result})
 
 
 @app.get("/api/settings/databases")

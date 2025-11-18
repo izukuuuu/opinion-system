@@ -76,6 +76,7 @@
           <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
         </div>
         <ActiveProjectSwitcher
+          v-if="showGlobalProjectSwitcher"
           class="ml-auto shrink-0"
           :show-label="false"
         />
@@ -199,7 +200,7 @@
         >
           <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <p class="text-sm font-semibold uppercase tracking-[0.3em] text-muted">舆情监测系统</p>
-            <ActiveProjectSwitcher class="hidden lg:inline-flex" />
+            <ActiveProjectSwitcher v-if="showGlobalProjectSwitcher" class="hidden lg:inline-flex" />
           </div>
           <h1 class="text-2xl font-semibold text-primary md:text-3xl">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
         </header>
@@ -371,7 +372,7 @@ const navigationGroups = [
         label: '系统设置',
         description: '配置数据库与模型参数',
         to: { name: 'settings-databases' },
-        match: ['settings', 'settings-backend', 'settings-databases', 'settings-ai', 'settings-theme'],
+        match: ['settings', 'settings-backend', 'settings-databases', 'settings-ai', 'settings-theme', 'settings-archives'],
         icon: Cog6ToothIcon
       }
     ]
@@ -382,6 +383,8 @@ const navigationLinks = navigationGroups.reduce(
   (links, group) => links.concat(group.links),
   []
 )
+
+const showGlobalProjectSwitcher = false
 
 const route = useRoute()
 const isLandingLayout = computed(() => route.meta?.layout === 'landing')

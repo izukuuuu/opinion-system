@@ -18,14 +18,36 @@
         <h2 class="text-xl font-semibold text-primary">准备入库参数</h2>
       </header>
 
-      <div class="space-y-2 text-xs text-secondary">
-        <p>
-          当前项目：
-          <span class="font-semibold text-primary">
-            {{ activeProjectName || '尚未选择' }}
+      <label class="space-y-2 text-sm">
+        <span class="font-medium text-secondary">选择项目</span>
+        <div class="flex flex-wrap items-center gap-3">
+          <select
+            v-if="projectOptions.length"
+            v-model="selectedProjectName"
+            class="inline-flex min-w-[220px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+            :disabled="projectsLoading"
+          >
+            <option disabled value="">请选择项目</option>
+            <option v-for="option in projectOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+          <span v-else class="text-xs text-muted">
+            暂无项目，请先在“项目数据”模块创建。
           </span>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="projectsLoading"
+            @click.prevent="refreshProjects"
+          >
+            {{ projectsLoading ? '加载中…' : '刷新项目' }}
+          </button>
+        </div>
+        <p v-if="projectsError" class="mt-2 rounded-2xl bg-rose-50 px-3 py-1 text-xs text-rose-600">
+          {{ projectsError }}
         </p>
-      </div>
+      </label>
 
       <div class="grid gap-6 md:grid-cols-2">
         <label class="space-y-2 text-sm">
@@ -183,12 +205,12 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   ArrowTrendingUpIcon
 } from '@heroicons/vue/24/outline'
-import { useActiveProject } from '../../composables/useActiveProject'
 import { useApiBase } from '../../composables/useApiBase'
+import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
 
 const { ensureApiBase } = useApiBase()
 const buildApiUrl = async (path) => {
@@ -197,7 +219,16 @@ const buildApiUrl = async (path) => {
 }
 const HISTORY_LIMIT = 6
 
-const { activeProject, activeProjectName } = useActiveProject()
+const {
+  projectOptions,
+  projectsLoading,
+  projectsError,
+  selectedProjectName,
+  activeProject,
+  activeProjectName,
+  loadProjects,
+  refreshProjects
+} = useTopicCreationProject()
 
 const datasetNameInput = ref('')
 const processingDate = ref(getToday())
@@ -282,6 +313,10 @@ const formattedResponse = computed(() => {
   } catch (error) {
     return String(uploadState.lastResponse)
   }
+})
+
+onMounted(() => {
+  loadProjects()
 })
 
 watch(

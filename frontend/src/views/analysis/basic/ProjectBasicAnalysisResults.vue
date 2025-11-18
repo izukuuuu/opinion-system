@@ -321,7 +321,6 @@ import {
 import AnalysisChartPanel from '../../../components/AnalysisChartPanel.vue'
 import AiSummaryList from '../../../components/analysis/AiSummaryList.vue'
 import { useBasicAnalysis } from '../../../composables/useBasicAnalysis'
-import { useActiveProject } from '../../../composables/useActiveProject'
 
 const {
   analysisFunctions,
@@ -344,16 +343,9 @@ const {
   lastLoaded
 } = useBasicAnalysis()
 
-const { activeProjectName } = useActiveProject()
-
-const selectableTopicOptions = computed(() => {
-  const options = Array.isArray(topicOptions.value) ? topicOptions.value.slice() : []
-  const activeName = (activeProjectName.value || '').trim()
-  if (activeName && !options.includes(activeName)) {
-    return [activeName, ...options]
-  }
-  return options
-})
+const selectableTopicOptions = computed(() =>
+  Array.isArray(topicOptions.value) ? topicOptions.value.slice() : []
+)
 
 const autoSelectedTopic = ref('')
 const activeSectionName = ref('')
@@ -505,13 +497,12 @@ const refreshHistory = async () => {
 }
 
 watch(
-  () => activeProjectName.value,
-  (name) => {
-    const trimmed = (name || '').trim()
-    if (!trimmed) return
-    if (!viewSelection.topic || viewSelection.topic === autoSelectedTopic.value) {
-      autoSelectedTopic.value = trimmed
-      viewSelection.topic = trimmed
+  topicOptions,
+  (options) => {
+    const first = Array.isArray(options) && options.length ? options[0] : ''
+    if (!viewSelection.topic && first) {
+      autoSelectedTopic.value = first
+      viewSelection.topic = first
     }
   },
   { immediate: true }

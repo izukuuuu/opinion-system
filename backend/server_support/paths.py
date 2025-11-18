@@ -20,6 +20,7 @@ FILTER_SUMMARY_FILENAME = "_summary.json"
 __all__ = [
     "BACKEND_DIR",
     "CONFIG_PATH",
+    "CONFIGS_DIR",
     "DATA_PROJECTS_ROOT",
     "FILTER_PROMPT_DIR",
     "CONTENT_PROMPT_DIR",

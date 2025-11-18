@@ -11,49 +11,76 @@
       </div>
     </header>
 
-    <section class="card-surface space-y-6 p-6">
-      <header class="space-y-2">
-        <h2 class="text-xl font-semibold text-primary">选择数据集</h2>
-        <p class="text-sm text-secondary">
-          请选择需要预处理的数据集，系统会自动使用当前项目名称与处理日期执行任务。
-        </p>
-      </header>
-<form class="space-y-4">
-  <p class="text-xs text-secondary">
-    当前项目：<span class="font-semibold text-primary">{{ currentProjectName }}</span>
-  </p>
-  <label class="space-y-1 text-sm">
-    <span class="font-medium text-secondary">选择数据集</span>
-    <div class="flex flex-wrap items-center gap-3">
-      <select
-        v-if="datasetOptions.length"
-        v-model="selectedDatasetId"
-        class="inline-flex min-w-[220px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-        :disabled="datasetsLoading"
-      >
-        <option v-for="option in datasetOptions" :key="option.id" :value="option.id">
-          {{ option.label }}
-        </option>
-      </select>
-      <span v-else class="text-xs text-muted">
-        当前项目暂无可用数据集，请先在“项目数据”页面完成上传。
-      </span>
-      <button
-        type="button"
-        class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-        :disabled="datasetsLoading"
-        @click="refreshDatasets"
-      >
-        {{ datasetsLoading ? '加载中…' : '刷新数据集' }}
-      </button>
-    </div>
-    <p v-if="datasetsError" class="mt-2 rounded-2xl bg-rose-50 px-3 py-1 text-xs text-rose-600">
-      {{ datasetsError }}
+<section class="card-surface space-y-6 p-6">
+  <header class="space-y-2">
+    <h2 class="text-xl font-semibold text-primary">选择数据集</h2>
+    <p class="text-sm text-secondary">
+      请选择需要预处理的数据集，系统会自动使用当前项目名称与处理日期执行任务。
     </p>
-  </label>
-</form>
-<p v-if="parameterError" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">{{ parameterError }}</p>
-    </section>
+  </header>
+  <form class="space-y-4">
+    <label class="space-y-1 text-sm">
+      <span class="font-medium text-secondary">选择项目</span>
+      <div class="flex flex-wrap items-center gap-3">
+        <select
+          v-if="projectOptions.length"
+          v-model="selectedProjectName"
+          class="inline-flex min-w-[220px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+          :disabled="projectsLoading"
+        >
+          <option disabled value="">请选择项目</option>
+          <option v-for="option in projectOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+        <span v-else class="text-xs text-muted">
+          暂无项目，请先在“项目数据”模块创建。
+        </span>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="projectsLoading"
+          @click.prevent="refreshProjects"
+        >
+          {{ projectsLoading ? '加载中…' : '刷新项目' }}
+        </button>
+      </div>
+      <p v-if="projectsError" class="mt-2 rounded-2xl bg-rose-50 px-3 py-1 text-xs text-rose-600">
+        {{ projectsError }}
+      </p>
+    </label>
+    <label class="space-y-1 text-sm">
+      <span class="font-medium text-secondary">选择数据集</span>
+      <div class="flex flex-wrap items-center gap-3">
+        <select
+          v-if="datasetOptions.length"
+          v-model="selectedDatasetId"
+          class="inline-flex min-w-[220px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+          :disabled="datasetsLoading"
+        >
+          <option v-for="option in datasetOptions" :key="option.id" :value="option.id">
+            {{ option.label }}
+          </option>
+        </select>
+        <span v-else class="text-xs text-muted">
+          当前项目暂无可用数据集，请先在“项目数据”页面完成上传。
+        </span>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="datasetsLoading"
+          @click="refreshDatasets"
+        >
+          {{ datasetsLoading ? '加载中…' : '刷新数据集' }}
+        </button>
+      </div>
+      <p v-if="datasetsError" class="mt-2 rounded-2xl bg-rose-50 px-3 py-1 text-xs text-rose-600">
+        {{ datasetsError }}
+      </p>
+    </label>
+  </form>
+  <p v-if="parameterError" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">{{ parameterError }}</p>
+</section>
 
     <section class="card-surface space-y-5 p-6">
       <header class="flex flex-wrap items-center justify-between gap-3">
@@ -263,8 +290,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
-import { useActiveProject } from '../../composables/useActiveProject'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useApiBase } from '../../composables/useApiBase'
 import {
   FunnelIcon,
@@ -272,11 +298,19 @@ import {
   TrashIcon,
   SparklesIcon
 } from '@heroicons/vue/24/outline'
+import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
 
 const { ensureApiBase } = useApiBase()
 
 const parameterError = ref('')
-const { activeProjectName } = useActiveProject()
+const {
+  projectOptions,
+  projectsLoading,
+  projectsError,
+  selectedProjectName,
+  loadProjects,
+  refreshProjects
+} = useTopicCreationProject()
 const datasets = ref([])
 const datasetsLoading = ref(false)
 const datasetsError = ref('')
@@ -352,7 +386,7 @@ const archiveSelection = reactive({
   cleanDate: ''
 })
 
-const currentProjectName = computed(() => activeProjectName.value || 'GLOBAL')
+const currentProjectName = computed(() => selectedProjectName.value || '')
 const datasetOptions = computed(() =>
   datasets.value.map((item) => {
     const name = item.display_name || item.id
@@ -541,6 +575,10 @@ const fetchProjectArchives = async ({ force = false } = {}) => {
     archivesState.loading = false
   }
 }
+
+onMounted(() => {
+  loadProjects()
+})
 
 watch(
   currentProjectName,
