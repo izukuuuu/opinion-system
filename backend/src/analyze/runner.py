@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from ..utils.setting.paths import bucket
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_save_success, log_skip
 from ..utils.setting.settings import settings
@@ -34,6 +34,8 @@ FUNCTION_LABELS = {
 SUMMARY_FILENAME = "summary.txt"
 AI_SUMMARY_FILENAME = "ai_summary.json"
 MAX_SNAPSHOT_ROWS = 5
+MAIN_FINDING_CONTEXT_LIMIT = 7
+MAIN_FINDING_TEXT_LIMIT = 420
 
 _AI_CLIENT: Optional[Any] = None
 _AI_CLIENT_ERROR = False
@@ -143,9 +145,94 @@ def _generate_ai_summary(func_name: str, target: str, snapshot: str, logger) -> 
     return text.strip()
 
 
-def _load_existing_ai_summary(path: Path) -> Dict[str, Dict[str, Any]]:
+def _collect_main_finding_context(entries: Dict[str, Dict[str, Any]]) -> List[Dict[str, str]]:
+    contexts: List[Dict[str, str]] = []
+    for key in sorted(entries.keys()):
+        entry = entries[key]
+        if entry.get('target') not in (None, '', '总体'):
+            continue
+        label = entry.get('function_label') or entry.get('function') or '未命名'
+        text = (entry.get('ai_summary') or entry.get('text_snapshot') or '').strip()
+        if not text:
+            continue
+        contexts.append({
+            "label": label,
+            "text": text[:MAIN_FINDING_TEXT_LIMIT]
+        })
+    return contexts[:MAIN_FINDING_CONTEXT_LIMIT]
+
+
+def _generate_main_finding_text(topic: str, start: str, end: Optional[str], contexts: List[Dict[str, str]], logger) -> str:
+    client = _get_ai_client(logger)
+    if not client or not contexts:
+        return ""
+    time_range = f"{start}→{end or start}"
+    topics_text = []
+    for item in contexts:
+        label = item.get('label') or '模块'
+        text = (item.get('text') or '').strip()
+        if not text:
+            continue
+        topics_text.append(f"【{label}】{text}")
+    prompt_parts = [
+        "你是一名资深舆情分析师，请基于不同分析模块的摘要，提炼一个整体主要发现。",
+        "输出要求：",
+        "1）用 2-3 句话完成，不要使用序号或项目符号；",
+        "2）要融合情绪、声量、趋势、话题与渠道等关键信号，避免逐条罗列模块；",
+        "3）语气客观精炼，控制在 120 字以内。",
+        f"分析时间段：{time_range}，专题：{topic or '当前专题'}。",
+        "以下是各模块的AI解读或数据快照：",
+        "\n\n".join(topics_text),
+        "\n请直接输出主要发现的两到三句话。"
+    ]
+    prompt = "\n".join(prompt_parts)
+    try:
+        response = _safe_async_call(client.call(prompt, model="qwen-plus", max_tokens=400))
+    except Exception as exc:  # pragma: no cover - 外部依赖
+        log_error(logger, f"AI总体发现生成失败：{exc}", "Analysis")
+        return ""
+    text = response.get('text') if response else ''
+    return (text or '').strip()
+
+
+def _fallback_main_finding(contexts: List[Dict[str, str]]) -> str:
+    if not contexts:
+        return ""
+    snippets: List[str] = []
+    for ctx in contexts[:3]:
+        text = (ctx.get('text') or '').strip()
+        if not text:
+            continue
+        first_line = next((line.strip() for line in text.splitlines() if line.strip()), '')
+        if first_line:
+            snippets.append(first_line)
+    if not snippets:
+        return ""
+    merged = "；".join(snippets)
+    return merged[:200]
+
+
+def _build_main_finding(ai_entries: Dict[str, Dict[str, Any]], previous: Optional[Dict[str, Any]], topic: str, start: str, end: Optional[str], logger) -> Optional[Dict[str, Any]]:
+    contexts = _collect_main_finding_context(ai_entries)
+    if not contexts:
+        return previous
+    ai_text = _generate_main_finding_text(topic, start, end, contexts, logger)
+    summary_text = ai_text or _fallback_main_finding(contexts)
+    if not summary_text:
+        return previous
+    candidate = {
+        "summary": summary_text,
+        "source_functions": [ctx['label'] for ctx in contexts],
+        "updated_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+    }
+    if previous and (previous.get('summary') or '').strip() == candidate['summary'].strip():
+        return previous
+    return candidate
+
+
+def _load_existing_ai_summary(path: Path) -> Tuple[Dict[str, Dict[str, Any]], Optional[Dict[str, Any]]]:
     if not path.exists():
-        return {}
+        return {}, None
     try:
         with open(path, 'r', encoding='utf-8') as fh:
             payload = json.load(fh)
@@ -153,9 +240,10 @@ def _load_existing_ai_summary(path: Path) -> Dict[str, Dict[str, Any]]:
         for item in payload.get('summaries', []):
             key = f"{item.get('function')}::{item.get('target', '总体')}"
             entries[key] = item
-        return entries
+        main_finding = payload.get('main_finding') if isinstance(payload.get('main_finding'), dict) else None
+        return entries, main_finding
     except Exception:
-        return {}
+        return {}, None
 
 
 def _update_ai_summary_entry(entries: Dict[str, Dict[str, Any]], func_name: str, target: str, snapshot: str, ai_text: str) -> bool:
@@ -176,8 +264,8 @@ def _update_ai_summary_entry(entries: Dict[str, Dict[str, Any]], func_name: str,
     return True
 
 
-def _save_ai_summary_file(path: Path, topic: str, start: str, end: Optional[str], entries: Dict[str, Dict[str, Any]]):
-    if not entries:
+def _save_ai_summary_file(path: Path, topic: str, start: str, end: Optional[str], entries: Dict[str, Dict[str, Any]], main_finding: Optional[Dict[str, Any]] = None):
+    if not entries and not main_finding:
         return
     payload = {
         "topic": topic,
@@ -185,6 +273,12 @@ def _save_ai_summary_file(path: Path, topic: str, start: str, end: Optional[str]
         "generated_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
         "summaries": [entries[key] for key in sorted(entries.keys())],
     }
+    if main_finding and (main_finding.get('summary') or '').strip():
+        payload["main_finding"] = {
+            "summary": (main_finding.get('summary') or '').strip(),
+            "source_functions": main_finding.get('source_functions') or [],
+            "updated_at": main_finding.get('updated_at') or datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+        }
     try:
         with open(path, 'w', encoding='utf-8') as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
@@ -265,8 +359,9 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
     analyze_root.mkdir(parents=True, exist_ok=True)
 
     ai_summary_file = analyze_root / AI_SUMMARY_FILENAME
-    ai_summary_entries = _load_existing_ai_summary(ai_summary_file)
+    ai_summary_entries, previous_main_finding = _load_existing_ai_summary(ai_summary_file)
     ai_state = {"dirty": False}
+    main_finding = previous_main_finding
     
     success_count = 0
     
@@ -393,8 +488,16 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
             log_error(logger, f"{func_name}_{target}: {e}", "Analysis")
             continue
     
-    if ai_state.get('dirty'):
-        _save_ai_summary_file(ai_summary_file, topic, date, end_date, ai_summary_entries)
+    main_finding = _build_main_finding(ai_summary_entries, previous_main_finding, topic, date, end_date, logger)
+    if main_finding and main_finding is not previous_main_finding:
+        ai_state['dirty'] = True
+
+    should_save = bool(ai_state.get('dirty'))
+    if not should_save and main_finding and main_finding is not previous_main_finding:
+        should_save = True
+
+    if should_save:
+        _save_ai_summary_file(ai_summary_file, topic, date, end_date, ai_summary_entries, main_finding)
 
     # 输出最终统计信息
     log_success(logger, "模块执行完成", "Analyze")

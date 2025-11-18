@@ -11,7 +11,7 @@
       </nav>
     </header>
 
-    <div class="flex flex-col gap-6 lg:flex-row lg:items-start">
+    <div class="flex flex-col gap-6 pb-20 lg:flex-row lg:items-start lg:pb-0">
       <CollapsibleSidebar
         :items="tabsWithAria"
         :active-key="activeTab"
@@ -130,7 +130,7 @@
 
     <button
       type="button"
-      class="fixed bottom-6 right-6 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white shadow-lg transition focus-ring-accent hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+      class="fixed right-6 bottom-[5.5rem] z-40 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white shadow-lg transition focus-ring-accent hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-slate-300 lg:bottom-6"
       @click="refresh"
       :disabled="loading"
       aria-label="刷新数据库数据"

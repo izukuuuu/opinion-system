@@ -25,7 +25,7 @@
       </RouterLink>
     </header>
 
-    <div class="flex flex-col gap-6 lg:flex-row lg:items-start">
+    <div class="flex flex-col gap-6 pb-20 lg:flex-row lg:items-start lg:pb-0">
       <CollapsibleSidebar :items="steps" :is-active-fn="isActive" />
       <div class="flex-1 min-w-0">
         <RouterView />

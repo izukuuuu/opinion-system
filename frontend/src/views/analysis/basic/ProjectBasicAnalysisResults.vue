@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-8">
-    <section class="card-surface space-y-5 p-6">
+    <section class="card-surface space-y-4 p-6">
       <header class="flex flex-wrap items-start justify-between gap-3">
         <div class="space-y-2">
           <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Select</p>
@@ -20,30 +20,32 @@
           <span>{{ historyState.loading ? '刷新中…' : '刷新记录' }}</span>
         </button>
       </header>
-      <div class="space-y-6 text-sm">
-        <label class="space-y-2 text-secondary">
-          <span class="text-xs font-semibold text-muted">专题 Topic *</span>
-          <select
-            v-model="viewSelection.topic"
-            class="input"
-            :disabled="topicsState.loading || !selectableTopicOptions.length"
-            required
-          >
-            <option value="" disabled>请选择远程专题</option>
-            <option
-              v-for="option in selectableTopicOptions"
-              :key="`view-topic-${option}`"
-              :value="option"
+      <div class="space-y-4 text-sm">
+        <div class="flex flex-col gap-2 md:flex-row md:items-end md:gap-4">
+          <label class="flex-1 space-y-2 text-secondary">
+            <span class="text-xs font-semibold text-muted">专题 Topic *</span>
+            <select
+              v-model="viewSelection.topic"
+              class="input"
+              :disabled="topicsState.loading || !selectableTopicOptions.length"
+              required
             >
-              {{ option }}
-            </option>
-          </select>
-          <p class="text-xs text-muted">
+              <option value="" disabled>请选择远程专题</option>
+              <option
+                v-for="option in selectableTopicOptions"
+                :key="`view-topic-${option}`"
+                :value="option"
+              >
+                {{ option }}
+              </option>
+            </select>
+          </label>
+          <p class="text-xs text-muted md:mb-2">
             <span v-if="topicsState.loading">正在加载专题列表…</span>
             <span v-else-if="!selectableTopicOptions.length">暂无可用专题，请先完成远程数据拉取。</span>
             <span v-else>选择专题后可读取对应的分析记录。</span>
           </p>
-        </label>
+        </div>
 
         <div class="space-y-3" v-if="viewSelection.topic">
           <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">已有存档</p>
@@ -53,12 +55,12 @@
           <div v-else-if="historyState.error" class="rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">
             无法读取记录：{{ historyState.error }}
           </div>
-          <div v-else-if="analysisHistory.length" class="grid gap-3 lg:grid-cols-2">
+          <div v-else-if="analysisHistory.length" class="grid gap-2.5 lg:grid-cols-2">
             <button
               v-for="record in analysisHistory"
               :key="record.id"
               type="button"
-              class="flex flex-col gap-1 rounded-2xl border px-4 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-soft/80"
+              class="flex flex-col gap-1.5 rounded-2xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-soft/80"
               :class="
                 record.id === selectedHistoryId
                   ? 'border-transparent bg-brand-soft/80 text-brand-700 shadow-sm ring-1 ring-brand-soft/80'
@@ -72,18 +74,13 @@
               >
                 {{ record.start }} → {{ record.end }}
               </span>
-              <span
-                class="text-xs"
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs"
                 :class="record.id === selectedHistoryId ? 'text-brand-700/80' : 'text-muted'"
               >
-                最新刷新：{{ record.updated_at || '未知' }}
-              </span>
-              <span
-                class="text-xs"
-                :class="record.id === selectedHistoryId ? 'text-brand-700/80' : 'text-muted'"
-              >
-                存档目录：{{ record.folder || record.id }}
-              </span>
+                <span>最新刷新：{{ record.updated_at || '未知' }}</span>
+                <span class="hidden sm:inline">•</span>
+                <span class="truncate">存档：{{ record.folder || record.id }}</span>
+              </div>
             </button>
           </div>
           <p v-else class="text-xs text-muted">当前专题暂无分析存档，请先前往“运行分析”执行一次 Analyze。</p>
@@ -166,7 +163,7 @@
       </template>
     </section>
 
-    <section v-if="aiSummaryItems.length" class="card-surface space-y-3 p-5 sm:p-6">
+    <section v-if="aiMainFinding || aiSummaryItems.length" class="card-surface space-y-4 p-5 sm:p-6">
       <header class="flex flex-wrap items-center justify-between gap-3 text-sm">
         <h3 class="text-lg font-semibold text-primary">AI 摘要解读</h3>
         <div class="flex flex-wrap items-center gap-3 text-xs text-muted">
@@ -180,8 +177,26 @@
           </span>
         </div>
       </header>
+      <div
+        v-if="aiMainFinding"
+        class="rounded-2xl border border-brand-soft bg-brand-soft/30 px-4 py-3 text-sm shadow-sm"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-start gap-2">
+            <span class="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+              <SparklesIcon class="h-4 w-4" />
+            </span>
+            <div class="space-y-1">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-brand-700">主要发现</p>
+              <p class="whitespace-pre-line text-sm leading-relaxed text-primary">{{ aiMainFinding.summary }}</p>
+              <p v-if="aiMainFinding.sourceFunctions.length" class="text-[11px] text-muted">依据：{{ aiMainFinding.sourceFunctions.join('、') }}</p>
+            </div>
+          </div>
+          <span v-if="aiMainFinding.updatedAt" class="text-[10px] text-muted whitespace-nowrap">更新时间 {{ aiMainFinding.updatedAt }}</span>
+        </div>
+      </div>
+      <AiSummaryList v-if="aiSummaryItems.length" :items="aiSummaryItems" />
       <p class="text-[11px] text-muted">AI 生成解读仅供参考，具体请查看分析图表。</p>
-      <AiSummaryList :items="aiSummaryItems" />
     </section>
 
     <section
@@ -377,6 +392,18 @@ const aiSummaryRangeText = computed(() => {
   if (!range?.start) return ''
   const end = range.end || range.start
   return `${range.start} → ${end}`
+})
+
+const aiMainFinding = computed(() => {
+  const main = aiSummaryMeta.value?.main_finding
+  const summary = (main?.summary || '').trim()
+  if (!summary) return null
+  const sources = Array.isArray(main?.source_functions) ? main.source_functions.filter(Boolean) : []
+  return {
+    summary,
+    sourceFunctions: sources,
+    updatedAt: formatTimestamp(main?.updated_at || aiSummaryMeta.value?.generated_at)
+  }
 })
 
 const getChineseTitle = (label) => {

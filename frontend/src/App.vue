@@ -59,7 +59,7 @@
     </aside>
 
     <header
-      class="fixed inset-x-0 top-0 z-20 border-b border-soft bg-surface/95 px-4 py-3 shadow-sm backdrop-blur lg:hidden"
+      class="fixed inset-x-0 top-0 z-20 border-b border-soft bg-white/70 px-4 py-3 shadow-sm backdrop-blur lg:hidden"
     >
       <div class="flex items-center gap-3">
         <button

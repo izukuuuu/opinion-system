@@ -37,8 +37,40 @@
   - update:collapsed: 当收起状态改变时触发（用于 v-model:collapsed 双向绑定）
 -->
 <template>
+  <!-- 移动端：底部导航栏 -->
+  <nav
+    class="fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-soft bg-white/70 px-2 py-2 shadow-lg backdrop-blur-sm lg:hidden"
+  >
+    <component
+      v-for="(item, index) in items"
+      :key="itemKey(item, index)"
+      :is="item.to ? RouterLink : 'button'"
+      v-bind="itemProps(item)"
+      class="group flex flex-1 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 transition focus-ring-accent"
+      :class="mobileItemClasses(item)"
+      role="tab"
+      :aria-current="item.to ? (isItemActive(item) ? 'page' : undefined) : undefined"
+      :aria-selected="!item.to ? isItemActive(item) : undefined"
+      @click="handleSelect(item)"
+    >
+      <div
+        class="rounded-lg p-1.5 shadow-sm"
+        :class="[
+          item.iconBg || 'bg-white/70',
+          item.iconColor || 'text-brand-600'
+        ]"
+      >
+        <component :is="item.icon" class="h-4 w-4" />
+      </div>
+      <span class="text-[10px] font-medium leading-tight text-secondary">
+        {{ item.label }}
+      </span>
+    </component>
+  </nav>
+
+  <!-- 桌面端：侧边栏 -->
   <aside
-    class="flex w-full shrink-0 flex-col gap-3 lg:sticky lg:top-16"
+    class="hidden w-full shrink-0 flex-col gap-3 lg:flex lg:sticky lg:top-16"
     :class="isCollapsed ? 'lg:w-24' : 'lg:w-64'"
   >
     <div class="flex flex-col gap-3">
@@ -240,5 +272,17 @@ const itemClasses = (item) => {
     : 'inline-flex items-center justify-between gap-3 px-4 py-3 text-left text-sm'
 
   return [activeClass, sizeClass]
+}
+
+/**
+ * 获取移动端底部导航栏项的 CSS 类名
+ * 根据激活状态返回不同的样式类
+ */
+const mobileItemClasses = (item) => {
+  const activeClass = isItemActive(item)
+    ? 'bg-brand-soft text-brand-600'
+    : 'text-secondary hover:bg-accent-faint hover:text-brand-600'
+
+  return activeClass
 }
 </script>
