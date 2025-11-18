@@ -24,7 +24,7 @@
     <template v-else>
     <aside
       v-if="sidebarCollapsed"
-      class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-20 lg:flex-col lg:border-r border-soft lg:bg-base-soft"
+      class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-20 lg:flex-col lg:border-r border-soft lg:bg-white"
     >
       <div class="flex flex-col items-center gap-3 border-b border-soft px-3 py-4">
         <button
@@ -92,7 +92,7 @@
     >
       <div
         v-if="!sidebarCollapsed"
-        class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-soft bg-base-soft shadow-lg lg:w-72 lg:shadow-sm"
+        class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-soft bg-white shadow-lg lg:w-72 lg:shadow-sm"
       >
         <div class="flex items-center justify-between border-b border-soft px-5 py-4">
           <div class="flex flex-col h-10 justify-center overflow-hidden">

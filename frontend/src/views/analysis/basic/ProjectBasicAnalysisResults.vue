@@ -1,36 +1,67 @@
 <template>
-  <div class="space-y-8">
+  <div class="space-y-4">
     <section class="card-surface space-y-4 p-6">
-      <header class="flex flex-wrap items-start justify-between gap-3">
-        <div class="space-y-2">
-          <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Select</p>
-          <h2 class="text-2xl font-semibold text-primary">选择分析记录</h2>
-          <p class="text-sm text-secondary">先选择专题，系统会列出该专题所有已生成的分析存档，点击任意卡片即可立即刷新结果。</p>
+      <header class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-xl font-semibold text-primary">选择分析记录</h2>
+        <div class="flex items-center gap-2">
+          <div ref="manualInputRef" class="relative" v-if="viewSelection.topic">
+            <button
+              type="button"
+              class="btn-secondary inline-flex items-center gap-2 whitespace-nowrap px-4 py-2 text-xs font-semibold sm:text-sm"
+              @click="toggleManualInput"
+            >
+              <CalendarDaysIcon class="h-4 w-4" />
+              <span>手动输入</span>
+            </button>
+            <div
+              v-if="showManualInput"
+              class="absolute right-0 top-full z-50 mt-2 w-80 rounded-2xl border border-soft bg-surface p-4 shadow-lg"
+            >
+              <form class="space-y-3" @submit.prevent="handleManualSubmit">
+                <div class="grid gap-3 md:grid-cols-2">
+                  <label class="space-y-2 text-secondary">
+                    <span class="text-xs font-semibold text-muted">开始日期 Start</span>
+                    <input v-model="viewManualForm.start" type="date" class="input" />
+                  </label>
+                  <label class="space-y-2 text-secondary">
+                    <span class="text-xs font-semibold text-muted">结束日期 End</span>
+                    <input v-model="viewManualForm.end" type="date" class="input" />
+                  </label>
+                </div>
+                <div class="flex flex-wrap gap-3 text-sm">
+                  <button type="submit" class="btn-secondary" :disabled="!viewSelection.topic">手动查询</button>
+                  <button type="button" class="btn-ghost" :disabled="loadState.loading || !viewSelection.topic" @click="loadResults()">
+                    {{ loadState.loading ? '读取中…' : '重新加载' }}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="btn-secondary inline-flex items-center gap-2 whitespace-nowrap px-4 py-2 text-xs font-semibold sm:text-sm"
+            :disabled="historyState.loading || loadState.loading || !viewSelection.topic"
+            @click="refreshHistory"
+          >
+            <ArrowPathIcon
+              class="h-4 w-4"
+              :class="historyState.loading ? 'animate-spin' : ''"
+            />
+            <span>{{ historyState.loading ? '刷新中…' : '刷新记录' }}</span>
+          </button>
         </div>
-        <button
-          type="button"
-          class="btn-secondary inline-flex items-center gap-2 whitespace-nowrap px-4 py-2 text-xs font-semibold sm:text-sm"
-          :disabled="historyState.loading || loadState.loading || !viewSelection.topic"
-          @click="refreshHistory"
-        >
-          <ArrowPathIcon
-            class="h-4 w-4"
-            :class="historyState.loading ? 'animate-spin' : ''"
-          />
-          <span>{{ historyState.loading ? '刷新中…' : '刷新记录' }}</span>
-        </button>
       </header>
       <div class="space-y-4 text-sm">
         <div class="flex flex-col gap-2 md:flex-row md:items-end md:gap-4">
           <label class="flex-1 space-y-2 text-secondary">
-            <span class="text-xs font-semibold text-muted">专题 Topic *</span>
+            <span class="text-xs font-semibold text-muted">专题</span>
             <select
               v-model="viewSelection.topic"
               class="input"
               :disabled="topicsState.loading || !selectableTopicOptions.length"
               required
             >
-              <option value="" disabled>请选择远程专题</option>
+              <option value="" disabled>请选择专题</option>
               <option
                 v-for="option in selectableTopicOptions"
                 :key="`view-topic-${option}`"
@@ -40,127 +71,110 @@
               </option>
             </select>
           </label>
-          <p class="text-xs text-muted md:mb-2">
-            <span v-if="topicsState.loading">正在加载专题列表…</span>
-            <span v-else-if="!selectableTopicOptions.length">暂无可用专题，请先完成远程数据拉取。</span>
-            <span v-else>选择专题后可读取对应的分析记录。</span>
-          </p>
-        </div>
-
-        <div class="space-y-3" v-if="viewSelection.topic">
-          <p class="text-xs font-semibold uppercase tracking-[0.4em] text-muted">已有存档</p>
-          <div v-if="historyState.loading" class="rounded-2xl border border-dashed border-soft bg-surface-muted px-4 py-6 text-center text-xs text-muted">
-            正在读取该专题的分析存档…
-          </div>
-          <div v-else-if="historyState.error" class="rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">
-            无法读取记录：{{ historyState.error }}
-          </div>
-          <div v-else-if="analysisHistory.length" class="grid gap-2.5 lg:grid-cols-2">
-            <button
-              v-for="record in analysisHistory"
-              :key="record.id"
-              type="button"
-              class="flex flex-col gap-1.5 rounded-2xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-soft/80"
-              :class="
-                record.id === selectedHistoryId
-                  ? 'border-transparent bg-brand-soft/80 text-brand-700 shadow-sm ring-1 ring-brand-soft/80'
-                  : 'border-soft text-secondary hover:border-brand-soft hover:bg-surface-muted'
-              "
-              @click="selectHistory(record.id)"
-            >
-              <span
-                class="text-sm font-semibold"
-                :class="record.id === selectedHistoryId ? 'text-brand-700' : 'text-primary'"
+          
+          <div ref="timeRangeRef" class="relative" v-if="viewSelection.topic">
+            <label class="space-y-2 text-secondary">
+              <span class="text-xs font-semibold text-muted">时间范围</span>
+              <button
+                type="button"
+                class="input flex w-full cursor-pointer items-center justify-between text-left transition"
+                :class="showTimeRange ? 'border-brand-soft ring-1 ring-brand-soft/80' : ''"
+                @click="toggleTimeRange"
               >
-                {{ record.start }} → {{ record.end }}
-              </span>
-              <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs"
-                :class="record.id === selectedHistoryId ? 'text-brand-700/80' : 'text-muted'"
-              >
-                <span>最新刷新：{{ record.updated_at || '未知' }}</span>
-                <span class="hidden sm:inline">•</span>
-                <span class="truncate">存档：{{ record.folder || record.id }}</span>
-              </div>
-            </button>
-          </div>
-          <p v-else class="text-xs text-muted">当前专题暂无分析存档，请先前往“运行分析”执行一次 Analyze。</p>
-        </div>
-
-        <details v-if="viewSelection.topic" class="rounded-2xl border border-dashed border-soft p-4" :open="false">
-          <summary class="cursor-pointer text-xs font-semibold uppercase tracking-[0.4em] text-muted">
-            手动输入其它区间
-          </summary>
-          <form class="mt-4 space-y-3" @submit.prevent="loadResultsFromManual">
-            <div class="grid gap-3 md:grid-cols-2">
-              <label class="space-y-2 text-secondary">
-                <span class="text-xs font-semibold text-muted">开始日期 Start</span>
-                <input v-model="viewManualForm.start" type="date" class="input" />
-              </label>
-              <label class="space-y-2 text-secondary">
-                <span class="text-xs font-semibold text-muted">结束日期 End</span>
-                <input v-model="viewManualForm.end" type="date" class="input" />
-              </label>
-            </div>
-            <div class="flex flex-wrap gap-3 text-sm">
-              <button type="submit" class="btn-secondary" :disabled="!viewSelection.topic">手动查询</button>
-              <button type="button" class="btn-ghost" :disabled="loadState.loading || !viewSelection.topic" @click="loadResults()">
-                {{ loadState.loading ? '读取中…' : '重新加载' }}
+                <span class="truncate" :class="selectedHistoryId && selectedRecord ? 'text-primary' : 'text-muted'">
+                  {{ selectedHistoryId && selectedRecord ? `${selectedRecord.start} → ${selectedRecord.end}` : '请选择时间范围' }}
+                </span>
+                <ChevronDownIcon 
+                  class="h-4 w-4 shrink-0 text-muted transition-transform"
+                  :class="showTimeRange ? 'rotate-180' : ''"
+                />
               </button>
-            </div>
-          </form>
-        </details>
-      </div>
-    </section>
-
-    <section class="card-surface space-y-6 p-6">
-      <template v-if="analysisSummary">
-        <dl class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <div class="rounded-2xl border border-soft bg-surface-muted/40 p-5 shadow-sm transition hover:border-brand-soft">
-            <div class="flex flex-col gap-3">
-              <span class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
-                <BookmarkSquareIcon class="h-5 w-5" />
-              </span>
-              <div class="space-y-1">
-                <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">专题</dt>
-                <dd class="text-lg font-semibold leading-tight text-primary break-words md:text-xl md:break-normal">
-                  {{ analysisSummary.topic }}
-                </dd>
+            </label>
+            
+            <Teleport to="body">
+              <div
+                v-if="showTimeRange"
+                class="fixed z-[9999] rounded-2xl border border-soft bg-surface p-4 shadow-lg"
+                :style="timeRangeDropdownStyle"
+              >
+              <div v-if="historyState.loading" class="rounded-2xl border border-dashed border-soft bg-surface-muted px-4 py-6 text-center text-xs text-muted">
+                正在读取该专题的分析存档…
               </div>
-            </div>
-          </div>
-          <div class="rounded-2xl border border-soft bg-surface-muted/40 p-5 shadow-sm transition hover:border-brand-soft">
-            <div class="flex flex-col gap-3">
-              <span class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
-                <CalendarDaysIcon class="h-5 w-5" />
-              </span>
-              <div class="space-y-1">
-                <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">分析区间</dt>
-                <dd class="text-lg font-semibold leading-tight text-primary break-words md:text-xl md:flex md:flex-wrap md:items-center md:gap-2">
-                  <span class="block md:inline">{{ analysisSummary.range?.start || '未提供' }}</span>
-                  <span class="block text-muted md:inline">→</span>
-                  <span class="block md:inline">{{ analysisSummary.range?.end || '未提供' }}</span>
-                </dd>
+              <div v-else-if="historyState.error" class="rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">
+                无法读取记录：{{ historyState.error }}
               </div>
-            </div>
-          </div>
-          <div class="rounded-2xl border border-soft bg-surface-muted/40 p-5 shadow-sm transition hover:border-brand-soft">
-            <div class="flex flex-col gap-3">
-              <span class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
-                <Squares2X2Icon class="h-5 w-5" />
-              </span>
-              <div class="space-y-1">
-                <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">分析模块</dt>
-                <dd class="text-lg font-semibold leading-tight text-primary md:text-xl">{{ analysisSummary.functionCount }}</dd>
+              <div v-else-if="analysisHistory.length" class="grid gap-2.5 lg:grid-cols-2">
+                <button
+                  v-for="record in analysisHistory"
+                  :key="record.id"
+                  type="button"
+                  class="flex flex-col gap-1.5 rounded-2xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-soft/80"
+                  :class="
+                    record.id === selectedHistoryId
+                      ? 'border-brand-soft bg-brand-soft text-brand-700 shadow-sm ring-1 ring-brand-soft'
+                      : 'border-soft text-secondary hover:border-brand-soft hover:bg-surface-muted'
+                  "
+                  @click="selectHistoryFromDropdown(record.id)"
+                >
+                  <span
+                    class="text-sm font-semibold"
+                    :class="record.id === selectedHistoryId ? 'text-brand-700' : 'text-primary'"
+                  >
+                    {{ record.start }} → {{ record.end }}
+                  </span>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs"
+                    :class="record.id === selectedHistoryId ? 'text-brand-700/80' : 'text-muted'"
+                  >
+                    <span>最新刷新：{{ record.updated_at || '未知' }}</span>
+                    <span class="hidden sm:inline">•</span>
+                    <span class="truncate">存档：{{ record.folder || record.id }}</span>
+                  </div>
+                </button>
               </div>
-            </div>
+              <p v-else class="text-xs text-muted">当前专题暂无分析存档，请先前往"运行分析"执行一次 Analyze。</p>
+              </div>
+            </Teleport>
           </div>
-        </dl>
-      </template>
-      <template v-else>
-        <div class="rounded-2xl border border-dashed border-soft bg-surface-muted/40 p-5 text-sm text-secondary">
-          还未读取任何分析 JSON，请先完成专题选择或手动查询。
         </div>
-      </template>
+        
+        <template v-if="analysisSummary">
+          <div class="border-t border-soft pt-4">
+            <dl class="flex flex-wrap items-center gap-4 text-sm">
+              <div class="flex items-center gap-2">
+                <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                  <BookmarkSquareIcon class="h-3.5 w-3.5" />
+                </span>
+                <div class="flex items-center gap-1.5">
+                  <dt class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">专题</dt>
+                  <dd class="font-semibold text-primary">
+                    {{ analysisSummary.topic }}
+                  </dd>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                  <CalendarDaysIcon class="h-3.5 w-3.5" />
+                </span>
+                <div class="flex items-center gap-1.5">
+                  <dt class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">分析区间</dt>
+                  <dd class="font-semibold text-primary">
+                    {{ analysisSummary.range?.start || '未提供' }} → {{ analysisSummary.range?.end || '未提供' }}
+                  </dd>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                  <Squares2X2Icon class="h-3.5 w-3.5" />
+                </span>
+                <div class="flex items-center gap-1.5">
+                  <dt class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">分析模块</dt>
+                  <dd class="font-semibold text-primary">{{ analysisSummary.functionCount }}</dd>
+                </div>
+              </div>
+            </dl>
+          </div>
+        </template>
+      </div>
     </section>
 
     <section v-if="aiMainFinding || aiSummaryItems.length" class="card-surface space-y-4 p-5 sm:p-6">
@@ -181,18 +195,15 @@
         v-if="aiMainFinding"
         class="rounded-2xl border border-brand-soft bg-brand-soft/30 px-4 py-3 text-sm shadow-sm"
       >
-        <div class="flex items-start justify-between gap-3">
-          <div class="flex items-start gap-2">
-            <span class="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
-              <SparklesIcon class="h-4 w-4" />
-            </span>
-            <div class="space-y-1">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-brand-700">主要发现</p>
-              <p class="whitespace-pre-line text-sm leading-relaxed text-primary">{{ aiMainFinding.summary }}</p>
-              <p v-if="aiMainFinding.sourceFunctions.length" class="text-[11px] text-muted">依据：{{ aiMainFinding.sourceFunctions.join('、') }}</p>
-            </div>
+        <div class="flex items-start gap-2">
+          <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+            <SparklesIcon class="h-4 w-4" />
+          </span>
+          <div class="space-y-1">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-brand-700">主要发现</p>
+            <p class="whitespace-pre-line text-sm leading-relaxed text-primary">{{ aiMainFinding.summary }}</p>
+            <p v-if="aiMainFinding.sourceFunctions.length" class="text-[11px] text-muted">依据：{{ aiMainFinding.sourceFunctions.join('、') }}</p>
           </div>
-          <span v-if="aiMainFinding.updatedAt" class="text-[10px] text-muted whitespace-nowrap">更新时间 {{ aiMainFinding.updatedAt }}</span>
         </div>
       </div>
       <AiSummaryList v-if="aiSummaryItems.length" :items="aiSummaryItems" />
@@ -291,13 +302,15 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Teleport } from 'vue'
 import {
   ArrowPathIcon,
   BookmarkSquareIcon,
   CalendarDaysIcon,
   ChartBarIcon,
   ChartPieIcon,
+  ChevronDownIcon,
   GlobeAltIcon,
   HashtagIcon,
   Squares2X2Icon,
@@ -344,6 +357,10 @@ const selectableTopicOptions = computed(() => {
 
 const autoSelectedTopic = ref('')
 const activeSectionName = ref('')
+const showTimeRange = ref(false)
+const timeRangeRef = ref(null)
+const showManualInput = ref(false)
+const manualInputRef = ref(null)
 
 const sectionIconMap = {
   classification: ChartPieIcon,
@@ -435,6 +452,48 @@ const selectHistory = (recordId) => {
   selectedHistoryId.value = recordId
 }
 
+const selectedRecord = computed(() => {
+  return analysisHistory.value.find((item) => item.id === selectedHistoryId.value)
+})
+
+const toggleTimeRange = async (event) => {
+  event.stopPropagation()
+  showTimeRange.value = !showTimeRange.value
+  if (showTimeRange.value) {
+    await nextTick()
+    updateTimeRangePosition()
+  }
+}
+
+const timeRangeDropdownStyle = ref({})
+
+const updateTimeRangePosition = () => {
+  if (!timeRangeRef.value) return
+  const rect = timeRangeRef.value.getBoundingClientRect()
+  timeRangeDropdownStyle.value = {
+    top: `${rect.bottom + 8}px`,
+    right: `${window.innerWidth - rect.right}px`,
+    width: `${Math.max(rect.width, 400)}px`
+  }
+}
+
+watch(showTimeRange, async (isOpen) => {
+  if (isOpen) {
+    await nextTick()
+    updateTimeRangePosition()
+    window.addEventListener('scroll', updateTimeRangePosition, true)
+    window.addEventListener('resize', updateTimeRangePosition)
+  } else {
+    window.removeEventListener('scroll', updateTimeRangePosition, true)
+    window.removeEventListener('resize', updateTimeRangePosition)
+  }
+})
+
+const selectHistoryFromDropdown = (recordId) => {
+  selectHistory(recordId)
+  showTimeRange.value = false
+}
+
 const refreshHistory = async () => {
   if (historyState.loading || loadState.loading) return
   const topic = (viewSelection.topic || '').trim()
@@ -494,7 +553,12 @@ watch(
   }
 )
 
-onMounted(() => {
+onMounted(async () => {
+  // 进入页面时自动刷新记录
+  if (viewSelection.topic) {
+    await refreshHistory()
+  }
+  
   if (selectedHistoryId.value) {
     applyHistorySelection(selectedHistoryId.value, { shouldLoad: true })
   }
@@ -525,4 +589,34 @@ const formatRowValue = (row) => {
   if (!row) return 0
   return row.value ?? row.count ?? row.total ?? 0
 }
+
+const toggleManualInput = (event) => {
+  event.stopPropagation()
+  showManualInput.value = !showManualInput.value
+}
+
+const handleManualSubmit = () => {
+  loadResultsFromManual()
+  showManualInput.value = false
+}
+
+// 点击外部关闭悬浮窗
+const handleClickOutside = (event) => {
+  if (manualInputRef.value && !manualInputRef.value.contains(event.target)) {
+    showManualInput.value = false
+  }
+  if (timeRangeRef.value && !timeRangeRef.value.contains(event.target)) {
+    showTimeRange.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleClickOutside)
+  window.removeEventListener('scroll', updateTimeRangePosition, true)
+  window.removeEventListener('resize', updateTimeRangePosition)
+})
 </script>

@@ -98,6 +98,7 @@ def log_success(logger: logging.Logger, message: str, module: str):
         message (str): 成功消息
         module (str): 模块名称
     """
+    logger = logger or logging.getLogger("opinion-system")
     record = logger.makeRecord('success', logging.INFO, '', 0, message, (), None)
     record.module = module
     record.status = 'success'
@@ -113,6 +114,7 @@ def log_error(logger: logging.Logger, message: str, module: str):
         message (str): 错误消息
         module (str): 模块名称
     """
+    logger = logger or logging.getLogger("opinion-system")
     record = logger.makeRecord('error', logging.ERROR, '', 0, message, (), None)
     record.module = module
     record.status = 'fail'
@@ -128,7 +130,7 @@ def log_module_start(logger: logging.Logger, module: str, action: str = "模块�
         module (str): 模块名称
         action (str): 操作描述
     """
-    logger.info(f"[{module}] {action}")
+    (logger or logging.getLogger("opinion-system")).info(f"[{module}] {action}")
 
 
 def log_save_success(logger: logging.Logger, file_path: str, module: str):
@@ -152,7 +154,7 @@ def log_skip(logger: logging.Logger, reason: str, module: str):
         reason (str): 跳过原因
         module (str): 模块名称
     """
-    logger.info(f"[{module}] 跳过: {reason}")
+    (logger or logging.getLogger("opinion-system")).info(f"[{module}] 跳过: {reason}")
 
 
 def get_logs_directory() -> Path:

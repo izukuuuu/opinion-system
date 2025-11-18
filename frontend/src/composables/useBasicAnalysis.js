@@ -12,37 +12,37 @@ const analysisFunctions = [
   {
     id: 'attitude',
     label: '情感分析',
-    description: '统计 Positive / Negative / Neutral 的占比。'
+    description: '分析内容的情感倾向分布，识别正面、负面和中性情绪。'
   },
   {
     id: 'classification',
     label: '话题分类',
-    description: '基于 classification 字段的数量分布。'
+    description: '对内容进行分类统计，了解不同话题的分布情况。'
   },
   {
     id: 'geography',
     label: '地域分析',
-    description: '按地域字段统计声量，适合地图或水平条形图。'
+    description: '分析内容的地域分布特征，识别主要传播区域。'
   },
   {
     id: 'keywords',
     label: '关键词分析',
-    description: '从正文中提取高频关键词并统计词频。'
+    description: '提取并统计高频关键词，了解核心关注点。'
   },
   {
     id: 'publishers',
     label: '发布者分析',
-    description: '统计 author 列中高频的媒体/账号。'
+    description: '分析主要发布者分布，识别活跃的媒体和账号。'
   },
   {
     id: 'trends',
     label: '趋势洞察',
-    description: '按日期统计声量趋势。'
+    description: '分析时间维度的声量变化，识别传播趋势和峰值。'
   },
   {
     id: 'volume',
     label: '声量概览',
-    description: '按渠道统计 JSONL 行数，评估声量占比。'
+    description: '统计各渠道的声量分布，评估传播渠道的影响力。'
   }
 ]
 
@@ -142,23 +142,28 @@ const analysisSections = computed(() => {
       description: ''
     }
     const displayLabel = sanitizeLabel(meta.label) || meta.label || func.name
-    const targets = func.targets.map((target) => {
-      const rows = extractRows(target.data)
-      const shouldSortDescending = isHorizontalBarFunction(func.name)
-      const displayRows = shouldSortDescending ? sortRowsDescending(rows) : rows
-      const targetTitle = `${displayLabel} · ${target.target}`
-      const targetSubtitle =
-        target.target === '总体' ? '自动生成的分析图表' : `${target.target} 渠道自动分析`
-      return {
-        target: target.target,
-        title: targetTitle,
-        subtitle: targetSubtitle,
-        option: buildChartOption(func.name, displayRows, targetTitle),
-        hasData: rows.length > 0,
-        rows: displayRows.slice(0, 12),
-        rawText: buildRawText(target.data)
-      }
-    })
+    const targets = func.targets
+      .map((target) => {
+        const rows = extractRows(target.data)
+        const shouldSortDescending = isHorizontalBarFunction(func.name)
+        const displayRows = shouldSortDescending ? sortRowsDescending(rows) : rows
+        const targetTitle = `${displayLabel} · ${target.target}`
+        return {
+          target: target.target,
+          title: targetTitle,
+          subtitle: '',
+          option: buildChartOption(func.name, displayRows, targetTitle),
+          hasData: rows.length > 0,
+          rows: displayRows.slice(0, 12),
+          rawText: buildRawText(target.data)
+        }
+      })
+      .sort((a, b) => {
+        // 将"总体"放在前面
+        if (a.target === '总体') return -1
+        if (b.target === '总体') return 1
+        return 0
+      })
     return {
       name: func.name,
       label: meta.label,
@@ -197,14 +202,15 @@ export const useBasicAnalysis = () => {
     selectedHistoryId,
     viewSelection,
     viewManualForm,
-    analysisSummary,
-    analysisAiSummary,
-    analysisSections,
-    loadTopics,
-    resetFetchForm,
-    runFetch,
-    runSelectedFunctions,
-    runSingleFunction,
+  analysisSummary,
+  analysisAiSummary,
+  analysisSections,
+  changeTopic,
+  loadTopics,
+  resetFetchForm,
+  runFetch,
+  runSelectedFunctions,
+  runSingleFunction,
     selectAll,
     clearSelection,
     loadHistory,
@@ -232,6 +238,16 @@ function initializeStore() {
       }
     },
     { immediate: true }
+  )
+
+  watch(
+    () => analyzeForm.topic,
+    (value) => {
+      const topicValue = (value || '').trim()
+      if (topicValue && topicValue !== fetchForm.topic) {
+        fetchForm.topic = topicValue
+      }
+    }
   )
 
   watch(
@@ -282,6 +298,13 @@ function initializeStore() {
   )
 }
 
+const changeTopic = (value) => {
+  const next = (value || '').trim()
+  fetchForm.topic = next
+  analyzeForm.topic = next
+  loadAvailableRange()
+}
+
 const ensureTopicSelection = () => {
   if (!topicOptions.value.length) return
   if (!fetchForm.topic || !topicOptions.value.includes(fetchForm.topic)) {
@@ -329,6 +352,11 @@ const loadAvailableRange = async () => {
   const requestId = ++availabilityRequestId
   availableRange.loading = true
   availableRange.error = ''
+  resetAvailableRange()
+  fetchForm.start = ''
+  fetchForm.end = ''
+  analyzeForm.start = ''
+  analyzeForm.end = ''
   try {
     const params = new URLSearchParams({ topic })
     const response = await callApi(`/api/fetch/availability?${params.toString()}`, { method: 'GET' })
@@ -341,6 +369,10 @@ const loadAvailableRange = async () => {
     if (requestId !== availabilityRequestId) return
     resetAvailableRange()
     availableRange.error = error instanceof Error ? error.message : String(error)
+    fetchForm.start = ''
+    fetchForm.end = ''
+    analyzeForm.start = ''
+    analyzeForm.end = ''
   } finally {
     if (requestId === availabilityRequestId) {
       availableRange.loading = false
@@ -457,6 +489,12 @@ const normalizeRange = (form) => {
   return { topic, start, end }
 }
 
+const parseDateValue = (value) => {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 const hasValidRange = (form) => {
   const { topic, start, end } = normalizeRange(form)
   return Boolean(topic && start && end)
@@ -545,15 +583,39 @@ const deriveRangeFromFolder = (folderValue, startValue, endValue) => {
   return { start: rangeStart, end: rangeEnd }
 }
 
-const runFetch = async () => {
-  const { topic, start, end } = normalizeRange(fetchForm)
+const runFetch = async (rangeOverride = null, options = {}) => {
+  const range = normalizeRange(rangeOverride || fetchForm)
+  const { topic, start, end } = range
+  const { logId = null, label = 'Fetch', silent = false } = options
+
   if (!topic || !start || !end) {
-    appendLog(fetchLogs, { label: '参数校验', message: 'Topic / Start / End 为必填', status: 'error' })
-    return
+    if (logId) {
+      updateLogEntry(fetchLogs, logId, { status: 'error', message: 'Topic / Start / End 为必填', time: currentTimeString() })
+    } else {
+      appendLog(fetchLogs, { label: '参数校验', message: 'Topic / Start / End 为必填', status: 'error' })
+    }
+    return false
   }
 
-  fetchState.loading = true
+  const entryId =
+    logId ||
+    appendLog(fetchLogs, {
+      label,
+      message: `准备拉取 ${topic} ${start}→${end}`,
+      status: 'running'
+    })
+
+  if (!silent) {
+    fetchState.loading = true
+  }
+
   try {
+    updateLogEntry(fetchLogs, entryId, {
+      status: 'running',
+      message: `正在拉取 ${topic} ${start}→${end}…`,
+      time: currentTimeString()
+    })
+
     await callApi('/api/fetch', {
       method: 'POST',
       body: JSON.stringify({
@@ -562,22 +624,90 @@ const runFetch = async () => {
         end
       })
     })
-    appendLog(fetchLogs, { label: 'Fetch', message: `已触发 ${topic} ${start}→${end}`, status: 'ok' })
-  } catch (error) {
-    appendLog(fetchLogs, {
-      label: 'Fetch',
-      message: error instanceof Error ? error.message : String(error),
-      status: 'error'
+
+    updateLogEntry(fetchLogs, entryId, {
+      status: 'ok',
+      message: `已触发 ${topic} ${start}→${end}`,
+      time: currentTimeString()
     })
+    return true
+  } catch (error) {
+    updateLogEntry(fetchLogs, entryId, {
+      label,
+      message: error instanceof Error ? error.message : String(error),
+      status: 'error',
+      time: currentTimeString()
+    })
+    return false
   } finally {
-    fetchState.loading = false
+    if (!silent) {
+      fetchState.loading = false
+    }
   }
+}
+
+const ensureFetchReadyForRange = async (range) => {
+  const target = normalizeRange(range)
+  const { topic, start, end } = target
+  if (!topic || !start || !end) {
+    appendLog(fetchLogs, { label: '数据准备', message: 'Topic / Start / End 为必填', status: 'error' })
+    return false
+  }
+
+  const logId = appendLog(fetchLogs, {
+    label: '数据准备',
+    message: `预先拉取 ${topic} ${start}→${end}`,
+    status: 'running'
+  })
+
+  const availStart = parseDateValue(availableRange.start)
+  const availEnd = parseDateValue(availableRange.end)
+  const reqStart = parseDateValue(start)
+  const reqEnd = parseDateValue(end)
+  if (availStart && availEnd && reqStart && reqEnd) {
+    const withinRange = reqStart >= availStart && reqEnd <= availEnd
+    if (!withinRange) {
+      updateLogEntry(fetchLogs, logId, {
+        status: 'error',
+        message: `当前专题可用区间为 ${availableRange.start}→${availableRange.end}，请调整时间。`,
+        time: currentTimeString()
+      })
+      appendLog(analyzeLogs, {
+        label: '数据准备',
+        message: `超出可用区间：${availableRange.start}→${availableRange.end}`,
+        status: 'error'
+      })
+      return false
+    }
+  }
+
+  const success = await runFetch(target, { logId, label: 'Fetch' })
+  if (!success) {
+    updateLogEntry(fetchLogs, logId, {
+      status: 'error',
+      message: '预拉取失败，请检查时间范围后重试。',
+      time: currentTimeString()
+    })
+    return false
+  }
+  updateLogEntry(fetchLogs, logId, {
+    status: 'ok',
+    message: '预拉取完成，准备执行分析。',
+    time: currentTimeString()
+  })
+  return true
 }
 
 const invokeAnalyze = async (functions) => {
   const { topic, start, end } = normalizeRange(analyzeForm)
   if (!topic || !start || !end) {
     appendLog(analyzeLogs, { label: '参数校验', message: 'Topic / Start / End 为必填', status: 'error' })
+    return
+  }
+
+  const fetchReady = await ensureFetchReadyForRange({ topic, start, end })
+  if (!fetchReady) {
+    appendLog(analyzeLogs, { label: '数据准备', message: '未能完成数据拉取，已停止本次分析。', status: 'error' })
     return
   }
 
@@ -715,4 +845,3 @@ const applyHistorySelection = async (historyId, { shouldLoad = false } = {}) => 
     await loadResults(entry)
   }
 }
-

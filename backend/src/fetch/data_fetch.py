@@ -1,6 +1,7 @@
 """
 数据提取功能
 """
+import logging
 from datetime import date, datetime
 from typing import List, Optional, Tuple
 
@@ -263,6 +264,8 @@ def get_available_date_range(topic: str, table_name: str, logger=None):
     Returns:
         tuple[str | None, str | None]: (最早日期, 最晚日期)。若表不存在或无数据则返回 (None, None)
     """
+    if logger is None:
+        logger = logging.getLogger("fetch-availability")
     db_config = settings.get('databases', {})
     db_url = db_config.get('db_url')
     if not db_url:
@@ -303,6 +306,8 @@ def get_topic_available_date_range(topic: str, logger=None):
             "channels": Dict[str, Dict[str, Optional[str]]]
         }
     """
+    if logger is None:
+        logger = logging.getLogger("fetch-availability")
     db_config = settings.get('databases', {})
     db_url = db_config.get('db_url')
     if not db_url:
