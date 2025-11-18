@@ -12,35 +12,11 @@
     </header>
 
     <div class="flex flex-col gap-6 lg:flex-row lg:items-start">
-      <aside class="flex w-full shrink-0 flex-col gap-3 lg:w-64 lg:sticky lg:top-16">
-        <button
-          v-for="tab in tabs"
-          :key="tab.key"
-          type="button"
-          class="group inline-flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition focus-ring-accent"
-          :class="[
-            activeTab === tab.key
-              ? 'border-brand-soft bg-brand-soft text-brand-600 shadow-sm'
-              : 'border-transparent bg-surface text-secondary hover:border-brand-soft hover:bg-accent-faint hover:text-brand-600'
-          ]"
-          role="tab"
-          :id="`database-tab-${tab.key}`"
-          :aria-selected="activeTab === tab.key"
-          :aria-controls="`database-panel-${tab.key}`"
-          @click="setActiveTab(tab.key)"
-        >
-          <span class="flex items-start gap-3">
-            <div class="mt-0.5 rounded-xl bg-white/70 p-2 text-brand-600 shadow-sm">
-              <component :is="tab.icon" class="h-4 w-4" />
-            </div>
-            <span class="flex flex-col gap-1">
-              <span class="font-semibold">{{ tab.label }}</span>
-              <span class="text-xs text-muted">{{ tab.description }}</span>
-            </span>
-          </span>
-          <ChevronRightIcon class="h-4 w-4 text-muted transition group-hover:text-brand-500" />
-        </button>
-      </aside>
+      <CollapsibleSidebar
+        :items="tabsWithAria"
+        :active-key="activeTab"
+        @select="(tab) => setActiveTab(tab.key)"
+      />
 
       <div class="flex-1 min-w-0 space-y-6">
         <section class="card-surface space-y-6 p-6">
@@ -176,10 +152,9 @@ import {
   ArrowPathIcon,
   CircleStackIcon,
   CodeBracketSquareIcon,
-  ServerStackIcon,
-  ChevronRightIcon
+  ServerStackIcon
 } from '@heroicons/vue/24/outline'
-
+import CollapsibleSidebar from '../components/navigation/CollapsibleSidebar.vue'
 import { useApiBase } from '../composables/useApiBase'
 
 const { callApi } = useApiBase()
@@ -209,6 +184,14 @@ const tabs = Object.freeze([
     icon: CodeBracketSquareIcon
   }
 ])
+
+const tabsWithAria = computed(() =>
+  tabs.map((tab) => ({
+    ...tab,
+    id: `database-tab-${tab.key}`,
+    ariaControls: `database-panel-${tab.key}`
+  }))
+)
 
 const setActiveTab = (key) => {
   if (tabs.some((tab) => tab.key === key)) {
