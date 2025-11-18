@@ -89,7 +89,8 @@ const steps = [
 
 const route = useRoute()
 
-const isActive = (target) => {
+const isActive = (itemOrTarget) => {
+  const target = itemOrTarget?.to ?? itemOrTarget
   if (!target?.name) return false
   if (route.name === target.name) return true
   // 当访问别名路径时保持当前状态

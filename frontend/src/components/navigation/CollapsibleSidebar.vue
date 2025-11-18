@@ -1,3 +1,41 @@
+<!--
+  可折叠侧边栏组件 (CollapsibleSidebar)
+  
+  这是一个页面内部的可复用侧边栏结构组件，支持展开和收起两种状态。
+  
+  功能特性：
+  - 支持展开/收起切换，展开时显示完整内容（包括描述文字），收起时仅显示图标和标题
+  - 支持路由导航（RouterLink）和按钮两种模式
+  - 支持自定义激活状态判断
+  - 支持受控和非受控两种模式（通过 collapsed prop）
+  
+  可传入参数：
+  - items: 侧边栏项数组，必填
+    * 每个 item 可包含以下属性：
+      - key: 唯一标识符（用于激活状态判断）
+      - label: 显示标题（必填）
+      - description: 描述文字（可选，仅在展开时显示）
+      - icon: Vue 组件（图标组件，必填）
+      - iconBg: 图标背景色类名（可选，默认 'bg-white/70'）
+      - iconColor: 图标颜色类名（可选，默认 'text-brand-600'）
+      - to: 路由对象或路径（可选，如果提供则渲染为 RouterLink，否则渲染为 button）
+      - id: HTML id 属性（可选）
+      - ariaControls: aria-controls 属性（可选）
+  
+  - activeKey: 当前激活项的 key 值（String | Number | null，可选）
+  
+  - collapsed: 是否收起状态（Boolean | null，可选）
+    * null: 非受控模式，组件内部管理状态
+    * boolean: 受控模式，由父组件控制状态
+  
+  - isActiveFn: 自定义激活状态判断函数（Function，可选）
+    * 函数签名: (item) => boolean
+    * 如果提供，将使用此函数判断激活状态，忽略 activeKey
+  
+  事件：
+  - select: 当点击侧边栏项时触发，参数为被点击的 item 对象
+  - update:collapsed: 当收起状态改变时触发（用于 v-model:collapsed 双向绑定）
+-->
 <template>
   <aside
     class="flex w-full shrink-0 flex-col gap-3 lg:sticky lg:top-16"
@@ -20,7 +58,14 @@
           class="flex flex-1"
           :class="isCollapsed ? 'flex-col items-center gap-1 text-center' : 'items-center gap-3'"
         >
-          <div class="rounded-xl bg-white/70 p-2 text-brand-600 shadow-sm" :class="isCollapsed ? 'p-1.5' : ''">
+          <div
+            class="rounded-xl p-2 shadow-sm"
+            :class="[
+              isCollapsed ? 'p-1.5' : '',
+              item.iconBg || 'bg-white/70',
+              item.iconColor || 'text-brand-600'
+            ]"
+          >
             <component :is="item.icon" class="h-4 w-4" />
           </div>
           <span
@@ -62,31 +107,59 @@ import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
 
+/**
+ * Props 定义
+ */
 const props = defineProps({
+  /**
+   * 侧边栏项数组，必填
+   * 每个 item 对象可包含：key, label, description, icon, iconBg, iconColor, to, id, ariaControls
+   */
   items: {
     type: Array,
     required: true
   },
+  /**
+   * 当前激活项的 key 值
+   * 用于判断哪个侧边栏项处于激活状态
+   */
   activeKey: {
     type: [String, Number, null],
     default: null
   },
+  /**
+   * 是否收起状态
+   * null: 非受控模式，组件内部管理状态
+   * boolean: 受控模式，由父组件控制状态（支持 v-model:collapsed）
+   */
   collapsed: {
     type: Boolean,
     default: null
   },
+  /**
+   * 自定义激活状态判断函数
+   * 如果提供，将使用此函数判断激活状态，忽略 activeKey
+   * 函数签名: (item) => boolean
+   */
   isActiveFn: {
     type: Function,
     default: null
   }
 })
 
+/**
+ * 事件定义
+ * @event select - 当点击侧边栏项时触发，参数为被点击的 item 对象
+ * @event update:collapsed - 当收起状态改变时触发，用于 v-model:collapsed 双向绑定
+ */
 const emit = defineEmits(['select', 'update:collapsed'])
 
+// 内部收起状态（用于非受控模式）
 const internalCollapsed = ref(
   typeof props.collapsed === 'boolean' ? props.collapsed : false
 )
 
+// 监听外部 collapsed prop 的变化（受控模式）
 watch(
   () => props.collapsed,
   (next) => {
@@ -96,6 +169,7 @@ watch(
   }
 )
 
+// 收起状态的 computed 属性，支持双向绑定
 const isCollapsed = computed({
   get: () => (typeof props.collapsed === 'boolean' ? props.collapsed : internalCollapsed.value),
   set: (val) => {
@@ -104,12 +178,24 @@ const isCollapsed = computed({
   }
 })
 
+/**
+ * 切换收起/展开状态
+ */
 const toggleCollapse = () => {
   isCollapsed.value = !isCollapsed.value
 }
 
+/**
+ * 获取侧边栏项的唯一 key
+ * 优先级：item.key > item.label > item.to?.name > item.to > index
+ */
 const itemKey = (item, index) => item.key ?? item.label ?? item.to?.name ?? item.to ?? index
 
+/**
+ * 判断侧边栏项是否处于激活状态
+ * 如果提供了 isActiveFn，则使用自定义函数判断
+ * 否则使用 activeKey 与 item 的 key 或 label 进行比较
+ */
 const isItemActive = (item) => {
   if (props.isActiveFn) {
     return props.isActiveFn(item)
@@ -118,10 +204,18 @@ const isItemActive = (item) => {
   return key !== undefined && key === props.activeKey
 }
 
+/**
+ * 处理侧边栏项点击事件
+ */
 const handleSelect = (item) => {
   emit('select', item)
 }
 
+/**
+ * 获取侧边栏项的 props
+ * 如果 item.to 存在，返回路由相关 props（用于 RouterLink）
+ * 否则返回按钮相关 props
+ */
 const itemProps = (item) => {
   const base = {}
   if (item.id) base.id = item.id
@@ -132,6 +226,10 @@ const itemProps = (item) => {
   return { ...base, type: 'button' }
 }
 
+/**
+ * 获取侧边栏项的 CSS 类名
+ * 根据激活状态和收起状态返回不同的样式类
+ */
 const itemClasses = (item) => {
   const activeClass = isItemActive(item)
     ? 'border-brand-soft bg-brand-soft text-brand-600 shadow-sm'
