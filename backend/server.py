@@ -36,6 +36,7 @@ from src.project import (  # type: ignore
 from src.utils.setting.paths import bucket, get_data_root, _normalise_topic  # type: ignore
 
 from server_support import (  # type: ignore
+    collect_layer_archives,
     collect_project_archives,
     collect_filter_status,
     error,
@@ -61,6 +62,7 @@ from server_support import (  # type: ignore
     require_fields,
     serialise_result,
     success,
+    DATA_PROJECTS_ROOT,
     mark_filter_job_running,
     mark_filter_job_finished,
 )
@@ -1529,6 +1531,69 @@ def project_archives(name: str):
     })
 
 
+def _build_fetch_cache_response(resolution_payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    if not resolution_payload:
+        return {"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}, 400
+    try:
+        topic_identifier, display_name, log_project, dataset_meta = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}, 400
+
+    dataset_reference = str(
+        dataset_meta.get("id") or resolution_payload.get("dataset_id") or ""
+    ).strip() or None
+
+    caches = collect_layer_archives(
+        topic_identifier,
+        "fetch",
+        dataset_id=dataset_reference,
+    )
+    totals = {
+        "files": sum(int(entry.get("file_count") or 0) for entry in caches),
+        "size": sum(int(entry.get("total_size") or 0) for entry in caches),
+    }
+    payload = {
+        "status": "ok",
+        "project": log_project,
+        "topic": topic_identifier,
+        "display_name": display_name,
+        "cache_root": str(DATA_PROJECTS_ROOT / topic_identifier / "fetch"),
+        "caches": caches,
+        "latest_cache": caches[0] if caches else None,
+        "totals": totals,
+        "count": len(caches),
+    }
+    return payload, 200
+
+
+@app.get("/api/projects/<string:name>/fetch-cache")
+def project_fetch_cache(name: str):
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    resolution_payload: Dict[str, Any] = {"project": name}
+    if dataset_id:
+        resolution_payload["dataset_id"] = dataset_id
+    response_payload, status_code = _build_fetch_cache_response(resolution_payload)
+    return jsonify(response_payload), status_code
+
+
+@app.get("/api/fetch/cache")
+def fetch_cache_overview():
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+
+    resolution_payload: Dict[str, Any] = {}
+    if topic:
+        resolution_payload["topic"] = topic
+    if project:
+        resolution_payload["project"] = project
+    if dataset_id:
+        resolution_payload["dataset_id"] = dataset_id
+
+    response_payload, status_code = _build_fetch_cache_response(resolution_payload)
+    return jsonify(response_payload), status_code
+
+
 @app.put("/api/projects/<string:name>/datasets/<string:dataset_id>/mapping")
 def update_project_dataset_mapping(name: str, dataset_id: str):
     payload = request.get_json(silent=True) or {}
@@ -1635,6 +1700,8 @@ def root():
         "/api/projects",
         "/api/projects/<name>",
         "/api/projects/<name>/datasets",
+        "/api/projects/<name>/fetch-cache",
+        "/api/fetch/cache",
     ]})
 
 

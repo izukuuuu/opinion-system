@@ -98,12 +98,13 @@ def _summarise_date_dir(layer: str, date_dir: Path, dataset_id: Optional[str]) -
         "total_size": total_size,
         "updated_at": _format_timestamp(latest_mtime),
     }
+    summary["path"] = str(date_dir)
     if dataset_id:
         summary["matches_dataset"] = dataset_hit
 
-    if layer == "raw":
+    if layer in {"raw", "fetch"}:
         summary["files"] = files
-    else:
+    if layer != "raw":
         summary["channels"] = sorted(channels)
     return summary
 

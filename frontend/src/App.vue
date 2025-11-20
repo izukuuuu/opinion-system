@@ -298,6 +298,7 @@ const navigationGroups = [
         label: '项目数据',
         description: '导入 Excel 并生成数据存档',
         to: { name: 'project-data' },
+        match: ['project-data', 'project-data-remote-cache'],
         icon: DocumentArrowUpIcon
       }
     ]

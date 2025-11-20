@@ -354,9 +354,9 @@
 
       <section class="space-y-8">
         <header class="space-y-2">
-          <h1 class="text-2xl font-semibold text-slate-900">项目数据</h1>
+          <h1 class="text-2xl font-semibold text-slate-900">本地数据管理</h1>
           <p class="text-sm text-slate-500">
-            当前项目已上传的原始数据集，可以进行查看或重新上传操作。
+            查看当前项目的原始数据集清单，并同步远程数据库的 fetch 缓存，统一在本地调试与预览。
           </p>
         </header>
 
@@ -448,6 +448,88 @@
               </li>
             </ul>
           </div>
+        </div>
+
+        <div class="card-surface space-y-6 p-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div class="space-y-1">
+              <h2 class="text-lg font-semibold text-slate-900">Fetch 缓存预览</h2>
+              <p class="text-xs text-slate-400">
+                通过 data_fetch 拉取的远程数据库内容会缓存到 {{ fetchCacheRoot || 'data/projects/&lt;topic&gt;/fetch' }} 目录。
+              </p>
+            </div>
+            <span class="text-xs text-slate-500">
+              共 {{ fetchCacheTotals.batches }} 批 · 文件 {{ fetchCacheTotals.files }} 个 · 总计 {{ formatFileSize(fetchCacheTotals.size) }}
+            </span>
+          </div>
+          <p v-if="!selectedProject" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">
+            请选择项目以查看远程缓存。
+          </p>
+          <p v-else-if="fetchCacheLoading" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">
+            缓存信息加载中…
+          </p>
+          <p v-else-if="fetchCacheError" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">
+            {{ fetchCacheError }}
+          </p>
+          <p v-else-if="!fetchCaches.length" class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+            当前项目尚未执行远程 fetch，可在“远程数据缓存”页触发拉取任务。
+          </p>
+          <ul v-else class="space-y-4">
+            <li
+              v-for="cache in fetchCaches"
+              :key="cache.date"
+              class="rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-sm"
+            >
+              <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p class="text-xs uppercase tracking-widest text-slate-400">缓存区间</p>
+                  <p class="text-lg font-semibold text-slate-900">{{ formatFetchRange(cache.date) }}</p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    目录：<span class="truncate">{{ fetchCachePathFor(cache) }}</span>
+                  </p>
+                </div>
+                <div class="text-right text-sm text-slate-500">
+                  更新时间：{{ formatTimestamp(cache.updated_at) }}
+                </div>
+              </div>
+              <dl class="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
+                <div>
+                  <dt class="text-xs uppercase tracking-widest text-slate-400">文件数量</dt>
+                  <dd class="text-base font-semibold text-slate-900">{{ cache.file_count || 0 }}</dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase tracking-widest text-slate-400">缓存容量</dt>
+                  <dd class="text-base font-semibold text-slate-900">{{ formatFileSize(cache.total_size) }}</dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase tracking-widest text-slate-400">包含渠道</dt>
+                  <dd class="text-base font-semibold text-slate-900">{{ cache.channels?.length ? cache.channels.length : 0 }}</dd>
+                </div>
+              </dl>
+              <div v-if="cache.channels?.length" class="mt-4 flex flex-wrap gap-2">
+                <span
+                  v-for="channel in cache.channels"
+                  :key="`${cache.date}-${channel}`"
+                  class="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700"
+                >
+                  {{ channel }}
+                </span>
+              </div>
+              <div v-if="cache.files?.length" class="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-3">
+                <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">生成文件</p>
+                <ul class="mt-2 space-y-1 text-sm text-slate-600">
+                  <li
+                    v-for="file in cache.files"
+                    :key="`${cache.date}-${file}`"
+                    class="truncate"
+                    :title="file"
+                  >
+                    {{ file }}
+                  </li>
+                </ul>
+              </div>
+            </li>
+          </ul>
         </div>
 
         <div class="card-surface space-y-6 p-6">
@@ -585,8 +667,8 @@
 import { FlexRender, getCoreRowModel, useVueTable } from '@tanstack/vue-table'
 import { ChevronLeftIcon, EllipsisVerticalIcon, PencilSquareIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useActiveProject } from '../composables/useActiveProject'
-import { useApiBase } from '../composables/useApiBase'
+import { useActiveProject } from '../../composables/useActiveProject'
+import { useApiBase } from '../../composables/useApiBase'
 
 const { ensureApiBase } = useApiBase()
 const buildApiUrl = async (path) => {
@@ -601,6 +683,16 @@ const projectError = ref('')
 const datasets = ref([])
 const datasetLoading = ref(false)
 const datasetError = ref('')
+
+const fetchCaches = ref([])
+const fetchCacheLoading = ref(false)
+const fetchCacheError = ref('')
+const fetchCacheRoot = ref('')
+const fetchCacheTotals = reactive({
+  files: 0,
+  size: 0,
+  batches: 0
+})
 
 const activeDatasetId = ref('')
 const previewRequestToken = ref(null)
@@ -1235,6 +1327,43 @@ const fetchDatasets = async (projectName) => {
   }
 }
 
+const resetProjectFetchCaches = () => {
+  fetchCaches.value = []
+  fetchCacheRoot.value = ''
+  fetchCacheTotals.files = 0
+  fetchCacheTotals.size = 0
+  fetchCacheTotals.batches = 0
+  fetchCacheError.value = ''
+}
+
+const fetchProjectCaches = async (projectName) => {
+  if (!projectName) {
+    resetProjectFetchCaches()
+    return
+  }
+  fetchCacheLoading.value = true
+  fetchCacheError.value = ''
+  try {
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(projectName)}/fetch-cache`)
+    const response = await fetch(endpoint)
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload || payload.status !== 'ok') {
+      const message = payload?.message || '读取缓存信息失败'
+      throw new Error(message)
+    }
+    fetchCaches.value = Array.isArray(payload.caches) ? payload.caches : []
+    fetchCacheRoot.value = payload.cache_root || ''
+    fetchCacheTotals.files = Number(payload.totals?.files ?? 0)
+    fetchCacheTotals.size = Number(payload.totals?.size ?? 0)
+    fetchCacheTotals.batches = Number(payload.count ?? fetchCaches.value.length)
+  } catch (err) {
+    resetProjectFetchCaches()
+    fetchCacheError.value = err instanceof Error ? err.message : '读取缓存信息失败'
+  } finally {
+    fetchCacheLoading.value = false
+  }
+}
+
 const selectProject = async (projectName) => {
   projectActionMenu.value = ''
   if (activeProjectName.value === projectName) return
@@ -1303,6 +1432,28 @@ const formatTimestamp = (timestamp) => {
   }
 }
 
+const formatFetchRange = (value) => {
+  if (!value) return '—'
+  const text = String(value)
+  if (text.includes('_')) {
+    const [start, end] = text.split('_', 2)
+    return `${start} → ${end || start}`
+  }
+  return text
+}
+
+const fetchCachePathFor = (cache) => {
+  if (!cache || typeof cache !== 'object') return fetchCacheRoot.value || ''
+  const explicitPath = typeof cache.path === 'string' ? cache.path.trim() : ''
+  if (explicitPath) return explicitPath
+  const dateValue = typeof cache.date === 'string' ? cache.date.trim() : ''
+  if (fetchCacheRoot.value && dateValue) {
+    const trimmed = fetchCacheRoot.value.replace(/\/+$/, '')
+    return `${trimmed}/${dateValue}`
+  }
+  return fetchCacheRoot.value || dateValue
+}
+
 const handleGlobalClick = () => {
   projectActionMenu.value = ''
 }
@@ -1324,10 +1475,11 @@ watch(
   activeProject,
   async (project) => {
     if (project?.name) {
-      await fetchDatasets(project.name)
+      await Promise.all([fetchDatasets(project.name), fetchProjectCaches(project.name)])
     } else {
       datasets.value = []
       clearActiveDatasetSelection()
+      resetProjectFetchCaches()
     }
   },
   { immediate: true }

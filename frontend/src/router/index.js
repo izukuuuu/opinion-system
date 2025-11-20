@@ -6,7 +6,9 @@ import TopicUploadStep from '../views/topics/TopicUploadStep.vue'
 import TopicPreprocessStep from '../views/topics/TopicPreprocessStep.vue'
 import TopicFilterStep from '../views/topics/TopicFilterStep.vue'
 import TopicIngestionStep from '../views/topics/TopicIngestionStep.vue'
-import ProjectDataView from '../views/ProjectDataView.vue'
+import ProjectDataLayout from '../views/project-data/ProjectDataLayout.vue'
+import ProjectDataLocalView from '../views/project-data/ProjectDataLocalView.vue'
+import ProjectDataRemoteCacheView from '../views/project-data/ProjectDataRemoteCacheView.vue'
 import ProjectBasicAnalysisLayout from '../views/analysis/basic/ProjectBasicAnalysisLayout.vue'
 import ProjectBasicAnalysisOverview from '../views/analysis/basic/ProjectBasicAnalysisOverview.vue'
 import ProjectBasicAnalysisRun from '../views/analysis/basic/ProjectBasicAnalysisRun.vue'
@@ -86,11 +88,30 @@ export const routes = [
   },
   {
     path: '/datasets',
-    name: 'project-data',
-    component: ProjectDataView,
+    component: ProjectDataLayout,
     meta: {
       title: '项目数据管理'
-    }
+    },
+    children: [
+      {
+        path: '',
+        name: 'project-data',
+        component: ProjectDataLocalView,
+        meta: {
+          title: '本地数据管理',
+          description: '导入 Excel 并维护项目数据集'
+        }
+      },
+      {
+        path: 'remote-cache',
+        name: 'project-data-remote-cache',
+        component: ProjectDataRemoteCacheView,
+        meta: {
+          title: '远程数据缓存',
+          description: '将远程数据库内容按时间区间缓存到本地并查看生成的 JSONL 文件'
+        }
+      }
+    ]
   },
   {
     path: '/analysis/basic',
