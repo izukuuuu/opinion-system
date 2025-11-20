@@ -250,7 +250,7 @@ const navigationGroups = [
     links: [
       {
         label: '系统简介',
-        description: 'OpinionSystem 平台概览',
+        description: '回到平台概览页',
         to: { name: 'home' },
         icon: HomeIcon
       }
@@ -261,7 +261,7 @@ const navigationGroups = [
     links: [
       {
         label: '数据集',
-        description: '远程数据库已上传数据',
+        description: '舆情数据库概览',
         to: { name: 'overview-datasets' },
         icon: TableCellsIcon
       }
@@ -271,8 +271,8 @@ const navigationGroups = [
     label: '数据获取',
     links: [
       {
-        label: '平台数据获取',
-        description: '通过 API 获得公开平台数据',
+        label: '舆情数据获取',
+        description: '获取公开平台数据',
         to: { name: 'data-acquisition-platform' },
         icon: CloudArrowDownIcon
       }
@@ -296,7 +296,7 @@ const navigationGroups = [
       },
       {
         label: '项目数据',
-        description: '导入 Excel 并生成数据存档',
+        description: '本地项目数据管理',
         to: { name: 'project-data' },
         match: ['project-data', 'project-data-remote-cache'],
         icon: DocumentArrowUpIcon
@@ -308,7 +308,7 @@ const navigationGroups = [
     links: [
       {
         label: '基础分析',
-        description: '查看专题基础指标',
+        description: '舆情专题基础分析',
         to: { name: 'project-data-analysis' },
         match: [
           'project-data-analysis',
@@ -319,13 +319,13 @@ const navigationGroups = [
       },
       {
         label: '内容分析',
-        description: '配置内容编码提示词',
+        description: '舆情内容编码分析',
         to: { name: 'content-analysis-prompt' },
         icon: DocumentTextIcon
       },
       {
         label: '主题分析',
-        description: 'BERTopic 主题分析',
+        description: '舆情主题分析',
         to: { name: 'topic-analysis-bertopic' },
         icon: BeakerIcon
       },
@@ -353,13 +353,13 @@ const navigationGroups = [
     links: [
       {
         label: 'TagRAG 检索',
-        description: '基于标签的智能问答',
+        description: '标签向量检索',
         to: { name: 'data-retrieval-tagrag' },
         icon: MagnifyingGlassCircleIcon
       },
       {
         label: 'RouterRAG 检索',
-        description: '多模型协同智能问答',
+        description: '多模型协同检索',
         to: { name: 'data-retrieval-routerrag' },
         icon: ArrowsRightLeftIcon
       }
@@ -370,14 +370,14 @@ const navigationGroups = [
     label: '工具',
     links: [
       {
-        label: '数据库',
-        description: '查看库表与连接状态',
+        label: '数据库管理',
+        description: '舆情数据库连接',
         to: { name: 'database' },
         icon: CircleStackIcon
       },
       {
         label: '系统设置',
-        description: '配置数据库与模型参数',
+        description: '系统配置与分析设置',
         to: { name: 'settings-databases' },
         match: ['settings', 'settings-backend', 'settings-databases', 'settings-ai', 'settings-theme', 'settings-archives'],
         icon: Cog6ToothIcon

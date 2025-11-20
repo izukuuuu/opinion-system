@@ -2,17 +2,17 @@
   <div>
     <section v-if="isPreviewMode" class="space-y-6">
       <div v-if="selectedDataset" class="space-y-6">
-        <header class="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+        <header
+          class="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-slate-200 bg-white/90 p-6 ">
           <div class="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
+            <button type="button"
               class="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-              @click="closePreview"
-            >
+              @click="closePreview">
               <ChevronLeftIcon class="h-4 w-4" />
               返回数据集列表
             </button>
-            <span class="inline-flex items-center gap-2 rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-600">
+            <span
+              class="inline-flex items-center gap-2 rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-600">
               Excel 预览
             </span>
           </div>
@@ -25,7 +25,8 @@
           <header class="space-y-1">
             <h1 class="text-2xl font-semibold text-slate-900">{{ selectedDataset.display_name }}</h1>
             <p class="text-sm text-slate-500">
-              数据集 ID：{{ selectedDataset.id }} · 专题：{{ selectedDataset.project }} · 更新于 {{ formatTimestamp(selectedDataset.stored_at) }}
+              数据集 ID：{{ selectedDataset.id }} · 专题：{{ selectedDataset.project }} · 更新于 {{
+                formatTimestamp(selectedDataset.stored_at) }}
             </p>
           </header>
           <dl class="grid gap-4 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-3">
@@ -35,7 +36,8 @@
             </div>
             <div class="space-y-1">
               <dt class="text-xs uppercase tracking-widest text-slate-400">数据行列</dt>
-              <dd class="text-sm text-slate-600">{{ selectedDataset.rows }} 行 · {{ selectedDataset.column_count }} 列</dd>
+              <dd class="text-sm text-slate-600">{{ selectedDataset.rows }} 行 · {{ selectedDataset.column_count }} 列
+              </dd>
             </div>
             <div class="space-y-1">
               <dt class="text-xs uppercase tracking-widest text-slate-400">专题标识</dt>
@@ -47,18 +49,21 @@
             </div>
             <div class="space-y-1">
               <dt class="text-xs uppercase tracking-widest text-slate-400">源文件</dt>
-              <dd class="text-sm text-slate-600 truncate" :title="selectedDataset.source_file">{{ selectedDataset.source_file }}</dd>
+              <dd class="text-sm text-slate-600 truncate" :title="selectedDataset.source_file">{{
+                selectedDataset.source_file }}</dd>
             </div>
             <div class="space-y-1">
               <dt class="text-xs uppercase tracking-widest text-slate-400">JSONL</dt>
-              <dd class="text-sm text-slate-600 truncate" :title="selectedDataset.jsonl_file">{{ selectedDataset.jsonl_file }}</dd>
+              <dd class="text-sm text-slate-600 truncate" :title="selectedDataset.jsonl_file">{{
+                selectedDataset.jsonl_file }}</dd>
             </div>
-          <div class="space-y-1">
-            <dt class="text-xs uppercase tracking-widest text-slate-400">PKL</dt>
-            <dd class="text-sm text-slate-600 truncate" :title="selectedDataset.pkl_file">{{ selectedDataset.pkl_file }}</dd>
-          </div>
-        </dl>
-        <div v-if="selectedDataset" class="mt-6 space-y-4">
+            <div class="space-y-1">
+              <dt class="text-xs uppercase tracking-widest text-slate-400">PKL</dt>
+              <dd class="text-sm text-slate-600 truncate" :title="selectedDataset.pkl_file">{{ selectedDataset.pkl_file
+                }}</dd>
+            </div>
+          </dl>
+          <div v-if="selectedDataset" class="mt-6 space-y-4">
             <header class="space-y-1">
               <h2 class="text-base font-semibold text-slate-900">字段映射</h2>
               <p class="text-xs text-slate-500">指定专题标识与关键信息字段，系统将根据映射执行预处理与分析。</p>
@@ -69,10 +74,8 @@
             <div class="grid gap-4 sm:grid-cols-2">
               <label class="space-y-1 text-xs">
                 <span class="font-medium text-slate-600">日期列</span>
-                <select
-                  v-model="mappingForm.date"
-                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                >
+                <select v-model="mappingForm.date"
+                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200">
                   <option value="">未指定</option>
                   <option v-for="column in selectedDatasetColumns" :key="`preview-date-${column}`" :value="column">
                     {{ column }}
@@ -81,10 +84,8 @@
               </label>
               <label class="space-y-1 text-xs">
                 <span class="font-medium text-slate-600">标题列</span>
-                <select
-                  v-model="mappingForm.title"
-                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                >
+                <select v-model="mappingForm.title"
+                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200">
                   <option value="">未指定</option>
                   <option v-for="column in selectedDatasetColumns" :key="`preview-title-${column}`" :value="column">
                     {{ column }}
@@ -93,10 +94,8 @@
               </label>
               <label class="space-y-1 text-xs">
                 <span class="font-medium text-slate-600">正文列</span>
-                <select
-                  v-model="mappingForm.content"
-                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                >
+                <select v-model="mappingForm.content"
+                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200">
                   <option value="">未指定</option>
                   <option v-for="column in selectedDatasetColumns" :key="`preview-content-${column}`" :value="column">
                     {{ column }}
@@ -105,10 +104,8 @@
               </label>
               <label class="space-y-1 text-xs">
                 <span class="font-medium text-slate-600">作者列</span>
-                <select
-                  v-model="mappingForm.author"
-                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                >
+                <select v-model="mappingForm.author"
+                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200">
                   <option value="">未指定</option>
                   <option v-for="column in selectedDatasetColumns" :key="`preview-author-${column}`" :value="column">
                     {{ column }}
@@ -117,12 +114,9 @@
               </label>
             </div>
             <div class="flex flex-wrap items-center gap-3 text-xs">
-              <button
-                type="button"
+              <button type="button"
                 class="inline-flex items-center gap-2 rounded-full border border-indigo-200 px-4 py-1.5 text-xs font-semibold text-indigo-600 transition hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-                :disabled="mappingSaving"
-                @click="saveSelectedDatasetMapping"
-              >
+                :disabled="mappingSaving" @click="saveSelectedDatasetMapping">
                 {{ mappingSaving ? '保存中…' : '保存字段映射' }}
               </button>
               <p v-if="mappingError" class="text-rose-600">{{ mappingError }}</p>
@@ -141,19 +135,14 @@
               <label class="text-xs font-medium text-slate-500">
                 每页
                 <select
-                  class="ml-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-600 shadow-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                  :value="previewPageSize"
-                  @change="changePreviewPageSize($event.target.value)"
-                >
+                  class="ml-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-600  focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  :value="previewPageSize" @change="changePreviewPageSize($event.target.value)">
                   <option v-for="size in previewPageSizeOptions" :key="size" :value="size">{{ size }}</option>
                 </select>
               </label>
-              <button
-                type="button"
+              <button type="button"
                 class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                :disabled="previewLoading"
-                @click="refreshDatasetPreview"
-              >
+                :disabled="previewLoading" @click="refreshDatasetPreview">
                 {{ previewLoading ? '刷新中…' : '刷新' }}
               </button>
             </div>
@@ -173,11 +162,8 @@
               <table class="min-w-full table-fixed divide-y divide-slate-200 text-sm text-slate-700">
                 <thead class="bg-slate-50">
                   <tr v-for="headerGroup in previewTable.getHeaderGroups()" :key="headerGroup.id">
-                    <th
-                      v-for="header in headerGroup.headers"
-                      :key="header.id"
-                      class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500"
-                    >
+                    <th v-for="header in headerGroup.headers" :key="header.id"
+                      class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                       <span v-if="!header.isPlaceholder">
                         <FlexRender :render="header.column.columnDef.header" :props="header.getContext()" />
                       </span>
@@ -186,11 +172,8 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100 bg-white">
                   <tr v-for="row in previewTable.getRowModel().rows" :key="row.id" class="hover:bg-indigo-50/40">
-                    <td
-                      v-for="cell in row.getVisibleCells()"
-                      :key="cell.id"
-                      class="px-4 py-2 align-top text-sm text-slate-700"
-                    >
+                    <td v-for="cell in row.getVisibleCells()" :key="cell.id"
+                      class="px-4 py-2 align-top text-sm text-slate-700">
                       <div class="max-w-[320px] truncate text-ellipsis" :title="cell.getValue?.() ?? ''">
                         <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
                       </div>
@@ -201,22 +184,18 @@
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500">
-              <span>第 {{ previewCurrentPageDisplay }} / {{ previewTotalPagesDisplay }} 页 · 合计 {{ previewTotalRows }} 行</span>
+              <span>第 {{ previewCurrentPageDisplay }} / {{ previewTotalPagesDisplay }} 页 · 合计 {{ previewTotalRows }}
+                行</span>
               <div class="inline-flex items-center gap-2">
-                <button
-                  type="button"
+                <button type="button"
                   class="rounded-full border border-slate-200 px-3 py-1 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:border-slate-100 disabled:text-slate-300"
-                  :disabled="previewPage <= 1 || previewLoading"
-                  @click="goToPreviewPage(previewPage - 1)"
-                >
+                  :disabled="previewPage <= 1 || previewLoading" @click="goToPreviewPage(previewPage - 1)">
                   上一页
                 </button>
-                <button
-                  type="button"
+                <button type="button"
                   class="rounded-full border border-slate-200 px-3 py-1 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:border-slate-100 disabled:text-slate-300"
                   :disabled="previewPage >= previewTotalPages || previewLoading"
-                  @click="goToPreviewPage(previewPage + 1)"
-                >
+                  @click="goToPreviewPage(previewPage + 1)">
                   下一页
                 </button>
               </div>
@@ -225,7 +204,7 @@
         </section>
       </div>
 
-      <div v-else class="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+      <div v-else class="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-500 ">
         正在加载数据集详情…
       </div>
     </section>
@@ -237,100 +216,68 @@
             <h2 class="text-lg font-semibold text-slate-900">项目列表</h2>
             <p class="text-sm text-slate-500">选择项目以查看上传的数据集。</p>
           </div>
-          <button
-            type="button"
+          <button type="button"
             class="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-            :disabled="projectLoading"
-            @click="fetchProjects"
-          >
+            :disabled="projectLoading" @click="fetchProjects">
             {{ projectLoading ? '加载中…' : '刷新' }}
           </button>
         </div>
         <ul class="space-y-3">
-          <li
-            v-for="project in projects"
-            :key="project.name"
-            :class="[
-              'relative rounded-2xl border transition focus-within:ring-2 focus-within:ring-indigo-200 focus-within:ring-offset-2',
-              project.name === selectedProject
-                ? 'border-brand bg-brand text-white'
-                : 'border-transparent bg-surface-muted hover:border-brand-soft hover:bg-brand-soft-muted'
-            ]"
-          >
-            <button
-              type="button"
-              class="flex w-full flex-col gap-1.5 px-4 py-3 pr-12 text-left transition"
-              @click="selectProject(project.name)"
-            >
-              <span
-                :class="[
-                  'text-base font-semibold transition-colors',
-                  project.name === selectedProject ? 'text-white' : 'text-slate-800'
-                ]"
-              >
+          <li v-for="project in projects" :key="project.name" :class="[
+            'relative rounded-2xl border transition focus-within:ring-2 focus-within:ring-indigo-200 focus-within:ring-offset-2',
+            project.name === selectedProject
+              ? 'border-brand bg-brand text-white'
+              : 'border-transparent bg-surface-muted hover:border-brand-soft hover:bg-brand-soft-muted'
+          ]">
+            <button type="button" class="flex w-full flex-col gap-1.5 px-4 py-3 pr-12 text-left transition"
+              @click="selectProject(project.name)">
+              <span :class="[
+                'text-base font-semibold transition-colors',
+                project.name === selectedProject ? 'text-white' : 'text-slate-800'
+              ]">
                 {{ project.display_name }}
               </span>
-              <span
-                v-if="project.display_name !== project.name"
-                :class="[
-                  'text-xs transition-colors',
-                  project.name === selectedProject ? 'text-white/70' : 'text-slate-500'
-                ]"
-              >
+              <span v-if="project.display_name !== project.name" :class="[
+                'text-xs transition-colors',
+                project.name === selectedProject ? 'text-white/70' : 'text-slate-500'
+              ]">
                 标识：{{ project.name }}
               </span>
-              <span
-                v-if="project.description"
-                :class="[
-                  'text-sm transition-colors',
-                  project.name === selectedProject ? 'text-white/80' : 'text-slate-600'
-                ]"
-              >
+              <span v-if="project.description" :class="[
+                'text-sm transition-colors',
+                project.name === selectedProject ? 'text-white/80' : 'text-slate-600'
+              ]">
                 {{ project.description }}
               </span>
-              <span
-                :class="[
-                  'text-xs transition-colors',
-                  project.name === selectedProject ? 'text-white/70' : 'text-slate-500'
-                ]"
-              >
+              <span :class="[
+                'text-xs transition-colors',
+                project.name === selectedProject ? 'text-white/70' : 'text-slate-500'
+              ]">
                 更新时间：{{ formatTimestamp(project.updated_at) }}
               </span>
-              <span
-                :class="[
-                  'text-[11px] transition-colors',
-                  project.name === selectedProject ? 'text-white/70' : 'text-slate-400'
-                ]"
-              >
+              <span :class="[
+                'text-[11px] transition-colors',
+                project.name === selectedProject ? 'text-white/70' : 'text-slate-400'
+              ]">
                 目录：{{ getUploadDirectory(project.slug) }}
               </span>
             </button>
             <div class="absolute right-3 top-3 z-10 flex flex-col items-end">
-              <button
-                type="button"
-                class="inline-flex h-8 w-8 items-center justify-center rounded-full transition"
+              <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full transition"
                 :class="project.name === selectedProject ? 'text-white hover:bg-white/10 focus-visible:outline-white/60' : 'text-slate-500 hover:bg-slate-200/60 focus-visible:outline-slate-400/40'"
-                @click.stop="toggleProjectMenu(project.name)"
-              >
+                @click.stop="toggleProjectMenu(project.name)">
                 <EllipsisVerticalIcon class="h-5 w-5" />
               </button>
-              <div
-                v-if="projectActionMenu === project.name"
-                class="mt-2 w-36 rounded-2xl border border-slate-200 bg-white p-2 text-left text-sm text-slate-600 shadow-lg"
-              >
-                <button
-                  type="button"
-                  class="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-slate-100"
-                  @click.stop="openProjectEditor(project)"
-                >
+              <div v-if="projectActionMenu === project.name"
+                class="mt-2 w-36 rounded-2xl border border-slate-200 bg-white p-2 text-left text-sm text-slate-600 shadow-lg">
+                <button type="button" class="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-slate-100"
+                  @click.stop="openProjectEditor(project)">
                   <PencilSquareIcon class="h-4 w-4" />
                   编辑项目
                 </button>
-                <button
-                  type="button"
+                <button type="button"
                   class="mt-1 flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-rose-600 hover:bg-rose-50"
-                  @click.stop="confirmProjectDelete(project)"
-                >
+                  @click.stop="confirmProjectDelete(project)">
                   <TrashIcon class="h-4 w-4" />
                   删除项目
                 </button>
@@ -338,16 +285,11 @@
             </div>
           </li>
         </ul>
-        <p
-          v-if="projectError"
-          class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600"
-        >
+        <p v-if="projectError" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">
           {{ projectError }}
         </p>
-        <p
-          v-else-if="!projects.length && !projectLoading"
-          class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500"
-        >
+        <p v-else-if="!projects.length && !projectLoading"
+          class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">
           暂无项目，请先在项目面板中创建。
         </p>
       </aside>
@@ -370,25 +312,22 @@
             </div>
             <span v-if="datasets.length" class="badge-soft">共 {{ datasets.length }} 个</span>
           </div>
-          <p v-if="!selectedProject" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">请选择左侧项目以查看归档记录。</p>
+          <p v-if="!selectedProject" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">请选择左侧项目以查看归档记录。
+          </p>
           <p v-else-if="datasetLoading" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">数据加载中…</p>
-          <p v-else-if="datasetError" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">{{ datasetError }}</p>
-          <p v-else-if="!datasets.length" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">尚未上传任何数据集。</p>
+          <p v-else-if="datasetError" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">{{ datasetError }}
+          </p>
+          <p v-else-if="!datasets.length" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">尚未上传任何数据集。
+          </p>
           <div v-else class="space-y-4">
             <p class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
               点击数据集卡片在新的预览子页面中打开 Excel 表格预览。
             </p>
             <ul class="space-y-4">
-              <li
-                v-for="dataset in datasets"
-                :key="dataset.id"
-                class="rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:border-indigo-200 hover:shadow focus-within:ring-2 focus-within:ring-indigo-200"
-              >
-                <button
-                  type="button"
-                  class="flex w-full flex-col gap-4 p-5 text-left"
-                  @click="setActiveDataset(dataset.id)"
-                >
+              <li v-for="dataset in datasets" :key="dataset.id"
+                class="rounded-3xl border border-slate-200 bg-white  transition hover:border-indigo-200 hover:shadow focus-within:ring-2 focus-within:ring-indigo-200">
+                <button type="button" class="flex w-full flex-col gap-4 p-5 text-left"
+                  @click="setActiveDataset(dataset.id)">
                   <header class="flex flex-wrap items-center justify-between gap-3">
                     <h3 class="text-lg font-semibold text-slate-900">{{ dataset.display_name }}</h3>
                     <span class="text-sm text-slate-500">{{ formatTimestamp(dataset.stored_at) }}</span>
@@ -416,28 +355,35 @@
                     </div>
                     <div class="space-y-1">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">存储目录</dt>
-                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="getUploadDirectory(dataset.project_slug)">{{ getUploadDirectory(dataset.project_slug) }}</dd>
+                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
+                        :title="getUploadDirectory(dataset.project_slug)">{{ getUploadDirectory(dataset.project_slug) }}
+                      </dd>
                     </div>
                     <div class="space-y-1">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">源文件</dt>
-                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="dataset.source_file">{{ dataset.source_file }}</dd>
+                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
+                        :title="dataset.source_file">{{ dataset.source_file }}</dd>
                     </div>
                     <div class="space-y-1">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">PKL</dt>
-                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="dataset.pkl_file">{{ dataset.pkl_file }}</dd>
+                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
+                        :title="dataset.pkl_file">{{ dataset.pkl_file }}</dd>
                     </div>
                     <div class="space-y-1">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">JSONL</dt>
-                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="dataset.jsonl_file">{{ dataset.jsonl_file }}</dd>
+                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
+                        :title="dataset.jsonl_file">{{ dataset.jsonl_file }}</dd>
                     </div>
                     <div class="space-y-1">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">Meta JSON</dt>
-                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md" :title="dataset.json_file">{{ dataset.json_file }}</dd>
+                      <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
+                        :title="dataset.json_file">{{ dataset.json_file }}</dd>
                     </div>
                   </dl>
                   <p class="text-xs text-slate-500">字段：{{ dataset.columns.join(', ') }}</p>
                   <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                    <span v-if="dataset.topic_label" class="rounded-full bg-indigo-50 px-2 py-1 font-medium text-indigo-600">
+                    <span v-if="dataset.topic_label"
+                      class="rounded-full bg-indigo-50 px-2 py-1 font-medium text-indigo-600">
                       专题标识：{{ dataset.topic_label }}
                     </span>
                     <span class="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
@@ -453,17 +399,14 @@
         <div class="card-surface space-y-6 p-6">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div class="space-y-1">
-              <h2 class="text-lg font-semibold text-slate-900">Fetch 缓存预览</h2>
+              <h2 class="text-lg font-semibold text-slate-900">用于分析的缓存文件</h2>
               <p class="text-xs text-slate-400">
-                通过 data_fetch 拉取的远程数据库内容会缓存到 {{ fetchCacheRoot || 'data/projects/&lt;topic&gt;/fetch' }} 目录。
+                数据库中存储的远程数据库内容会缓存到对应项目的 {{ fetchCacheRoot || 'data/projects/&lt;topic&gt;/fetch' }} 目录。
               </p>
             </div>
-            <span class="text-xs text-slate-500">
-              共 {{ fetchCacheTotals.batches }} 批 · 文件 {{ fetchCacheTotals.files }} 个 · 总计 {{ formatFileSize(fetchCacheTotals.size) }}
-            </span>
           </div>
           <p v-if="!selectedProject" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">
-            请选择项目以查看远程缓存。
+            请选择项目以查看数据库缓存。
           </p>
           <p v-else-if="fetchCacheLoading" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">
             缓存信息加载中…
@@ -472,17 +415,14 @@
             {{ fetchCacheError }}
           </p>
           <p v-else-if="!fetchCaches.length" class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
-            当前项目尚未执行远程 fetch，可在“远程数据缓存”页触发拉取任务。
+            当前项目尚未缓存分析存档，可在“远程数据缓存”页进行分析文件缓存同步操作。
           </p>
           <ul v-else class="space-y-4">
-            <li
-              v-for="cache in fetchCaches"
-              :key="cache.date"
-              class="rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-sm"
-            >
+            <li v-for="cache in fetchCaches" :key="cache.date"
+              class="rounded-3xl border border-slate-200 bg-white/90 p-5 ">
               <div class="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p class="text-xs uppercase tracking-widest text-slate-400">缓存区间</p>
+                  <p class="text-xs uppercase tracking-widest text-slate-400">分析时间区间</p>
                   <p class="text-lg font-semibold text-slate-900">{{ formatFetchRange(cache.date) }}</p>
                   <p class="mt-1 text-xs text-slate-500">
                     目录：<span class="truncate">{{ fetchCachePathFor(cache) }}</span>
@@ -502,31 +442,16 @@
                   <dd class="text-base font-semibold text-slate-900">{{ formatFileSize(cache.total_size) }}</dd>
                 </div>
                 <div>
-                  <dt class="text-xs uppercase tracking-widest text-slate-400">包含渠道</dt>
-                  <dd class="text-base font-semibold text-slate-900">{{ cache.channels?.length ? cache.channels.length : 0 }}</dd>
+                  <dt class="text-xs uppercase tracking-widest text-slate-400">包含平台</dt>
+                  <dd class="text-base font-semibold text-slate-900">{{ cache.channels?.length ? cache.channels.length :
+                    0 }}</dd>
                 </div>
               </dl>
               <div v-if="cache.channels?.length" class="mt-4 flex flex-wrap gap-2">
-                <span
-                  v-for="channel in cache.channels"
-                  :key="`${cache.date}-${channel}`"
-                  class="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700"
-                >
+                <span v-for="channel in cache.channels" :key="`${cache.date}-${channel}`"
+                  class="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
                   {{ channel }}
                 </span>
-              </div>
-              <div v-if="cache.files?.length" class="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-3">
-                <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">生成文件</p>
-                <ul class="mt-2 space-y-1 text-sm text-slate-600">
-                  <li
-                    v-for="file in cache.files"
-                    :key="`${cache.date}-${file}`"
-                    class="truncate"
-                    :title="file"
-                  >
-                    {{ file }}
-                  </li>
-                </ul>
               </div>
             </li>
           </ul>
@@ -535,7 +460,8 @@
         <div class="card-surface space-y-6 p-6">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <h2 class="text-lg font-semibold text-slate-900">上传表格</h2>
-            <span v-if="selectedProject" class="badge-soft bg-indigo-100 text-indigo-600">当前项目：{{ selectedProjectDisplayName }}</span>
+            <span v-if="selectedProject" class="badge-soft bg-indigo-100 text-indigo-600">当前项目：{{
+              selectedProjectDisplayName }}</span>
           </div>
           <p class="text-sm text-slate-500">
             支持 .xlsx、.xls、.csv、.jsonl 文件，系统会为每份数据生成同名的 JSONL 与 PKL 文件，方便在后续流程中直接读取。
@@ -543,27 +469,22 @@
           <form class="space-y-4" @submit.prevent="uploadDataset">
             <label
               class="flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50/70 px-6 text-center text-sm text-slate-500 transition hover:border-indigo-300 hover:bg-indigo-50/40"
-              :class="{ 'border-indigo-300 bg-white shadow-inner text-indigo-600': uploadFile }"
-            >
-              <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.xls,.csv,.jsonl" @change="handleFileChange" />
+              :class="{ 'border-indigo-300 bg-white shadow-inner text-indigo-600': uploadFile }">
+              <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.xls,.csv,.jsonl"
+                @change="handleFileChange" />
               <span class="text-sm font-medium">
                 {{ uploadFile ? uploadFile.name : '点击或拖拽文件到此处' }}
               </span>
               <span class="text-xs text-slate-400">最大支持 50MB</span>
             </label>
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <button
-                type="submit"
+              <button type="submit"
                 class="inline-flex items-center justify-center rounded-full bg-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
-                :disabled="uploading"
-              >
+                :disabled="uploading">
                 {{ uploading ? '上传中…' : '上传并归档' }}
               </button>
               <div class="space-y-1 text-sm">
-                <p
-                  v-if="uploadHelper && !uploadError && !uploadSuccess"
-                  class="text-slate-500"
-                >
+                <p v-if="uploadHelper && !uploadError && !uploadSuccess" class="text-slate-500">
                   {{ uploadHelper }}
                 </p>
                 <p v-if="uploadError" class="text-rose-600">{{ uploadError }}</p>
@@ -574,11 +495,8 @@
         </div>
       </section>
     </div>
-    <div
-      v-if="editingProject"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6"
-      @click.self="closeProjectEditor"
-    >
+    <div v-if="editingProject" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6"
+      @click.self="closeProjectEditor">
       <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl">
         <header class="mb-4 space-y-1">
           <h3 class="text-lg font-semibold text-slate-900">编辑项目</h3>
@@ -587,38 +505,27 @@
         <form class="space-y-4" @submit.prevent="submitProjectEdit">
           <label class="block space-y-1 text-sm">
             <span class="font-medium text-slate-700">展示名称</span>
-            <input
-              v-model.trim="projectForm.displayName"
-              type="text"
-              required
-              class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              placeholder="在列表中显示的名称"
-            />
+            <input v-model.trim="projectForm.displayName" type="text" required
+              class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              placeholder="在列表中显示的名称" />
             <p class="text-xs text-slate-400">原始标识：{{ editingProject && editingProject.name }}</p>
           </label>
           <label class="block space-y-1 text-sm">
             <span class="font-medium text-slate-700">简介</span>
-            <textarea
-              v-model.trim="projectForm.description"
-              rows="4"
-              class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              placeholder="记录该项目的用途或数据来源"
-            />
+            <textarea v-model.trim="projectForm.description" rows="4"
+              class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              placeholder="记录该项目的用途或数据来源" />
           </label>
           <p v-if="projectEditError" class="text-sm text-rose-600">{{ projectEditError }}</p>
           <div class="flex items-center justify-end gap-3">
-            <button
-              type="button"
+            <button type="button"
               class="rounded-full border border-slate-200 px-4 py-1.5 text-sm text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
-              @click="closeProjectEditor"
-            >
+              @click="closeProjectEditor">
               取消
             </button>
-            <button
-              type="submit"
+            <button type="submit"
               class="rounded-full bg-indigo-600 px-5 py-1.5 text-sm font-semibold text-white shadow transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
-              :disabled="projectEditLoading"
-            >
+              :disabled="projectEditLoading">
               {{ projectEditLoading ? '保存中…' : '保存修改' }}
             </button>
           </div>
@@ -626,11 +533,8 @@
       </div>
     </div>
 
-    <div
-      v-if="deletingProject"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6"
-      @click.self="cancelProjectDelete"
-    >
+    <div v-if="deletingProject" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6"
+      @click.self="cancelProjectDelete">
       <div class="w-full max-w-sm rounded-3xl bg-white p-6 text-sm text-slate-600 shadow-xl">
         <header class="mb-3 space-y-1">
           <h3 class="text-lg font-semibold text-slate-900">确认删除项目</h3>
@@ -641,19 +545,14 @@
         </p>
         <p v-if="projectDeleteError" class="mb-3 text-sm text-rose-600">{{ projectDeleteError }}</p>
         <div class="flex items-center justify-end gap-3">
-          <button
-            type="button"
+          <button type="button"
             class="rounded-full border border-slate-200 px-4 py-1.5 text-sm text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
-            @click="cancelProjectDelete"
-          >
+            @click="cancelProjectDelete">
             取消
           </button>
-          <button
-            type="button"
+          <button type="button"
             class="rounded-full bg-rose-600 px-5 py-1.5 text-sm font-semibold text-white shadow transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:bg-rose-300"
-            :disabled="projectDeleteLoading"
-            @click="deleteProject"
-          >
+            :disabled="projectDeleteLoading" @click="deleteProject">
             {{ projectDeleteLoading ? '删除中…' : '确认删除' }}
           </button>
         </div>
@@ -1176,10 +1075,10 @@ const fetchDatasetPreview = async (datasetId, pageArg = previewPage.value, pageS
       : []
     previewRows.value = Array.isArray(data.rows)
       ? data.rows.map((row) => {
-          if (!row || typeof row !== 'object') return {}
-          const entries = Object.entries(row).map(([key, value]) => [key, stringifyPreviewCell(value)])
-          return Object.fromEntries(entries)
-        })
+        if (!row || typeof row !== 'object') return {}
+        const entries = Object.entries(row).map(([key, value]) => [key, stringifyPreviewCell(value)])
+        return Object.fromEntries(entries)
+      })
       : []
     previewPage.value = Number(data.page) || pageArg
     previewPageSize.value = Number(data.page_size) || pageSizeArg

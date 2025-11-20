@@ -53,7 +53,7 @@ export const routes = [
         name: 'topic-create-upload',
         component: TopicUploadStep,
         meta: {
-          title: '上传原始数据',
+          title: '新建专题 · 上传原始数据',
           breadcrumb: '上传原始数据'
         }
       },
@@ -62,7 +62,7 @@ export const routes = [
         name: 'topic-create-preprocess',
         component: TopicPreprocessStep,
         meta: {
-          title: '数据预处理',
+          title: '新建专题 · 数据预处理',
           breadcrumb: '数据预处理'
         }
       },
@@ -71,7 +71,7 @@ export const routes = [
         name: 'topic-create-filter',
         component: TopicFilterStep,
         meta: {
-          title: '筛选数据',
+          title: '新建专题 · 筛选数据',
           breadcrumb: '筛选数据'
         }
       },
@@ -80,7 +80,7 @@ export const routes = [
         name: 'topic-create-ingest',
         component: TopicIngestionStep,
         meta: {
-          title: '数据入库',
+          title: '新建专题 · 数据入库',
           breadcrumb: '数据入库'
         }
       },
@@ -98,7 +98,7 @@ export const routes = [
         name: 'project-data',
         component: ProjectDataLocalView,
         meta: {
-          title: '本地数据管理',
+          title: '项目数据 · 本地数据管理',
           description: '导入 Excel 并维护项目数据集'
         }
       },
@@ -107,7 +107,7 @@ export const routes = [
         name: 'project-data-remote-cache',
         component: ProjectDataRemoteCacheView,
         meta: {
-          title: '远程数据缓存',
+          title: '项目数据 · 远程数据缓存',
           description: '将远程数据库内容按时间区间缓存到本地并查看生成的 JSONL 文件'
         }
       }

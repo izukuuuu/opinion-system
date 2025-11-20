@@ -23,14 +23,14 @@ const sidebarItems = [
   {
     key: 'project-data',
     label: '本地数据管理',
-    description: '导入表格并维护字段映射',
+    description: '本地项目与数据集信息',
     icon: ServerStackIcon,
     to: { name: 'project-data' },
   },
   {
     key: 'project-data-remote-cache',
     label: '远程数据缓存',
-    description: '查看 fetch 缓存记录与文件',
+    description: '缓存用于分析的存档文件',
     icon: CloudArrowDownIcon,
     to: { name: 'project-data-remote-cache' },
   },

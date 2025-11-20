@@ -4,25 +4,18 @@
       <header class="space-y-2">
         <h1 class="text-2xl font-semibold text-slate-900">远程数据缓存</h1>
         <p class="text-sm text-slate-500">
-          调用远程 query / fetch 接口，将数据库中的专题内容按时间区间同步并缓存到本地 data/projects/&lt;topic&gt;/fetch 目录，方便后续项目管理与分析使用。
+          指定分析时间区间，将远程数据库中的专题内容缓存到本地，便于后续项目数据分析。
         </p>
       </header>
 
-      <div class="grid gap-4 lg:grid-cols-3">
+      <div class="grid gap-4 lg:grid-cols-2">
         <label class="space-y-2 text-sm">
-          <span class="font-medium text-slate-700">远程专题 (query)</span>
+          <span class="font-medium text-slate-700">专题名称</span>
           <select
-            class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            :disabled="topicsLoading"
-            :value="selectedTopic"
-            @change="handleTopicChange($event.target.value)"
-          >
+            class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            :disabled="topicsLoading" :value="selectedTopic" @change="handleTopicChange($event.target.value)">
             <option value="">请选择远程专题</option>
-            <option
-              v-for="topic in topics"
-              :key="topic"
-              :value="topic"
-            >
+            <option v-for="topic in topics" :key="topic" :value="topic">
               {{ topic }}
             </option>
           </select>
@@ -30,7 +23,7 @@
           <p v-else-if="topicsLoading" class="text-xs text-slate-500">正在加载远程专题列表…</p>
         </label>
         <div class="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-500">
-          <p class="text-xs uppercase tracking-widest text-slate-400">可用区间 (fetch availability)</p>
+          <p class="text-xs uppercase tracking-widest text-slate-400">时间区间</p>
           <p class="mt-1 text-base font-semibold text-slate-900">
             {{
               availability.start && availability.end
@@ -40,76 +33,45 @@
           </p>
           <p v-if="availability.error" class="text-xs text-rose-500">{{ availability.error }}</p>
         </div>
-        <div class="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-500">
-          <p class="text-xs uppercase tracking-widest text-slate-400">远程服务器</p>
-          <p class="mt-1 truncate text-base font-semibold text-slate-900" :title="backendBase">
-            {{ backendBase }}
-          </p>
-        </div>
       </div>
 
-      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="grid gap-4 sm:grid-cols-2">
         <label class="space-y-2 text-sm">
           <span class="font-medium text-slate-700">开始日期</span>
-          <input
-            v-model="fetchForm.start"
-            type="date"
-            class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            :disabled="!selectedTopic"
-          />
+          <input v-model="fetchForm.start" type="date"
+            class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            :disabled="!selectedTopic" />
         </label>
         <label class="space-y-2 text-sm">
           <span class="font-medium text-slate-700">结束日期</span>
-          <input
-            v-model="fetchForm.end"
-            type="date"
-            class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            :disabled="!selectedTopic"
-            placeholder="默认与开始日期相同"
-          />
+          <input v-model="fetchForm.end" type="date"
+            class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            :disabled="!selectedTopic" placeholder="默认与开始日期相同" />
         </label>
-        <div class="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-500">
-          <p class="text-xs uppercase tracking-widest text-slate-400">缓存目录</p>
-          <p class="mt-1 truncate text-xs text-slate-500" :title="cacheRoot">
-            {{ cacheRoot || '尚未生成缓存目录' }}
-          </p>
-        </div>
       </div>
 
       <div class="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
+        <button type="button"
+          class="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-600/90 px-4 py-2 text-sm font-semibold text-white  transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          :disabled="fetchRunning || !canSubmitFetch" @click="triggerFetch">
+          {{ fetchRunning ? '拉取中…' : '同步数据到本地' }}
+        </button>
+        <button type="button"
           class="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-          :disabled="availability.loading || !selectedTopic"
-          @click="loadAvailability()"
-        >
+          :disabled="availability.loading || !selectedTopic" @click="loadAvailability()">
           {{ availability.loading ? '获取中…' : '刷新可用区间' }}
         </button>
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-600/90 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-          :disabled="fetchRunning || !canSubmitFetch"
-          @click="triggerFetch"
-        >
-          {{ fetchRunning ? '拉取中…' : '触发远程拉取 (fetch)' }}
-        </button>
-        <button
-          type="button"
+        <button type="button"
           class="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-          :disabled="cacheLoading || !selectedTopic"
-          @click="refreshCaches"
-        >
+          :disabled="cacheLoading || !selectedTopic" @click="refreshCaches">
           {{ cacheLoading ? '刷新中…' : '刷新缓存状态' }}
         </button>
         <span v-if="latestCache" class="text-xs text-slate-500">
           最近缓存时间：{{ formatTimestamp(latestCache.updated_at) }}
         </span>
       </div>
-      <p
-        v-if="fetchFeedback.message"
-        class="rounded-2xl px-4 py-3 text-sm"
-        :class="fetchFeedback.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'"
-      >
+      <p v-if="fetchFeedback.message" class="rounded-2xl px-4 py-3 text-sm"
+        :class="fetchFeedback.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'">
         {{ fetchFeedback.message }}
       </p>
     </section>
@@ -140,11 +102,7 @@
         当前专题尚未拉取过远程缓存，可先指定时间区间触发 fetch。
       </p>
       <ul v-else class="space-y-4">
-        <li
-          v-for="cache in caches"
-          :key="cache.date"
-          class="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm"
-        >
+        <li v-for="cache in caches" :key="cache.date" class="rounded-3xl border border-slate-200 bg-white/90 p-6 ">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
               <p class="text-xs uppercase tracking-widest text-slate-400">缓存区间</p>
@@ -171,23 +129,15 @@
             </div>
           </dl>
           <div v-if="cache.channels?.length" class="mt-4 flex flex-wrap gap-2">
-            <span
-              v-for="channel in cache.channels"
-              :key="`${cache.date}-${channel}`"
-              class="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700"
-            >
+            <span v-for="channel in cache.channels" :key="`${cache.date}-${channel}`"
+              class="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
               {{ channel }}
             </span>
           </div>
           <div v-if="cache.files?.length" class="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-3">
             <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">生成文件</p>
             <ul class="mt-2 space-y-1 text-sm text-slate-600">
-              <li
-                v-for="file in cache.files"
-                :key="`${cache.date}-${file}`"
-                class="truncate"
-                :title="file"
-              >
+              <li v-for="file in cache.files" :key="`${cache.date}-${file}`" class="truncate" :title="file">
                 {{ file }}
               </li>
             </ul>
@@ -320,7 +270,7 @@ const loadAvailability = async (topicOverride = null) => {
     if (requestId !== availabilityRequestId) return
     availability.start = ''
     availability.end = ''
-    availability.error = error instanceof Error ? error.message : '无法获取可用区间'
+    availability.error = error instanceof Error ? error.message : '无法获取时间区间'
     fetchForm.start = ''
     fetchForm.end = ''
   } finally {
