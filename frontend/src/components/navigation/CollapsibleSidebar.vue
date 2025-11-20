@@ -38,34 +38,26 @@
 -->
 <template>
   <!-- 移动端：底部导航栏 -->
-  <nav
-    class="fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-soft bg-white/70 px-2 py-2 shadow-lg backdrop-blur-sm lg:hidden"
-  >
-    <component
-      v-for="(item, index) in items"
-      :key="itemKey(item, index)"
-      :is="item.to ? RouterLink : 'button'"
-      v-bind="itemProps(item)"
-      class="group flex flex-1 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 transition focus-ring-accent"
-      :class="mobileItemClasses(item)"
-      role="tab"
-      :aria-current="item.to ? (isItemActive(item) ? 'page' : undefined) : undefined"
-      :aria-selected="!item.to ? isItemActive(item) : undefined"
-      @click="handleSelect(item)"
-    >
-      <div
-        class="rounded-lg p-1.5 shadow-sm"
-        :class="[
-          item.iconBg || 'bg-white/70',
-          item.iconColor || 'text-brand-600'
-        ]"
+  <nav class="fixed inset-x-0 bottom-4 z-10 flex justify-center px-4 lg:hidden">
+    <div class="mobile-pill-nav w-full max-w-xl">
+      <div class="mobile-pill-nav__container">
+      <component
+        v-for="(item, index) in items"
+        :key="itemKey(item, index)"
+        :is="item.to ? RouterLink : 'button'"
+        v-bind="itemProps(item)"
+        class="group mobile-pill-nav__item focus-ring-accent"
+        :class="mobileItemClasses(item)"
+        role="tab"
+        :aria-current="item.to ? (isItemActive(item) ? 'page' : undefined) : undefined"
+        :aria-selected="!item.to ? isItemActive(item) : undefined"
+        @click="handleSelect(item)"
       >
-        <component :is="item.icon" class="h-4 w-4" />
+        <component :is="item.icon" class="mobile-pill-nav__icon" />
+        <span>{{ item.label }}</span>
+      </component>
       </div>
-      <span class="text-[10px] font-medium leading-tight text-secondary">
-        {{ item.label }}
-      </span>
-    </component>
+    </div>
   </nav>
 
   <!-- 桌面端：侧边栏 -->
@@ -98,7 +90,7 @@
               item.iconColor || 'text-brand-600'
             ]"
           >
-            <component :is="item.icon" class="h-4 w-4" />
+            <component :is="item.icon" class="h-5 w-5" />
           </div>
           <span
             class="flex flex-col text-muted transition-colors"
@@ -279,10 +271,51 @@ const itemClasses = (item) => {
  * 根据激活状态返回不同的样式类
  */
 const mobileItemClasses = (item) => {
-  const activeClass = isItemActive(item)
-    ? 'bg-brand-soft text-brand-600'
-    : 'text-secondary hover:bg-accent-faint hover:text-brand-600'
-
-  return activeClass
+  return isItemActive(item) ? 'mobile-pill-nav__item--active' : ''
 }
 </script>
+
+<style scoped>
+.mobile-pill-nav__container {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  border-radius: 1.5rem;
+  border: 1px solid var(--color-border-soft);
+  background-color: var(--color-bg-base-soft);
+  box-shadow: 0 12px 36px rgb(12 18 28 / 0.12);
+}
+
+.mobile-pill-nav__item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: 1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background-color: transparent;
+  border: none;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.mobile-pill-nav__item--active {
+  background-color: rgb(var(--color-brand-100) / 1);
+  color: var(--color-text-primary);
+}
+
+.mobile-pill-nav__icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: rgb(var(--color-brand-600) / 1);
+}
+
+.mobile-pill-nav__item--active .mobile-pill-nav__icon {
+  color: rgb(var(--color-brand-700) / 1);
+}
+</style>
