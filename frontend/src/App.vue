@@ -24,38 +24,40 @@
     <template v-else>
     <aside
       v-if="sidebarCollapsed"
-      class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-20 lg:flex-col lg:border-r border-soft lg:bg-white"
+      class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-24 lg:flex-col lg:border-r border-soft lg:bg-white/80 lg:backdrop-blur-md"
     >
-      <div class="flex flex-col items-center gap-3 border-b border-soft px-3 py-4">
-        <button
-          type="button"
-          class="flex h-10 w-10 items-center justify-center rounded-md border border-soft bg-surface text-secondary transition hover:border-brand-soft hover:text-primary focus-ring-accent"
-          :aria-expanded="!sidebarCollapsed"
-          :aria-label="sidebarToggleLabel"
-          @click="toggleSidebar"
-        >
-          <ChevronDoubleRightIcon class="h-4 w-4" />
-        </button>
-      </div>
-      <nav class="flex flex-1 flex-col items-center gap-4 py-6">
-        <RouterLink
-          v-for="link in navigationLinks"
-          :key="link.label"
-          :to="link.to"
-          class="group relative flex h-11 w-11 items-center justify-center rounded-lg text-muted transition hover:bg-brand-soft hover:text-brand-600 focus-ring-accent"
-          :title="link.label"
-          :aria-label="link.label"
-          active-class="bg-brand-soft text-brand-600"
-        >
-          <component :is="link.icon" class="h-5 w-5" />
-          <span
-            class="pointer-events-none absolute left-full top-1/2 z-10 ml-3 -translate-y-1/2 whitespace-nowrap rounded-md bg-brand-200 px-2 py-1 text-xs font-medium text-secondary opacity-0 shadow-lg transition duration-150 ease-out group-hover:translate-x-1 group-hover:opacity-100"
-            aria-hidden="true"
+      <div class="flex h-full flex-col px-3 py-6">
+        <div class="flex flex-col items-center gap-4 pb-5">
+          <button
+            type="button"
+            class="flex h-11 w-11 items-center justify-center rounded-2xl border border-soft bg-white/90 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+            :aria-expanded="!sidebarCollapsed"
+            :aria-label="sidebarToggleLabel"
+            @click="toggleSidebar"
           >
-            {{ link.label }}
-          </span>
-        </RouterLink>
-      </nav>
+            <Bars3Icon class="h-5 w-5" />
+          </button>
+        </div>
+
+        <nav class="collapsed-sidebar-scroll flex-1 overflow-y-auto">
+          <div class="flex flex-col items-center gap-4 pb-6">
+            <RouterLink
+              v-for="link in navigationLinks"
+              :key="link.label"
+              :to="link.to"
+              :class="getCollapsedLinkClasses(link)"
+              :aria-label="link.label"
+            >
+              <div :class="getCollapsedIconClasses(link)">
+                <component :is="link.icon" class="h-5 w-5" />
+              </div>
+              <span class="text-[11px] font-semibold leading-tight text-secondary">
+                {{ link.label }}
+              </span>
+            </RouterLink>
+          </div>
+        </nav>
+      </div>
     </aside>
 
     <header
@@ -93,60 +95,69 @@
     >
       <div
         v-if="!sidebarCollapsed"
-        class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-soft bg-white shadow-lg lg:w-72 lg:shadow-sm"
+        class="fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-soft bg-white shadow-lg lg:shadow-sm"
       >
-        <div class="flex items-center justify-between border-b border-soft px-5 py-4">
-          <div class="flex flex-col h-10 justify-center overflow-hidden">
-            <span class="text-lg font-semibold text-primary">Opinion System</span>
-            <span class="text-sm text-secondary">舆情监测系统</span>
-          </div>
+        <div class="flex items-center gap-3 border-b border-soft px-5 py-4">
           <button
             type="button"
-            class="flex h-10 w-10 items-center justify-center rounded-md border border-soft bg-surface text-secondary transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+            class="flex h-11 w-11 items-center justify-center rounded-2xl border border-soft bg-white/90 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
             :aria-label="sidebarToggleLabel"
             @click="toggleSidebar"
           >
-            <ChevronDoubleLeftIcon class="h-4 w-4" />
-            <span class="sr-only">收起侧边栏</span>
+            <Bars3Icon class="h-5 w-5" />
+            <span class="sr-only">{{ sidebarToggleLabel }}</span>
           </button>
+          <div class="flex flex-col overflow-hidden">
+            <span class="text-lg font-semibold text-primary">Opinion System</span>
+            <span class="text-xs text-muted">舆情监测系统导航</span>
+          </div>
         </div>
 
         <div
           ref="sidebarScrollEl"
           :class="[
-            'sidebar-scroll flex flex-1 flex-col gap-8 overflow-y-auto px-5 pb-8 pt-6',
+            'sidebar-scroll flex flex-1 flex-col overflow-y-auto px-5 pb-8 pt-6',
             { 'sidebar-scroll--hidden': !isSidebarScrollbarVisible }
           ]"
         >
-          <nav class="space-y-8">
-            <section
-              v-for="group in navigationGroups"
-              :key="group.label"
-              class="space-y-4"
-            >
-              <h2 class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{{ group.label }}</h2>
-              <RouterLink
-                v-for="link in group.links"
-                :key="link.label"
-                :to="link.to"
-                custom
-                v-slot="{ href, navigate }"
+          <div class="flex flex-col gap-6">
+            <nav class="space-y-6">
+              <section
+                v-for="group in navigationGroups"
+                :key="group.label"
+                class="space-y-3"
               >
-                <a
-                  :href="href"
-                  @click="navigate"
-                  class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-secondary transition hover:bg-brand-soft hover:text-primary focus-ring-accent"
-                  :class="isGlobalLinkActive(link) ? 'bg-brand-soft text-brand-600' : ''"
-                >
-                  <component :is="link.icon" class="h-5 w-5 text-muted" />
-                  <div class="flex flex-col">
-                    <span>{{ link.label }}</span>
-                    <span class="text-xs font-normal text-muted">{{ link.description }}</span>
-                  </div>
-                </a>
-              </RouterLink>
-            </section>
-          </nav>
+                <h2 class="text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-muted/80">
+                  {{ group.label }}
+                </h2>
+                <div class="space-y-2">
+                  <RouterLink
+                    v-for="link in group.links"
+                    :key="link.label"
+                    :to="link.to"
+                    custom
+                    v-slot="{ href, navigate }"
+                  >
+                    <a
+                      :href="href"
+                      @click="navigate"
+                      :class="getExpandedLinkClasses(link)"
+                    >
+                      <div :class="getExpandedIconClasses(link)">
+                        <component :is="link.icon" class="h-5 w-5" />
+                      </div>
+                      <div class="flex flex-col text-left">
+                        <span>{{ link.label }}</span>
+                        <span v-if="link.description" class="text-xs font-normal text-muted">
+                          {{ link.description }}
+                        </span>
+                      </div>
+                    </a>
+                  </RouterLink>
+                </div>
+              </section>
+            </nav>
+          </div>
         </div>
       </div>
     </Transition>
@@ -191,7 +202,7 @@
       <div
           :class="[
           'flex min-h-screen flex-1 flex-col px-0 pt-[4rem] lg:pt-0',
-          sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-72'
+          sidebarCollapsed ? 'lg:pl-24' : 'lg:pl-72'
         ]"
       >
         <header
@@ -217,8 +228,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
+  Bars3Icon,
   BeakerIcon,
-  ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
   CircleStackIcon,
   HomeIcon,
@@ -232,7 +243,8 @@ import {
   TableCellsIcon,
   MagnifyingGlassCircleIcon,
   SparklesIcon,
-  ChartBarIcon
+  ChartBarIcon,
+  PencilSquareIcon
 } from '@heroicons/vue/24/outline'
 import ActiveProjectSwitcher from './components/ActiveProjectSwitcher.vue'
 import './assets/colors.css'
@@ -271,7 +283,7 @@ const navigationGroups = [
     label: '数据获取',
     links: [
       {
-        label: '舆情数据获取',
+        label: '平台数据',
         description: '获取公开平台数据',
         to: { name: 'data-acquisition-platform' },
         icon: CloudArrowDownIcon
@@ -391,6 +403,12 @@ const navigationLinks = navigationGroups.reduce(
   []
 )
 
+const primarySidebarAction = {
+  label: '新建专题',
+  description: '上传数据并完成初始化流程',
+  to: { name: 'topic-create-overview' }
+}
+
 const showGlobalProjectSwitcher = false
 
 const route = useRoute()
@@ -411,6 +429,34 @@ const isGlobalLinkActive = (link) => {
   }
   return false
 }
+
+const getCollapsedLinkClasses = (link) => [
+  'group flex flex-col items-center gap-2 rounded-3xl px-2 py-3 text-center text-[11px] font-semibold tracking-tight text-secondary transition focus-ring-accent',
+  isGlobalLinkActive(link)
+    ? 'bg-brand-soft text-brand-700 shadow-sm'
+    : 'text-muted hover:text-brand-700 hover:bg-brand-soft'
+]
+
+const getCollapsedIconClasses = (link) => [
+  'flex h-12 w-12 items-center justify-center rounded-2xl border text-muted shadow-sm transition',
+  isGlobalLinkActive(link)
+    ? 'border-transparent bg-brand text-white shadow-lg'
+    : 'border-soft bg-white/90 group-hover:border-brand-soft group-hover:text-brand-700'
+]
+
+const getExpandedLinkClasses = (link) => [
+  'group flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition focus-ring-accent',
+  isGlobalLinkActive(link)
+    ? 'bg-brand-soft text-brand-700 shadow-sm'
+    : 'text-secondary hover:bg-brand-soft hover:text-brand-700'
+]
+
+const getExpandedIconClasses = (link) => [
+  'flex h-10 w-10 items-center justify-center rounded-2xl border bg-white text-muted shadow-sm transition',
+  isGlobalLinkActive(link)
+    ? 'border-transparent text-brand-700'
+    : 'border-transparent group-hover:text-brand-700'
+]
 
 const mediaQuery =
   typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)') : null
@@ -595,3 +641,19 @@ onBeforeUnmount(() => {
   cleanupHeaderObserver?.()
 })
 </script>
+
+<style scoped>
+.collapsed-sidebar-scroll {
+  scrollbar-width: none;
+}
+
+.collapsed-sidebar-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.collapsed-sidebar-scroll::-webkit-scrollbar-thumb,
+.collapsed-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+</style>
