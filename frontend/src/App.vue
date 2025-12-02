@@ -479,7 +479,7 @@ const compactHeaderStyle = computed(() => ({
 
 const compactHeaderOffsetStyle = computed(() => {
   if (!isDesktop.value) return {}
-  const left = sidebarCollapsed.value ? '5rem' : '18rem'
+  const left = sidebarCollapsed.value ? '6rem' : '18rem'
   return { left, right: '0' }
 })
 

@@ -77,21 +77,29 @@ def _fetch_table_info(
     db_name: str,
     table_name: str,
     logger: Any,
+    approx_rows: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Fetch the row count and sample for a single table."""
 
     table_info: Dict[str, Any] = {"name": table_name}
 
-    try:
-        count_query = f"SELECT COUNT(*) as record_count FROM `{db_name}`.`{table_name}`"
-        count_result = db_manager.execute_query(count_query)
-        record_count = count_result["record_count"].iloc[0]
-        table_info["record_count"] = int(record_count)
-        log_success(logger, f"表 {db_name}.{table_name} 包含 {record_count} 条记录", "Query")
-    except Exception as e:
-        table_info["error"] = str(e)
-        log_error(logger, f"查询表 {db_name}.{table_name} 信息失败: {e}", "Query")
-        return table_info
+    # 优先使用 information_schema.TABLES 提供的近似行数，避免对每张表执行 COUNT(*)
+    if approx_rows is not None:
+        try:
+            table_info["record_count"] = int(approx_rows)
+        except Exception:
+            table_info["record_count"] = None
+    else:
+        try:
+            count_query = f"SELECT COUNT(*) as record_count FROM `{db_name}`.`{table_name}`"
+            count_result = db_manager.execute_query(count_query)
+            record_count = count_result["record_count"].iloc[0]
+            table_info["record_count"] = int(record_count)
+            log_success(logger, f"表 {db_name}.{table_name} 包含 {record_count} 条记录", "Query")
+        except Exception as e:
+            table_info["error"] = str(e)
+            log_error(logger, f"查询表 {db_name}.{table_name} 信息失败: {e}", "Query")
+            return table_info
 
     try:
         preview_query = f"SELECT * FROM `{db_name}`.`{table_name}` LIMIT {PREVIEW_ROW_LIMIT}"
@@ -108,7 +116,7 @@ def _fetch_table_info(
     return table_info
 
 
-def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
+def query_database_info(logger=None, include_counts: bool = True) -> Optional[Dict[str, Any]]:
     """
     查询数据库信息
 
@@ -186,9 +194,11 @@ def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
                 "tables": [],
             }
 
-            # 获取数据库中的表
+            # 获取数据库中的表及 approximate 行数（避免对每张表做 COUNT(*)）
             tables_query = """
-            SELECT TABLE_NAME as table_name
+            SELECT
+                TABLE_NAME as table_name,
+                TABLE_ROWS as table_rows
             FROM information_schema.TABLES
             WHERE TABLE_SCHEMA = :db_name
             ORDER BY TABLE_NAME
@@ -203,17 +213,38 @@ def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
                 continue
 
             table_names = tables_df['table_name'].tolist()
+            approx_rows_map = {}
+            if 'table_rows' in tables_df.columns:
+                approx_rows_map = {
+                    row['table_name']: row['table_rows']
+                    for _, row in tables_df.iterrows()
+                }
             log_success(
                 logger,
                 f"数据库 {db_name} 包含 {len(table_names)} 个表: {', '.join(table_names)}",
                 "Query",
             )
 
+            # 轻量模式：只返回库和表结构，不做逐表行数与预览
+            if not include_counts:
+                database_overview["tables"] = [{"name": name} for name in table_names]
+                stats = {
+                    "table_count": len(table_names),
+                    "counted_table_count": 0,
+                    "total_rows": 0,
+                }
+                database_overview.update(stats)
+                total_tables += stats["table_count"]
+                total_rows += stats["total_rows"]
+                overview["databases"].append(database_overview)
+                continue
+
             table_workers = min(MAX_TABLE_WORKERS, len(table_names)) or 1
             futures: Dict[Any, Tuple[int, str]] = {}
             with ThreadPoolExecutor(max_workers=table_workers) as executor:
                 for index, table_name in enumerate(table_names):
-                    future = executor.submit(_fetch_table_info, db_manager, db_name, table_name, logger)
+                    approx_rows = approx_rows_map.get(table_name)
+                    future = executor.submit(_fetch_table_info, db_manager, db_name, table_name, logger, approx_rows)
                     futures[future] = (index, table_name)
 
                 table_results: List[Tuple[int, Dict[str, Any]]] = []
@@ -259,7 +290,7 @@ def query_database_info(logger=None) -> Optional[Dict[str, Any]]:
                 pass
 
 
-def run_query(logger=None) -> Dict[str, Any]:
+def run_query(logger=None, include_counts: bool = True) -> Dict[str, Any]:
     """
     运行数据查询
 
@@ -275,7 +306,7 @@ def run_query(logger=None) -> Dict[str, Any]:
     log_module_start(logger, "Query")
 
     try:
-        result = query_database_info(logger)
+        result = query_database_info(logger, include_counts=include_counts)
         if result is not None:
             return result
 

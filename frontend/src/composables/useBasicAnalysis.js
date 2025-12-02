@@ -385,7 +385,10 @@ const loadTopics = async () => {
   topicsState.error = ''
   const previousTopic = fetchForm.topic
   try {
-    const response = await callApi('/api/query', { method: 'POST', body: JSON.stringify({}) })
+    const response = await callApi('/api/query', {
+      method: 'POST',
+      body: JSON.stringify({ include_counts: false })
+    })
     const databases = response?.data?.databases ?? []
     topicsState.options = databases
       .map((db) => String(db?.name || '').trim())

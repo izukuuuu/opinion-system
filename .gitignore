@@ -27,3 +27,6 @@ backend/logs/*
 # OS
 .DS_Store
 frontend/.env.local
+
+# Addon
+.claude

@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import re
 import sys
 import time
 import os
@@ -1128,9 +1129,18 @@ def pipeline_endpoint():
 def query_endpoint():
     from src.query import run_query  # type: ignore
 
+    payload = request.get_json(silent=True) or {}
+    include_counts_value = payload.get("include_counts", True)
+    include_counts = True
+    if isinstance(include_counts_value, bool):
+        include_counts = include_counts_value
+    elif isinstance(include_counts_value, str):
+        include_counts = include_counts_value.strip().lower() not in ("false", "0", "no", "off", "")
+
     response, code = _execute_operation(
         "query",
         run_query,
+        include_counts=include_counts,
         log_context={"project": "GLOBAL", "params": {"source": "api"}},
     )
     return jsonify(response), code
@@ -1154,13 +1164,17 @@ def fetch_availability_endpoint():
     except ValueError as exc:
         return error(str(exc))
 
+    # 对于远程数据源，可用日期区间查询需要使用真实数据库名，
+    # 即请求中提供的 topic；若缺失则退回到展示名/内部标识。
+    db_topic = topic or display_name or topic_identifier
+
     from src.fetch import get_topic_available_date_range  # type: ignore
 
-    availability = get_topic_available_date_range(topic_identifier)
+    availability = get_topic_available_date_range(db_topic)
     return success(
         {
             "data": {
-                "topic": display_name or topic_identifier,
+                "topic": display_name or db_topic,
                 "bucket": topic_identifier,
                 "range": availability,
             }
@@ -1191,12 +1205,16 @@ def fetch_endpoint():
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
+    # 远程 Fetch 从数据库读取数据，需使用真实库名；
+    # 优先使用请求中的 topic，其次展示名，最后回退内部标识。
+    db_topic = (topic or "").strip() or display_name or topic_identifier
+
     from src.fetch import run_fetch  # type: ignore
 
     response, code = _execute_operation(
         "fetch",
         run_fetch,
-        topic_identifier,
+        db_topic,
         start,
         end,
         log_context={
@@ -1531,6 +1549,209 @@ def project_archives(name: str):
     })
 
 
+@app.delete("/api/projects/<string:name>/archives/<string:layer>/<string:date>")
+def delete_project_archive(name: str, layer: str, date: str):
+    """
+    删除指定项目的存档
+
+    Args:
+        name: 项目名称
+        layer: 存档层级 (raw, merge, clean)
+        date: 存档日期
+
+    Returns:
+        JSON响应
+    """
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+
+    # 验证层级参数
+    valid_layers = ["raw", "merge", "clean"]
+    if layer not in valid_layers:
+        return jsonify({
+            "status": "error",
+            "message": f"无效的存档层级: {layer}，支持的层级: {', '.join(valid_layers)}"
+        }), 400
+
+    # 验证日期格式
+    if not re.match(r'^\d{8}$', date):
+        return jsonify({
+            "status": "error",
+            "message": "无效的日期格式，请使用YYYYMMDD格式，例如: 20241202"
+        }), 400
+
+    resolution_payload: Dict[str, Any] = {"project": name}
+    if dataset_id:
+        resolution_payload["dataset_id"] = dataset_id
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    try:
+        # 检查依赖关系 - 不能删除被后续阶段依赖的存档
+        dependency_check = check_archive_dependencies(topic_identifier, layer, date)
+        if not dependency_check["can_delete"]:
+            return jsonify({
+                "status": "error",
+                "message": dependency_check["message"],
+                "dependent_layers": dependency_check.get("dependent_layers", [])
+            }), 409
+
+        # 执行删除操作
+        result = delete_archive_directory(topic_identifier, layer, date)
+
+        if result["success"]:
+            return jsonify({
+                "status": "ok",
+                "message": f"成功删除 {layer.upper()} 存档 ({date})",
+                "deleted_files": result["deleted_files"],
+                "deleted_size": result.get("deleted_size", 0)
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": result["message"] or f"删除 {layer.upper()} 存档失败"
+            }), 500
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return jsonify({
+            "status": "error",
+            "message": f"删除存档时发生错误: {str(e)}",
+            "error_details": error_details if app.debug else None
+        }), 500
+
+
+def check_archive_dependencies(topic_identifier: str, layer: str, date: str) -> Dict[str, Any]:
+    """
+    检查存档的依赖关系，确认是否可以安全删除
+
+    Args:
+        topic_identifier: 专题标识符
+        layer: 存档层级
+        date: 存档日期
+
+    Returns:
+        检查结果字典
+    """
+    from server_support.archives import collect_project_archives
+
+    # 定义依赖关系：clean依赖merge，merge依赖raw
+    dependencies = {
+        "raw": ["merge", "clean"],
+        "merge": ["clean"]
+    }
+
+    # 如果删除clean存档，没有后续依赖，可以直接删除
+    if layer == "clean":
+        return {"can_delete": True, "message": "Clean存档无后续依赖，可以删除"}
+
+    # 检查是否有后续阶段依赖此存档
+    dependent_layers = dependencies.get(layer, [])
+    blocking_archives = []
+
+    for dependent_layer in dependent_layers:
+        # 获取后续层级的存档
+        archives = collect_project_archives(topic_identifier, layers=[dependent_layer])
+        dependent_archives = archives.get(dependent_layer, [])
+
+        # 检查是否有基于当前存档日期创建的后续存档
+        for archive in dependent_archives:
+            # 这里简化检查：如果后续存档日期等于或晚于当前存档日期，可能存在依赖
+            # 实际业务中可能需要更精确的依赖关系追踪
+            if archive["date"] >= date:
+                blocking_archives.append({
+                    "layer": dependent_layer,
+                    "date": archive["date"],
+                    "updated_at": archive.get("updated_at", "")
+                })
+
+    if blocking_archives:
+        archive_list = ", ".join([
+            f"{arch['layer'].upper()}({arch['date']})"
+            for arch in blocking_archives
+        ])
+        return {
+            "can_delete": False,
+            "message": f"无法删除 {layer.upper()} 存档，存在依赖关系：{archive_list}",
+            "dependent_layers": blocking_archives
+        }
+
+    return {"can_delete": True, "message": f"{layer.upper()}存档无依赖，可以删除"}
+
+
+def delete_archive_directory(topic_identifier: str, layer: str, date: str) -> Dict[str, Any]:
+    """
+    删除指定存档目录
+
+    Args:
+        topic_identifier: 专题标识符
+        layer: 存档层级 (raw, merge, clean)
+        date: 存档日期
+
+    Returns:
+        删除结果字典
+    """
+    import shutil
+    import os
+    from src.utils.setting.paths import bucket
+
+    try:
+        archive_dir = bucket(layer, topic_identifier, date)
+
+        if not os.path.exists(archive_dir):
+            return {
+                "success": False,
+                "message": f"存档目录不存在: {archive_dir}",
+                "deleted_files": [],
+                "deleted_size": 0
+            }
+
+        # 统计要删除的文件
+        deleted_files = []
+        deleted_size = 0
+
+        for root, _, files in os.walk(archive_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    file_size = os.path.getsize(file_path)
+                    deleted_size += file_size
+                    relative_path = os.path.relpath(file_path, archive_dir)
+                    deleted_files.append(relative_path)
+                except OSError:
+                    # 忽略无法获取大小的文件
+                    pass
+
+        # 执行删除
+        shutil.rmtree(archive_dir)
+
+        return {
+            "success": True,
+            "message": f"成功删除存档目录: {layer}/{date}",
+            "deleted_files": deleted_files,
+            "deleted_size": deleted_size,
+            "deleted_count": len(deleted_files)
+        }
+
+    except PermissionError:
+        return {
+            "success": False,
+            "message": "权限不足，无法删除存档目录",
+            "deleted_files": [],
+            "deleted_size": 0
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"删除存档目录时发生错误: {str(e)}",
+            "deleted_files": [],
+            "deleted_size": 0
+        }
+
+
 def _build_fetch_cache_response(resolution_payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     if not resolution_payload:
         return {"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}, 400
@@ -1635,54 +1856,82 @@ def update_project_dataset_mapping(name: str, dataset_id: str):
 
 @app.post("/api/projects/<string:name>/datasets")
 def upload_project_dataset(name: str):
-    file = request.files.get("file")
-    if not file or not getattr(file, "filename", ""):
+    uploads = request.files.getlist("file") or request.files.getlist("files")
+    if not uploads:
+        single = request.files.get("file")
+        if single and getattr(single, "filename", ""):
+            uploads = [single]
+    uploads = [upload for upload in uploads if getattr(upload, "filename", "")]
+    if not uploads:
         return jsonify({"status": "error", "message": "请选择需要上传的表格文件"}), 400
 
     mapping_hints = parse_column_mapping_from_form(request.form)
     topic_label_hint = normalise_topic_label(request.form.get("topic_label"))
 
-    try:
-        dataset = store_uploaded_dataset(
-            name,
-            file,
-            column_mapping=mapping_hints,
-            topic_label=topic_label_hint,
-        )
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
-    except Exception:  # pragma: no cover - defensive logging
-        LOGGER.exception("Failed to store dataset for project %s", name)
+    datasets: List[Dict[str, Any]] = []
+    failures: List[Dict[str, str]] = []
+    last_exception = None
+
+    for upload in uploads:
         try:
-            PROJECT_MANAGER.log_operation(
+            dataset = store_uploaded_dataset(
                 name,
-                "import_dataset",
-                params={"source": "api"},
-                success=False,
+                upload,
+                column_mapping=mapping_hints,
+                topic_label=topic_label_hint,
             )
-        except Exception:  # pragma: no cover - avoid cascading failures
-            LOGGER.debug("Unable to persist failed dataset log for project %s", name, exc_info=True)
-        return jsonify({"status": "error", "message": "数据集保存失败"}), 500
+            datasets.append(dataset)
+            try:
+                PROJECT_MANAGER.log_operation(
+                    name,
+                    "import_dataset",
+                    params={
+                        "dataset_id": dataset.get("id"),
+                        "filename": dataset.get("display_name"),
+                        "rows": dataset.get("rows"),
+                        "columns": dataset.get("column_count"),
+                        "column_mapping": dataset.get("column_mapping"),
+                        "topic_label": dataset.get("topic_label"),
+                        "source": "api",
+                    },
+                    success=True,
+                )
+            except Exception:  # pragma: no cover - logging should not break API
+                LOGGER.debug("Failed to persist dataset upload log for project %s", name, exc_info=True)
+        except ValueError as exc:
+            failures.append({"filename": upload.filename or "", "message": str(exc)})
+            last_exception = exc
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.exception("Failed to store dataset for project %s", name)
+            failures.append({"filename": upload.filename or "", "message": "数据集保存失败"})
+            last_exception = exc
+            try:
+                PROJECT_MANAGER.log_operation(
+                    name,
+                    "import_dataset",
+                    params={"source": "api", "filename": upload.filename},
+                    success=False,
+                )
+            except Exception:  # pragma: no cover - avoid cascading failures
+                LOGGER.debug("Unable to persist failed dataset log for project %s", name, exc_info=True)
 
-    try:
-        PROJECT_MANAGER.log_operation(
-            name,
-            "import_dataset",
-            params={
-                "dataset_id": dataset.get("id"),
-                "filename": dataset.get("display_name"),
-                "rows": dataset.get("rows"),
-                "columns": dataset.get("column_count"),
-                "column_mapping": dataset.get("column_mapping"),
-                "topic_label": dataset.get("topic_label"),
-                "source": "api",
-            },
-            success=True,
-        )
-    except Exception:  # pragma: no cover - logging should not break API
-        LOGGER.debug("Failed to persist dataset upload log for project %s", name, exc_info=True)
+    if not datasets and failures:
+        message = failures[0].get("message") or "数据集保存失败"
+        status_code = 400 if isinstance(last_exception, ValueError) else 500
+        return jsonify({"status": "error", "message": message, "errors": failures}), status_code
 
-    return jsonify({"status": "ok", "dataset": dataset}), 201
+    payload: Dict[str, Any] = {
+        "status": "ok",
+        "datasets": datasets,
+        "count": len(datasets),
+    }
+    if datasets:
+        payload["dataset"] = datasets[-1]
+    if failures:
+        payload["errors"] = failures
+
+    status_code = 201 if len(failures) == 0 else 207
+    return jsonify(payload), status_code
 
 
 @app.route("/")

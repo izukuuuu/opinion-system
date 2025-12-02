@@ -224,7 +224,10 @@ const loadTopics = async () => {
   topicsLoading.value = true
   topicsError.value = ''
   try {
-    const response = await callApi('/api/query', { method: 'POST', body: JSON.stringify({}) })
+    const response = await callApi('/api/query', {
+      method: 'POST',
+      body: JSON.stringify({ include_counts: false })
+    })
     const databases = response?.data?.databases ?? []
     topics.value = normalizeTopicOptions(databases)
     if (!topics.value.length) {

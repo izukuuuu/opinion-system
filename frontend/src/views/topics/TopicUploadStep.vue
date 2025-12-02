@@ -118,22 +118,94 @@
         <form class="space-y-5" @submit.prevent="uploadDataset">
           <div
             class="flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-brand-soft bg-surface-muted px-6 text-center text-sm text-secondary transition hover:border-brand hover:bg-brand-soft hover:text-brand-600"
-            :class="{ 'border-brand bg-surface text-brand-600 shadow-inner': uploadFile }"
+            :class="{ 'border-brand bg-surface text-brand-600 shadow-inner': uploadFiles.length || dragActive }"
+            @dragenter.prevent="handleDragEnter"
+            @dragover.prevent="handleDragOver"
+            @dragleave.prevent="handleDragLeave"
+            @drop.prevent="handleDrop"
           >
             <input
               ref="fileInput"
               type="file"
               class="hidden"
               accept=".xlsx,.xls,.csv,.jsonl"
+              multiple
               @change="handleFileChange"
             />
             <button type="button" class="flex flex-col items-center gap-2 text-sm" @click="fileInput?.click()">
               <DocumentArrowUpIcon class="h-10 w-10 text-slate-300" />
               <span class="font-medium">
-                {{ uploadFile ? uploadFile.name : '点击或拖拽文件到此处' }}
+                {{ uploadFiles.length ? selectedFileSummary : '点击或拖拽文件到此处' }}
               </span>
-              <span class="text-xs text-slate-400">最大支持 50MB</span>
+              <span class="text-xs text-slate-400">
+                {{ uploadFiles.length ? `已选择 ${uploadFiles.length} 个文件` : '最大 50MB/单文件 · 支持拖拽、批量选择' }}
+              </span>
             </button>
+          </div>
+          <div
+            v-if="uploadFiles.length"
+            class="space-y-2 rounded-2xl border border-soft bg-white/80 px-4 py-3 text-xs text-secondary shadow-sm"
+          >
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-primary">待上传文件</span>
+              <button
+                type="button"
+                class="text-rose-600 transition hover:text-rose-500"
+                @click="clearSelectedFiles()"
+              >
+                清空
+              </button>
+            </div>
+            <ul class="space-y-1 text-sm text-primary">
+              <li
+                v-for="(file, index) in uploadFiles"
+                :key="`${file.name}-${file.lastModified}-${index}`"
+                class="flex items-center justify-between gap-2 rounded-xl bg-surface-muted px-3 py-2 text-xs text-secondary"
+              >
+                <span class="truncate text-sm text-primary">{{ file.name }}</span>
+                <button
+                  type="button"
+                  class="text-rose-600 transition hover:text-rose-500"
+                  @click="removeSelectedFile(index)"
+                >
+                  移除
+                </button>
+              </li>
+            </ul>
+          </div>
+          <div
+            v-if="uploadStatuses.length"
+            class="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-white/80 px-4 py-3 text-xs text-secondary shadow-sm"
+          >
+            <div class="flex items-center justify-between text-[13px] font-semibold text-primary">
+              <span>批量上传进度</span>
+              <span>{{ uploadProgress.completed }}/{{ uploadProgress.total }} · {{ uploadProgress.percent }}%</span>
+            </div>
+            <div class="h-2 w-full rounded-full bg-slate-200">
+              <div
+                class="h-full rounded-full bg-brand transition-all"
+                :style="{ width: `${Math.max(uploadProgress.percent, uploadProgress.completed ? 10 : 0)}%` }"
+              ></div>
+            </div>
+            <ul class="space-y-1 text-sm text-primary">
+              <li
+                v-for="status in uploadStatuses"
+                :key="status.key"
+                class="flex items-center justify-between gap-2 rounded-xl bg-surface-muted px-3 py-2 text-xs text-secondary"
+              >
+                <span class="truncate text-sm text-primary">{{ status.name }}</span>
+                <span
+                  class="font-semibold"
+                  :class="status.status === 'success'
+                    ? 'text-emerald-600'
+                    : status.status === 'error'
+                      ? 'text-rose-600'
+                      : 'text-slate-500'"
+                >
+                  {{ status.message }}
+                </span>
+              </li>
+            </ul>
           </div>
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <button type="submit" class="btn-base btn-tone-primary px-6 py-2" :disabled="uploading">
@@ -164,6 +236,24 @@
               </div>
               <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">上传成功</span>
             </header>
+            <div
+              v-if="hasMultipleDatasets"
+              class="mt-4 space-y-2 rounded-2xl bg-amber-50/80 px-4 py-3 text-xs leading-relaxed text-amber-800"
+            >
+              <p>
+                本次上传共包含 {{ uploadedDatasets.length }} 个数据集，字段映射将一次性同步到所有数据集。
+                为了确保 Merge / Clean 等后续流程顺利，请保证这些数据集来源一致、字段命名完全相同。
+              </p>
+              <ul class="flex flex-wrap gap-2 text-[11px] text-amber-700">
+                <li
+                  v-for="dataset in uploadedDatasets"
+                  :key="`dataset-chip-${dataset.id}`"
+                  class="rounded-full bg-white/70 px-3 py-1 font-semibold"
+                >
+                  {{ dataset.display_name || dataset.id }}
+                </li>
+              </ul>
+            </div>
             <dl class="mt-4 grid gap-3 text-sm text-secondary sm:grid-cols-2 lg:grid-cols-3">
               <div class="rounded-2xl bg-surface-muted px-4 py-3">
                 <dt class="text-[11px] uppercase tracking-widest text-muted">文件大小</dt>
@@ -225,6 +315,9 @@
                 <h4 class="text-sm font-semibold text-primary">字段映射</h4>
                 <p class="text-xs text-secondary">
                   指定专题标识、日期、标题、正文与作者列，系统将在预处理与后续流程中使用这些字段。
+                </p>
+                <p v-if="hasMultipleDatasets" class="rounded-2xl bg-amber-50/80 px-3 py-2 text-[11px] text-amber-700">
+                  当前选项仅展示所有数据集中共同存在的列。若列表为空，请检查各数据集字段是否对齐，或在数据管理页面统一列名后重试。
                 </p>
                 <p v-if="!datasetColumns.length" class="text-xs text-muted">当前尚未识别到字段列表，可先保存专题标识。</p>
               </header>
@@ -329,11 +422,18 @@ const createError = ref('')
 const createSuccess = ref('')
 
 const fileInput = ref(null)
-const uploadFile = ref(null)
+const uploadFiles = ref([])
+const dragActive = ref(false)
+const dragCounter = ref(0)
 const uploading = ref(false)
 const uploadError = ref('')
 const uploadSuccess = ref('')
-const latestDataset = ref(null)
+const uploadStatuses = ref([])
+const uploadedDatasets = ref([])
+const latestDataset = computed(() => {
+  const list = uploadedDatasets.value
+  return list.length ? list[list.length - 1] : null
+})
 const columnMappingForm = reactive({
   topic: '',
   date: '',
@@ -365,14 +465,40 @@ const uploadHelper = computed(() => {
   if (uploading.value) return ''
   if (!canUpload.value) return '请先创建专题后再操作'
   if (!topicName.value) return '请先填写专题名称'
-  if (!uploadFile.value) return '请选择需要上传的文件'
+  if (!uploadFiles.value.length) return '请选择需要上传的文件'
   return ''
 })
 
-const datasetColumns = computed(() => {
-  if (!latestDataset.value || !Array.isArray(latestDataset.value.columns)) return []
-  return latestDataset.value.columns.map((column) => column.toString())
+const uploadProgress = computed(() => {
+  const total = uploadStatuses.value.length
+  if (!total) {
+    return { total: 0, completed: 0, percent: 0, running: false }
+  }
+  const completed = uploadStatuses.value.filter((item) => ['success', 'error'].includes(item.status)).length
+  const running = uploadStatuses.value.some((item) => item.status === 'uploading')
+  const percent = Math.round((completed / total) * 100)
+  return { total, completed, percent, running }
 })
+
+const hasMultipleDatasets = computed(() => uploadedDatasets.value.length > 1)
+
+const datasetColumns = computed(() => {
+  const batches = uploadedDatasets.value
+  if (!batches.length) {
+    return []
+  }
+  const columnSets = batches.map((dataset) => {
+    if (!dataset || !Array.isArray(dataset.columns)) return []
+    return dataset.columns.map((column) => column.toString())
+  })
+  if (!columnSets.length) return []
+  return columnSets.reduce((acc, columns) => {
+    if (!acc.length) return columns
+    return acc.filter((column) => columns.includes(column))
+  }, columnSets[0])
+})
+
+const mappingTargets = computed(() => uploadedDatasets.value)
 
 const tagPrefix = computed(() => {
   if (!selectedTags.value.length) return ''
@@ -446,8 +572,19 @@ const applyDatasetMapping = (dataset) => {
   mappingError.value = ''
 }
 
+const updateUploadedDataset = (datasetId, updates) => {
+  uploadedDatasets.value = uploadedDatasets.value.map((dataset) => {
+    if (dataset.id !== datasetId) return dataset
+    return {
+      ...dataset,
+      ...updates
+    }
+  })
+}
+
 const saveColumnMapping = async () => {
-  if (!latestDataset.value || !topicName.value) return
+  const targets = mappingTargets.value
+  if (!targets.length || !topicName.value) return
   mappingSaving.value = true
   mappingError.value = ''
   mappingSuccess.value = ''
@@ -462,33 +599,53 @@ const saveColumnMapping = async () => {
     topic_label: columnMappingForm.topic || ''
   }
 
-  try {
-    const endpoint = await buildApiUrl(
-      `/projects/${encodeURIComponent(latestDataset.value.project)}/datasets/${encodeURIComponent(latestDataset.value.id)}/mapping`
-    )
-    const response = await fetch(endpoint, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    })
-    const result = await response.json()
-    if (!response.ok || result.status !== 'ok') {
-      throw new Error(result.message || '字段映射保存失败')
+  const failures = []
+  let successCount = 0
+
+  for (const dataset of targets) {
+    try {
+      const endpoint = await buildApiUrl(
+        `/projects/${encodeURIComponent(dataset.project)}/datasets/${encodeURIComponent(dataset.id)}/mapping`
+      )
+      const response = await fetch(endpoint, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      })
+      const result = await response.json()
+      if (!response.ok || result.status !== 'ok') {
+        throw new Error(result.message || '字段映射保存失败')
+      }
+      successCount += 1
+      const nextTopicLabel = typeof result.topic_label === 'string' ? result.topic_label : payload.topic_label
+      updateUploadedDataset(dataset.id, {
+        column_mapping: result.column_mapping,
+        topic_label: typeof nextTopicLabel === 'string' ? nextTopicLabel.trim() : ''
+      })
+    } catch (err) {
+      failures.push({
+        dataset,
+        message: err instanceof Error ? err.message : '字段映射保存失败'
+      })
     }
-    mappingSuccess.value = '字段映射已保存'
-    latestDataset.value = {
-      ...latestDataset.value,
-      column_mapping: result.column_mapping,
-      topic_label: typeof result.topic_label === 'string' ? result.topic_label : columnMappingForm.topic
-    }
-    columnMappingForm.topic = typeof latestDataset.value.topic_label === 'string' ? latestDataset.value.topic_label.trim() : ''
-  } catch (err) {
-    mappingError.value = err instanceof Error ? err.message : '字段映射保存失败'
-  } finally {
-    mappingSaving.value = false
   }
+
+  if (failures.length) {
+    const failedNames = failures.map((failure) => failure.dataset.display_name || failure.dataset.id).join('、')
+    mappingError.value =
+      failures.length === targets.length
+        ? `所有数据集字段映射保存失败：${failures[0].message}`
+        : `部分数据集字段映射保存失败（${failedNames}），请检查后重试。`
+  } else if (successCount) {
+    mappingSuccess.value =
+      successCount === 1 ? '字段映射已保存' : `字段映射已同步至 ${successCount} 个数据集`
+    const firstTopic = uploadedDatasets.value[uploadedDatasets.value.length - 1]?.topic_label
+    columnMappingForm.topic = typeof firstTopic === 'string' ? firstTopic.trim() : columnMappingForm.topic
+  }
+
+  mappingSaving.value = false
 }
 
 watch(
@@ -541,12 +698,104 @@ const createTopic = async () => {
   }
 }
 
-const handleFileChange = (event) => {
-  const [file] = event.target.files || []
-  uploadFile.value = file || null
+const selectedFileSummary = computed(() => {
+  if (!uploadFiles.value.length) return ''
+  if (uploadFiles.value.length === 1) return uploadFiles.value[0].name
+  if (uploadFiles.value.length === 2) return `${uploadFiles.value[0].name}、${uploadFiles.value[1].name}`
+  return `${uploadFiles.value[0].name} 等 ${uploadFiles.value.length} 个文件`
+})
+
+const resetFileInput = () => {
+  if (fileInput.value) {
+    fileInput.value.value = ''
+  }
+}
+
+const addSelectedFiles = (files) => {
+  if (!files.length) return false
+  const existingKeys = new Set(
+    uploadFiles.value.map((file) => `${file.name}-${file.size}-${file.lastModified}`)
+  )
+  const next = uploadFiles.value.slice()
+  files.forEach((file) => {
+    const key = `${file.name}-${file.size}-${file.lastModified}`
+    if (!existingKeys.has(key)) {
+      existingKeys.add(key)
+      next.push(file)
+    }
+  })
+  if (next.length === uploadFiles.value.length) {
+    return false
+  }
+  uploadFiles.value = next
   uploadError.value = ''
   uploadSuccess.value = ''
-  latestDataset.value = null
+  uploadedDatasets.value = []
+  uploadStatuses.value = []
+  return true
+}
+
+const handleFileChange = (event) => {
+  const files = Array.from(event?.target?.files || [])
+  addSelectedFiles(files)
+  resetFileInput()
+}
+
+const clearSelectedFiles = ({ resetStatuses = true } = {}) => {
+  uploadFiles.value = []
+  resetFileInput()
+  if (resetStatuses) {
+    uploadStatuses.value = []
+  }
+}
+
+const removeSelectedFile = (index) => {
+  if (index < 0 || index >= uploadFiles.value.length) return
+  const next = uploadFiles.value.slice()
+  next.splice(index, 1)
+  uploadFiles.value = next
+  if (!next.length) {
+    resetFileInput()
+  }
+}
+
+const handleDragEnter = (event) => {
+  event?.preventDefault?.()
+  dragCounter.value += 1
+  dragActive.value = true
+}
+
+const handleDragOver = (event) => {
+  event?.preventDefault?.()
+  if (!dragActive.value) {
+    dragActive.value = true
+  }
+}
+
+const handleDragLeave = (event) => {
+  event?.preventDefault?.()
+  dragCounter.value = Math.max(dragCounter.value - 1, 0)
+  if (dragCounter.value === 0) {
+    dragActive.value = false
+  }
+}
+
+const handleDrop = (event) => {
+  event?.preventDefault?.()
+  const files = Array.from(event?.dataTransfer?.files || [])
+  dragCounter.value = 0
+  dragActive.value = false
+  if (addSelectedFiles(files)) {
+    resetFileInput()
+  }
+}
+
+const normaliseDatasetPayload = (dataset) => {
+  if (!dataset || typeof dataset !== 'object') return null
+  return {
+    ...dataset,
+    topic_label: typeof dataset.topic_label === 'string' ? dataset.topic_label.trim() : ''
+  }
 }
 
 const uploadDataset = async () => {
@@ -554,7 +803,7 @@ const uploadDataset = async () => {
     uploadError.value = '请填写专题名称后再上传'
     return
   }
-  if (!uploadFile.value) {
+  if (!uploadFiles.value.length) {
     uploadError.value = '请选择需要上传的文件'
     return
   }
@@ -563,31 +812,89 @@ const uploadDataset = async () => {
   uploadError.value = ''
   uploadSuccess.value = ''
 
-  const formData = new FormData()
-  formData.append('file', uploadFile.value)
+  uploadStatuses.value = uploadFiles.value.map((file, index) => ({
+    key: `${file.name}-${file.size}-${file.lastModified}-${index}`,
+    name: file.name,
+    status: 'pending',
+    message: '排队中'
+  }))
 
-  try {
-    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(topicName.value)}/datasets`)
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      body: formData
-    })
-    const result = await response.json()
-    if (!response.ok || result.status !== 'ok') {
-      throw new Error(result.message || '上传失败')
+  const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(topicName.value)}/datasets`)
+  const successes = []
+  const failures = []
+
+  for (const [index, file] of uploadFiles.value.entries()) {
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      if (uploadStatuses.value[index]) {
+        uploadStatuses.value[index].status = 'uploading'
+        uploadStatuses.value[index].message = '上传中…'
+      }
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        body: formData
+      })
+      const result = await response.json()
+      if (!response.ok || result.status !== 'ok') {
+        throw new Error(result.message || '上传失败')
+      }
+      const uploadedDatasetsRaw = Array.isArray(result.datasets)
+        ? result.datasets
+        : result.dataset
+          ? [result.dataset]
+          : []
+      const datasetEntries = uploadedDatasetsRaw
+        .map(normaliseDatasetPayload)
+        .filter((dataset) => Boolean(dataset))
+      const dataset = datasetEntries.length ? datasetEntries[datasetEntries.length - 1] : null
+      successes.push({ file, dataset })
+      if (uploadStatuses.value[index]) {
+        uploadStatuses.value[index].status = 'success'
+        uploadStatuses.value[index].message = '上传完成'
+      }
+    } catch (err) {
+      failures.push({ file, message: err instanceof Error ? err.message : '上传失败' })
+      if (uploadStatuses.value[index]) {
+        uploadStatuses.value[index].status = 'error'
+        uploadStatuses.value[index].message = err instanceof Error ? err.message : '上传失败'
+      }
     }
-    uploadSuccess.value = '上传成功，已生成 JSONL 与 PKL 存档。'
-    latestDataset.value = result.dataset
-      ? { ...result.dataset, topic_label: typeof result.dataset.topic_label === 'string' ? result.dataset.topic_label.trim() : '' }
-      : null
-    uploadFile.value = null
-    if (fileInput.value) {
-      fileInput.value.value = ''
-    }
-  } catch (err) {
-    uploadError.value = err instanceof Error ? err.message : '上传失败'
-  } finally {
-    uploading.value = false
   }
+
+  const succeededDatasets = successes
+    .map((entry) => entry.dataset)
+    .filter((dataset) => dataset && typeof dataset === 'object')
+
+  uploadedDatasets.value = succeededDatasets
+
+  if (successes.length) {
+    const successMessage =
+      successes.length === 1
+        ? `已成功上传 ${successes[0].file.name}`
+        : `已成功上传 ${successes.length} 个文件`
+    uploadSuccess.value = failures.length
+      ? `${successMessage}，${failures.length} 个文件需要重试。`
+      : `${successMessage}，已生成 JSONL 与 PKL 存档。`
+  } else {
+    uploadSuccess.value = ''
+  }
+
+  if (failures.length) {
+    const failedNames = failures.map((entry) => entry.file?.name || '未知文件').join('、')
+    const lastError = failures[failures.length - 1]?.message || '上传失败'
+    uploadError.value =
+      failures.length === uploadFiles.value.length
+        ? `全部上传失败：${lastError}（${failedNames}）`
+        : `部分文件上传失败：${lastError}（${failedNames}）`
+
+    uploadFiles.value = failures.map((entry) => entry.file).filter((file) => Boolean(file))
+    resetFileInput()
+  } else {
+    uploadError.value = ''
+    clearSelectedFiles({ resetStatuses: false })
+  }
+
+  uploading.value = false
 }
 </script>

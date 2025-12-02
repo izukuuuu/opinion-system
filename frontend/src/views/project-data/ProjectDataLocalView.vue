@@ -320,61 +320,77 @@
           <p v-else-if="!datasets.length" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">尚未上传任何数据集。
           </p>
           <div v-else class="space-y-4">
-            <p class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
-              点击数据集卡片在新的预览子页面中打开 Excel 表格预览。
-            </p>
-            <ul class="space-y-4">
-              <li v-for="dataset in datasets" :key="dataset.id"
-                class="rounded-3xl border border-slate-200 bg-white  transition hover:border-indigo-200 hover:shadow focus-within:ring-2 focus-within:ring-indigo-200">
-                <button type="button" class="flex w-full flex-col gap-4 p-5 text-left"
+            <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+              <span>点击数据集卡片在新的预览子页面中打开 Excel 表格预览。</span>
+              <button
+                v-if="hasMoreDatasets"
+                type="button"
+                class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 transition hover:text-indigo-500"
+                @click="toggleDatasetVisibility"
+              >
+                <ChevronDownIcon
+                  v-if="!showAllDatasets"
+                  class="h-4 w-4 transition-transform"
+                />
+                <ChevronUpIcon
+                  v-else
+                  class="h-4 w-4 transition-transform"
+                />
+                {{ showAllDatasets ? '收起列表' : `展开剩余 ${remainingDatasetCount} 个` }}
+              </button>
+            </div>
+            <ul class="space-y-3">
+              <li v-for="dataset in visibleDatasets" :key="dataset.id"
+                class="rounded-2xl border border-slate-200 bg-white transition hover:border-indigo-200 hover:shadow-sm focus-within:ring-1 focus-within:ring-indigo-200">
+                <button type="button" class="flex w-full flex-col gap-3 p-4 text-left"
                   @click="setActiveDataset(dataset.id)">
                   <header class="flex flex-wrap items-center justify-between gap-3">
                     <h3 class="text-lg font-semibold text-slate-900">{{ dataset.display_name }}</h3>
                     <span class="text-sm text-slate-500">{{ formatTimestamp(dataset.stored_at) }}</span>
                   </header>
-                  <dl class="grid gap-4 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-3">
-                    <div class="space-y-1">
+                  <dl class="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-3">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">数据集 ID</dt>
                       <dd class="text-sm text-slate-600">{{ dataset.id }}</dd>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">专题名称</dt>
                       <dd class="text-sm text-slate-600">{{ dataset.project }}</dd>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">专题标识</dt>
                       <dd class="text-sm text-slate-600">{{ dataset.topic_label || '未设置' }}</dd>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">数据行列</dt>
                       <dd class="text-sm text-slate-600">{{ dataset.rows }} 行 · {{ dataset.column_count }} 列</dd>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">文件大小</dt>
                       <dd class="text-sm text-slate-600">{{ formatFileSize(dataset.file_size) }}</dd>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">存储目录</dt>
                       <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
                         :title="getUploadDirectory(dataset.project_slug)">{{ getUploadDirectory(dataset.project_slug) }}
                       </dd>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">源文件</dt>
                       <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
                         :title="dataset.source_file">{{ dataset.source_file }}</dd>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">PKL</dt>
                       <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
                         :title="dataset.pkl_file">{{ dataset.pkl_file }}</dd>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">JSONL</dt>
                       <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
                         :title="dataset.jsonl_file">{{ dataset.jsonl_file }}</dd>
                     </div>
-                    <div class="space-y-1">
+                    <div class="space-y-0.5">
                       <dt class="text-xs uppercase tracking-widest text-slate-400">Meta JSON</dt>
                       <dd class="text-sm text-slate-600 truncate max-w-xs sm:max-w-sm lg:max-w-md"
                         :title="dataset.json_file">{{ dataset.json_file }}</dd>
@@ -564,7 +580,7 @@
 
 <script setup>
 import { FlexRender, getCoreRowModel, useVueTable } from '@tanstack/vue-table'
-import { ChevronLeftIcon, EllipsisVerticalIcon, PencilSquareIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { ChevronDownIcon, ChevronLeftIcon, ChevronUpIcon, EllipsisVerticalIcon, PencilSquareIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useActiveProject } from '../../composables/useActiveProject'
 import { useApiBase } from '../../composables/useApiBase'
@@ -582,6 +598,8 @@ const projectError = ref('')
 const datasets = ref([])
 const datasetLoading = ref(false)
 const datasetError = ref('')
+const DATASET_PREVIEW_LIMIT = 3
+const showAllDatasets = ref(false)
 
 const fetchCaches = ref([])
 const fetchCacheLoading = ref(false)
@@ -655,6 +673,16 @@ const selectedDataset = computed(() =>
     ? datasets.value.find((dataset) => dataset.id === activeDatasetId.value) || null
     : null
 )
+const hasMoreDatasets = computed(() => datasets.value.length > DATASET_PREVIEW_LIMIT)
+const remainingDatasetCount = computed(() =>
+  hasMoreDatasets.value ? datasets.value.length - DATASET_PREVIEW_LIMIT : 0
+)
+const visibleDatasets = computed(() => {
+  if (!hasMoreDatasets.value || showAllDatasets.value) {
+    return datasets.value
+  }
+  return datasets.value.slice(0, DATASET_PREVIEW_LIMIT)
+})
 const selectedDatasetColumns = computed(() =>
   selectedDataset.value && Array.isArray(selectedDataset.value.columns)
     ? selectedDataset.value.columns.map((column) => column.toString())
@@ -804,6 +832,11 @@ const normalizeDataset = (dataset) => {
         : {},
     topic_label: typeof dataset.topic_label === 'string' ? dataset.topic_label.trim() : ''
   }
+}
+
+const toggleDatasetVisibility = () => {
+  if (!hasMoreDatasets.value) return
+  showAllDatasets.value = !showAllDatasets.value
 }
 
 const upsertProjectInList = (payload) => {
@@ -1012,6 +1045,10 @@ watch(
   },
   { immediate: true }
 )
+
+watch(datasets, () => {
+  showAllDatasets.value = false
+})
 
 const stringifyPreviewCell = (value) => {
   if (value === null || value === undefined) return ''

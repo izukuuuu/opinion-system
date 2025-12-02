@@ -557,7 +557,10 @@ const loadTopics = async () => {
   topicsState.loading = true
   topicsState.error = ''
   try {
-    const response = await callApi('/api/query', { method: 'POST', body: JSON.stringify({}) })
+    const response = await callApi('/api/query', {
+      method: 'POST',
+      body: JSON.stringify({ include_counts: false })
+    })
     const options = extractRemoteTopics(response)
     topicsState.options = options
     if (!options.length) {

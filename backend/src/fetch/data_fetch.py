@@ -2,11 +2,13 @@
 数据提取功能
 """
 import logging
+import re
 from datetime import date, datetime
 from typing import List, Optional, Tuple
 
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.engine.url import make_url
 
 from ..utils.setting.paths import ensure_bucket
@@ -163,6 +165,22 @@ def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, lo
         engine.dispose()
 
 
+_PROJECT_ID_PATTERN = re.compile(r"^(\d{8})-(\d{6})-(.+)$")
+
+
+def _normalise_db_topic(topic: str) -> str:
+    """
+    将项目标识形式的专题名（例如 20251202-071626-控烟）还原为数据库名部分。
+
+    如果不符合时间戳前缀模式，则返回原始字符串的去空白版本。
+    """
+    text = str(topic or "").strip()
+    match = _PROJECT_ID_PATTERN.match(text)
+    if match:
+        return match.group(3).strip() or text
+    return text
+
+
 def _format_date(value: Optional[date]) -> Optional[str]:
     if value is None:
         return None
@@ -266,6 +284,7 @@ def get_available_date_range(topic: str, table_name: str, logger=None):
     """
     if logger is None:
         logger = logging.getLogger("fetch-availability")
+    db_topic = _normalise_db_topic(topic)
     db_config = settings.get('databases', {})
     db_url = db_config.get('db_url')
     if not db_url:
@@ -273,17 +292,20 @@ def get_available_date_range(topic: str, table_name: str, logger=None):
         return None, None
 
     base_url = make_url(db_url)
-    db_url_with_db = base_url.set(database=topic)
+    db_url_with_db = base_url.set(database=db_topic)
     engine = create_engine(db_url_with_db)
 
     try:
         with engine.connect() as conn:
-            if not table_exists(conn, table_name, topic):
-                log_skip(logger, f"表 {topic}.{table_name} 不存在", "Fetch")
+            if not table_exists(conn, table_name, db_topic):
+                log_skip(logger, f"表 {db_topic}.{table_name} 不存在", "Fetch")
                 return None, None
 
-            start_date, end_date = _query_table_date_range(conn, table_name, topic, logger)
+            start_date, end_date = _query_table_date_range(conn, table_name, db_topic, logger)
             return _format_date(start_date), _format_date(end_date)
+    except OperationalError as e:
+        log_error(logger, f"查询表 {table_name} 日期区间失败: {e}", "Fetch")
+        return None, None
     except Exception as e:
         log_error(logger, f"查询表 {table_name} 日期区间失败: {e}", "Fetch")
         return None, None
@@ -308,6 +330,7 @@ def get_topic_available_date_range(topic: str, logger=None):
     """
     if logger is None:
         logger = logging.getLogger("fetch-availability")
+    db_topic = _normalise_db_topic(topic)
     db_config = settings.get('databases', {})
     db_url = db_config.get('db_url')
     if not db_url:
@@ -315,7 +338,7 @@ def get_topic_available_date_range(topic: str, logger=None):
         return {"start": None, "end": None, "channels": {}}
 
     base_url = make_url(db_url)
-    db_url_with_db = base_url.set(database=topic)
+    db_url_with_db = base_url.set(database=db_topic)
     engine = create_engine(db_url_with_db)
 
     table_ranges = {}
@@ -324,11 +347,11 @@ def get_topic_available_date_range(topic: str, logger=None):
 
     try:
         with engine.connect() as conn:
-            tables = _list_topic_tables(conn, topic, logger)
+            tables = _list_topic_tables(conn, db_topic, logger)
             if not tables:
-                log_skip(logger, f"专题 {topic} 无可用表，返回默认空区间", "Fetch")
+                log_skip(logger, f"专题 {db_topic} 无可用表，返回默认空区间", "Fetch")
             for table_name in tables:
-                start_value, end_value = _query_table_date_range(conn, table_name, topic, logger)
+                start_value, end_value = _query_table_date_range(conn, table_name, db_topic, logger)
                 table_ranges[table_name] = {
                     "start": _format_date(start_value),
                     "end": _format_date(end_value)
@@ -339,8 +362,10 @@ def get_topic_available_date_range(topic: str, logger=None):
                 if end_value:
                     if max_date is None or end_value > max_date:
                         max_date = end_value
+    except OperationalError as e:
+        log_error(logger, f"汇总专题 {db_topic} 日期区间失败: {e}", "Fetch")
     except Exception as e:
-        log_error(logger, f"汇总专题 {topic} 日期区间失败: {e}", "Fetch")
+        log_error(logger, f"汇总专题 {db_topic} 日期区间失败: {e}", "Fetch")
     finally:
         engine.dispose()
 
