@@ -1,0 +1,31 @@
+# Python
+backend/venv/
+backend/configs/
+backend/data/*
+!backend/data/.gitkeep
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+.env
+.env.*
+.env.local
+
+# Node
+frontend/node_modules/
+frontend/dist/
+/frontend/package.json
+/frontend/package-lock.json
+
+backend/store/*
+backend/logs/*
+!backend/store/.gitkeep
+
+.idea
+
+# OS
+.DS_Store
+frontend/.env.local
+venv/
+venv/

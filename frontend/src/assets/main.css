@@ -1,0 +1,115 @@
+@import './colors.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    @apply font-sans antialiased;
+    color: var(--color-text-primary);
+    background-color: var(--color-bg-base);
+  }
+
+  body {
+    @apply min-h-screen m-0;
+    background-color: var(--color-bg-base);
+    color: var(--color-text-primary);
+  }
+
+  a {
+    @apply no-underline text-inherit;
+  }
+}
+
+@layer components {
+  .card-surface {
+    @apply rounded-3xl border backdrop-blur;
+    background-color: var(--color-surface);
+    border-color: var(--color-border-soft);
+  }
+
+  .btn-base {
+    @apply inline-flex items-center justify-center rounded-full border border-transparent text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2;
+  }
+
+  .btn-base:disabled {
+    @apply cursor-not-allowed;
+    box-shadow: none;
+  }
+
+  .btn-tone-primary {
+    @apply text-white;
+    background-color: rgb(var(--color-brand-600) / 1);
+  }
+
+  .btn-tone-primary:focus-visible {
+    outline-color: rgb(var(--color-brand-600) / 1);
+  }
+
+  .btn-tone-primary:hover:not(:disabled) {
+    background-color: rgb(var(--color-brand-500) / 1);
+  }
+
+  .btn-tone-primary:disabled {
+    border-color: rgb(var(--color-brand-200) / 1);
+    background-color: rgb(var(--color-brand-100) / 1);
+    color: rgb(var(--color-brand-600) / 1);
+  }
+
+  .btn-tone-success {
+    @apply text-white;
+    background-color: rgb(var(--color-success-600) / 1);
+  }
+
+  .btn-tone-success:focus-visible {
+    outline-color: rgb(var(--color-success-600) / 1);
+  }
+
+  .btn-tone-success:hover:not(:disabled) {
+    background-color: rgb(var(--color-success-500) / 1);
+  }
+
+  .btn-tone-success:disabled {
+    border-color: rgb(var(--color-success-200) / 1);
+    background-color: rgb(var(--color-success-100) / 1);
+    color: rgb(var(--color-success-700) / 1);
+  }
+
+  .btn-tone-danger {
+    @apply text-white;
+    background-color: rgb(var(--color-danger-600) / 1);
+  }
+
+  .btn-tone-danger:focus-visible {
+    outline-color: rgb(var(--color-danger-600) / 1);
+  }
+
+  .btn-tone-danger:hover:not(:disabled) {
+    background-color: rgb(var(--color-danger-500) / 1);
+  }
+
+  .btn-tone-danger:disabled {
+    border-color: rgb(var(--color-danger-200) / 1);
+    background-color: rgb(var(--color-danger-100) / 1);
+    color: rgb(var(--color-danger-700) / 1);
+  }
+
+  .card-section-title {
+    @apply text-lg font-semibold;
+    color: var(--color-text-primary);
+  }
+
+  .badge-soft {
+    @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium;
+    background-color: rgb(var(--color-accent-100));
+    color: var(--color-text-secondary);
+  }
+
+  .checkbox-custom {
+    @apply h-4 w-4 shrink-0 appearance-none rounded border border-soft bg-surface transition-colors;
+    @apply checked:border-brand-600 checked:bg-brand-600;
+    @apply focus:ring-2 focus:ring-brand-500 focus:ring-offset-1;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+}
