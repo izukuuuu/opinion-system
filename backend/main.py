@@ -507,13 +507,14 @@ def ragrouter_command(topic):
 @click.option('--topk-graphrag', default=3, type=int, help='GraphRAG返回的核心实体数量 (默认: 3)')
 @click.option('--topk-normalrag', default=10, type=int, help='NormalRAG返回的句子数量 (默认: 5)')
 @click.option('--topk-tagrag', default=3, type=int, help='TagRAG返回的文本块数量 (默认: 5)')
+@click.option('--no-query-expansion', is_flag=True, help='禁用查询扩展/重写（默认启用）')
 @click.option('--no-llm-summary', is_flag=True, help='禁用LLM整理结果')
 @click.option('--llm-summary-mode', default='supplement', type=click.Choice(['strict', 'supplement']),
               help='LLM整理模式 (默认: strict)')
 @click.option('--return-format', default='llm_only', type=click.Choice(['both', 'llm_only', 'index_only']),
               help='返回格式: both(全部), llm_only(仅LLM), index_only(仅索引) (默认: both)')
 def router_retrieve_command(topic, query, mode, topk_graphrag, topk_normalrag, topk_tagrag,
-                           no_llm_summary, llm_summary_mode, return_format):
+                           no_query_expansion, no_llm_summary, llm_summary_mode, return_format):
     """
     运行RagRouter检索功能
     """
@@ -528,6 +529,7 @@ def router_retrieve_command(topic, query, mode, topk_graphrag, topk_normalrag, t
             topk_graphrag=topk_graphrag,
             topk_normalrag=topk_normalrag,
             topk_tagrag=topk_tagrag,
+            enable_query_expansion=not no_query_expansion,
             enable_llm_summary=not no_llm_summary,
             llm_summary_mode=llm_summary_mode,
             return_format=return_format

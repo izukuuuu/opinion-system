@@ -36,6 +36,8 @@ from src.project import (  # type: ignore
 )
 from src.utils.setting.paths import bucket, get_data_root, _normalise_topic  # type: ignore
 
+from src.topic.data_bertopic_qwen import run_topic_bertopic
+
 from server_support import (  # type: ignore
     collect_layer_archives,
     collect_project_archives,
@@ -144,6 +146,53 @@ def _compose_analyze_folder(start: str, end: Optional[str]) -> str:
     if end:
         return f"{start}_{end}"
     return start
+
+def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
+    valid, error_response = require_fields(payload, "topic", "start_date")
+    if not valid:
+        return error_response
+
+    topic = str(payload.get("topic") or "").strip()
+    start_date = str(payload.get("start_date") or "").strip()
+    end_value = payload.get("end_date")
+    end_date = str(end_value).strip() if end_value else None
+
+    if not topic or not start_date:
+        return {
+            "status": "error",
+            "message": "Missing required field(s): topic, start_date",
+        }
+
+    fetch_dir = payload.get("fetch_dir")
+    fetch_dir = str(fetch_dir).strip() if fetch_dir else None
+
+    userdict = payload.get("userdict")
+    userdict = str(userdict).strip() if userdict else None
+
+    stopwords = payload.get("stopwords")
+    stopwords = str(stopwords).strip() if stopwords else None
+
+    result = run_topic_bertopic(
+        topic,
+        start_date,
+        end_date,
+        fetch_dir=fetch_dir,
+        userdict=userdict,
+        stopwords=stopwords,
+    )
+
+    if result:
+        return {
+            "status": "ok",
+            "topic": topic,
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+
+    return {
+        "status": "error",
+        "message": "BERTopic 主题分析执行失败，请检查后端日志",
+    }
 
 
 def _split_analyze_folder(folder: str) -> Tuple[str, str]:
@@ -1423,6 +1472,97 @@ def get_analyze_results():
 
     return success(response_payload)
 
+@app.post("/api/analysis/topic/bertopic/run")
+def run_topic_bertopic_endpoint():
+    payload = request.get_json(silent=True) or {}
+    valid, error_response = require_fields(payload, "topic", "start_date")
+    if not valid:
+        return jsonify(error_response), 400
+    response, code = _execute_operation(
+        "topic-bertopic",
+        _run_topic_bertopic_api,
+        payload,
+        log_context={
+            "project": str(payload.get("topic") or "").strip() or None,
+            "params": {
+                "start_date": str(payload.get("start_date") or "").strip(),
+                "end_date": str(payload.get("end_date") or "").strip(),
+                "source": "api",
+            },
+        },
+    )
+    return jsonify(response), code
+
+@app.get("/api/analysis/topic/bertopic/results")
+def get_topic_bertopic_results():
+    raw_topic = request.args.get("topic")
+    raw_project = request.args.get("project")
+    raw_dataset_id = request.args.get("dataset_id")
+
+    start = (request.args.get("start") or "").strip()
+    if not start:
+        return error("Missing required query parameters: start")
+    end = (request.args.get("end") or "").strip() or None
+
+    payload = {
+        "topic": raw_topic,
+        "project": raw_project,
+        "dataset_id": raw_dataset_id,
+    }
+
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError:
+        topic_identifier = (raw_topic or "").strip()
+        if not topic_identifier:
+            return error("Missing required query parameters: topic or project")
+        display_name = raw_topic or raw_project or topic_identifier
+
+    folder_name = _compose_analyze_folder(start, end)
+    if not folder_name:
+        return error("Invalid start date supplied")
+
+    topic_dir = bucket("topic", topic_identifier, folder_name)
+    if not topic_dir.exists():
+        fallback_dir = bucket("topic", topic_identifier, start)
+        if fallback_dir.exists():
+            topic_dir = fallback_dir
+        else:
+            return error("未找到对应的主题分析结果目录", status_code=404)
+
+    file_map = {
+        "summary": "1主题统计结果.json",
+        "keywords": "2主题关键词.json",
+        "coords": "3文档2D坐标.json",
+        "llm_clusters": "4大模型再聚类结果.json",
+        "llm_keywords": "5大模型主题关键词.json",
+    }
+
+    files_payload: Dict[str, Any] = {}
+    for key, filename in file_map.items():
+        file_path = topic_dir / filename
+        if file_path.exists():
+            try:
+                files_payload[key] = _load_json_file(file_path)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("Failed to load topic result file %s", file_path, exc_info=True)
+                files_payload[key] = {"error": str(exc)}
+
+    if not files_payload:
+        return error("未找到可用的 BERTopic 结果文件", status_code=404)
+
+    response_payload = {
+        "topic": display_name,
+        "topic_identifier": topic_identifier,
+        "range": {
+            "start": start,
+            "end": end or start,
+        },
+        "files": files_payload,
+    }
+
+    return success({"data": response_payload})
+
 
 @app.get("/api/projects")
 def list_projects():
@@ -1973,6 +2113,57 @@ def main() -> None:
             )
             raise SystemExit(1) from exc
         raise
+
+
+@app.get("/api/analysis/topic/bertopic/topics")
+def list_topic_buckets():
+    """获取所有可用的专题 Bucket 列表
+    
+    Query parameters:
+        only_with_results: 如果为 true，只返回有 BERTopic 分析结果的专题（默认: false）
+    """
+    try:
+        from src.utils.setting.paths import get_data_root
+        data_root = get_data_root()
+        projects_dir = data_root / "projects"
+        
+        only_with_results = request.args.get("only_with_results", "false").lower() == "true"
+        
+        LOGGER.info("Listing topic buckets from: %s (only_with_results=%s)", projects_dir, only_with_results)
+        
+        if not projects_dir.exists():
+            LOGGER.warning("Projects directory does not exist: %s", projects_dir)
+            return success({"topics": [], "data_root": str(data_root), "projects_dir": str(projects_dir)})
+        
+        topics = []
+        all_items = list(projects_dir.iterdir())
+        LOGGER.info("Found %d items in projects directory", len(all_items))
+        
+        for item in sorted(all_items):
+            if item.is_dir() and not item.name.startswith('.'):
+                # 检查是否有 topic 目录（表示有 BERTopic 分析结果）
+                topic_dir = item / "topic"
+                has_topic = topic_dir.exists() and topic_dir.is_dir()
+                
+                # 如果 only_with_results=True，只返回有 topic 目录的专题
+                # 否则返回所有专题
+                if not only_with_results or has_topic:
+                    topics.append({
+                        "bucket": item.name,
+                        "name": item.name,
+                        "has_bertopic_results": has_topic
+                    })
+                    LOGGER.debug("Added project %s (has_bertopic_results=%s)", item.name, has_topic)
+        
+        LOGGER.info("Returning %d topics", len(topics))
+        return success({
+            "topics": topics,
+            "data_root": str(data_root),
+            "projects_dir": str(projects_dir)
+        })
+    except Exception as exc:
+        LOGGER.exception("Failed to list topic buckets")
+        return error(f"获取专题列表失败: {str(exc)}")
 
 
 if __name__ == "__main__":

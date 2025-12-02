@@ -14,6 +14,10 @@ import ProjectBasicAnalysisOverview from '../views/analysis/basic/ProjectBasicAn
 import ProjectBasicAnalysisRun from '../views/analysis/basic/ProjectBasicAnalysisRun.vue'
 import ProjectBasicAnalysisResults from '../views/analysis/basic/ProjectBasicAnalysisResults.vue'
 import ContentAnalysisPrompt from '../views/analysis/content/ContentAnalysisPrompt.vue'
+import TopicBertopicLayout from '../views/analysis/topic/TopicBertopicLayout.vue'
+import TopicBertopicOverview from '../views/analysis/topic/TopicBertopicOverview.vue'
+import TopicBertopicRun from '../views/analysis/topic/TopicBertopicRun.vue'
+import TopicBertopicResults from '../views/analysis/topic/TopicBertopicResults.vue'
 import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
 import DatabaseDatasetsView from '../views/DatabaseDatasetsView.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
@@ -166,12 +170,36 @@ export const routes = [
   },
   {
     path: '/analysis/topic/bertopic',
-    name: 'topic-analysis-bertopic',
-    component: PlaceholderModuleView,
-    meta: {
-      title: 'BERTopic 主题分析',
-      placeholder: 'BERTopic 主题分析模块建设中，敬请期待。'
-    }
+    component: TopicBertopicLayout,
+    children: [
+      {
+        path: '',
+        name: 'topic-analysis-bertopic',
+        component: TopicBertopicOverview,
+        meta: {
+          title: 'BERTopic 主题分析',
+          breadcrumb: '流程概览'
+        }
+      },
+      {
+        path: 'run',
+        name: 'topic-analysis-bertopic-run',
+        component: TopicBertopicRun,
+        meta: {
+          title: 'BERTopic 主题分析 · 运行',
+          breadcrumb: '运行分析'
+        }
+      },
+      {
+        path: 'view',
+        name: 'topic-analysis-bertopic-view',
+        component: TopicBertopicResults,
+        meta: {
+          title: 'BERTopic 主题分析 · 查看结果',
+          breadcrumb: '查看结果'
+        }
+      }
+    ]
   },
   {
     path: '/analysis/interpretation/tagrag',
