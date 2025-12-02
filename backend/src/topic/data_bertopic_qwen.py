@@ -10,7 +10,7 @@ import re
 import json
 import warnings
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Iterable, Any
 
 # 严格抑制所有警告（在导入可能产生警告的库之前）
 warnings.filterwarnings("ignore")  # 抑制所有警告
@@ -68,6 +68,86 @@ def _default_paths(topic: str, start_date: str, end_date: str = None) -> Dict[st
     }
 
 
+def _deduplicate_by_contents(df: pd.DataFrame, logger, source: str) -> pd.DataFrame:
+    if df.empty:
+        return df
+    target_col = next((col for col in df.columns if "contents" in str(col).lower()), None)
+    if not target_col:
+        return df
+    if target_col != "contents":
+        df = df.rename(columns={target_col: "contents"})
+    before_count = len(df)
+    df = df.drop_duplicates(subset=["contents"], keep="last")
+    after_count = len(df)
+    if before_count != after_count:
+        log_success(logger, f"{source}去重: {before_count} -> {after_count}", "TopicBertopic")
+    return df
+
+
+def _read_json_records(file_path: Path, logger) -> pd.DataFrame:
+    """
+    读取 JSON / JSONL 文件为 DataFrame，尽最大可能兼容常见结构。
+    """
+    try:
+        suffix = file_path.suffix.lower()
+        if suffix == ".jsonl":
+            df = pd.read_json(file_path, lines=True)
+        else:
+            raw = file_path.read_text(encoding="utf-8").strip()
+            if not raw:
+                return pd.DataFrame()
+            payload = json.loads(raw)
+            rows: Iterable = _normalise_json_payload(payload)
+            df = pd.DataFrame(list(rows))
+        if df.empty:
+            return df
+        log_success(logger, f"读取JSON数据: {file_path.name} - {len(df)}条", "TopicBertopic")
+        return df
+    except Exception as exc:
+        log_error(logger, f"读取JSON失败 {file_path.name}: {exc}", "TopicBertopic")
+        return pd.DataFrame()
+
+
+def _normalise_json_payload(payload: Any) -> Iterable[Dict]:
+    if isinstance(payload, list):
+        return [item if isinstance(item, dict) else {"contents": str(item)} for item in payload]
+    if isinstance(payload, dict):
+        candidate_keys = ["data", "records", "items", "result", "rows"]
+        for key in candidate_keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item if isinstance(item, dict) else {"contents": str(item)} for item in value]
+        return [payload]
+    return []
+
+
+def _load_json_sources(fetch_dir: Path, logger) -> pd.DataFrame:
+    priority_files = ["总体.jsonl", "总体.json"]
+    for filename in priority_files:
+        file_path = fetch_dir / filename
+        if file_path.exists():
+            df = _read_json_records(file_path, logger)
+            if not df.empty:
+                return _deduplicate_by_contents(df, logger, "JSON")
+
+    json_files = sorted([f for f in fetch_dir.glob("*.json*") if f.name not in priority_files])
+    if not json_files:
+        return pd.DataFrame()
+
+    log_success(logger, f"尝试从{len(json_files)}个JSON文件合并数据", "TopicBertopic")
+    all_frames: List[pd.DataFrame] = []
+    for file_path in json_files:
+        df = _read_json_records(file_path, logger)
+        if not df.empty:
+            all_frames.append(df)
+    if not all_frames:
+        return pd.DataFrame()
+    merged = pd.concat(all_frames, ignore_index=True)
+    merged = _deduplicate_by_contents(merged, logger, "JSON")
+    log_success(logger, f"JSON数据合并完成，共{len(merged)}条", "TopicBertopic")
+    return merged
+
+
 def _load_and_merge_fetch_data(fetch_dir: Path, logger) -> pd.DataFrame:
     """
     从fetch目录读取所有CSV文件并合并（与analyze模块一致）
@@ -90,12 +170,7 @@ def _load_and_merge_fetch_data(fetch_dir: Path, logger) -> pd.DataFrame:
             df = read_csv(overall_file)
             if not df.empty:
                 log_success(logger, f"读取总体数据: {len(df)}条", "TopicBertopic")
-                # 去重（基于contents字段）
-                before_count = len(df)
-                df = df.drop_duplicates(subset=['contents'], keep='last')
-                after_count = len(df)
-                if before_count != after_count:
-                    log_success(logger, f"去重: {before_count} -> {after_count}", "TopicBertopic")
+                df = _deduplicate_by_contents(df, logger, "总体CSV")
                 log_success(logger, f"合并完成，共{len(df)}条数据", "TopicBertopic")
                 return df
         except Exception as e:
@@ -104,8 +179,12 @@ def _load_and_merge_fetch_data(fetch_dir: Path, logger) -> pd.DataFrame:
     # 如果没有总体.csv，则读取各渠道CSV文件并合并
     csv_files = sorted([f for f in fetch_dir.glob("*.csv") if f.name != "总体.csv"])
     if not csv_files:
-        log_error(logger, f"未找到CSV文件: {fetch_dir}", "TopicBertopic")
-        return pd.DataFrame()
+        log_error(logger, f"未找到CSV文件: {fetch_dir}，尝试读取JSON/JSONL", "TopicBertopic")
+        json_df = _load_json_sources(fetch_dir, logger)
+        if json_df.empty:
+            log_error(logger, "未找到可用的JSON/JSONL数据", "TopicBertopic")
+            return pd.DataFrame()
+        return json_df
     
     log_success(logger, f"找到{len(csv_files)}个渠道CSV文件", "TopicBertopic")
     
@@ -122,19 +201,16 @@ def _load_and_merge_fetch_data(fetch_dir: Path, logger) -> pd.DataFrame:
             continue
     
     if not all_data:
-        log_error(logger, "没有读取到任何数据", "TopicBertopic")
-        return pd.DataFrame()
+        log_error(logger, "没有读取到任何CSV数据，尝试JSON/JSONL", "TopicBertopic")
+        json_df = _load_json_sources(fetch_dir, logger)
+        if json_df.empty:
+            log_error(logger, "未找到可用的JSON/JSONL数据", "TopicBertopic")
+            return pd.DataFrame()
+        return json_df
     
     # 合并所有数据
     merged_df = pd.concat(all_data, ignore_index=True)
-    
-    # 去重（基于contents字段）
-    before_count = len(merged_df)
-    merged_df = merged_df.drop_duplicates(subset=['contents'], keep='last')
-    after_count = len(merged_df)
-    
-    if before_count != after_count:
-        log_success(logger, f"合并后去重: {before_count} -> {after_count}", "TopicBertopic")
+    merged_df = _deduplicate_by_contents(merged_df, logger, "渠道CSV")
     
     log_success(logger, f"合并完成，共{len(merged_df)}条数据", "TopicBertopic")
     return merged_df
@@ -143,7 +219,7 @@ def _load_and_merge_fetch_data(fetch_dir: Path, logger) -> pd.DataFrame:
 def _clean_text(text: str) -> str:
     if not text:
         return ""
-    text = re.sub(r'[^\u4e00-\u9fa5\u3000-\u303f0-9，。！？；：、（）《》【】""''\s]', '', text)
+    text = re.sub(r'[^\u4e00-\u9fa5\u3000-\u303f0-9，。！？；：、（）《》【】""\'\'\\s]', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
@@ -304,13 +380,47 @@ async def _call_llm_recluster(topic_stats: Dict, topic: str, logger) -> Optional
                 "关键词": keywords[:20]
             }
         
-        # 加载提示词配置：根据主题动态加载对应的yaml文件
+        # 加载提示词配置：先尝试加载专题特定的yaml文件，如果不存在则使用默认文件
         prompt_config = _load_prompt(f"topic_bertopic/{topic}.yaml", "topic_bertopic_recluster", logger)
         if not prompt_config:
-            log_error(logger, "无法加载再聚类提示词，使用默认提示词", "TopicBertopic")
+            # 尝试加载默认提示词文件
+            prompt_config = _load_prompt("topic_bertopic/default.yaml", "topic_bertopic_recluster", logger)
+            if prompt_config:
+                logger.info(f"[TopicBertopic] 已加载默认提示词文件: topic_bertopic/default.yaml")
+        if not prompt_config:
+            log_error(logger, "无法加载再聚类提示词，使用内置默认提示词", "TopicBertopic")
             prompt_config = {
-                'system': '你是一个专业的控烟领域主题分析专家，擅长将相似的控烟相关主题进行归纳和合并，并对其进行命名。',
-                'user': f"""分析以下控烟相关主题，将语义相似的主题合并为{TARGET_TOPICS}个左右的主题。\n\n输入数据：\n{{input_data}}\n\n请直接输出JSON，不要其他内容。"""
+                'system': '你是一名资深的主题分析专家，擅长对 BERTopic 产出的多个主题进行语义抽象、命名与总结。请根据提供的主题关键词与文档统计，将语义接近的主题重新分组，并为新主题给出简洁明了的命名与描述。\n\n核心原则：\n1. 主题命名必须严格基于提供的关键词，不能脱离关键词内容进行命名\n2. 主题命名必须准确反映关键词的核心语义，不能产生与关键词无关的命名\n3. 如果关键词是"戒烟、烟瘾、抽烟"，主题命名应该是"戒烟方法"或"烟草依赖"等，绝不能是"人工智能"等无关内容\n4. 命名前必须仔细分析关键词，确保命名与关键词高度一致',
+                'user': """下方给出若干原始主题的关键词与文档数，请将语义接近的主题合并为 {TARGET_TOPICS} 个左右的新主题。
+
+重要要求：
+1. 必须将所有原始主题都分配到新主题中，不能遗漏任何主题
+2. 即使主题相似度不高，也要根据关键词的语义关联性进行合并
+3. 每个新主题至少包含1个原始主题，可以包含多个原始主题
+4. 新主题数量应该接近 {TARGET_TOPICS} 个，但可以根据实际情况调整（最少1个，最多不超过原始主题数）
+5. **【关键】主题命名必须严格基于提供的关键词，仔细分析关键词的核心含义后再命名，确保命名与关键词内容高度一致，绝不能产生与关键词无关的命名**
+
+输出要求（必须严格遵守）：
+{{
+  "合并方案": [
+    {{
+      "新主题名称": "新主题1",
+      "主题命名": "正式的主题名称（必须基于关键词总结，不能脱离关键词内容）",
+      "主题描述": "一句话概述主题核心内容（基于关键词）",
+      "原始主题集合": ["主题0", "主题2"]
+    }}
+  ]
+}}
+
+命名检查清单：
+- 主题命名是否准确反映了关键词的核心内容？
+- 主题命名是否与关键词高度相关？
+- 是否存在与关键词无关的命名？（如果存在，必须修正）
+
+必须返回一个包含 "合并方案" 数组的 JSON，数组中必须包含至少1个合并方案。不能返回空数组。
+
+输入数据：
+{{input_data}}"""
             }
         
         # 格式化提示词
@@ -330,6 +440,9 @@ async def _call_llm_recluster(topic_stats: Dict, topic: str, logger) -> Optional
         )
         
         result_text = response.choices[0].message.content.strip()
+        # 记录原始响应（用于调试）
+        logger.debug(f"[TopicBertopic] 大模型原始响应（前500字符）: {result_text[:500]}")
+        
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0].strip()
         elif "```" in result_text:
@@ -338,11 +451,26 @@ async def _call_llm_recluster(topic_stats: Dict, topic: str, logger) -> Optional
         
         try:
             merge_result = json.loads(result_text)
-            log_success(logger, "大模型合并建议获取成功", "TopicBertopic")
+            # 记录解析后的 JSON 结构（用于调试）
+            logger.debug(f"[TopicBertopic] 解析后的 JSON 键: {list(merge_result.keys())}")
+            
+            merge_plan = merge_result.get("合并方案")
+            if not isinstance(merge_plan, list):
+                # 输出完整的 JSON 结构以便调试
+                log_error(logger, f"大模型响应缺少'合并方案'字段或类型错误（期望 list，实际 {type(merge_plan)}）", "TopicBertopic")
+                log_error(logger, f"解析后的 JSON 结构: {json.dumps(merge_result, ensure_ascii=False, indent=2)[:1000]}", "TopicBertopic")
+                log_error(logger, f"原始响应（前1000字符）: {response.choices[0].message.content.strip()[:1000]}", "TopicBertopic")
+                return None
+            if not merge_plan:
+                log_error(logger, "大模型返回的'合并方案'为空数组", "TopicBertopic")
+                # 空数组也返回，让调用方决定如何处理
+                return merge_result
+            log_success(logger, f"大模型合并建议获取成功，共 {len(merge_plan)} 个合并方案", "TopicBertopic")
             return merge_result
         except json.JSONDecodeError as e:
             log_error(logger, f"JSON解析失败: {e}", "TopicBertopic")
-            log_error(logger, f"响应长度: {len(result_text)}, 前200字符: {result_text[:200]}", "TopicBertopic")
+            log_error(logger, f"响应长度: {len(result_text)}, 前500字符: {result_text[:500]}", "TopicBertopic")
+            log_error(logger, f"完整响应: {result_text}", "TopicBertopic")
             return None
         
     except Exception as e:
@@ -352,11 +480,11 @@ async def _call_llm_recluster(topic_stats: Dict, topic: str, logger) -> Optional
         return None
 
 
-def _calculate_reclustered_keywords(topic_stats: Dict, merge_result: Dict, naming_results: Dict) -> Dict:
+def _calculate_reclustered_keywords(topic_stats: Dict, merge_plan: List[Dict], naming_results: Dict) -> Dict:
     """根据合并方案重新计算关键词权重"""
     reclustered_topics = {}
     
-    for merge_group in merge_result["合并方案"]:
+    for merge_group in merge_plan:
         new_topic_name = merge_group["新主题名称"]
         topic_naming = naming_results.get(new_topic_name, f"主题{len(reclustered_topics)}")
         original_topics = merge_group["原始主题集合"]
@@ -413,14 +541,19 @@ async def _generate_reclustered_json(topic_stats: Dict, topic: str, out_dir: Pat
         log_error(logger, "无法获取大模型合并建议", "TopicBertopic")
         return None
     
+    merge_plan = merge_result.get("合并方案")
+    if not isinstance(merge_plan, list) or not merge_plan:
+        log_error(logger, "大模型合并建议为空，跳过再聚类", "TopicBertopic")
+        return None
+    
     naming_results = {}
-    for merge_group in merge_result["合并方案"]:
+    for merge_group in merge_plan:
         new_topic_name = merge_group["新主题名称"]
         topic_naming = merge_group.get("主题命名", "")
         if topic_naming:
             naming_results[new_topic_name] = topic_naming
     
-    reclustered_topics = _calculate_reclustered_keywords(topic_stats, merge_result, naming_results)
+    reclustered_topics = _calculate_reclustered_keywords(topic_stats, merge_plan, naming_results)
     
     final_result = {}
     reclustered_keywords_data = {}

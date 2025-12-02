@@ -40,6 +40,7 @@ class SearchParams:
     topk_graphrag: int = 3  # GraphRAG返回的核心实体数量（固定前3个，扩展其所有关系）
     topk_normalrag: int = 5
     topk_tagrag: int = 5
+    enable_query_expansion: bool = True  # 是否启用查询扩展/重写
     enable_llm_summary: bool = True  # 是否启用LLM整理结果
     llm_summary_mode: str = "strict"  # strict(严格模式)/supplement(补充模式)
     return_format: str = "both"  # both(都返回)/llm_only(仅LLM整理)/index_only(仅索引结果)
@@ -308,6 +309,54 @@ class LLMHelper:
             return []
         except:
             return []
+    
+    async def expand_query(self, original_query: str) -> str:
+        """查询扩展/重写：将用户查询扩展为更完整、更适合检索的查询
+        
+        Args:
+            original_query: 原始用户查询
+            
+        Returns:
+            str: 扩展后的查询文本
+        """
+        # 从配置文件加载提示词，如果没有则使用默认提示词
+        prompt_template = self.prompts.get('query_expansion', {}).get('prompt', '')
+        
+        if not prompt_template:
+            # 使用默认提示词
+            prompt_template = """你是一个专业的查询扩展助手。请将用户查询扩展为更适合信息检索的查询文本。
+
+要求：
+1. 保持原查询的核心意图不变
+2. 补充相关的同义词、近义词和相关概念
+3. 将口语化表达转换为更规范的检索查询
+4. 如果查询已经很完整，可以保持原样或稍作优化
+5. 扩展后的查询应该更有利于在知识库中检索到相关信息
+
+用户查询：{query}
+
+请直接返回扩展后的查询文本，不要添加任何解释或说明。"""
+        
+        prompt = prompt_template.format(query=original_query)
+        expanded_query = await self.call_api(prompt, max_tokens=500)
+        
+        if expanded_query:
+            # 清理返回结果（去除可能的格式标记）
+            expanded_query = expanded_query.strip()
+            # 如果返回的是JSON格式，尝试提取
+            try:
+                json_match = re.search(r'\{.*\}', expanded_query, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group(0))
+                    expanded_query = result.get('expanded_query', expanded_query)
+            except:
+                pass
+            
+            log_success(self.logger, f"查询扩展完成: {original_query[:50]}... -> {expanded_query[:50]}...", "QueryExpansion")
+            return expanded_query
+        else:
+            log_error(self.logger, "查询扩展失败，使用原始查询", "QueryExpansion")
+            return original_query
 
 class EmbeddingGenerator:
     """向量生成器 - 使用text-embedding-v4"""
@@ -898,11 +947,24 @@ class AdvancedRAGSearcher:
     async def search(self, params: SearchParams) -> Dict[str, Any]:
         """主检索函数"""
         
-        # 步骤1: 时间过滤
-        time_range = await self._process_time_filter(params.query_text)
+        # 步骤0: 查询扩展/重写（提升检索准确率，可选）
+        original_query = params.query_text
+        if params.enable_query_expansion:
+            expanded_query = await self.llm_helper.expand_query(original_query)
+            # 使用扩展后的查询进行后续检索
+            # 但保留原始查询用于结果展示和时间过滤（时间过滤使用原始查询更准确）
+            effective_query = expanded_query if expanded_query != original_query else original_query
+            if effective_query != original_query:
+                log_success(self.logger, f"查询已扩展: {original_query[:50]}... -> {effective_query[:50]}...", "RouterRetrieve")
+        else:
+            effective_query = original_query
+            log_success(self.logger, f"查询扩展已禁用，使用原始查询", "RouterRetrieve")
         
-        # 步骤2: 生成查询向量
-        query_vec = await self.embedding_gen.generate_embedding(params.query_text)
+        # 步骤1: 时间过滤（使用原始查询，因为时间信息提取更准确）
+        time_range = await self._process_time_filter(original_query)
+        
+        # 步骤2: 生成查询向量（使用扩展后的查询）
+        query_vec = await self.embedding_gen.generate_embedding(effective_query)
         if not query_vec:
             log_error(self.logger, "查询向量生成失败", "search")
             return {"error": "查询向量生成失败"}
@@ -910,7 +972,8 @@ class AdvancedRAGSearcher:
         # 步骤3: 根据模式执行检索
         results = {
             "query_topic": params.query_topic,
-            "query_text": params.query_text,
+            "query_text": original_query,  # 保留原始查询用于展示
+            "expanded_query": effective_query if effective_query != original_query else None,  # 扩展后的查询
             "search_mode": params.search_mode,
             "time_filter": {
                 "has_time": time_range.has_time,
@@ -963,8 +1026,8 @@ class AdvancedRAGSearcher:
                 
         # 步骤4: 使用LLM整理检索结果（可选）
         if params.enable_llm_summary:
-            
-            summary = await self.llm_helper.summarize_results(params.query_text, results, params.llm_summary_mode)
+            # 使用原始查询进行结果整理，因为用户更关心原始查询的答案
+            summary = await self.llm_helper.summarize_results(original_query, results, params.llm_summary_mode)
             
             if summary:
                 results["llm_summary"] = summary
@@ -975,14 +1038,16 @@ class AdvancedRAGSearcher:
             if "llm_summary" in results:
                 return {
                     "query_topic": params.query_topic,
-                    "query_text": params.query_text,
+                    "query_text": original_query,
+                    "expanded_query": results.get("expanded_query"),
                     "llm_summary": results["llm_summary"]
                 }
             else:
                 log_error(self.logger, "return_format=llm_only但未启用LLM整理，返回空结果", "return")
                 return {
                     "query_topic": params.query_topic,
-                    "query_text": params.query_text,
+                    "query_text": original_query,
+                    "expanded_query": results.get("expanded_query"),
                     "llm_summary": "未启用LLM整理，无法返回LLM结果"
                 }
         
@@ -1005,12 +1070,25 @@ def router_retrieve(
     topk_graphrag: int = 3,
     topk_normalrag: int = 5,
     topk_tagrag: int = 5,
+    enable_query_expansion: bool = True,
     enable_llm_summary: bool = True,
     llm_summary_mode: str = "strict",
     return_format: str = "both"
 ) -> Dict[str, Any]:
     """
     RAG检索包装函数，返回JSON格式的检索结果
+    
+    Args:
+        topic: 主题名称
+        query: 查询文本
+        mode: 检索模式 (mixed/graphrag/normalrag/tagrag)
+        topk_graphrag: GraphRAG返回的核心实体数量
+        topk_normalrag: NormalRAG返回的句子数量
+        topk_tagrag: TagRAG返回的文本块数量
+        enable_query_expansion: 是否启用查询扩展/重写（默认True）
+        enable_llm_summary: 是否启用LLM整理结果
+        llm_summary_mode: LLM整理模式 (strict/supplement)
+        return_format: 返回格式 (both/llm_only/index_only)
     """
     try:
         # 引入logger（使用主题和当前日期）
@@ -1055,6 +1133,7 @@ def router_retrieve(
             topk_graphrag=topk_graphrag,
             topk_normalrag=topk_normalrag,
             topk_tagrag=topk_tagrag,
+            enable_query_expansion=enable_query_expansion,
             enable_llm_summary=enable_llm_summary,
             llm_summary_mode=llm_summary_mode,
             return_format=return_format
