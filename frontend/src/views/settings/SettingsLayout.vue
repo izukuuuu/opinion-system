@@ -35,7 +35,8 @@ import {
   CpuChipIcon,
   ArrowDownTrayIcon,
   ServerStackIcon,
-  SwatchIcon
+  SwatchIcon,
+  DocumentMagnifyingGlassIcon
 } from '@heroicons/vue/24/outline'
 import CollapsibleSidebar from '../../components/navigation/CollapsibleSidebar.vue'
 
@@ -51,6 +52,12 @@ const navigationItems = [
     label: 'AI 服务配置',
     to: { name: 'settings-ai' },
     icon: CpuChipIcon
+  },
+  {
+    key: 'settings-rag',
+    label: 'RAG 配置',
+    to: { name: 'settings-rag' },
+    icon: DocumentMagnifyingGlassIcon
   },
   {
     key: 'settings-backend',

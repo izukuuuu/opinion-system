@@ -18,6 +18,12 @@ from .configuration import (
     persist_llm_config,
     reload_settings,
 )
+from .rag_config import (
+    load_rag_config,
+    persist_rag_config,
+    mask_api_keys,
+    validate_rag_config,
+)
 from .dataset_files import (
     ensure_raw_dataset_availability,
     iter_unique_strings,
@@ -83,6 +89,11 @@ __all__ = [
     "persist_databases_config",
     "persist_llm_config",
     "reload_settings",
+    # RAG configuration helpers
+    "load_rag_config",
+    "persist_rag_config",
+    "mask_api_keys",
+    "validate_rag_config",
     # Content analysis prompt helpers
     "content_prompt_path",
     "load_content_prompt_config",

@@ -15,27 +15,6 @@ from ...setting.env_loader import get_api_key
 from ...setting.paths import get_project_root
 from ...logging.logging import setup_logger, log_success, log_error, log_module_start
 
-
-def get_available_topics():
-    """
-    获取可用的TagRAG专题列表。
-
-    Returns:
-        List[str]: 专题名称列表
-    """
-    topics = []
-    try:
-        format_db_dir = get_project_root() / "src" / "utils" / "rag" / "tagrag" / "format_db"
-        if format_db_dir.exists():
-            topics = [f.stem for f in format_db_dir.glob("*.json")]
-            log_success(None, f"Found {len(topics)} TagRAG topics: {topics}", "TagRAG")
-        else:
-            log_error(None, f"TagRAG format_db directory not found: {format_db_dir}", "TagRAG")
-    except Exception as e:
-        log_error(None, f"Failed to get TagRAG topics: {e}", "TagRAG")
-
-    return topics
-
 def to_pinyin(text: str) -> str:
     """
     将中文文本转换为拼音（小写，无空格）。

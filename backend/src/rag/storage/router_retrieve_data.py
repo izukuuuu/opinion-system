@@ -17,28 +17,6 @@ from ...logging.logging import setup_logger, log_success, log_error, log_module_
 from ...ai.qwen import QwenClient
 
 
-def get_available_router_topics():
-    """
-    获取可用的RouterRAG专题列表。
-
-    Returns:
-        List[str]: 专题名称列表
-    """
-    topics = []
-    try:
-        router_dir = get_project_root() / "src" / "utils" / "rag" / "ragrouter"
-        if router_dir.exists():
-            topics = [d.name for d in router_dir.iterdir()
-                     if d.is_dir() and (d / "normal_db").exists()]
-            log_success(None, f"Found {len(topics)} RouterRAG topics: {topics}", "RouterRAG")
-        else:
-            log_error(None, f"RouterRAG directory not found: {router_dir}", "RouterRAG")
-    except Exception as e:
-        log_error(None, f"Failed to get RouterRAG topics: {e}", "RouterRAG")
-
-    return topics
-
-
 @dataclass
 class TimeRange:
     """时间范围"""
@@ -1174,3 +1152,4 @@ def router_retrieve(
             "error": str(e),
             "traceback": traceback.format_exc()
         }
+

@@ -240,19 +240,19 @@ export const routes = [
   {
     path: '/retrieval/tagrag',
     name: 'data-retrieval-tagrag',
-    component: PlaceholderModuleView,
+    component: () => import('../views/retrieval/TagRAGView.vue'),
     meta: {
       title: 'TagRAG 检索',
-      placeholder: '标签向量检索体验敬请期待。'
+      breadcrumb: 'TagRAG 检索'
     }
   },
   {
     path: '/retrieval/routerrag',
     name: 'data-retrieval-routerrag',
-    component: PlaceholderModuleView,
+    component: () => import('../views/retrieval/RouterRAGView.vue'),
     meta: {
       title: 'RouterRAG 检索',
-      placeholder: 'RouterRAG 检索路由设计中。'
+      breadcrumb: 'RouterRAG 检索'
     }
   },
   {
@@ -310,6 +310,7 @@ export const routes = [
     children: [
       {
         path: '',
+        name: 'settings-default',
         redirect: { name: 'settings-backend' }
       },
       {
@@ -355,6 +356,15 @@ export const routes = [
         meta: {
           title: 'AI 服务配置',
           breadcrumb: 'AI 服务配置'
+        }
+      },
+      {
+        path: 'rag',
+        name: 'settings-rag',
+        component: () => import('../views/settings/SettingsRAGView.vue'),
+        meta: {
+          title: 'RAG 配置',
+          breadcrumb: 'RAG 配置'
         }
       }
     ]

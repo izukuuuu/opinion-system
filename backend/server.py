@@ -52,6 +52,8 @@ from server_support import (  # type: ignore
     load_databases_config,
     load_filter_template_config,
     load_llm_config,
+    load_rag_config,
+    mask_api_keys,
     normalise_topic_label,
     parse_column_mapping_from_form,
     parse_column_mapping_payload,
@@ -59,12 +61,14 @@ from server_support import (  # type: ignore
     persist_content_prompt_config,
     persist_filter_template_config,
     persist_llm_config,
+    persist_rag_config,
     prepare_pipeline_args,
     resolve_topic_identifier,
     resolve_stage_processing_date,
     require_fields,
     serialise_result,
     success,
+    validate_rag_config,
     DATA_PROJECTS_ROOT,
     mark_filter_job_running,
     mark_filter_job_finished,
@@ -2074,6 +2078,85 @@ def upload_project_dataset(name: str):
     return jsonify(payload), status_code
 
 
+# RAG Configuration endpoints
+@app.route("/api/rag/config", methods=["GET"])
+def get_rag_config():
+    """Get RAG configuration."""
+    try:
+        config = load_rag_config()
+        # Mask API keys for security
+        masked_config = mask_api_keys(config)
+        return success(data=masked_config)
+    except Exception as e:
+        LOGGER.error(f"Failed to load RAG config: {e}")
+        return error(message="Failed to load RAG configuration")
+
+
+@app.route("/api/rag/config", methods=["POST"])
+def save_rag_config():
+    """Save RAG configuration."""
+    try:
+        config = require_fields(request.get_json(), [])
+
+        # Validate configuration
+        is_valid, errors = validate_rag_config(config)
+        if not is_valid:
+            return error(message="Invalid RAG configuration", errors=errors)
+
+        persist_rag_config(config)
+        return success(message="RAG configuration saved successfully")
+    except Exception as e:
+        LOGGER.error(f"Failed to save RAG config: {e}")
+        return error(message="Failed to save RAG configuration")
+
+
+@app.route("/api/rag/test", methods=["POST"])
+def test_rag_config():
+    """Test RAG configuration."""
+    try:
+        config = require_fields(request.get_json(), ["query"])
+        query = config.get("query")
+
+        # TODO: Implement actual RAG test
+        # For now, just return a mock response
+        results = [
+            {
+                "id": "test_1",
+                "text": f"This is a test result for query: {query}",
+                "score": 0.95,
+                "metadata": {"source": "test"}
+            }
+        ]
+
+        return success(data={"results": results, "total": len(results)})
+    except Exception as e:
+        LOGGER.error(f"Failed to test RAG: {e}")
+        return error(message="Failed to test RAG configuration")
+
+
+@app.route("/api/rag/embedding/models", methods=["GET"])
+def list_embedding_models():
+    """List available embedding models."""
+    try:
+        models = {
+            "huggingface": [
+                "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                "sentence-transformers/all-MiniLM-L6-v2",
+                "sentence-transformers/all-mpnet-base-v2",
+                "shibing624/text2vec-base-chinese",
+            ],
+            "openai": [
+                "text-embedding-ada-002",
+                "text-embedding-3-small",
+                "text-embedding-3-large",
+            ]
+        }
+        return success(data=models)
+    except Exception as e:
+        LOGGER.error(f"Failed to list embedding models: {e}")
+        return error(message="Failed to list embedding models")
+
+
 @app.route("/")
 def root():
     return jsonify({"message": "OpinionSystem API", "endpoints": [
@@ -2091,6 +2174,9 @@ def root():
         "/api/projects/<name>/datasets",
         "/api/projects/<name>/fetch-cache",
         "/api/fetch/cache",
+        "/api/rag/config",
+        "/api/rag/test",
+        "/api/rag/embedding/models",
     ]})
 
 
@@ -2164,6 +2250,256 @@ def list_topic_buckets():
     except Exception as exc:
         LOGGER.exception("Failed to list topic buckets")
         return error(f"获取专题列表失败: {str(exc)}")
+
+
+# ====== RAG (Retrieval-Augmented Generation) API Endpoints ======
+
+@app.get("/api/rag/config")
+def get_rag_config():
+    """获取RAG配置"""
+    try:
+        from src.rag.config import RAGConfig
+
+        # Load default config
+        config_path = BACKEND_DIR / "src" / "rag" / "config" / "default.json"
+        if config_path.exists():
+            config = RAGConfig.load(config_path)
+            return success({"config": config.to_dict()})
+        else:
+            # Return default values
+            return success({"config": {
+                "embedding": {
+                    "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                    "batch_size": 32,
+                    "device": "auto"
+                },
+                "chunking": {
+                    "chunk_size": 512,
+                    "chunk_overlap": 50,
+                    "strategy": "size"
+                },
+                "retrieval": {
+                    "top_k": 10,
+                    "threshold": 0.0,
+                    "search_type": "vector"
+                }
+            }})
+    except Exception as exc:
+        LOGGER.exception("Failed to get RAG config")
+        return error(f"获取RAG配置失败: {str(exc)}")
+
+
+@app.post("/api/rag/config")
+def update_rag_config():
+    """更新RAG配置"""
+    try:
+        payload = request.get_json(silent=True) or {}
+
+        # Validate required fields
+        if not payload.get("config"):
+            return error("Missing required field: config")
+
+        # Save config
+        config_path = BACKEND_DIR / "src" / "rag" / "config" / "default.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        import json
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(payload["config"], f, indent=2, ensure_ascii=False)
+
+        return success({"message": "RAG配置已更新"})
+    except Exception as exc:
+        LOGGER.exception("Failed to update RAG config")
+        return error(f"更新RAG配置失败: {str(exc)}")
+
+
+@app.get("/api/rag/topics")
+def get_rag_topics():
+    """获取可用的RAG专题列表"""
+    try:
+        tagrag_topics: List[str] = []
+        router_topics: List[str] = []
+
+        # Prefer helper functions (they normalise project root); fall back to filesystem scan if they fail.
+        try:
+            from src.utils.rag.tagrag.tag_retrieve_data import get_available_topics as list_tagrag_topics  # type: ignore
+            tagrag_topics = list_tagrag_topics() or []
+        except Exception as helper_exc:  # pragma: no cover - defensive, helper may rely on optional deps
+            LOGGER.warning("TagRAG topic helper failed, using filesystem fallback: %s", helper_exc)
+        if not tagrag_topics:
+            tagrag_dir = SRC_DIR / "utils" / "rag" / "tagrag" / "format_db"
+            if tagrag_dir.exists():
+                tagrag_topics = [f.stem for f in tagrag_dir.glob("*.json") if f.stem]
+
+        try:
+            from src.utils.rag.ragrouter.router_retrieve_data import get_available_router_topics  # type: ignore
+            router_topics = get_available_router_topics() or []
+        except Exception as helper_exc:  # pragma: no cover - defensive, helper may rely on optional deps
+            LOGGER.warning("RouterRAG topic helper failed, using filesystem fallback: %s", helper_exc)
+        if not router_topics:
+            router_dir = SRC_DIR / "utils" / "rag" / "ragrouter"
+            if router_dir.exists():
+                router_topics = [
+                    d.name for d in router_dir.iterdir()
+                    if d.is_dir() and not d.name.startswith('.')
+                ]
+
+        return success({
+            "tagrag_topics": sorted({t.strip() for t in tagrag_topics if str(t).strip()}),
+            "router_topics": sorted({t.strip() for t in router_topics if str(t).strip()})
+        })
+    except Exception as exc:
+        LOGGER.exception("Failed to get RAG topics")
+        return error(f"获取RAG专题列表失败: {str(exc)}")
+
+
+@app.post("/api/rag/tagrag/retrieve")
+def tagrag_retrieve():
+    """TagRAG检索接口"""
+    try:
+        payload = request.get_json(silent=True) or {}
+
+        # Validate required fields
+        query = payload.get("query", "").strip()
+        topic = payload.get("topic", "").strip()
+        top_k = payload.get("top_k", 10)
+
+        if not query:
+            return error("Missing required field: query")
+        if not topic:
+            return error("Missing required field: topic")
+
+        # Import TagRAG retrieval
+        from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents
+
+        # Retrieve documents
+        results = retrieve_documents(
+            query=query,
+            topic=topic,
+            top_k=top_k,
+            threshold=payload.get("threshold", 0.0)
+        )
+
+        return success({"results": results, "total": len(results)})
+    except Exception as exc:
+        LOGGER.exception("Failed to retrieve TagRAG documents")
+        return error(f"TagRAG检索失败: {str(exc)}")
+
+
+@app.post("/api/rag/routerrag/retrieve")
+def routerrag_retrieve():
+    """RouterRAG检索接口"""
+    try:
+        payload = request.get_json(silent=True) or {}
+
+        # Validate required fields
+        query = payload.get("query", "").strip()
+        topic = payload.get("topic", "").strip()
+        top_k = payload.get("top_k", 10)
+
+        if not query:
+            return error("Missing required field: query")
+        if not topic:
+            return error("Missing required field: topic")
+
+        # Import RouterRAG retrieval
+        from src.utils.rag.ragrouter.router_retrieve_data import retrieve_documents
+
+        # Retrieve documents
+        results = retrieve_documents(
+            query=query,
+            topic=topic,
+            top_k=top_k,
+            threshold=payload.get("threshold", 0.0)
+        )
+
+        return success({"results": results, "total": len(results)})
+    except Exception as exc:
+        LOGGER.exception("Failed to retrieve RouterRAG documents")
+        return error(f"RouterRAG检索失败: {str(exc)}")
+
+
+@app.post("/api/rag/universal/retrieve")
+def universal_rag_retrieve():
+    """通用RAG检索接口（支持多种检索策略）"""
+    try:
+        payload = request.get_json(silent=True) or {}
+
+        # Validate required fields
+        query = payload.get("query", "").strip()
+        topic = payload.get("topic", "").strip()
+        rag_type = payload.get("rag_type", "tagrag")  # tagrag, routerrag, hybrid
+        top_k = payload.get("top_k", 10)
+
+        if not query:
+            return error("Missing required field: query")
+        if not topic:
+            return error("Missing required field: topic")
+
+        results = []
+
+        if rag_type == "tagrag":
+            from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents
+            results = retrieve_documents(query=query, topic=topic, top_k=top_k)
+
+        elif rag_type == "routerrag":
+            from src.utils.rag.ragrouter.router_retrieve_data import retrieve_documents
+            results = retrieve_documents(query=query, topic=topic, top_k=top_k)
+
+        elif rag_type == "hybrid":
+            # Combine results from both systems
+            try:
+                from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents as tagrag_retrieve
+                from src.utils.rag.ragrouter.router_retrieve_data import retrieve_documents as router_retrieve
+
+                tagrag_results = tagrag_retrieve(query=query, topic=topic, top_k=top_k // 2)
+                router_results = router_retrieve(query=query, topic=topic, top_k=top_k // 2)
+
+                # Combine and deduplicate
+                results = tagrag_results + router_results
+                results = results[:top_k]  # Limit to top_k
+            except Exception as e:
+                LOGGER.warning(f"Hybrid retrieval failed, falling back to TagRAG: {e}")
+                from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents
+                results = retrieve_documents(query=query, topic=topic, top_k=top_k)
+
+        return success({"results": results, "total": len(results), "rag_type": rag_type})
+    except Exception as exc:
+        LOGGER.exception("Failed to retrieve documents")
+        return error(f"检索失败: {str(exc)}")
+
+
+@app.post("/api/rag/export")
+def export_rag_data():
+    """导出RAG数据格式"""
+    try:
+        payload = request.get_json(silent=True) or {}
+
+        # Validate required fields
+        input_path = payload.get("input_path", "").strip()
+        output_path = payload.get("output_path", "").strip()
+        topic = payload.get("topic", "").strip()
+
+        if not input_path or not output_path:
+            return error("Missing required fields: input_path, output_path")
+
+        # Import converter
+        from src.rag.cli.export_tagrag import export_tagrag_texts
+        from pathlib import Path
+
+        # Run export
+        export_tagrag_texts(
+            input_path=Path(input_path),
+            output_path=Path(output_path),
+            topic=topic or "export",
+            chunk_size=payload.get("chunk_size", 3),
+            chunk_strategy=payload.get("chunk_strategy", "count")
+        )
+
+        return success({"message": "导出成功", "output_path": output_path})
+    except Exception as exc:
+        LOGGER.exception("Failed to export RAG data")
+        return error(f"导出失败: {str(exc)}")
 
 
 if __name__ == "__main__":

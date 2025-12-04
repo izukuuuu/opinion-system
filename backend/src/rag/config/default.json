@@ -1,0 +1,62 @@
+{
+  "pipeline_name": "opinion_system_rag",
+  "enable_caching": true,
+  "cache_dir": "./cache",
+  "log_level": "INFO",
+  "embedding": {
+    "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "model_type": "huggingface",
+    "dimension": null,
+    "batch_size": 32,
+    "normalize": true,
+    "cache_embeddings": true,
+    "cache_dir": null,
+    "device": "auto",
+    "api_key": null,
+    "api_base": null
+  },
+  "chunking": {
+    "strategy": "size",
+    "chunk_size": 512,
+    "chunk_overlap": 50,
+    "separator": "\n\n",
+    "min_chunk_size": 50,
+    "max_chunk_size": 2048,
+    "respect_sentence_boundary": true,
+    "strip_whitespace": true
+  },
+  "retrieval": {
+    "top_k": 10,
+    "threshold": 0.0,
+    "search_type": "vector",
+    "rerank": false,
+    "reranker_model": null,
+    "include_metadata": true,
+    "score_type": "cosine"
+  },
+  "storage": {
+    "storage_type": "file",
+    "path": null,
+    "connection_string": null,
+    "index_type": "flat",
+    "metric": "cosine",
+    "create_if_not_exists": true,
+    "persist_index": true
+  },
+  "processing": {
+    "lowercase": false,
+    "remove_urls": true,
+    "remove_emails": true,
+    "remove_extra_whitespace": true,
+    "remove_special_chars": false,
+    "normalize_unicode": true,
+    "min_word_length": 1,
+    "stop_words": []
+  },
+  "custom_settings": {
+    "topic": "opinion",
+    "preserve_metadata": true,
+    "file_prefix": "doc",
+    "file_suffix": "_text1.txt"
+  }
+}
