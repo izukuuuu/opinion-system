@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
-import { useRAGDataFlow } from './useDataFlow'
+import { useApiBase } from './useApiBase'
 
-// RAG state - Using direct API calls instead of data flow
+const { callApi } = useApiBase()
 
 // Form states
 const searchForm = reactive({
@@ -90,8 +90,7 @@ export const useRAGSimple = () => {
     configState.error = ''
 
     try {
-      const response = await dataFlow.request({
-        url: '/api/rag/config',
+      const response = await callApi('/api/rag/config', {
         method: 'GET'
       })
 
@@ -114,10 +113,9 @@ export const useRAGSimple = () => {
     configState.error = ''
 
     try {
-      const response = await dataFlow.request({
-        url: '/api/rag/config',
+      const response = await callApi('/api/rag/config', {
         method: 'POST',
-        data: configForm
+        body: JSON.stringify(configForm)
       })
       return response
     } catch (error) {
@@ -135,15 +133,23 @@ export const useRAGSimple = () => {
     topicsState.error = ''
 
     try {
-      // TODO: Implement topic loading endpoint
-      // For now, use mock data
-      topicsState.tagragTopics = [
-        { id: '1', name: '示例专题1', description: '这是一个示例专题' },
-        { id: '2', name: '示例专题2', description: '这是另一个示例专题' }
-      ]
-      topicsState.routerTopics = []
+      const response = await callApi('/api/rag/topics', {
+        method: 'GET'
+      })
+
+      if (response?.data) {
+        topicsState.tagragTopics = response.data.tagrag_topics || []
+        topicsState.routerTopics = response.data.router_topics || []
+      } else {
+        // Fallback to empty arrays
+        topicsState.tagragTopics = []
+        topicsState.routerTopics = []
+      }
     } catch (error) {
       topicsState.error = error.message || '加载专题列表失败'
+      // Fallback to empty arrays on error
+      topicsState.tagragTopics = []
+      topicsState.routerTopics = []
       throw error
     } finally {
       topicsState.loading = false
@@ -158,13 +164,12 @@ export const useRAGSimple = () => {
     resultsState.total = 0
 
     try {
-      const response = await dataFlow.request({
-        url: '/api/rag/test',
+      const response = await callApi('/api/rag/test', {
         method: 'POST',
-        data: {
+        body: JSON.stringify({
           query: params.query || searchForm.query,
           type: type
-        }
+        })
       })
 
       resultsState.results = response?.data?.results || []

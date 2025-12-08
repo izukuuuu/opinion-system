@@ -24,7 +24,7 @@
 
 @layer components {
   .card-surface {
-    @apply rounded-3xl border backdrop-blur;
+    @apply rounded-3xl border backdrop-blur overflow-hidden;
     background-color: var(--color-surface);
     border-color: var(--color-border-soft);
   }

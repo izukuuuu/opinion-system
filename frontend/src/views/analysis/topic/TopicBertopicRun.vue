@@ -15,44 +15,55 @@
       <form class="mt-6 space-y-6" @submit.prevent="handleRun">
         <div class="grid gap-4 md:grid-cols-2">
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            专题 Bucket（必填）
-            <div class="relative">
-              <select
-                v-model="form.topic"
-                class="input"
-                :disabled="topicsLoading"
-              >
-                <option value="" disabled>请选择专题...</option>
-                <option v-for="topic in topics" :key="topic.bucket" :value="topic.bucket">
-                  {{ topic.name }}
-                </option>
-              </select>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-semibold text-muted">专题 Topic *</span>
               <button
-                v-if="!topicsLoading"
                 type="button"
-                class="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-secondary hover:bg-surface-muted"
-                @click="loadTopics"
-                title="刷新专题列表"
+                class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
+                :disabled="topicsState.loading"
+                @click="loadTopics(true)"
               >
-                🔄
+                <ArrowPathIcon
+                  class="h-3 w-3"
+                  :class="topicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
+                />
+                <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
               </button>
-              <span v-if="topicsLoading" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-secondary">加载中...</span>
             </div>
+            <select
+              v-model="form.topic"
+              class="input"
+              :disabled="topicsState.loading || topicOptions.length === 0"
+              @change="handleTopicChange"
+            >
+              <option value="" disabled>请选择远程专题</option>
+              <option v-for="option in topicOptions" :key="option.bucket" :value="option.bucket">
+                {{ option.display_name || option.name }}
+              </option>
+            </select>
+            <p class="text-xs text-muted">
+              <span v-if="topicsState.loading">正在读取专题列表…</span>
+              <span v-else-if="topicsState.error" class="text-danger">{{ topicsState.error }}</span>
+              <span v-else>修改专题后会自动检查可用数据范围。</span>
+            </p>
           </label>
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            开始日期（YYYY-MM-DD）
+            <span class="text-xs font-semibold text-muted">开始日期 Start *</span>
             <input
               v-model.trim="form.startDate"
               type="date"
               class="input"
+              :disabled="availableRange.loading"
             />
           </label>
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            结束日期（可选，默认同开始）
+            <span class="text-xs font-semibold text-muted">结束日期 End</span>
             <input
               v-model.trim="form.endDate"
               type="date"
               class="input"
+              :disabled="availableRange.loading"
+              :min="form.startDate"
             />
           </label>
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
@@ -84,19 +95,36 @@
           </label>
         </div>
 
+        <!-- 数据可用性提示 -->
+        <div v-if="availableRange.start || availableRange.error" class="rounded-xl border p-3 text-sm"
+             :class="availableRange.error ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'">
+          <div class="flex items-start gap-2">
+            <span class="text-base">{{ availableRange.error ? '⚠️' : 'ℹ️' }}</span>
+            <div>
+              <p class="font-medium" :class="availableRange.error ? 'text-red-700' : 'text-blue-700'">
+                数据可用性
+              </p>
+              <p v-if="availableRange.error" class="text-red-600 text-xs mt-1">{{ availableRange.error }}</p>
+              <p v-else class="text-blue-600 text-xs mt-1">
+                数据范围：{{ availableRange.start }} ~ {{ availableRange.end }}
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div class="flex flex-wrap gap-3">
           <button
             type="submit"
             class="btn btn-primary"
             :disabled="!canSubmit"
           >
-            {{ state.running ? '正在运行…' : '运行 BERTopic 分析' }}
+            {{ runState.running ? '正在运行…' : '运行 BERTopic 分析' }}
           </button>
           <button
             type="button"
             class="btn btn-soft"
             @click="resetOptionalFields"
-            :disabled="state.running"
+            :disabled="runState.running"
           >
             清空可选参数
           </button>
@@ -104,7 +132,7 @@
             type="button"
             class="btn btn-ghost"
             @click="resetAll"
-            :disabled="state.running"
+            :disabled="runState.running"
           >
             重置全部
           </button>
@@ -112,12 +140,19 @@
       </form>
     </section>
 
-    <section v-if="state.error" class="rounded-2xl border border-red-200 bg-red-50/70 p-5 text-red-700">
+    <!-- 执行日志 -->
+    <AnalysisLogList
+      v-if="logs.length > 0"
+      :logs="logs"
+      empty-label="暂无执行记录，运行分析时会自动触发数据准备与进度。"
+    />
+
+    <section v-if="logs.some(log => log.status === 'error')" class="rounded-2xl border border-red-200 bg-red-50/70 p-5 text-red-700">
       <p class="font-medium">运行失败</p>
-      <p class="text-sm mt-1">{{ state.error }}</p>
+      <p class="text-sm mt-1">{{ logs.find(log => log.status === 'error')?.message || '发生错误' }}</p>
     </section>
 
-    <section v-if="state.result" class="result-section">
+    <section v-if="lastResult" class="result-section">
       <div class="result-header">
         <div class="result-header__icon">✅</div>
         <div>
@@ -131,8 +166,8 @@
           <div class="result-card__icon">📊</div>
           <div class="result-card__content">
             <p class="result-card__label">运行状态</p>
-            <p class="result-card__value">{{ state.result.status === 'ok' ? '完成' : state.result.status }}</p>
-            <p class="result-card__meta">operation: {{ state.result.operation }}</p>
+            <p class="result-card__value">{{ lastResult.status === 'ok' ? '完成' : lastResult.status }}</p>
+            <p class="result-card__meta">operation: {{ lastResult.operation }}</p>
           </div>
         </div>
 
@@ -141,12 +176,12 @@
           <div class="result-card__content">
             <p class="result-card__label">时间区间</p>
             <p class="result-card__value">
-              {{ state.result.data?.start_date || state.result.data?.start || '-' }}
-              <span v-if="state.result.data?.end_date || state.result.data?.end" class="result-card__arrow">
-                → {{ state.result.data?.end_date || state.result.data?.end }}
+              {{ lastResult.data?.start_date || lastResult.data?.start || '-' }}
+              <span v-if="lastResult.data?.end_date || lastResult.data?.end" class="result-card__arrow">
+                → {{ lastResult.data?.end_date || lastResult.data?.end }}
               </span>
             </p>
-            <p class="result-card__meta">专题：{{ state.result.data?.topic || '-' }}</p>
+            <p class="result-card__meta">专题：{{ lastResult.data?.topic || '-' }}</p>
           </div>
         </div>
       </div>
@@ -158,7 +193,7 @@
         </div>
         <div class="result-info-box__content">
           <div class="result-info-box__path">
-            <code class="path-code">data/topic/{{ form.topic || state.result.data?.topic }}/&lt;日期范围&gt;/</code>
+            <code class="path-code">data/topic/{{ form.topic || lastResult.data?.topic }}/&lt;日期范围&gt;/</code>
           </div>
           <p class="result-info-box__hint">
             💡 可在"查看结果"页面或数据目录中查看这些文件，完成可视化或二次分析
@@ -183,64 +218,63 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch, onMounted } from 'vue'
+import { computed, watch, onMounted } from 'vue'
+import { ArrowPathIcon } from '@heroicons/vue/24/outline'
 import { useTopicBertopicAnalysis } from '@/composables/useTopicBertopicAnalysis'
 import { useActiveProject } from '@/composables/useActiveProject'
-import { useApiBase } from '@/composables/useApiBase'
+import AnalysisLogList from '@/components/analysis/AnalysisLogList.vue'
 
-const form = reactive({
-  topic: '',
-  startDate: '',
-  endDate: '',
-  fetchDir: '',
-  userdict: '',
-  stopwords: ''
-})
+const {
+  topicsState,
+  topicOptions,
+  form,
+  availableRange,
+  runState,
+  lastResult,
+  lastPayload,
+  logs,
+  loadTopics,
+  resetState,
+  runBertopicAnalysis,
+  resetForm,
+  resetOptionalFields
+} = useTopicBertopicAnalysis()
 
-const topics = ref([])
-const topicsLoading = ref(false)
-const showRequestPayload = ref(false)
-
-const { state, lastPayload, runBertopicAnalysis, resetState } = useTopicBertopicAnalysis()
 const { activeProjectName } = useActiveProject()
-const { callApi } = useApiBase()
-
-const loadTopics = async () => {
-  topicsLoading.value = true
-  try {
-    const response = await callApi('/api/analysis/topic/bertopic/topics', { method: 'GET' })
-    topics.value = response?.data?.topics || response?.topics || []
-  } catch (error) {
-    console.error('Failed to load topics:', error)
-    topics.value = []
-  } finally {
-    topicsLoading.value = false
-  }
-}
 
 onMounted(() => {
-  loadTopics()
+  // 只加载有数据的专题
+  loadTopics(true)
 })
 
 watch(
   activeProjectName,
   (value) => {
     if (value && !form.topic) {
-      form.topic = value
+      // 查找匹配的专题
+      const matched = topicOptions.value.find(t =>
+        t.name === value || t.display_name === value || t.bucket === value
+      )
+      if (matched) {
+        form.topic = matched.bucket
+      }
     }
   },
   { immediate: true }
 )
 
-const canSubmit = computed(() => Boolean(form.topic.trim() && form.startDate.trim() && !state.running))
+const canSubmit = computed(() => {
+  return Boolean(
+    form.topic.trim() &&
+    form.startDate.trim() &&
+    !runState.running &&
+    !availableRange.loading
+  )
+})
 
-const formattedPayload = computed(() => JSON.stringify(lastPayload.value, null, 2))
-
-const resetOptionalFields = () => {
-  form.fetchDir = ''
-  form.userdict = ''
-  form.stopwords = ''
-}
+const formattedPayload = computed(() => {
+  return JSON.stringify(lastPayload.value, null, 2)
+})
 
 const resetAll = () => {
   const topic = form.topic
@@ -262,8 +296,13 @@ const handleRun = async () => {
       stopwords: form.stopwords
     })
   } catch {
-    // 错误信息已由 state.error 承担
+    // 错误信息已通过日志显示
   }
+}
+
+const handleTopicChange = () => {
+  // 清空可选字段
+  resetOptionalFields()
 }
 </script>
 

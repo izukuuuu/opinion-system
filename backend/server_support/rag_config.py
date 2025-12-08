@@ -140,6 +140,11 @@ def _get_default_rag_config() -> Dict[str, Any]:
     }
 
 
+def get_default_rag_config() -> Dict[str, Any]:
+    """Public wrapper for default RAG configuration."""
+    return _get_default_rag_config()
+
+
 def persist_rag_config(config: Dict[str, Any]) -> None:
     """Save RAG configuration to settings."""
     try:

@@ -10,72 +10,122 @@
       </div>
     </header>
 
+    <!-- 查询参数 -->
     <section class="rounded-2xl border border-soft bg-surface p-6 shadow-sm">
-      <h2 class="text-lg font-semibold text-primary">查询参数</h2>
-      <form class="mt-6 space-y-6" @submit.prevent="loadResults">
+      <h2 class="text-lg font-semibold text-primary mb-6">查询参数</h2>
+
+      <!-- 历史记录选择 -->
+      <div v-if="analysisHistory.length > 0" class="mb-6">
+        <label class="block text-sm font-medium text-primary mb-2">
+          <span class="text-xs font-semibold text-muted">历史记录</span>
+          <select
+            v-model="selectedHistoryId"
+            class="input mt-1"
+            @change="applyHistorySelection(selectedHistoryId, { shouldLoad: true })"
+          >
+            <option value="">选择历史分析记录...</option>
+            <option
+              v-for="record in analysisHistory"
+              :key="record.id"
+              :value="record.id"
+            >
+              {{ formatTimestamp(record.start) }} - {{ formatTimestamp(record.end) }} ({{ record.topic }})
+            </option>
+          </select>
+        </label>
+      </div>
+
+      <!-- 手动输入表单 -->
+      <form @submit.prevent="loadResultsFromManual" class="space-y-6">
         <div class="grid gap-4 md:grid-cols-2">
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            专题 Bucket（必填）
-            <div class="relative">
-              <select
-                v-model="form.topic"
-                class="input"
-                :disabled="topicsLoading"
-              >
-                <option value="" disabled>请选择专题...</option>
-                <option v-for="topic in topics" :key="topic.bucket" :value="topic.bucket">
-                  {{ topic.name }}
-                </option>
-              </select>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-semibold text-muted">专题 Topic *</span>
               <button
-                v-if="!topicsLoading"
                 type="button"
-                class="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-secondary hover:bg-surface-muted"
-                @click="loadTopics"
-                title="刷新专题列表"
+                class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
+                :disabled="topicsState.loading"
+                @click="loadTopics(true)"
               >
-                🔄
+                <ArrowPathIcon
+                  class="h-3 w-3"
+                  :class="topicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
+                />
+                <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
               </button>
-              <span v-if="topicsLoading" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-secondary">加载中...</span>
             </div>
+            <select
+              v-model="viewManualForm.topic"
+              class="input"
+              :disabled="topicsState.loading || topicOptions.length === 0"
+            >
+              <option value="" disabled>请选择专题</option>
+              <option v-for="option in topicOptions" :key="option.bucket" :value="option.bucket">
+                {{ option.display_name || option.name }}
+              </option>
+            </select>
           </label>
+
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            开始日期（YYYY-MM-DD）
+            <span class="text-xs font-semibold text-muted">开始日期 Start *</span>
             <input
-              v-model.trim="form.start"
+              v-model.trim="viewManualForm.start"
               type="date"
               class="input"
+              :disabled="loadState.loading"
             />
           </label>
+
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            结束日期（可选）
+            <span class="text-xs font-semibold text-muted">结束日期 End</span>
             <input
-              v-model.trim="form.end"
+              v-model.trim="viewManualForm.end"
               type="date"
               class="input"
+              :disabled="loadState.loading"
+              :min="viewManualForm.start"
             />
           </label>
         </div>
+
+        <!-- 数据可用性提示 -->
+        <div v-if="availableRange.start || availableRange.error" class="rounded-xl border p-3 text-sm"
+             :class="availableRange.error ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'">
+          <div class="flex items-start gap-2">
+            <span class="text-base">{{ availableRange.error ? '⚠️' : 'ℹ️' }}</span>
+            <div>
+              <p class="font-medium" :class="availableRange.error ? 'text-red-700' : 'text-blue-700'">
+                数据可用性
+              </p>
+              <p v-if="availableRange.error" class="text-red-600 text-xs mt-1">{{ availableRange.error }}</p>
+              <p v-else class="text-blue-600 text-xs mt-1">
+                数据范围：{{ availableRange.start }} ~ {{ availableRange.end }}
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div class="flex flex-wrap gap-3">
           <button
             type="submit"
             class="btn btn-primary"
-            :disabled="!canSubmit || state.loading"
+            :disabled="!viewManualForm.topic || !viewManualForm.start || loadState.loading"
           >
-            {{ state.loading ? '加载中…' : '加载结果' }}
+            {{ loadState.loading ? '加载中…' : '加载结果' }}
           </button>
           <button
             type="button"
             class="btn btn-soft"
-            @click="resetForm"
-            :disabled="state.loading"
+            @click="viewManualForm.topic = viewSelection.topic; viewManualForm.start = viewSelection.start; viewManualForm.end = viewSelection.end"
+            :disabled="loadState.loading"
           >
-            重置
+            重置为当前选择
           </button>
         </div>
       </form>
-      <p v-if="state.error" class="mt-4 rounded-xl border border-red-200 bg-red-50/70 p-4 text-sm text-red-700">
-        {{ state.error }}
+
+      <p v-if="loadState.error" class="mt-4 rounded-xl border border-red-200 bg-red-50/70 p-4 text-sm text-red-700">
+        {{ loadState.error }}
       </p>
     </section>
 
@@ -293,7 +343,7 @@
     </section>
 
     <section
-      v-if="!state.loading && !state.error && !hasSummary"
+      v-if="!loadState.loading && !loadState.error && !hasSummary"
       class="topic-dashboard__card topic-dashboard__empty"
     >
       暂无可视化数据，请先填写专题与时间并点击"加载结果"。
@@ -302,19 +352,38 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch, onMounted, nextTick } from 'vue'
+import { computed, reactive, watch, onMounted, nextTick, ref } from 'vue'
+import { ArrowPathIcon } from '@heroicons/vue/24/outline'
 import AnalysisChartPanel from '@/components/AnalysisChartPanel.vue'
 import PlotlyChartPanel from '@/components/PlotlyChartPanel.vue'
-import { useApiBase } from '@/composables/useApiBase'
+import { useTopicBertopicView } from '@/composables/useTopicBertopicView'
 import { useActiveProject } from '@/composables/useActiveProject'
 import * as echarts from 'echarts'
 
-const form = reactive({
-  topic: '',
-  start: '',
-  end: ''
-})
+const {
+  topicsState,
+  topicOptions,
+  viewSelection,
+  viewManualForm,
+  loadState,
+  bertopicData,
+  hasResults,
+  historyState,
+  analysisHistory,
+  selectedHistoryId,
+  selectedRecord,
+  availableRange,
+  bertopicStats,
+  loadTopics,
+  loadHistory,
+  loadResults,
+  loadResultsFromManual,
+  refreshHistory,
+  applyHistorySelection,
+  formatTimestamp
+} = useTopicBertopicView()
 
+// 控制面板状态
 const controls = reactive({
   search: '',
   sort: 'docCount-desc',
@@ -333,47 +402,43 @@ const availableTopics = ref([])
 const umapChartRef = ref(null)
 let umapChartInstance = null
 
-const state = reactive({
-  loading: false,
-  error: '',
-  data: null
-})
-
-const topics = ref([])
-const topicsLoading = ref(false)
-
-const { callApi } = useApiBase()
 const { activeProjectName } = useActiveProject()
 
+// 监听活动项目变化
 watch(
   activeProjectName,
   (value) => {
-    if (value && !form.topic) {
-      form.topic = value
+    if (value && !viewSelection.topic) {
+      const matched = topicOptions.value.find(t =>
+        t.name === value || t.display_name === value || t.bucket === value
+      )
+      if (matched) {
+        viewSelection.topic = matched.bucket
+        viewManualForm.topic = matched.bucket
+      }
     }
   },
   { immediate: true }
 )
 
 onMounted(() => {
-  loadTopics()
+  // 加载专题列表
+  loadTopics(true)
 })
 
-// 后端返回的数据结构：state.data = { data: { files: { summary: {...}, keywords: {...}, ... } } }
-// 或者直接：state.data = { files: { summary: {...}, keywords: {...}, ... } }
+// 后端返回的数据结构：bertopicData = { files: { summary: {...}, keywords: {...}, ... } }
 const results = computed(() => {
-  const data = state.data
-  if (!data) return {}
+  if (!bertopicData.value) return {}
   // 处理嵌套的 data 结构
-  if (data.data && data.data.files) {
-    return data.data.files
+  if (bertopicData.value.data && bertopicData.value.data.files) {
+    return bertopicData.value.data.files
   }
   // 处理直接的 files 结构
-  if (data.files) {
-    return data.files
+  if (bertopicData.value.files) {
+    return bertopicData.value.files
   }
   // 兼容旧格式
-  return data.results || {}
+  return bertopicData.value.results || {}
 })
 const hasSummary = computed(() => Boolean(results.value.summary))
 
@@ -1237,16 +1302,16 @@ const downloadSelectedDocIds = () => {
 }
 
 const exportData = () => {
-  if (!state.data) {
+  if (!bertopicData.value) {
     alert('暂无数据可导出')
     return
   }
-  
+
   const exportData = {
     metadata: {
-      topic: form.topic,
-      start_date: form.start,
-      end_date: form.end,
+      topic: viewSelection.topic,
+      start_date: viewSelection.start,
+      end_date: viewSelection.end,
       export_time: new Date().toISOString()
     },
     statistics: {
@@ -1267,16 +1332,16 @@ const exportData = () => {
       description: cluster.description,
       doc_count: cluster.count,
       original_topics: cluster.original,
-      keywords: cluster.keywords.map(kw => 
+      keywords: cluster.keywords.map(kw =>
         Array.isArray(kw) ? { word: kw[0], weight: kw[1] } : { word: kw, weight: 0 }
       )
     }))
   }
-  
+
   const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json;charset=utf-8' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = `bertopic_results_${form.topic}_${form.start}${form.end ? `_${form.end}` : ''}.json`
+  a.download = `bertopic_results_${viewSelection.topic}_${viewSelection.start}${viewSelection.end ? `_${viewSelection.end}` : ''}.json`
   a.click()
   URL.revokeObjectURL(a.href)
 }
@@ -1397,89 +1462,10 @@ watch(
   { immediate: true, deep: true }
 )
 
-const loadTopics = async () => {
-  topicsLoading.value = true
-  try {
-    const response = await callApi('/api/analysis/topic/bertopic/topics', { method: 'GET' })
-    topics.value = response?.data?.topics || response?.topics || []
-  } catch (error) {
-    console.error('Failed to load topics:', error)
-    topics.value = []
-  } finally {
-    topicsLoading.value = false
-  }
-}
-
-const resetForm = () => {
-  form.topic = ''
-  form.start = ''
-  form.end = ''
-  state.data = null
-  state.error = ''
-}
-
-const canSubmit = computed(() => Boolean(form.topic.trim() && form.start.trim() && !state.loading))
+// canSubmit computed property is now handled inline in template
 
 const updateTopN = (value) => {
   controls.topN = Math.max(3, Math.min(Number(value) || 7, Math.max(7, maxTopN.value)))
-}
-
-const loadResults = async () => {
-  if (!form.topic || !form.start) {
-    state.error = '专题与开始日期为必填'
-    return
-  }
-  state.loading = true
-  state.error = ''
-  state.data = null
-  try {
-    const params = new URLSearchParams({
-      topic: form.topic,
-      start: form.start
-    })
-    if (form.end) params.set('end', form.end)
-    const response = await callApi(`/api/analysis/topic/bertopic/results?${params.toString()}`, {
-      method: 'GET'
-    })
-    // 检查响应状态
-    if (response?.status === 'error') {
-      state.error = response?.message || '加载分析结果失败'
-      state.data = null
-      return
-    }
-    // 处理嵌套的 data 结构
-    state.data = response?.data || response
-  } catch (error) {
-    // 处理HTTP错误（如404）
-    let errorMessage = '加载失败'
-    if (error instanceof Error) {
-      const msg = error.message
-      if (msg.includes('404') || msg.includes('Not Found')) {
-        errorMessage = `未找到专题 "${form.topic}" 在 ${form.start}${form.end ? ` 至 ${form.end}` : ''} 的 BERTopic 分析结果。\n\n请确认：\n1. 该专题是否已运行 BERTopic 分析\n2. 日期范围是否正确\n3. 结果文件是否存在于 data/projects/${form.topic}/topic/ 目录下`
-      } else if (msg.includes('请求失败')) {
-        // 尝试解析JSON错误消息
-        try {
-          const jsonMatch = msg.match(/\{.*\}/)
-          if (jsonMatch) {
-            const errorObj = JSON.parse(jsonMatch[0])
-            errorMessage = errorObj.message || errorObj.error || msg
-          } else {
-            errorMessage = msg
-          }
-        } catch {
-          errorMessage = msg
-        }
-      } else {
-        errorMessage = msg
-      }
-    } else {
-      errorMessage = String(error || '加载失败')
-    }
-    state.error = errorMessage
-    state.data = null
-  } finally {
-    state.loading = false
-  }
 }
 </script>
 

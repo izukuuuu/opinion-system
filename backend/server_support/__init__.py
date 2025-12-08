@@ -23,6 +23,7 @@ from .rag_config import (
     persist_rag_config,
     mask_api_keys,
     validate_rag_config,
+    get_default_rag_config,
 )
 from .dataset_files import (
     ensure_raw_dataset_availability,
@@ -94,6 +95,7 @@ __all__ = [
     "persist_rag_config",
     "mask_api_keys",
     "validate_rag_config",
+    "get_default_rag_config",
     # Content analysis prompt helpers
     "content_prompt_path",
     "load_content_prompt_config",

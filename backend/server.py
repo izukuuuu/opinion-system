@@ -72,6 +72,7 @@ from server_support import (  # type: ignore
     DATA_PROJECTS_ROOT,
     mark_filter_job_running,
     mark_filter_job_finished,
+    get_default_rag_config,
 )
 
 PROJECT_MANAGER = get_project_manager()
@@ -167,6 +168,32 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
             "message": "Missing required field(s): topic, start_date",
         }
 
+    # 使用新的BERTopic实现，集成fetch流程
+    try:
+        # 导入新的BERTopic模块
+        from src.topic.data_bertopic_qwen_v2 import run_topic_bertopic
+
+        # 确保fetch数据可用性检查
+        from src.fetch.data_fetch import get_topic_available_date_range
+
+        # 检查数据可用范围
+        avail_start, avail_end = get_topic_available_date_range(topic)
+        if avail_start and avail_end:
+            import pandas as pd
+            req_start = pd.to_datetime(start_date).date()
+            req_end = pd.to_datetime(end_date or start_date).date()
+            avail_start_date = pd.to_datetime(avail_start).date()
+            avail_end_date = pd.to_datetime(avail_end).date()
+
+            if req_start < avail_start_date or req_end > avail_end_date:
+                return {
+                    "status": "error",
+                    "message": f"请求的日期范围 {start_date}~{end_date or start_date} 超出可用范围 {avail_start}~{avail_end}",
+                }
+    except ImportError:
+        # 如果新模块不存在，回退到旧实现
+        from src.topic.data_bertopic_qwen import run_topic_bertopic
+
     fetch_dir = payload.get("fetch_dir")
     fetch_dir = str(fetch_dir).strip() if fetch_dir else None
 
@@ -176,6 +203,7 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     stopwords = payload.get("stopwords")
     stopwords = str(stopwords).strip() if stopwords else None
 
+    # 运行BERTopic分析
     result = run_topic_bertopic(
         topic,
         start_date,
@@ -186,11 +214,18 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     if result:
+        # 返回成功响应，包含更多信息
+        folder_name = f"{start_date}_{end_date}" if end_date else start_date
         return {
             "status": "ok",
-            "topic": topic,
-            "start_date": start_date,
-            "end_date": end_date,
+            "operation": "topic-bertopic",
+            "data": {
+                "topic": topic,
+                "start_date": start_date,
+                "end_date": end_date,
+                "folder": folder_name,
+                "message": "BERTopic分析完成，结果已保存"
+            }
         }
 
     return {
@@ -1497,6 +1532,88 @@ def run_topic_bertopic_endpoint():
     )
     return jsonify(response), code
 
+
+@app.get("/api/analysis/topic/bertopic/availability")
+def check_topic_availability():
+    """检查专题的数据可用性范围
+
+    Query parameters:
+        topic: 专题名称
+        project: 项目名称（可选）
+        dataset_id: 数据集ID（可选）
+    """
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+
+    if not any([topic, project, dataset_id]):
+        return error("Missing required field(s): topic/project/dataset_id")
+
+    payload = {
+        "topic": topic,
+        "project": project,
+        "dataset_id": dataset_id,
+    }
+
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return error(str(exc))
+
+    # 对于远程数据源，使用真实数据库名
+    db_topic = topic or display_name or topic_identifier
+
+    from src.fetch.data_fetch import get_topic_available_date_range
+
+    # 获取数据可用日期范围
+    avail_start, avail_end = get_topic_available_date_range(db_topic)
+
+    # 检查本地缓存情况
+    from src.utils.setting.paths import bucket, get_data_root
+    data_root = get_data_root() / "projects"
+    project_dir = data_root / topic_identifier
+
+    fetch_caches = []
+    if project_dir.exists():
+        fetch_dir = project_dir / "fetch"
+        if fetch_dir.exists():
+            for cache_dir in fetch_dir.iterdir():
+                if cache_dir.is_dir():
+                    # 解析日期范围
+                    dir_name = cache_dir.name
+                    if "_" in dir_name:
+                        start, end = dir_name.split("_", 1)
+                    else:
+                        start, end = dir_name, dir_name
+
+                    # 检查是否有总体.jsonl文件
+                    has_data = (cache_dir / "总体.jsonl").exists()
+
+                    fetch_caches.append({
+                        "folder": dir_name,
+                        "start": start,
+                        "end": end,
+                        "has_data": has_data,
+                        "path": str(cache_dir.relative_to(get_data_root()))
+                    })
+
+            # 按日期排序
+            fetch_caches.sort(key=lambda x: (x["start"], x["end"]), reverse=True)
+
+    response = {
+        "topic": display_name or db_topic,
+        "topic_identifier": topic_identifier,
+        "database_range": {
+            "start": avail_start,
+            "end": avail_end
+        },
+        "local_caches": fetch_caches,
+        "has_cache": len(fetch_caches) > 0
+    }
+
+    return success({"data": response})
+
+
 @app.get("/api/analysis/topic/bertopic/results")
 def get_topic_bertopic_results():
     raw_topic = request.args.get("topic")
@@ -2084,38 +2201,55 @@ def get_rag_config():
     """Get RAG configuration."""
     try:
         config = load_rag_config()
+    except Exception as e:
+        LOGGER.exception("Failed to load RAG config; returning defaults")
+        try:
+            config = get_default_rag_config()
+        except Exception:
+            config = {}
+
+    try:
         # Mask API keys for security
         masked_config = mask_api_keys(config)
-        return success(data=masked_config)
-    except Exception as e:
-        LOGGER.error(f"Failed to load RAG config: {e}")
-        return error(message="Failed to load RAG configuration")
+    except Exception as mask_exc:  # pragma: no cover - defensive masking
+        LOGGER.exception("Failed to mask RAG config: %s", mask_exc)
+        masked_config = config if isinstance(config, dict) else {}
+
+    return success({"data": masked_config})
 
 
 @app.route("/api/rag/config", methods=["POST"])
 def save_rag_config():
     """Save RAG configuration."""
     try:
-        config = require_fields(request.get_json(), [])
+        payload = request.get_json(silent=True) or {}
+        config = payload.get("config") if isinstance(payload, dict) and "config" in payload else payload
+
+        if not isinstance(config, dict):
+            return error("Invalid RAG configuration payload", 400)
 
         # Validate configuration
         is_valid, errors = validate_rag_config(config)
         if not is_valid:
-            return error(message="Invalid RAG configuration", errors=errors)
+            return jsonify({"status": "error", "message": "Invalid RAG configuration", "errors": errors}), 400
 
         persist_rag_config(config)
-        return success(message="RAG configuration saved successfully")
+        return success({"message": "RAG configuration saved successfully"})
     except Exception as e:
         LOGGER.error(f"Failed to save RAG config: {e}")
-        return error(message="Failed to save RAG configuration")
+        return error("Failed to save RAG configuration", 500)
 
 
 @app.route("/api/rag/test", methods=["POST"])
 def test_rag_config():
     """Test RAG configuration."""
     try:
-        config = require_fields(request.get_json(), ["query"])
-        query = config.get("query")
+        payload = request.get_json(silent=True) or {}
+        valid, error_response = require_fields(payload, "query")
+        if not valid:
+            return jsonify(error_response), 400
+
+        query = payload.get("query")
 
         # TODO: Implement actual RAG test
         # For now, just return a mock response
@@ -2128,7 +2262,7 @@ def test_rag_config():
             }
         ]
 
-        return success(data={"results": results, "total": len(results)})
+        return jsonify({"status": "ok", "data": {"results": results, "total": len(results)}})
     except Exception as e:
         LOGGER.error(f"Failed to test RAG: {e}")
         return error(message="Failed to test RAG configuration")
@@ -2151,7 +2285,7 @@ def list_embedding_models():
                 "text-embedding-3-large",
             ]
         }
-        return success(data=models)
+        return success({"data": models})
     except Exception as e:
         LOGGER.error(f"Failed to list embedding models: {e}")
         return error(message="Failed to list embedding models")
@@ -2204,48 +2338,112 @@ def main() -> None:
 @app.get("/api/analysis/topic/bertopic/topics")
 def list_topic_buckets():
     """获取所有可用的专题 Bucket 列表
-    
+
     Query parameters:
         only_with_results: 如果为 true，只返回有 BERTopic 分析结果的专题（默认: false）
+        only_with_data: 如果为 true，只返回有可用数据的专题（默认: false）
     """
     try:
         from src.utils.setting.paths import get_data_root
+        from src.query import run_query  # 使用query模块获取数据库专题列表
         data_root = get_data_root()
         projects_dir = data_root / "projects"
-        
+
         only_with_results = request.args.get("only_with_results", "false").lower() == "true"
-        
-        LOGGER.info("Listing topic buckets from: %s (only_with_results=%s)", projects_dir, only_with_results)
-        
-        if not projects_dir.exists():
-            LOGGER.warning("Projects directory does not exist: %s", projects_dir)
-            return success({"topics": [], "data_root": str(data_root), "projects_dir": str(projects_dir)})
-        
+        only_with_data = request.args.get("only_with_data", "false").lower() == "true"
+
+        # 优先从数据库获取专题列表
         topics = []
-        all_items = list(projects_dir.iterdir())
-        LOGGER.info("Found %d items in projects directory", len(all_items))
-        
-        for item in sorted(all_items):
-            if item.is_dir() and not item.name.startswith('.'):
-                # 检查是否有 topic 目录（表示有 BERTopic 分析结果）
-                topic_dir = item / "topic"
-                has_topic = topic_dir.exists() and topic_dir.is_dir()
-                
-                # 如果 only_with_results=True，只返回有 topic 目录的专题
-                # 否则返回所有专题
-                if not only_with_results or has_topic:
-                    topics.append({
-                        "bucket": item.name,
-                        "name": item.name,
-                        "has_bertopic_results": has_topic
-                    })
-                    LOGGER.debug("Added project %s (has_bertopic_results=%s)", item.name, has_topic)
-        
-        LOGGER.info("Returning %d topics", len(topics))
+
+        if only_with_data:
+            # 从远程数据库获取有数据的专题列表
+            try:
+                response, _ = _execute_operation(
+                    "query",
+                    run_query,
+                    include_counts=True,
+                    log_context={"project": "GLOBAL", "params": {"source": "api"}}
+                )
+
+                if response.get("status") == "ok":
+                    databases = response.get("data", {}).get("databases", [])
+                    for db in databases:
+                        db_name = db.get("name", "").strip()
+                        if db_name:
+                            # 检查本地是否有对应的项目目录
+                            project_dir = projects_dir / db_name if projects_dir.exists() else None
+                            has_topic = False
+
+                            if project_dir and project_dir.exists():
+                                topic_dir = project_dir / "topic"
+                                has_topic = topic_dir.exists() and topic_dir.is_dir()
+
+                            # 过滤条件
+                            if not only_with_results or has_topic:
+                                topics.append({
+                                    "bucket": db_name,
+                                    "name": db_name,
+                                    "display_name": db.get("display_name", db_name),
+                                    "has_bertopic_results": has_topic,
+                                    "source": "database"
+                                })
+
+            except Exception as db_exc:
+                LOGGER.warning("Failed to get topics from database: %s", db_exc)
+                # 降级到本地文件系统扫描
+
+        # 如果没有从数据库获取到数据，或不需要只从数据库获取
+        if not topics or not only_with_data:
+            # 从本地文件系统扫描
+            if projects_dir.exists():
+                all_items = list(projects_dir.iterdir())
+                LOGGER.info("Found %d items in projects directory", len(all_items))
+
+                for item in sorted(all_items):
+                    if item.is_dir() and not item.name.startswith('.'):
+                        # 检查是否有 topic 目录
+                        topic_dir = item / "topic"
+                        has_topic = topic_dir.exists() and topic_dir.is_dir()
+
+                        # 检查是否有fetch数据（表示有可用数据）
+                        has_data = False
+                        fetch_dir = item / "fetch"
+                        if fetch_dir.exists():
+                            # 检查是否有任何fetch子目录
+                            has_data = any(fetch_dir.iterdir())
+
+                        # 过滤条件
+                        if not only_with_data or has_data:
+                            if not only_with_results or has_topic:
+                                topics.append({
+                                    "bucket": item.name,
+                                    "name": item.name,
+                                    "display_name": item.name,
+                                    "has_bertopic_results": has_topic,
+                                    "source": "local"
+                                })
+
+        # 去重（优先保留数据库来源的记录）
+        seen = set()
+        unique_topics = []
+        for topic in topics:
+            key = topic["bucket"]
+            if key not in seen:
+                seen.add(key)
+                unique_topics.append(topic)
+            elif topic.get("source") == "database":
+                # 如果已经有记录，但当前是数据库来源，更新记录
+                for i, existing in enumerate(unique_topics):
+                    if existing["bucket"] == key:
+                        unique_topics[i] = topic
+                        break
+
+        LOGGER.info("Returning %d topics", len(unique_topics))
         return success({
-            "topics": topics,
+            "topics": unique_topics,
             "data_root": str(data_root),
-            "projects_dir": str(projects_dir)
+            "projects_dir": str(projects_dir),
+            "source": "database" if any(t.get("source") == "database" for t in unique_topics) else "local"
         })
     except Exception as exc:
         LOGGER.exception("Failed to list topic buckets")
@@ -2253,65 +2451,6 @@ def list_topic_buckets():
 
 
 # ====== RAG (Retrieval-Augmented Generation) API Endpoints ======
-
-@app.get("/api/rag/config")
-def get_rag_config():
-    """获取RAG配置"""
-    try:
-        from src.rag.config import RAGConfig
-
-        # Load default config
-        config_path = BACKEND_DIR / "src" / "rag" / "config" / "default.json"
-        if config_path.exists():
-            config = RAGConfig.load(config_path)
-            return success({"config": config.to_dict()})
-        else:
-            # Return default values
-            return success({"config": {
-                "embedding": {
-                    "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-                    "batch_size": 32,
-                    "device": "auto"
-                },
-                "chunking": {
-                    "chunk_size": 512,
-                    "chunk_overlap": 50,
-                    "strategy": "size"
-                },
-                "retrieval": {
-                    "top_k": 10,
-                    "threshold": 0.0,
-                    "search_type": "vector"
-                }
-            }})
-    except Exception as exc:
-        LOGGER.exception("Failed to get RAG config")
-        return error(f"获取RAG配置失败: {str(exc)}")
-
-
-@app.post("/api/rag/config")
-def update_rag_config():
-    """更新RAG配置"""
-    try:
-        payload = request.get_json(silent=True) or {}
-
-        # Validate required fields
-        if not payload.get("config"):
-            return error("Missing required field: config")
-
-        # Save config
-        config_path = BACKEND_DIR / "src" / "rag" / "config" / "default.json"
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        import json
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(payload["config"], f, indent=2, ensure_ascii=False)
-
-        return success({"message": "RAG配置已更新"})
-    except Exception as exc:
-        LOGGER.exception("Failed to update RAG config")
-        return error(f"更新RAG配置失败: {str(exc)}")
-
 
 @app.get("/api/rag/topics")
 def get_rag_topics():
