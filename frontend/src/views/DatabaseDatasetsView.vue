@@ -252,11 +252,17 @@ const platformIconMap = Object.freeze(
     { file: '微信.svg', names: ['微信'] },
     { file: '微博.svg', names: ['微博'] },
     { file: '新闻APP.svg', names: ['新闻app', '新闻APP', '新闻App'] },
-    { file: '新闻网站.svg', names: ['新闻网站'] },
+    { file: '新闻网站.svg', names: ['新闻网站', '网站'] },
     { file: '自媒体.svg', names: ['自媒体', '自媒体号'] },
     { file: '视频.svg', names: ['视频'] },
     { file: '论坛.svg', names: ['论坛'] },
-    { file: '电子报.svg', names: ['电子报'] }
+    { file: '电子报.svg', names: ['电子报'] },
+    { file: '推特.svg', names: ['推特', 'twitter', 'Twitter'] },
+    { file: '脸书.svg', names: ['脸书', 'facebook', 'Facebook', 'fb', 'FB'] },
+    { file: '油管.svg', names: ['油管', 'youtube', 'YouTube'] },
+    { file: '照片墙.svg', names: ['照片墙', 'instagram', 'Instagram', 'ins', 'INS'] },
+    { file: 'telegram.svg', names: ['telegram', 'Telegram', 'tg', 'TG'] },
+    { file: 'tiktok.svg', names: ['tiktok', 'TikTok'] }
   ].reduce((acc, { file, names }) => {
     const iconUrl = new URL(`../drawable/platform-icons/${file}`, import.meta.url).href
     names.forEach((name) => {
