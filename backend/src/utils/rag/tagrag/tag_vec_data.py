@@ -5,6 +5,7 @@ import os
 import json
 import lancedb
 import numpy as np
+from pathlib import Path
 from openai import OpenAI
 from typing import List, Dict, Any
 from pypinyin import lazy_pinyin, Style
@@ -70,7 +71,11 @@ def get_existing_ids(db_path: str, table_name: str, logger) -> set:
         log_error(logger, f"读取现有数据库失败: {e}", "Tagvectorize")
         return set()
 
-def vectorize_and_store(topic_name: str = "控烟"):
+def vectorize_and_store(
+    topic_name: str = "控烟",
+    format_json_path: str = None,
+    vector_db_path: str = None,
+):
     """
     主函数：向量化数据并存储到LanceDB数据库。
     
@@ -102,18 +107,25 @@ def vectorize_and_store(topic_name: str = "控烟"):
         log_success(logger, "OpenAI客户端初始化成功", "Tagvectorize")
         
         # 加载数据
-        # 使用绝对路径定位主题JSON文件
-        project_root = get_project_root()
-        format_json_path = project_root / "src" / "utils" / "rag" / "tagrag" / "format_db" / f"{topic_name}.json"
-        
+        # 使用绝对路径定位主题JSON文件（允许外部传入）
+        if format_json_path:
+            format_json_path = Path(format_json_path)
+        else:
+            project_root = get_project_root()
+            format_json_path = project_root / "src" / "utils" / "rag" / "tagrag" / "format_db" / f"{topic_name}.json"
+
         if not format_json_path.exists():
             log_error(logger, f"主题数据文件不存在: {format_json_path}", "Tagvectorize")
             raise FileNotFoundError(f"主题数据文件不存在: {format_json_path}")
-        
+
         data = load_data(str(format_json_path), logger)
         
         # 确保数据目录存在
-        vector_db_path = project_root / "src" / "utils" / "rag" / "tagrag" / "vector_db"
+        if vector_db_path:
+            vector_db_path = Path(vector_db_path)
+        else:
+            project_root = get_project_root()
+            vector_db_path = project_root / "src" / "utils" / "rag" / "tagrag" / "vector_db"
         os.makedirs(vector_db_path, exist_ok=True)
         db_path = str(vector_db_path)
         

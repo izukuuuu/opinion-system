@@ -18,6 +18,7 @@ import TopicBertopicLayout from '../views/analysis/topic/TopicBertopicLayout.vue
 import TopicBertopicOverview from '../views/analysis/topic/TopicBertopicOverview.vue'
 import TopicBertopicRun from '../views/analysis/topic/TopicBertopicRun.vue'
 import TopicBertopicResults from '../views/analysis/topic/TopicBertopicResults.vue'
+import ReportGenerationView from '../views/analysis/ReportGenerationView.vue'
 import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
 import DatabaseDatasetsView from '../views/DatabaseDatasetsView.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
@@ -157,6 +158,15 @@ export const routes = [
     meta: {
       title: '内容分析 · 提示词配置',
       breadcrumb: '内容分析'
+    }
+  },
+  {
+    path: '/analysis/report',
+    name: 'report-generation',
+    component: ReportGenerationView,
+    meta: {
+      title: '报告解读',
+      breadcrumb: '报告解读'
     }
   },
   {
@@ -365,6 +375,15 @@ export const routes = [
         meta: {
           title: 'RAG 配置',
           breadcrumb: 'RAG 配置'
+        }
+      },
+      {
+        path: 'experimental',
+        name: 'settings-experimental',
+        component: () => import('../views/settings/SettingsExperimentalView.vue'),
+        meta: {
+          title: '实验性功能',
+          breadcrumb: '实验性功能'
         }
       }
     ]

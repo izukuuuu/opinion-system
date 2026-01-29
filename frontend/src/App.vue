@@ -242,7 +242,6 @@ import {
   Squares2X2Icon,
   TableCellsIcon,
   MagnifyingGlassCircleIcon,
-  SparklesIcon,
   ChartBarIcon,
   PencilSquareIcon
 } from '@heroicons/vue/24/outline'
@@ -347,10 +346,10 @@ const navigationGroups = [
         icon: BeakerIcon
       },
       {
-        label: '智能解读',
-        description: '舆情特征智能解读',
-        to: { name: 'data-interpretation-engine' },
-        icon: SparklesIcon
+        label: '报告解读',
+        description: '报告解读与导出',
+        to: { name: 'report-generation' },
+        icon: DocumentTextIcon
       }
     ]
   },

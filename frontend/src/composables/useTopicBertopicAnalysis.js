@@ -14,6 +14,7 @@ const topicOptions = computed(() => topicsState.options)
 
 const form = reactive({
   topic: '',
+  project: '',
   startDate: '',
   endDate: '',
   fetchDir: '',
@@ -159,14 +160,17 @@ const loadAvailableRange = async () => {
 
   availableRange.loading = true
   availableRange.error = ''
-  clearAvailableRange()
+  availableRange.start = ''
+  availableRange.end = ''
 
   try {
     // 使用基础分析相同的API检查数据可用性
-    const response = await callApi(
-      `/api/fetch/availability?topic=${encodeURIComponent(form.topic)}`,
-      { method: 'GET' }
-    )
+    const params = new URLSearchParams({ topic: form.topic })
+    const project = (form.project || '').trim()
+    if (project) {
+      params.set('project', project)
+    }
+    const response = await callApi(`/api/fetch/availability?${params.toString()}`, { method: 'GET' })
 
     const data = response?.data
     if (data && data.range) {
@@ -182,8 +186,13 @@ const loadAvailableRange = async () => {
   } catch (error) {
     // 如果基础API失败，尝试使用BERTopic专用的API
     try {
+      const fallbackParams = new URLSearchParams({ topic: form.topic })
+      const project = (form.project || '').trim()
+      if (project) {
+        fallbackParams.set('project', project)
+      }
       const response = await callApi(
-        `/api/analysis/topic/bertopic/availability?topic=${encodeURIComponent(form.topic)}`,
+        `/api/analysis/topic/bertopic/availability?${fallbackParams.toString()}`,
         { method: 'GET' }
       )
 
@@ -296,9 +305,42 @@ const runBertopicAnalysis = async (params) => {
   })
 
   try {
+    // 先拉取远程数据到本地缓存（与基础分析一致）
+    const fetchLogId = appendLog({
+      label: '数据准备',
+      message: `拉取远程数据 ${form.topic} ${form.startDate} → ${form.endDate || form.startDate}`,
+      status: 'running'
+    })
+    try {
+      await callApi('/api/fetch', {
+        method: 'POST',
+        body: JSON.stringify({
+          topic: form.topic,
+          project: form.project || undefined,
+          start: form.startDate,
+          end: form.endDate || form.startDate
+        })
+      })
+      updateLog(fetchLogId, {
+        status: 'ok',
+        message: '数据拉取完成，可开始主题分析'
+      })
+    } catch (fetchError) {
+      updateLog(fetchLogId, {
+        status: 'error',
+        message: fetchError instanceof Error ? fetchError.message : String(fetchError)
+      })
+      updateLog(logId, {
+        status: 'error',
+        message: '数据拉取失败，已终止分析'
+      })
+      return
+    }
+
     // 构建请求参数
     const payload = {
       topic: form.topic,
+      project: form.project || undefined,
       start_date: form.startDate,
       end_date: form.endDate || undefined,
       fetch_dir: form.fetchDir || undefined,

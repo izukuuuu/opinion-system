@@ -408,6 +408,7 @@ const { activeProjectName } = useActiveProject()
 watch(
   activeProjectName,
   (value) => {
+    viewSelection.project = value || ''
     if (value && !viewSelection.topic) {
       const matched = topicOptions.value.find(t =>
         t.name === value || t.display_name === value || t.bucket === value
@@ -2267,4 +2268,3 @@ const updateTopN = (value) => {
   border: 1px solid var(--color-border-soft);
 }
 </style>
-

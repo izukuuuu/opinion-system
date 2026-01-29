@@ -427,14 +427,18 @@ class AdvancedRAGSearcher:
     """高级RAG检索系统 - 支持时间过滤、三种检索策略、多跳查询、多主题数据库"""
     
     def __init__(self, topic: str, logger, qwen_client: QwenClient, 
-                 llm_model: str, embedding_model: str, prompts_file: str):
+                 llm_model: str, embedding_model: str, prompts_file: str,
+                 db_base_path: Optional[Path] = None):
         self.topic = topic
         self.logger = logger
         self.qwen_client = qwen_client
         
-        # 根据主题确定数据库路径：src/utils/rag/ragrouter/{主题}数据库/vector_db
-        rag_base = Path(__file__).parent
-        self.db_path = rag_base / f"{topic}数据库" / "vector_db"
+        # 根据主题确定数据库路径：{base}/{主题}数据库/vector_db
+        if db_base_path is None:
+            rag_base = Path(__file__).parent
+            self.db_path = rag_base / f"{topic}数据库" / "vector_db"
+        else:
+            self.db_path = db_base_path / "vector_db"
         
         if not self.db_path.exists():
             log_error(self.logger, f"数据库不存在: {self.db_path}", "searcher")
@@ -1095,7 +1099,8 @@ def router_retrieve(
     enable_query_expansion: bool = True,
     enable_llm_summary: bool = True,
     llm_summary_mode: str = "strict",
-    return_format: str = "both"
+    return_format: str = "both",
+    db_base_path: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
     RAG检索包装函数，返回JSON格式的检索结果
@@ -1144,7 +1149,8 @@ def router_retrieve(
             qwen_client=qwen_client,
             llm_model=llm_model,
             embedding_model=embedding_model,
-            prompts_file=prompts_file
+            prompts_file=prompts_file,
+            db_base_path=db_base_path
         )
         
         # 设置检索参数
@@ -1174,3 +1180,70 @@ def router_retrieve(
             "error": str(e),
             "traceback": traceback.format_exc()
         }
+
+
+def retrieve_documents(
+    query: str,
+    topic: str,
+    top_k: int = 10,
+    threshold: float = 0.0,
+    mode: str = "normalrag",
+    db_base_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Adapter for API usage. Normalizes RouterRAG results into a flat list with
+    `text` and `score` for the frontend retrieval views.
+    """
+    payload = router_retrieve(
+        topic=topic,
+        query=query,
+        mode=mode,
+        topk_normalrag=top_k,
+        topk_tagrag=top_k,
+        enable_llm_summary=False,
+        return_format="index_only",
+        db_base_path=db_base_path,
+    )
+
+    if not isinstance(payload, dict):
+        return []
+
+    results: List[Dict[str, Any]] = []
+
+    if mode == "tagrag":
+        items = payload.get("tagrag", {}).get("text_blocks", [])
+        for item in items:
+            distance = float(item.get("score", 1.0))
+            similarity = max(0.0, 1.0 - distance)
+            if similarity < threshold:
+                continue
+            results.append({
+                "id": item.get("text_id") or item.get("doc_id"),
+                "text": item.get("text", ""),
+                "score": round(similarity, 4),
+                "metadata": {
+                    "doc_id": item.get("doc_id"),
+                    "doc_name": item.get("doc_name"),
+                    "text_tag": item.get("text_tag"),
+                },
+            })
+        return results
+
+    # Default: normalrag
+    items = payload.get("normalrag", {}).get("sentences", [])
+    for item in items:
+        distance = float(item.get("score", 1.0))
+        similarity = max(0.0, 1.0 - distance)
+        if similarity < threshold:
+            continue
+        results.append({
+            "id": item.get("sentence_id") or item.get("doc_id"),
+            "text": item.get("text", ""),
+            "score": round(similarity, 4),
+            "metadata": {
+                "doc_id": item.get("doc_id"),
+                "doc_name": item.get("doc_name"),
+            },
+        })
+
+    return results

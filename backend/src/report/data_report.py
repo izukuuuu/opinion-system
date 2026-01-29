@@ -6,7 +6,7 @@ import asyncio
 import time
 import traceback
 
-from ..utils.setting.paths import bucket, ensure_bucket
+from ..utils.setting.paths import bucket, ensure_bucket, get_project_root
 from ..utils.logging.logging import (
     setup_logger,
     log_module_start,
@@ -107,6 +107,45 @@ def _collect_sections(topic: str, date_folder: str, logger) -> List[Tuple[str, s
         if text:
             sections.append((func_cn, text))
     return sections
+
+
+def _load_manual_report_text(topic: str, date_folder: str, logger) -> Optional[str]:
+    """
+    尝试加载人工编写的报告文本，若存在则优先使用。
+
+    查找顺序：
+    1) 报告输出目录（reports bucket）
+    2) 后端根目录
+    3) 仓库根目录
+    """
+    project_root = get_project_root()
+    repo_root = project_root.parent
+    report_dir = bucket("reports", topic, date_folder)
+    candidate_dirs = [report_dir, project_root, repo_root]
+    candidate_names = [
+        "manual_report.md",
+        "manual_report.txt",
+        f"{topic}_{date_folder}_分析报告.md",
+        f"{topic}_{date_folder}_分析报告.txt",
+        f"{topic}分析报告.md",
+        f"{topic}分析报告.txt",
+    ]
+
+    for base in candidate_dirs:
+        for name in candidate_names:
+            path = base / name
+            if not path.exists():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8").strip()
+            except Exception:
+                log_error(logger, f"读取人工报告失败: {path} | {traceback.format_exc()}", "Report")
+                continue
+            if text:
+                log_success(logger, f"使用人工报告文本: {path}", "Report")
+                return text
+            log_error(logger, f"人工报告文本为空: {path}", "Report")
+    return None
 
 
 def _sections_to_block(sections: List[Tuple[str, str]]) -> str:
@@ -515,74 +554,85 @@ def run_report(topic: str, start_date: str, end_date: Optional[str] = None) -> b
     try:
         log_module_start(logger, "Report")
 
-        # 1) 收集 *_rag_enhanced.json（仅“总体”）
-        raw_sections = _collect_sections(topic, date_folder, logger)
-        if not raw_sections:
-            log_error(logger, "未找到任何可用的解读结果（*_rag_enhanced.json），报告未生成", "Report")
-            return False
+        manual_text = _load_manual_report_text(topic, date_folder, logger)
+        sections_text = ""
+        full_text: Optional[str] = None
+        used_manual = False
 
-        sections_text = _sections_to_block(raw_sections)
+        if manual_text:
+            full_text = manual_text
+            used_manual = True
+        else:
+            # 1) 收集 *_rag_enhanced.json（仅“总体”）
+            raw_sections = _collect_sections(topic, date_folder, logger)
+            if not raw_sections:
+                log_error(logger, "未找到任何可用的解读结果（*_rag_enhanced.json），报告未生成", "Report")
+                return False
 
-        # 2) 读取提示词 YAML 并组装消息
-        tmpl = _load_prompt_yaml(topic, logger)
-        messages = _compose_llm_input(topic, date_folder, sections_text, tmpl)
+            sections_text = _sections_to_block(raw_sections)
 
-        # 3) 读取 LLM 配置（若存在）
-        project_root = Path(__file__).resolve().parents[2]
-        llm_cfg_path = project_root / "configs" / "llm.yaml"
-        model_name: Optional[str] = None
-        timeout_s: float = 200.0  # 报告文本较长，默认更宽松
-        max_retries: int = 2
-        try:
-            import yaml  # type: ignore
-            if llm_cfg_path.exists():
-                with open(llm_cfg_path, "r", encoding="utf-8") as f:
-                    llm_cfg = yaml.safe_load(f)  # type: ignore
-                if isinstance(llm_cfg, dict):
-                    # 模型名优先级：report.model > report_model > model/chat_model
-                    report_cfg = llm_cfg.get("report") if isinstance(llm_cfg.get("report"), dict) else None
-                    model_name = (
-                        (report_cfg or {}).get("model")
-                        or llm_cfg.get("report_model")
-                        or llm_cfg.get("model")
-                        or llm_cfg.get("chat_model")
-                    )
-                    # 超时优先级：report.timeout > report_timeout > timeout > 默认
-                    if report_cfg and "timeout" in report_cfg:
-                        timeout_s = float(report_cfg.get("timeout", timeout_s))
-                    else:
-                        timeout_s = float(llm_cfg.get("report_timeout", llm_cfg.get("timeout", timeout_s)))
-                    # 重试优先级：report.retries > report_retries > retries > 默认
-                    if report_cfg and "retries" in report_cfg:
-                        max_retries = int(report_cfg.get("retries", max_retries))
-                    else:
-                        max_retries = int(llm_cfg.get("report_retries", llm_cfg.get("retries", max_retries)))
-            # 保护性下限：避免被设置得过小导致大文本易超时
-            timeout_s = max(timeout_s, 90.0)
-            log_success(logger, f"LLM配置：timeout={timeout_s:.0f}s, retries={max_retries}", "Report")
-        except Exception:
-            log_error(logger, f"读取 llm.yaml 失败，使用默认配置 | {traceback.format_exc()}", "Report")
+            # 2) 读取提示词 YAML 并组装消息
+            tmpl = _load_prompt_yaml(topic, logger)
+            messages = _compose_llm_input(topic, date_folder, sections_text, tmpl)
 
-        # 4) 调用大模型
-        full_text: Optional[str] = asyncio.run(
-            _llm_call_report(messages, logger, model=model_name, timeout=timeout_s, max_retries=max_retries)
-        )
+            # 3) 读取 LLM 配置（若存在）
+            project_root = Path(__file__).resolve().parents[2]
+            llm_cfg_path = project_root / "configs" / "llm.yaml"
+            model_name: Optional[str] = None
+            timeout_s: float = 200.0  # 报告文本较长，默认更宽松
+            max_retries: int = 2
+            try:
+                import yaml  # type: ignore
+                if llm_cfg_path.exists():
+                    with open(llm_cfg_path, "r", encoding="utf-8") as f:
+                        llm_cfg = yaml.safe_load(f)  # type: ignore
+                    if isinstance(llm_cfg, dict):
+                        # 模型名优先级：report.model > report_model > model/chat_model
+                        report_cfg = llm_cfg.get("report") if isinstance(llm_cfg.get("report"), dict) else None
+                        model_name = (
+                            (report_cfg or {}).get("model")
+                            or llm_cfg.get("report_model")
+                            or llm_cfg.get("model")
+                            or llm_cfg.get("chat_model")
+                        )
+                        # 超时优先级：report.timeout > report_timeout > timeout > 默认
+                        if report_cfg and "timeout" in report_cfg:
+                            timeout_s = float(report_cfg.get("timeout", timeout_s))
+                        else:
+                            timeout_s = float(llm_cfg.get("report_timeout", llm_cfg.get("timeout", timeout_s)))
+                        # 重试优先级：report.retries > report_retries > retries > 默认
+                        if report_cfg and "retries" in report_cfg:
+                            max_retries = int(report_cfg.get("retries", max_retries))
+                        else:
+                            max_retries = int(llm_cfg.get("report_retries", llm_cfg.get("retries", max_retries)))
+                # 保护性下限：避免被设置得过小导致大文本易超时
+                timeout_s = max(timeout_s, 90.0)
+                log_success(logger, f"LLM配置：timeout={timeout_s:.0f}s, retries={max_retries}", "Report")
+            except Exception:
+                log_error(logger, f"读取 llm.yaml 失败，使用默认配置 | {traceback.format_exc()}", "Report")
 
-        # 5) 若 LLM 失败，回退为拼接文本直接输出
-        if not full_text:
-            log_error(logger, "LLM 生成失败，将回退为直接拼接文本", "Report")
-            full_text = sections_text
+            # 4) 调用大模型
+            full_text = asyncio.run(
+                _llm_call_report(messages, logger, model=model_name, timeout=timeout_s, max_retries=max_retries)
+            )
+
+            # 5) 若 LLM 失败，回退为拼接文本直接输出
+            if not full_text:
+                log_error(logger, "LLM 生成失败，将回退为直接拼接文本", "Report")
+                full_text = sections_text
 
         # 6) 写入 Word
         output_dir = ensure_bucket("reports", topic, date_folder)
         output_path = output_dir / f"{topic}_{date_folder}_报告.docx"
         ok = _build_doc_from_text(topic, date_folder, full_text, output_path, logger)
         if ok:
-            log_success(logger, "报告生成完成（由 LLM 生产全文）", "Report")
+            if used_manual:
+                log_success(logger, "报告生成完成（使用人工文本）", "Report")
+            else:
+                log_success(logger, "报告生成完成（由 LLM 生产全文）", "Report")
         return ok
 
     except Exception:
         log_error(logger, f"报告生成失败: {traceback.format_exc()}", "Report")
         return False
-
 

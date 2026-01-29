@@ -21,6 +21,7 @@ frontend/dist/
 backend/store/*
 backend/logs/*
 !backend/store/.gitkeep
+backend/src/filter/cache/
 
 .idea
 

@@ -36,7 +36,8 @@ import {
   ArrowDownTrayIcon,
   ServerStackIcon,
   SwatchIcon,
-  DocumentMagnifyingGlassIcon
+  DocumentMagnifyingGlassIcon,
+  BeakerIcon
 } from '@heroicons/vue/24/outline'
 import CollapsibleSidebar from '../../components/navigation/CollapsibleSidebar.vue'
 
@@ -76,6 +77,12 @@ const navigationItems = [
     label: '主题颜色',
     to: { name: 'settings-theme' },
     icon: SwatchIcon
+  },
+  {
+    key: 'settings-experimental',
+    label: '实验性功能',
+    to: { name: 'settings-experimental' },
+    icon: BeakerIcon
   }
 ]
 

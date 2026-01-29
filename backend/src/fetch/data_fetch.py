@@ -17,7 +17,14 @@ from ..utils.logging.logging import setup_logger, log_module_start, log_success,
 from ..utils.io.excel import write_jsonl, read_jsonl
 
 
-def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, logger=None) -> bool:
+def fetch_range(
+    topic: str,
+    start_date: str,
+    end_date: str,
+    output_date: str,
+    logger=None,
+    db_topic: Optional[str] = None,
+) -> bool:
     """
     从数据库提取指定时间范围的数据
     
@@ -48,7 +55,8 @@ def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, lo
         return False
     
     base_url = make_url(db_url)
-    db_url_with_db = base_url.set(database=topic)
+    db_name = _normalise_db_topic(db_topic or topic)
+    db_url_with_db = base_url.set(database=db_name)
     engine = create_engine(db_url_with_db)
     
     all_data = []
@@ -59,8 +67,8 @@ def fetch_range(topic: str, start_date: str, end_date: str, output_date: str, lo
             # 4. 提取各渠道数据
             for channel in channels:
                 try:
-                    if not table_exists(conn, channel, topic):
-                        log_skip(logger, f"表 {topic}.{channel} 不存在，跳过", "Fetch")
+                    if not table_exists(conn, channel, db_name):
+                        log_skip(logger, f"表 {db_name}.{channel} 不存在，跳过", "Fetch")
                         continue
                     
                     # 查询数据

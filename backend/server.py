@@ -53,6 +53,13 @@ from server_support import (  # type: ignore
     load_filter_template_config,
     load_llm_config,
     load_rag_config,
+    ensure_rag_ready,
+    get_rag_build_status,
+    ensure_routerrag_db,
+    ensure_tagrag_db,
+    list_project_routerrag_topics,
+    list_project_tagrag_topics,
+    start_rag_build,
     mask_api_keys,
     normalise_topic_label,
     parse_column_mapping_from_form,
@@ -157,16 +164,50 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not valid:
         return error_response
 
-    topic = str(payload.get("topic") or "").strip()
+    raw_topic = str(payload.get("topic") or "").strip()
+    raw_project = str(payload.get("project") or "").strip()
+    raw_dataset_id = str(payload.get("dataset_id") or "").strip()
+
     start_date = str(payload.get("start_date") or "").strip()
     end_value = payload.get("end_date")
     end_date = str(end_value).strip() if end_value else None
 
-    if not topic or not start_date:
+    if not raw_topic and not raw_project and not raw_dataset_id:
         return {
             "status": "error",
-            "message": "Missing required field(s): topic, start_date",
+            "message": "Missing required field(s): topic, project, or dataset_id",
         }
+
+    if not start_date:
+        return {
+            "status": "error",
+            "message": "Missing required field(s): start_date",
+        }
+
+    # 将云端/项目标识解析为本地 bucket 名称（与基础分析一致）
+    try:
+        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(
+            {
+                "topic": raw_topic,
+                "project": raw_project,
+                "dataset_id": raw_dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError:
+        topic_identifier = (raw_topic or raw_project or "").strip()
+        display_name = raw_topic or raw_project or topic_identifier
+        log_project = topic_identifier
+
+    bucket_topic = topic_identifier or raw_topic
+    db_topic = raw_topic or display_name or bucket_topic
+    topic_label = display_name or db_topic
+
+    # 确保存储目录存在，避免回落到旧路径
+    try:
+        PROJECT_MANAGER.ensure_project_storage(log_project or bucket_topic, create_if_missing=True)
+    except Exception:
+        LOGGER.warning("Failed to ensure project storage for BERTopic", exc_info=True)
 
     # 使用新的BERTopic实现，集成fetch流程
     try:
@@ -176,8 +217,14 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
         # 确保fetch数据可用性检查
         from src.fetch.data_fetch import get_topic_available_date_range
 
-        # 检查数据可用范围
-        avail_start, avail_end = get_topic_available_date_range(topic)
+        # 检查数据可用范围（使用数据库实际专题名）
+        availability = get_topic_available_date_range(db_topic)
+        if isinstance(availability, dict):
+            avail_start = availability.get("start")
+            avail_end = availability.get("end")
+        else:
+            avail_start, avail_end = availability
+
         if avail_start and avail_end:
             import pandas as pd
             req_start = pd.to_datetime(start_date).date()
@@ -205,12 +252,15 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # 运行BERTopic分析
     result = run_topic_bertopic(
-        topic,
+        bucket_topic,
         start_date,
         end_date,
         fetch_dir=fetch_dir,
         userdict=userdict,
         stopwords=stopwords,
+        bucket_topic=bucket_topic,
+        db_topic=db_topic,
+        display_topic=topic_label,
     )
 
     if result:
@@ -220,7 +270,8 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
             "status": "ok",
             "operation": "topic-bertopic",
             "data": {
-                "topic": topic,
+                "topic": topic_label,
+                "bucket": bucket_topic,
                 "start_date": start_date,
                 "end_date": end_date,
                 "folder": folder_name,
@@ -1517,15 +1568,35 @@ def run_topic_bertopic_endpoint():
     valid, error_response = require_fields(payload, "topic", "start_date")
     if not valid:
         return jsonify(error_response), 400
+
+    raw_topic = str(payload.get("topic") or "").strip()
+    raw_project = str(payload.get("project") or "").strip()
+    raw_dataset_id = str(payload.get("dataset_id") or "").strip()
+    try:
+        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(
+            {
+                "topic": raw_topic,
+                "project": raw_project,
+                "dataset_id": raw_dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError:
+        topic_identifier = raw_topic or raw_project
+        display_name = raw_topic or raw_project or topic_identifier
+        log_project = topic_identifier
+
     response, code = _execute_operation(
         "topic-bertopic",
         _run_topic_bertopic_api,
         payload,
         log_context={
-            "project": str(payload.get("topic") or "").strip() or None,
+            "project": log_project or topic_identifier,
             "params": {
                 "start_date": str(payload.get("start_date") or "").strip(),
                 "end_date": str(payload.get("end_date") or "").strip(),
+                "topic": display_name or raw_topic or raw_project,
+                "bucket": topic_identifier,
                 "source": "api",
             },
         },
@@ -2456,40 +2527,49 @@ def list_topic_buckets():
 def get_rag_topics():
     """获取可用的RAG专题列表"""
     try:
+        project = str(request.args.get("project") or "").strip()
+        project_bucket = PROJECT_MANAGER.resolve_identifier(project) if project else None
+        project_bucket = project_bucket or project
         tagrag_topics: List[str] = []
         router_topics: List[str] = []
 
-        # Prefer helper functions (they normalise project root); fall back to filesystem scan if they fail.
-        try:
-            from src.utils.rag.tagrag.tag_retrieve_data import get_available_topics as list_tagrag_topics  # type: ignore
-            tagrag_topics = list_tagrag_topics() or []
-        except Exception as helper_exc:  # pragma: no cover - defensive, helper may rely on optional deps
-            LOGGER.warning("TagRAG topic helper failed, using filesystem fallback: %s", helper_exc)
-        if not tagrag_topics:
-            tagrag_dir = SRC_DIR / "utils" / "rag" / "tagrag" / "format_db"
-            if tagrag_dir.exists():
-                tagrag_topics = [f.stem for f in tagrag_dir.glob("*.json") if f.stem]
+        if project_bucket:
+            tagrag_topics = list_project_tagrag_topics(project_bucket)
+            router_topics = list_project_routerrag_topics(project_bucket)
+            return success({
+                "data": {
+                    "tagrag_topics": sorted({t.strip() for t in tagrag_topics if str(t).strip()}),
+                    "router_topics": sorted({t.strip() for t in router_topics if str(t).strip()})
+                }
+            })
 
-        try:
-            from src.utils.rag.ragrouter.router_retrieve_data import get_available_router_topics  # type: ignore
-            router_topics = get_available_router_topics() or []
-        except Exception as helper_exc:  # pragma: no cover - defensive, helper may rely on optional deps
-            LOGGER.warning("RouterRAG topic helper failed, using filesystem fallback: %s", helper_exc)
-        if not router_topics:
-            router_dir = SRC_DIR / "utils" / "rag" / "ragrouter"
-            if router_dir.exists():
-                router_topics = [
-                    d.name for d in router_dir.iterdir()
-                    if d.is_dir() and not d.name.startswith('.')
-                ]
+        # No fallback to src/utils/rag when project is not provided.
 
         return success({
-            "tagrag_topics": sorted({t.strip() for t in tagrag_topics if str(t).strip()}),
-            "router_topics": sorted({t.strip() for t in router_topics if str(t).strip()})
+            "data": {
+                "tagrag_topics": sorted({t.strip() for t in tagrag_topics if str(t).strip()}),
+                "router_topics": sorted({t.strip() for t in router_topics if str(t).strip()})
+            }
         })
     except Exception as exc:
         LOGGER.exception("Failed to get RAG topics")
         return error(f"获取RAG专题列表失败: {str(exc)}")
+
+
+@app.get("/api/rag/cache/status")
+def get_rag_cache_status():
+    project = str(request.args.get("project") or "").strip()
+    topic = str(request.args.get("topic") or "").strip()
+    rag_type = str(request.args.get("type") or "").strip() or "tagrag"
+
+    if not project or not topic:
+        return error("Missing required field(s): project, topic")
+
+    project_bucket = PROJECT_MANAGER.resolve_identifier(project) if project else None
+    project_bucket = project_bucket or project
+
+    status = get_rag_build_status(project_bucket, rag_type, topic)
+    return success({"data": status})
 
 
 @app.post("/api/rag/tagrag/retrieve")
@@ -2501,6 +2581,9 @@ def tagrag_retrieve():
         # Validate required fields
         query = payload.get("query", "").strip()
         topic = payload.get("topic", "").strip()
+        project = str(payload.get("project") or "").strip()
+        project_bucket = PROJECT_MANAGER.resolve_identifier(project) if project else None
+        project_bucket = project_bucket or project
         top_k = payload.get("top_k", 10)
 
         if not query:
@@ -2508,18 +2591,31 @@ def tagrag_retrieve():
         if not topic:
             return error("Missing required field: topic")
 
+        if project_bucket and not ensure_rag_ready(project_bucket, "tagrag", topic):
+            status = start_rag_build(project_bucket, "tagrag", topic)
+            return jsonify({
+                "status": "building",
+                "message": "正在准备检索资料，请稍后再试",
+                "data": status,
+            }), 202
+
         # Import TagRAG retrieval
         from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents
+
+        db_path = None
+        if project_bucket:
+            db_path = ensure_tagrag_db(topic, project_bucket)
 
         # Retrieve documents
         results = retrieve_documents(
             query=query,
             topic=topic,
             top_k=top_k,
-            threshold=payload.get("threshold", 0.0)
+            threshold=payload.get("threshold", 0.0),
+            db_path=str(db_path) if db_path else None,
         )
 
-        return success({"results": results, "total": len(results)})
+        return success({"data": {"results": results, "total": len(results)}})
     except Exception as exc:
         LOGGER.exception("Failed to retrieve TagRAG documents")
         return error(f"TagRAG检索失败: {str(exc)}")
@@ -2534,6 +2630,9 @@ def routerrag_retrieve():
         # Validate required fields
         query = payload.get("query", "").strip()
         topic = payload.get("topic", "").strip()
+        project = str(payload.get("project") or "").strip()
+        project_bucket = PROJECT_MANAGER.resolve_identifier(project) if project else None
+        project_bucket = project_bucket or project
         top_k = payload.get("top_k", 10)
 
         if not query:
@@ -2541,18 +2640,31 @@ def routerrag_retrieve():
         if not topic:
             return error("Missing required field: topic")
 
+        if project_bucket and not ensure_rag_ready(project_bucket, "routerrag", topic):
+            status = start_rag_build(project_bucket, "routerrag", topic)
+            return jsonify({
+                "status": "building",
+                "message": "正在准备检索资料，请稍后再试",
+                "data": status,
+            }), 202
+
         # Import RouterRAG retrieval
         from src.utils.rag.ragrouter.router_retrieve_data import retrieve_documents
+
+        base_path = None
+        if project_bucket:
+            base_path = ensure_routerrag_db(topic, project_bucket)
 
         # Retrieve documents
         results = retrieve_documents(
             query=query,
             topic=topic,
             top_k=top_k,
-            threshold=payload.get("threshold", 0.0)
+            threshold=payload.get("threshold", 0.0),
+            db_base_path=base_path,
         )
 
-        return success({"results": results, "total": len(results)})
+        return success({"data": {"results": results, "total": len(results)}})
     except Exception as exc:
         LOGGER.exception("Failed to retrieve RouterRAG documents")
         return error(f"RouterRAG检索失败: {str(exc)}")
@@ -2568,6 +2680,9 @@ def universal_rag_retrieve():
         query = payload.get("query", "").strip()
         topic = payload.get("topic", "").strip()
         rag_type = payload.get("rag_type", "tagrag")  # tagrag, routerrag, hybrid
+        project = str(payload.get("project") or "").strip()
+        project_bucket = PROJECT_MANAGER.resolve_identifier(project) if project else None
+        project_bucket = project_bucket or project
         top_k = payload.get("top_k", 10)
 
         if not query:
@@ -2579,11 +2694,27 @@ def universal_rag_retrieve():
 
         if rag_type == "tagrag":
             from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents
-            results = retrieve_documents(query=query, topic=topic, top_k=top_k)
+            if project_bucket and not ensure_rag_ready(project_bucket, "tagrag", topic):
+                status = start_rag_build(project_bucket, "tagrag", topic)
+                return jsonify({
+                    "status": "building",
+                    "message": "正在准备检索资料，请稍后再试",
+                    "data": status,
+                }), 202
+            db_path = ensure_tagrag_db(topic, project_bucket) if project_bucket else None
+            results = retrieve_documents(query=query, topic=topic, top_k=top_k, db_path=str(db_path) if db_path else None)
 
         elif rag_type == "routerrag":
             from src.utils.rag.ragrouter.router_retrieve_data import retrieve_documents
-            results = retrieve_documents(query=query, topic=topic, top_k=top_k)
+            if project_bucket and not ensure_rag_ready(project_bucket, "routerrag", topic):
+                status = start_rag_build(project_bucket, "routerrag", topic)
+                return jsonify({
+                    "status": "building",
+                    "message": "正在准备检索资料，请稍后再试",
+                    "data": status,
+                }), 202
+            base_path = ensure_routerrag_db(topic, project_bucket) if project_bucket else None
+            results = retrieve_documents(query=query, topic=topic, top_k=top_k, db_base_path=base_path)
 
         elif rag_type == "hybrid":
             # Combine results from both systems
@@ -2591,8 +2722,26 @@ def universal_rag_retrieve():
                 from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents as tagrag_retrieve
                 from src.utils.rag.ragrouter.router_retrieve_data import retrieve_documents as router_retrieve
 
-                tagrag_results = tagrag_retrieve(query=query, topic=topic, top_k=top_k // 2)
-                router_results = router_retrieve(query=query, topic=topic, top_k=top_k // 2)
+                if project_bucket:
+                    if not ensure_rag_ready(project_bucket, "tagrag", topic):
+                        status = start_rag_build(project_bucket, "tagrag", topic)
+                        return jsonify({
+                            "status": "building",
+                            "message": "正在准备检索资料，请稍后再试",
+                            "data": status,
+                        }), 202
+                    if not ensure_rag_ready(project_bucket, "routerrag", topic):
+                        status = start_rag_build(project_bucket, "routerrag", topic)
+                        return jsonify({
+                            "status": "building",
+                            "message": "正在准备检索资料，请稍后再试",
+                            "data": status,
+                        }), 202
+
+                tag_db_path = ensure_tagrag_db(topic, project_bucket) if project_bucket else None
+                router_base_path = ensure_routerrag_db(topic, project_bucket) if project_bucket else None
+                tagrag_results = tagrag_retrieve(query=query, topic=topic, top_k=top_k // 2, db_path=str(tag_db_path) if tag_db_path else None)
+                router_results = router_retrieve(query=query, topic=topic, top_k=top_k // 2, db_base_path=router_base_path)
 
                 # Combine and deduplicate
                 results = tagrag_results + router_results
@@ -2602,7 +2751,7 @@ def universal_rag_retrieve():
                 from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents
                 results = retrieve_documents(query=query, topic=topic, top_k=top_k)
 
-        return success({"results": results, "total": len(results), "rag_type": rag_type})
+        return success({"data": {"results": results, "total": len(results), "rag_type": rag_type}})
     except Exception as exc:
         LOGGER.exception("Failed to retrieve documents")
         return error(f"检索失败: {str(exc)}")

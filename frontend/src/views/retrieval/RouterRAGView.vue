@@ -260,6 +260,7 @@
         <p class="mt-2 text-sm text-secondary">请尝试调整查询关键词、选择不同的专题或降低相似度阈值</p>
       </div>
     </section>
+    <RagCacheToast :state="ragCacheState" />
   </div>
 </template>
 
@@ -267,12 +268,14 @@
 import { computed, onMounted } from 'vue'
 import { ArrowPathIcon } from '@heroicons/vue/24/outline'
 import { useRAGTopics } from '../../composables/useRAGTopics'
+import RagCacheToast from '../../components/rag/RagCacheToast.vue'
 
 const {
   ragTopicsState,
   ragTopicOptions,
   ragSearchForm,
   ragRetrievalState,
+  ragCacheState,
   loadRAGTopics,
   retrieveRouterRAG,
   retrieveTagRAG

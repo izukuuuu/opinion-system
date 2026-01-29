@@ -47,19 +47,20 @@ from ..utils.io.excel import read_csv
 TARGET_TOPICS = 8  # 大模型合并后的目标主题数
 LLM_MODEL_NAME = "qwen-plus"
 
-def _default_paths(topic: str, start_date: str, end_date: str = None) -> Dict[str, Path]:
+def _default_paths(topic: str, start_date: str, end_date: str = None, bucket_topic: Optional[str] = None) -> Dict[str, Path]:
     project_root = get_project_root()
     configs_root = project_root / "configs"
+    storage_topic = bucket_topic or topic
     # 使用fetch目录，与analyze模块一致
     if end_date:
         folder_name = f"{start_date}_{end_date}"
     else:
         folder_name = start_date
-    fetch_dir = bucket("fetch", topic, folder_name)
+    fetch_dir = bucket("fetch", storage_topic, folder_name)
     userdict = configs_root / "userdict.txt"  # 可选：用户词典，使用项目统一配置
     stopwords = configs_root / "stopwords.txt"  # 使用项目统一配置
     # 输出路径使用相同的日期范围格式
-    out_analyze = bucket("topic", topic, folder_name)  # 输出到data/topic/{topic}/{date_range}/
+    out_analyze = bucket("topic", storage_topic, folder_name)  # 输出到data/topic/{topic}/{date_range}/
     return {
         "fetch_dir": fetch_dir,
         "userdict": userdict,
@@ -616,13 +617,16 @@ def _load_prompt(file_path: str, prompt_key: str, logger) -> Optional[Dict[str, 
 
 def run_topic_bertopic(topic: str, start_date: str, end_date: str = None,
                        fetch_dir: Optional[str] = None,
-                       userdict: Optional[str] = None, stopwords: Optional[str] = None) -> bool:
+                       userdict: Optional[str] = None, stopwords: Optional[str] = None,
+                       bucket_topic: Optional[str] = None, display_topic: Optional[str] = None) -> bool:
     # 使用日期范围格式作为日志标识
     date_range = f"{start_date}_{end_date}" if end_date else start_date
-    logger = setup_logger(topic, date_range)
+    topic_label = display_topic or topic
+    storage_topic = bucket_topic or topic
+    logger = setup_logger(topic_label, date_range)
     log_module_start(logger, "TopicBertopic")
 
-    paths = _default_paths(topic, start_date, end_date)
+    paths = _default_paths(storage_topic, start_date, end_date, bucket_topic=storage_topic)
     fetch_path = Path(fetch_dir) if fetch_dir else paths["fetch_dir"]
     userdict_path = Path(userdict) if userdict else paths["userdict"]
     stopwords_path = Path(stopwords) if stopwords else paths["stopwords"]
@@ -673,12 +677,11 @@ def run_topic_bertopic(topic: str, start_date: str, end_date: str = None,
 
         # 大模型再聚类，生成第4、5个JSON
         import asyncio
-        asyncio.run(_generate_reclustered_json(stats_json, topic, out_analyze, logger))
+        asyncio.run(_generate_reclustered_json(stats_json, topic_label, out_analyze, logger))
 
         log_success(logger, "主题分析完成", "TopicBertopic")
         return True
     except Exception as e:
         log_error(logger, f"异常: {e}", "TopicBertopic")
         return False
-
 

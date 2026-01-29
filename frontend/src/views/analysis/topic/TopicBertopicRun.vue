@@ -250,6 +250,7 @@ onMounted(() => {
 watch(
   activeProjectName,
   (value) => {
+    form.project = value || ''
     if (value && !form.topic) {
       // 查找匹配的专题
       const matched = topicOptions.value.find(t =>
@@ -635,4 +636,3 @@ const handleTopicChange = () => {
   background: rgba(255, 255, 255, 0.3);
 }
 </style>
-

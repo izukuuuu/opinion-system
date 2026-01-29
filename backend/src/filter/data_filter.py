@@ -26,6 +26,10 @@ from ..utils.setting.settings import settings
 # Path(__file__).resolve() -> .../backend/src/filter/data_filter.py
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
+# 进度文件缓存目录
+PROGRESS_CACHE_DIR = Path(__file__).parent / "cache"
+PROGRESS_CACHE_DIR.mkdir(exist_ok=True)
+
 
 def _current_timestamp() -> str:
     """Return ISO 8601 timestamp in UTC."""
@@ -44,7 +48,7 @@ def _load_progress(topic: str, date: str, channel: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: 进度记录
     """
-    progress_file = Path(__file__).parent / f"{topic}_{date}_{channel}_progress.json"
+    progress_file = PROGRESS_CACHE_DIR / f"{topic}_{date}_{channel}_progress.json"
     if progress_file.exists():
         try:
             with open(progress_file, "r", encoding="utf-8") as f:
@@ -75,7 +79,7 @@ def _save_progress(topic: str, date: str, channel: str, progress: Dict[str, Any]
         progress (Dict[str, Any]): 进度记录
     """
     try:
-        progress_file = Path(__file__).parent / f"{topic}_{date}_{channel}_progress.json"
+        progress_file = PROGRESS_CACHE_DIR / f"{topic}_{date}_{channel}_progress.json"
         with open(progress_file, "w", encoding="utf-8") as f:
             json.dump(progress, f, ensure_ascii=False, indent=2)
     except Exception as exc:  # pragma: no cover - 记录失败不影响流程
@@ -138,7 +142,7 @@ def _clear_progress(topic: str, date: str, channel: str) -> None:
         channel (str): 渠道名称
     """
     try:
-        progress_file = Path(__file__).parent / f"{topic}_{date}_{channel}_progress.json"
+        progress_file = PROGRESS_CACHE_DIR / f"{topic}_{date}_{channel}_progress.json"
         if progress_file.exists():
             progress_file.unlink()
     except Exception:

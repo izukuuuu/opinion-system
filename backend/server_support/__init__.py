@@ -25,6 +25,15 @@ from .rag_config import (
     validate_rag_config,
     get_default_rag_config,
 )
+from .rag import (
+    ensure_rag_ready,
+    get_rag_build_status,
+    ensure_routerrag_db,
+    ensure_tagrag_db,
+    list_project_routerrag_topics,
+    list_project_tagrag_topics,
+    start_rag_build,
+)
 from .dataset_files import (
     ensure_raw_dataset_availability,
     iter_unique_strings,
@@ -96,6 +105,14 @@ __all__ = [
     "mask_api_keys",
     "validate_rag_config",
     "get_default_rag_config",
+    # RAG storage helpers
+    "ensure_routerrag_db",
+    "ensure_tagrag_db",
+    "ensure_rag_ready",
+    "get_rag_build_status",
+    "list_project_routerrag_topics",
+    "list_project_tagrag_topics",
+    "start_rag_build",
     # Content analysis prompt helpers
     "content_prompt_path",
     "load_content_prompt_config",

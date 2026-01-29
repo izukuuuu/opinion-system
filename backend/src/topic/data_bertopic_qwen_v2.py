@@ -47,10 +47,12 @@ TARGET_TOPICS = 8  # 大模型合并后的目标主题数
 LLM_MODEL_NAME = "qwen-plus"
 
 
-def _default_paths(topic: str, start_date: str, end_date: str = None) -> Dict[str, Path]:
+def _default_paths(topic: str, start_date: str, end_date: str = None, bucket_topic: Optional[str] = None) -> Dict[str, Path]:
     """获取默认路径配置"""
     project_root = get_project_root()
     configs_root = project_root / "configs"
+
+    storage_topic = bucket_topic or topic
 
     # 使用与analyze相同的日期范围格式
     if end_date:
@@ -58,10 +60,10 @@ def _default_paths(topic: str, start_date: str, end_date: str = None) -> Dict[st
     else:
         folder_name = start_date
 
-    fetch_dir = bucket("fetch", topic, folder_name)
+    fetch_dir = bucket("fetch", storage_topic, folder_name)
     userdict = configs_root / "userdict.txt"
     stopwords = configs_root / "stopwords.txt"
-    out_analyze = bucket("topic", topic, folder_name)
+    out_analyze = bucket("topic", storage_topic, folder_name)
 
     return {
         "fetch_dir": fetch_dir,
@@ -71,14 +73,17 @@ def _default_paths(topic: str, start_date: str, end_date: str = None) -> Dict[st
     }
 
 
-def _ensure_fetch_data(topic: str, start_date: str, end_date: str, logger) -> bool:
+def _ensure_fetch_data(topic: str, start_date: str, end_date: str, logger, bucket_topic: Optional[str] = None, db_topic: Optional[str] = None) -> bool:
     """
     确保fetch数据存在，如果不存在则触发fetch流程
     """
     from ..fetch.data_fetch import fetch_range
 
+    storage_topic = bucket_topic or topic
+    db_name = db_topic or topic
+
     # 检查fetch缓存是否已存在
-    paths = _default_paths(topic, start_date, end_date)
+    paths = _default_paths(storage_topic, start_date, end_date, bucket_topic=storage_topic)
     fetch_dir = paths["fetch_dir"]
 
     if fetch_dir.exists() and (fetch_dir / "总体.jsonl").exists():
@@ -86,7 +91,12 @@ def _ensure_fetch_data(topic: str, start_date: str, end_date: str, logger) -> bo
         return True
 
     # 检查数据可用性
-    avail_start, avail_end = get_topic_available_date_range(topic)
+    availability = get_topic_available_date_range(db_name)
+    if isinstance(availability, dict):
+        avail_start = availability.get("start")
+        avail_end = availability.get("end")
+    else:
+        avail_start, avail_end = availability
     if avail_start and avail_end:
         req_start = pd.to_datetime(start_date).date()
         req_end = pd.to_datetime(end_date).date()
@@ -102,9 +112,9 @@ def _ensure_fetch_data(topic: str, start_date: str, end_date: str, logger) -> bo
             return False
 
     # 执行fetch
-    log_success(logger, f"开始拉取数据: {topic} {start_date}~{end_date}", "TopicBertopic")
+    log_success(logger, f"开始拉取数据: {db_name} {start_date}~{end_date}", "TopicBertopic")
     output_date = f"{start_date}_{end_date}" if end_date else start_date
-    success = fetch_range(topic, start_date, end_date, output_date, logger)
+    success = fetch_range(storage_topic, start_date, end_date, output_date, logger, db_topic=db_name)
 
     if success:
         log_success(logger, f"数据拉取完成", "TopicBertopic")
@@ -498,7 +508,10 @@ def run_topic_bertopic(
     end_date: str = None,
     fetch_dir: str = None,
     userdict: str = None,
-    stopwords: str = None
+    stopwords: str = None,
+    bucket_topic: str = None,
+    db_topic: str = None,
+    display_topic: str = None,
 ) -> bool:
     """
     运行BERTopic主题分析主函数
@@ -514,8 +527,12 @@ def run_topic_bertopic(
     Returns:
         bool: 是否成功
     """
+    storage_topic = bucket_topic or topic
+    db_name = db_topic or topic
+    topic_label = display_topic or topic
+
     logger = setup_logger("topic_bertopic")
-    log_module_start(logger, f"BERTopic主题分析: {topic} {start_date}~{end_date or start_date}")
+    log_module_start(logger, f"BERTopic主题分析: {topic_label} {start_date}~{end_date or start_date}")
 
     try:
         # 处理参数
@@ -525,16 +542,16 @@ def run_topic_bertopic(
         # 确保数据已拉取
         if not fetch_dir:
             # 自动fetch数据
-            if not _ensure_fetch_data(topic, start_date, end_date, logger):
+            if not _ensure_fetch_data(db_name, start_date, end_date, logger, bucket_topic=storage_topic, db_topic=db_name):
                 return False
-            paths = _default_paths(topic, start_date, end_date)
+            paths = _default_paths(storage_topic, start_date, end_date, bucket_topic=storage_topic)
         else:
             # 使用指定的fetch目录
             fetch_path = Path(fetch_dir)
             if not fetch_path.exists():
                 log_error(logger, f"指定的fetch目录不存在: {fetch_dir}", "TopicBertopic")
                 return False
-            paths = _default_paths(topic, start_date, end_date)
+            paths = _default_paths(storage_topic, start_date, end_date, bucket_topic=storage_topic)
             paths["fetch_dir"] = fetch_path
 
         # 加载词典
@@ -584,7 +601,7 @@ def run_topic_bertopic(
         # 运行BERTopic分析
         success = _run_bertopic(
             processed_texts,
-            topic,
+            topic_label,
             start_date,
             end_date,
             output_dir,

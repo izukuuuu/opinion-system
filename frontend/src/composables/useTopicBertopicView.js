@@ -14,6 +14,7 @@ const topicOptions = computed(() => topicsState.options)
 
 const viewSelection = reactive({
   topic: '',
+  project: '',
   start: '',
   end: ''
 })
@@ -157,7 +158,7 @@ const loadTopics = async (onlyWithData = false) => {
 }
 
 // 加载分析历史
-const loadHistory = async (topic) => {
+const loadHistory = async (topic, projectOverride = '') => {
   historyState.loading = true
   historyState.error = ''
 
@@ -169,10 +170,15 @@ const loadHistory = async (topic) => {
   }
 
   historyState.topic = trimmed
+  const project = (projectOverride || viewSelection.project || '').trim()
+  const archiveTopic = project || trimmed
 
   try {
     // 先从analyze API获取历史
-    const params = new URLSearchParams({ topic })
+    const params = new URLSearchParams({ topic: trimmed })
+    if (project) {
+      params.set('project', project)
+    }
     const response = await callApi(`/api/analyze/history?${params.toString()}`, {
       method: 'GET'
     })
@@ -184,7 +190,7 @@ const loadHistory = async (topic) => {
     }
 
     // 如果没有，从archives获取
-    const encodedTopic = encodeURIComponent(topic)
+    const encodedTopic = encodeURIComponent(archiveTopic)
     const archiveResponse = await callApi(`/api/projects/${encodedTopic}/archives?layers=analyze`, {
       method: 'GET'
     })
@@ -199,7 +205,7 @@ const loadHistory = async (topic) => {
   } catch (primaryError) {
     try {
       // 降级到archives
-      const encodedTopic = encodeURIComponent(topic)
+      const encodedTopic = encodeURIComponent(archiveTopic)
       const archiveResponse = await callApi(`/api/projects/${encodedTopic}/archives?layers=analyze`, {
         method: 'GET'
       })
@@ -225,6 +231,7 @@ const loadHistory = async (topic) => {
 const loadResults = async (range) => {
   const targetRange = range ? range : viewSelection
   const { topic, start, end } = targetRange
+  const project = (targetRange?.project || viewSelection.project || '').trim()
 
   if (!topic || !start) {
     loadState.error = '请选择专题和时间范围'
@@ -238,6 +245,9 @@ const loadResults = async (range) => {
 
   try {
     const params = new URLSearchParams({ topic, start })
+    if (project) {
+      params.set('project', project)
+    }
     if (end) params.set('end', end)
 
     const response = await callApi(`/api/analysis/topic/bertopic/results?${params.toString()}`, {
@@ -257,7 +267,7 @@ const loadResults = async (range) => {
       lastLoaded.value = new Date().toLocaleString()
       viewManualForm.topic = bertopicData.value.topic
       viewManualForm.start = bertopicData.value.range.start || start
-      viewManualForm.end = bertopic.value.range.end || end
+      viewManualForm.end = bertopicData.value.range.end || end
     }
   } catch (error) {
     loadState.error = error instanceof Error ? error.message : String(error)
@@ -293,7 +303,8 @@ const loadResultsFromManual = async () => {
       topicOptions.value[0] ||
       '',
     start: viewManualForm.start,
-    end: viewManualForm.end
+    end: viewManualForm.end,
+    project: viewSelection.project
   }
 
   const range = manualRange
@@ -344,7 +355,7 @@ function initializeStore() {
     () => viewSelection.topic,
     (topic) => {
       if (topic) {
-        loadHistory(topic)
+        loadHistory(topic, viewSelection.project)
       }
     }
   )

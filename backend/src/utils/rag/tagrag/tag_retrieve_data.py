@@ -339,3 +339,47 @@ def tag_retrieve(query: str,
             "error": str(e),
             "results": []
         }
+
+
+def retrieve_documents(
+    query: str,
+    topic: str,
+    top_k: int = 10,
+    threshold: float = 0.0,
+    search_column: str = "tag_vec",
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Adapter for API usage. Returns a flat list of results with `text` and `score`
+    to align with frontend expectations.
+    """
+    logger = setup_logger(f"TagRAG_{topic}", "default")
+
+    try:
+        retriever = Retriever(topic_name=topic, db_path=db_path, logger=logger)
+        raw_results = retriever.retrieve(
+            query=query,
+            top_k=top_k,
+            search_column=search_column,
+            min_similarity=threshold,
+            return_columns=None
+        )
+
+        results: List[Dict[str, Any]] = []
+        for item in raw_results:
+            data = item.get("data") or {}
+            score = float(item.get("similarity", 0.0))
+            metadata = {
+                k: v for k, v in data.items()
+                if k not in {"id", "text", "tag_vec", "text_vec"}
+            }
+            results.append({
+                "id": data.get("id"),
+                "text": data.get("text", ""),
+                "score": score,
+                "metadata": metadata,
+            })
+        return results
+    except Exception as e:
+        log_error(logger, f"API retrieve failed: {e}", "TagRetrieve")
+        return []
