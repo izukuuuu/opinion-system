@@ -1,271 +1,241 @@
 <template>
-  <div class="space-y-10">
-    <!-- Header -->
-    <section class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-500 to-brand-700 px-6 py-10 text-white sm:px-10">
-      <div class="absolute inset-0 opacity-40">
-        <div class="absolute -top-28 left-1/3 h-72 w-72 -translate-x-1/2 rounded-full bg-white/25 blur-3xl"></div>
-        <div class="absolute bottom-0 right-10 h-56 w-56 rounded-full bg-brand-200/80 blur-3xl"></div>
+  <div class="min-h-screen pb-20">
+    <main class="mx-auto max-w-4xl px-6 pt-8">
+      <div class="mb-6 flex justify-end">
+        <button
+          @click="showManageModal = true"
+          class="group flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:border-brand-300 hover:text-brand-600 active:bg-gray-50"
+        >
+          <svg class="h-4 w-4 text-gray-400 transition group-hover:text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <span>库管理</span>
+        </button>
       </div>
-      <div class="relative space-y-6">
-        <div class="space-y-4">
-          <p class="text-sm font-semibold uppercase tracking-[0.4em] text-white/70">RAG 检索</p>
-          <h1 class="text-3xl font-semibold sm:text-4xl">TagRAG 检索</h1>
-        </div>
 
-        <div class="space-y-4">
-          <p class="text-sm text-white/90">
-            基于标签向量的智能文档检索系统，通过语义相似度快速定位相关内容。
-          </p>
+      <!-- 2. 搜索核心区：聚焦、简洁 -->
+      <section class="mb-10 text-center">
+        <h2 class="mb-5 text-2xl font-extrabold text-gray-900 sm:text-3xl">
+          你想查找什么内容？
+        </h2>
 
-          <div>
-            <p class="mb-2 text-sm font-semibold text-white">功能特点</p>
-            <p class="text-sm leading-relaxed text-white/80">
-              支持语义搜索、相似度评分、结果导出等功能，帮助您快速从海量文档中找到所需信息。
-            </p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Search Form -->
-    <section class="card-surface space-y-6 p-6">
-      <header class="space-y-2">
-        <h2 class="text-2xl font-semibold text-primary">检索设置</h2>
-        <p class="text-sm text-secondary">配置检索参数并执行搜索</p>
-      </header>
-
-      <form class="space-y-5 text-sm" @submit.prevent="handleSearch">
-        <div class="grid gap-4 md:grid-cols-3">
-          <!-- Query Input -->
-          <div class="md:col-span-2 space-y-2">
-            <label class="text-xs font-semibold text-muted">检索查询 *</label>
-            <div class="relative">
-              <input
-                v-model="ragSearchForm.query"
-                type="text"
-                placeholder="输入要检索的关键词或句子..."
-                class="input w-full"
+        <form @submit.prevent="handleSearch" class="relative mx-auto max-w-2xl">
+          <!-- 搜索框主体 -->
+          <div class="group relative flex items-center overflow-hidden rounded-2xl bg-white p-2 shadow-xl shadow-brand-500/5 ring-1 ring-black/5 transition focus-within:ring-2 focus-within:ring-brand-500">
+            <!-- 专题选择 (作为前置过滤器) -->
+            <div class="relative flex items-center border-r border-gray-100 pr-2">
+              <select
+                v-model="ragSearchForm.topic"
+                class="h-full w-32 cursor-pointer appearance-none rounded-xl border-none bg-transparent py-3 pl-4 pr-8 text-sm font-medium text-gray-700 focus:ring-0"
                 required
-              />
-              <svg class="absolute right-3 top-3 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              >
+                <option value="" disabled>选择专题</option>
+                <option v-for="topic in tagragTopicOptions" :key="topic" :value="topic">{{ topic }}</option>
+              </select>
+              <svg class="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </div>
-          </div>
 
-          <!-- Topic Selection -->
-          <div class="space-y-2">
-            <div class="flex items-center justify-between gap-2">
-              <label class="text-xs font-semibold text-muted">选择专题 *</label>
-              <div class="flex items-center gap-2">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
-                  :disabled="ragTopicsState.loading"
-                  @click="loadTopics"
-                >
-                  <ArrowPathIcon
-                    class="h-3 w-3"
-                    :class="ragTopicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
-                  />
-                  <span>{{ ragTopicsState.loading ? '刷新中…' : '刷新专题' }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="text-[11px] font-medium text-brand-600 hover:text-brand-700"
-                  @click="toggleBuildPanel"
-                >
-                  生成检索库
-                </button>
-              </div>
-            </div>
-            <select
-              v-model="ragSearchForm.topic"
-              class="input"
-              :disabled="ragTopicsState.loading || !tagragTopicOptions.length"
+            <!-- 输入框 -->
+            <input
+              v-model="ragSearchForm.query"
+              type="text"
+              class="flex-1 border-none bg-transparent px-4 py-3 text-lg text-gray-900 placeholder-gray-400 focus:ring-0"
+              placeholder="输入关键词，例如：'数据安全规范'..."
               required
+            />
+
+            <!-- 搜索按钮 -->
+            <button
+              type="submit"
+              :disabled="ragRetrievalState.loading || !ragSearchForm.query || !ragSearchForm.topic"
+              class="ml-2 rounded-xl bg-brand-600 px-6 py-3 font-semibold text-white shadow-md transition hover:bg-brand-700 hover:shadow-lg disabled:cursor-not-allowed disabled:bg-gray-300 disabled:shadow-none"
             >
-              <option value="" disabled>请选择专题</option>
-              <option v-for="topic in tagragTopicOptions" :key="topic" :value="topic">
-                {{ topic }}
-              </option>
-            </select>
-            <p class="text-xs text-muted">
-              <span v-if="ragTopicsState.loading">正在读取专题列表…</span>
-              <span v-else-if="ragTopicsState.error" class="text-danger">{{ ragTopicsState.error }}</span>
-              <span v-else>选择要检索的专题数据</span>
-            </p>
-            <div v-if="buildPanelVisible" class="rounded-xl border border-brand-100 bg-brand-50/50 p-4 text-xs text-muted">
-              <div class="flex items-center justify-between gap-2">
-                <span class="font-semibold text-brand-700">从远程专题生成本地检索库</span>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
-                  :disabled="remoteTopicsState.loading"
-                  @click="refreshRemoteTopics"
-                >
-                  <ArrowPathIcon
-                    class="h-3 w-3"
-                    :class="remoteTopicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
-                  />
-                  <span>{{ remoteTopicsState.loading ? '刷新中…' : '刷新远程' }}</span>
-                </button>
-              </div>
-              <div class="mt-3 grid gap-3 md:grid-cols-3">
-                <select
-                  v-model="ragBuildForm.topic"
-                  class="input"
-                  :disabled="remoteTopicsState.loading || !remoteTopicOptions.length"
-                >
-                  <option value="" disabled>请选择远程专题</option>
-                  <option v-for="topic in remoteTopicOptions" :key="`tagrag-build-${topic}`" :value="topic">
-                    {{ topic }}
-                  </option>
-                </select>
-                <button
-                  type="button"
-                  class="btn-secondary"
-                  :disabled="ragBuildState.loading || !ragBuildForm.topic"
-                  @click="handleBuild"
-                >
-                  {{ ragBuildState.loading ? '准备中…' : '开始准备' }}
-                </button>
-              </div>
-              <p class="mt-2">同步远程专题内容到当前项目，并建立本地检索索引。</p>
-              <p v-if="remoteTopicsState.error" class="mt-1 text-danger">{{ remoteTopicsState.error }}</p>
-              <p v-if="ragBuildState.error" class="mt-1 text-danger">{{ ragBuildState.error }}</p>
-            </div>
+              <svg v-if="ragRetrievalState.loading" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span v-else>搜索</span>
+            </button>
           </div>
-        </div>
 
-        <!-- Advanced Options -->
-        <details class="group">
-          <summary class="cursor-pointer text-xs font-medium text-muted hover:text-primary">
-            高级选项
-          </summary>
-          <div class="mt-4 grid gap-4 md:grid-cols-2">
-            <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted">返回数量 (Top-K)</label>
-              <input
-                v-model.number="ragSearchForm.top_k"
-                type="number"
-                min="1"
-                max="50"
-                class="input"
-              />
-            </div>
-            <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted">相似度阈值</label>
-              <div class="flex items-center gap-3">
-                <input
-                  v-model.number="ragSearchForm.threshold"
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  class="flex-1"
-                />
-                <span class="w-12 text-xs font-medium text-primary">
-                  {{ ragSearchForm.threshold.toFixed(2) }}
-                </span>
-              </div>
-            </div>
+          <!-- 高级选项 (更优雅的展开方式) -->
+          <div class="mt-4 flex flex-wrap items-center justify-center gap-6 text-sm text-gray-500">
+            <label class="flex items-center gap-2">
+              <span class="text-xs font-medium">相似度阈值: {{ ragSearchForm.threshold }}</span>
+              <input v-model.number="ragSearchForm.threshold" type="range" min="0" max="1" step="0.05" class="h-1.5 w-24 cursor-pointer appearance-none rounded-lg bg-gray-200 accent-brand-600" />
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="text-xs font-medium">Top-K:</span>
+              <input v-model.number="ragSearchForm.top_k" type="number" min="1" max="20" class="w-12 rounded-md border-gray-300 py-0.5 text-center text-xs focus:border-brand-500 focus:ring-brand-500" />
+            </label>
           </div>
-        </details>
+        </form>
 
-        <!-- Error Message -->
-        <p v-if="ragRetrievalState.error" class="rounded-xl border border-red-200 bg-red-50/70 p-4 text-sm text-red-700">
+        <!-- 错误提示 -->
+        <div v-if="ragRetrievalState.error" class="mx-auto mt-4 max-w-lg rounded-lg bg-red-50 p-3 text-sm text-red-600">
           {{ ragRetrievalState.error }}
-        </p>
+        </div>
+      </section>
 
-        <!-- Submit Button -->
-        <div class="flex justify-between">
-          <div class="flex items-center gap-4 text-xs text-muted">
-            <span>TagRAG 向量检索</span>
+      <!-- 3. 结果展示区：卡片式布局 -->
+      <section v-if="ragRetrievalState.results.length > 0" class="animate-fade-in-up space-y-6">
+        <div class="flex items-end justify-between border-b border-gray-200 pb-2">
+          <div>
+            <h3 class="text-lg font-bold text-gray-900">检索结果</h3>
+            <p class="text-sm text-gray-500">找到 {{ ragRetrievalState.total }} 条相关片段</p>
           </div>
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="ragRetrievalState.loading || !ragSearchForm.query || !ragSearchForm.topic"
-          >
-            {{ ragRetrievalState.loading ? '检索中…' : '开始检索' }}
+          <button @click="exportResults" class="text-sm font-medium text-brand-600 hover:text-brand-800 hover:underline">
+            导出 CSV
           </button>
         </div>
-      </form>
-    </section>
 
-    <!-- Results -->
-    <section v-if="ragRetrievalState.results.length > 0" class="space-y-6">
-      <header class="flex items-center justify-between">
-        <div>
-          <h2 class="text-2xl font-semibold text-primary">检索结果</h2>
-          <p class="text-sm text-secondary">
-            共找到 {{ ragRetrievalState.total }} 条相关文档
-          </p>
-        </div>
-        <button
-          @click="exportResults"
-          class="btn-secondary"
-        >
-          导出结果
-        </button>
-      </header>
+        <div class="grid gap-4">
+          <div
+            v-for="(result, index) in ragRetrievalState.results"
+            :key="index"
+            class="relative overflow-hidden rounded-xl border border-gray-100 bg-white p-5 shadow-sm"
+          >
+            <!-- 相似度指示条 -->
+            <div
+              class="absolute left-0 top-0 h-full w-1"
+              :class="getScoreColorClass(result.score)"
+            ></div>
 
-      <div class="space-y-4">
-        <div
-          v-for="(result, index) in ragRetrievalState.results"
-          :key="index"
-          class="card-surface group relative overflow-hidden"
-        >
-          <div class="p-6">
             <div class="mb-3 flex items-start justify-between">
-              <div class="flex items-center gap-3">
-                <span class="rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
-                  #{{ index + 1 }}
-                </span>
-                <span :class="getScoreClass(result.score)" class="rounded-full px-3 py-1 text-xs font-medium">
-                  相似度: {{ (result.score * 100).toFixed(1) }}%
-                </span>
-              </div>
-              <div class="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
-                <button
-                  @click="copyText(result.text)"
-                  class="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                  title="复制文本"
+              <div class="flex items-center gap-2">
+                <span class="flex h-6 w-6 items-center justify-center rounded bg-gray-100 text-xs font-bold text-gray-500">#{{ index + 1 }}</span>
+                <span
+                  class="rounded-full px-2 py-0.5 text-xs font-bold"
+                  :class="getScoreBadgeClass(result.score)"
                 >
-                  <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                </button>
+                  匹配度: {{ (result.score * 100).toFixed(1) }}%
+                </span>
               </div>
+
+              <!-- 快捷操作 -->
+              <button
+                @click="copyText(result.text)"
+                class="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                title="复制内容"
+              >
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
             </div>
 
-            <div class="mb-3">
-              <h3 class="font-medium text-primary mb-2">文档内容</h3>
-              <p class="text-sm text-secondary leading-relaxed">{{ result.text }}</p>
+            <!-- 核心文本 -->
+            <div class="prose prose-sm max-w-none text-gray-700">
+              <p class="leading-relaxed">{{ result.text }}</p>
             </div>
 
-            <div v-if="result.metadata && Object.keys(result.metadata).length > 0" class="border-t pt-3">
-              <details class="cursor-pointer">
-                <summary class="text-xs font-medium text-muted">元数据信息</summary>
-                <pre class="mt-2 overflow-x-auto text-xs text-muted">{{ JSON.stringify(result.metadata, null, 2) }}</pre>
+            <!-- 元数据 (折叠式) -->
+            <div v-if="result.metadata && Object.keys(result.metadata).length" class="mt-4 border-t border-gray-50 pt-3">
+              <details class="group/meta">
+                <summary class="flex cursor-pointer items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600">
+                  <svg class="h-3 w-3 transition group-open/meta:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                  显示元数据来源
+                </summary>
+                <div class="mt-2 grid grid-cols-2 gap-2 rounded bg-gray-50 p-2 text-xs text-gray-500">
+                  <div v-for="(val, key) in result.metadata" :key="key" class="truncate">
+                    <span class="font-semibold text-gray-400">{{ key }}:</span> {{ val }}
+                  </div>
+                </div>
               </details>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- No Results -->
-    <section v-else-if="hasSearched && !ragRetrievalState.loading" class="card-surface">
-      <div class="py-12 text-center">
-        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <h3 class="mt-4 text-lg font-medium text-primary">未找到相关文档</h3>
-        <p class="mt-2 text-sm text-secondary">请尝试调整查询关键词或降低相似度阈值</p>
+      <!-- 空状态 -->
+      <div v-else-if="hasSearched && !ragRetrievalState.loading" class="mt-12 flex flex-col items-center justify-center text-center">
+        <div class="flex h-20 w-20 items-center justify-center rounded-full bg-gray-50">
+          <svg class="h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <h3 class="mt-4 text-lg font-medium text-gray-900">未找到相关内容</h3>
+        <p class="mt-2 max-w-sm text-sm text-gray-500">建议尝试降低相似度阈值，或更换更通用的关键词重新检索。</p>
       </div>
-    </section>
+    </main>
+
+    <!-- 4. 模态框：库管理 (将原本混乱的 Build Panel 移到这里) -->
+    <div v-if="showManageModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div class="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div class="border-b border-gray-100 bg-gray-50/50 px-6 py-4 flex justify-between items-center">
+          <h3 class="text-lg font-semibold text-gray-900">检索库管理</h3>
+          <button @click="showManageModal = false" class="text-gray-400 hover:text-gray-600">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="p-6 space-y-6">
+          <!-- 刷新当前库 -->
+          <div>
+            <label class="mb-2 block text-sm font-medium text-gray-700">现有专题库状态</label>
+            <div class="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+              <span class="text-sm text-gray-600">
+                当前可用专题: <span class="font-bold text-gray-900">{{ tagragTopicOptions.length }}</span> 个
+              </span>
+              <button
+                @click="loadTopics"
+                :disabled="ragTopicsState.loading"
+                class="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+              >
+                <ArrowPathIcon class="h-3 w-3" :class="{'animate-spin': ragTopicsState.loading}"/>
+                {{ ragTopicsState.loading ? '同步中' : '同步列表' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 生成新库 -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <label class="block text-sm font-medium text-gray-700">从远程数据构建新库</label>
+              <button
+                @click="refreshRemoteTopics"
+                :disabled="remoteTopicsState.loading"
+                class="text-xs text-brand-600 hover:underline"
+              >
+                {{ remoteTopicsState.loading ? '加载源数据...' : '刷新源数据' }}
+              </button>
+            </div>
+
+            <div class="space-y-3 rounded-xl bg-blue-50/50 p-4 border border-blue-100">
+              <select
+                v-model="ragBuildForm.topic"
+                class="w-full rounded-lg border-gray-300 text-sm focus:border-brand-500 focus:ring-brand-500"
+                :disabled="remoteTopicsState.loading"
+              >
+                <option value="" disabled>选择远程数据源...</option>
+                <option v-for="topic in remoteTopicOptions" :key="`remote-${topic}`" :value="topic">
+                  {{ topic }}
+                </option>
+              </select>
+
+              <button
+                @click="handleBuild"
+                :disabled="ragBuildState.loading || !ragBuildForm.topic"
+                class="w-full rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+              >
+                {{ ragBuildState.loading ? '正在构建索引 (耗时较长)...' : '开始构建索引' }}
+              </button>
+            </div>
+
+            <p v-if="ragBuildState.error" class="mt-2 text-xs text-red-600">{{ ragBuildState.error }}</p>
+            <p class="mt-2 text-xs text-gray-400">注意：构建索引可能需要几分钟时间，构建完成后需刷新列表。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <RagCacheToast :state="ragCacheState" />
   </div>
 </template>
@@ -293,8 +263,7 @@ const {
 } = useRAGTopics()
 
 const hasSearched = computed(() => ragRetrievalState.error !== '' || ragRetrievalState.results.length > 0)
-const showBuildPanel = ref(false)
-const buildPanelVisible = computed(() => showBuildPanel.value || tagragTopicOptions.value.length === 0)
+const showManageModal = ref(false)
 
 // Methods
 const loadTopics = async () => {
@@ -305,47 +274,47 @@ const refreshRemoteTopics = async () => {
   await loadRemoteTopics()
 }
 
-const toggleBuildPanel = () => {
-  showBuildPanel.value = !showBuildPanel.value
-  if (showBuildPanel.value && !remoteTopicOptions.value.length) {
-    loadRemoteTopics()
-  }
-}
-
 const handleBuild = async () => {
   try {
     await buildRagTopic({ type: 'tagrag' })
   } catch (error) {
-    // Error is already handled in the composable
+    // Error handled in composable
   }
 }
 
 const handleSearch = async () => {
   if (!ragSearchForm.query || !ragSearchForm.topic) {
-    ragRetrievalState.error = '请填写查询内容和选择专题'
+    ragRetrievalState.error = '请选择专题并输入查询内容'
     return
   }
-
   try {
     await retrieveTagRAG()
   } catch (error) {
-    // Error is already handled in the composable
+    // Error handled
   }
 }
 
-const getScoreClass = (score) => {
-  if (score >= 0.8) return 'bg-green-100 text-green-800'
-  if (score >= 0.6) return 'bg-blue-100 text-blue-800'
-  if (score >= 0.4) return 'bg-yellow-100 text-yellow-800'
-  return 'bg-gray-100 text-gray-800'
+// 辅助样式函数：左侧线条颜色
+const getScoreColorClass = (score) => {
+  if (score >= 0.8) return 'bg-emerald-500'
+  if (score >= 0.6) return 'bg-blue-500'
+  if (score >= 0.4) return 'bg-yellow-500'
+  return 'bg-gray-300'
+}
+
+// 辅助样式函数：Badge 样式
+const getScoreBadgeClass = (score) => {
+  if (score >= 0.8) return 'bg-emerald-100 text-emerald-700'
+  if (score >= 0.6) return 'bg-blue-100 text-blue-700'
+  if (score >= 0.4) return 'bg-yellow-100 text-yellow-700'
+  return 'bg-gray-100 text-gray-600'
 }
 
 const copyText = async (text) => {
   try {
     await navigator.clipboard.writeText(text)
-    alert('已复制到剪贴板')
   } catch (error) {
-    alert('复制失败')
+    // ignore
   }
 }
 
@@ -376,8 +345,26 @@ onMounted(() => {
 })
 
 watch(tagragTopicOptions, (options) => {
-  if (!options.includes(ragSearchForm.topic)) {
-    ragSearchForm.topic = options[0] || ''
+  if (options.length > 0 && !options.includes(ragSearchForm.topic)) {
+    ragSearchForm.topic = options[0]
   }
 })
 </script>
+
+<style scoped>
+/* 简单的淡入动画 */
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+</style>
