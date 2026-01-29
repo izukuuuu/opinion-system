@@ -1,4 +1,4 @@
-import { reactive, ref, computed } from 'vue'
+import { reactive, ref, computed, watch } from 'vue'
 import { useApiBase } from './useApiBase'
 import { useActiveProject } from './useActiveProject'
 
@@ -9,10 +9,22 @@ const { activeProjectName } = useActiveProject()
 const ragTopicsState = reactive({
   loading: false,
   error: '',
-  options: []  // This will hold available RAG topics
+  options: [],  // union of all topics
+  tagrag: [],
+  router: []
 })
 
 const ragTopicOptions = computed(() => ragTopicsState.options)
+const tagragTopicOptions = computed(() => ragTopicsState.tagrag)
+const routerTopicOptions = computed(() => ragTopicsState.router)
+
+const remoteTopicsState = reactive({
+  loading: false,
+  error: '',
+  options: []
+})
+
+const remoteTopicOptions = computed(() => remoteTopicsState.options)
 
 // Search form (mirrors analyzeForm)
 const ragSearchForm = reactive({
@@ -31,6 +43,18 @@ const ragRetrievalState = reactive({
   total: 0
 })
 
+const ragBuildState = reactive({
+  loading: false,
+  error: '',
+  status: '',
+  percent: 0,
+  message: ''
+})
+
+const ragBuildForm = reactive({
+  topic: ''
+})
+
 const ragCacheState = reactive({
   visible: false,
   running: false,
@@ -42,6 +66,7 @@ const ragCacheState = reactive({
 
 let ragCacheTimer = null
 let ragCacheHideTimer = null
+let ragCacheRefreshQueued = false
 
 const stopRagCachePolling = () => {
   if (ragCacheTimer) {
@@ -88,9 +113,21 @@ const pollRagCacheStatus = async (type, topic) => {
   const fetchStatus = async () => {
     const response = await callApi(`/api/rag/cache/status?${params.toString()}`, { method: 'GET' })
     const status = response?.data || {}
+    if (status.status === 'idle') {
+      stopRagCachePolling()
+      ragCacheState.visible = false
+      return
+    }
     updateCacheState({ ...status, type, topic })
     if (status.status === 'done' || status.status === 'error') {
       stopRagCachePolling()
+      if (status.status === 'done' && !ragCacheRefreshQueued) {
+        ragCacheRefreshQueued = true
+        setTimeout(async () => {
+          await loadRAGTopics()
+          ragCacheRefreshQueued = false
+        }, 600)
+      }
     }
   }
 
@@ -111,17 +148,21 @@ const loadRAGTopics = async () => {
     const url = params.toString() ? `/api/rag/topics?${params.toString()}` : '/api/rag/topics'
     const response = await callApi(url, { method: 'GET' })
 
-    // Combine TagRAG and RouterRAG topics
     const tagragTopics = response?.data?.tagrag_topics || []
     const routerTopics = response?.data?.router_topics || []
+    ragTopicsState.tagrag = tagragTopics
+      .map((item) => String(item || '').trim())
+      .filter((name, index, arr) => name && arr.indexOf(name) === index)
+    ragTopicsState.router = routerTopics
+      .map((item) => String(item || '').trim())
+      .filter((name, index, arr) => name && arr.indexOf(name) === index)
+    ragTopicsState.options = [...ragTopicsState.tagrag, ...ragTopicsState.router]
+      .filter((name, index, arr) => name && arr.indexOf(name) === index)
 
-    // All available topics
-    ragTopicsState.options = [...tagragTopics, ...routerTopics]
-
-    // If no current selection, select first available topic
-    if (!ragSearchForm.topic && ragTopicsState.options.length > 0) {
-      ragSearchForm.topic = ragTopicsState.options[0]
+    if (ragSearchForm.topic && !ragTopicsState.options.includes(ragSearchForm.topic)) {
+      ragSearchForm.topic = ''
     }
+
 
     return response
   } catch (error) {
@@ -129,6 +170,74 @@ const loadRAGTopics = async () => {
     throw error
   } finally {
     ragTopicsState.loading = false
+  }
+}
+
+const loadRemoteTopics = async () => {
+  remoteTopicsState.loading = true
+  remoteTopicsState.error = ''
+
+  try {
+    const response = await callApi('/api/query', {
+      method: 'POST',
+      body: JSON.stringify({ include_counts: false })
+    })
+    const databases = response?.data?.databases ?? []
+    remoteTopicsState.options = databases
+      .map((db) => String(db?.name || '').trim())
+      .filter((name, index, arr) => name && arr.indexOf(name) === index)
+    if (!remoteTopicsState.options.includes(ragBuildForm.topic)) {
+      ragBuildForm.topic = remoteTopicsState.options[0] || ''
+    }
+    return response
+  } catch (error) {
+    remoteTopicsState.error = error.message || '加载远程专题失败'
+    remoteTopicsState.options = []
+    ragBuildForm.topic = ''
+    throw error
+  } finally {
+    remoteTopicsState.loading = false
+  }
+}
+
+const buildRagTopic = async (params = {}) => {
+  ragBuildState.loading = true
+  ragBuildState.error = ''
+  const buildTopic = params.topic || ragBuildForm.topic
+  const buildType = params.type || 'tagrag'
+
+  if (!buildTopic) {
+    ragBuildState.loading = false
+    ragBuildState.error = '请选择要生成的专题'
+    return null
+  }
+  if (!activeProjectName.value) {
+    ragBuildState.loading = false
+    ragBuildState.error = '请先在左侧选择项目'
+    return null
+  }
+
+  try {
+    const response = await callApi('/api/rag/build', {
+      method: 'POST',
+      body: JSON.stringify({
+        topic: buildTopic,
+        project: activeProjectName.value,
+        type: buildType
+      })
+    })
+    const status = response?.data || {}
+    ragBuildState.status = status.status || ''
+    ragBuildState.percent = Number(status.percent || 0)
+    ragBuildState.message = status.message || ''
+    updateCacheState({ ...status, type: buildType, topic: buildTopic })
+    await pollRagCacheStatus(buildType, buildTopic)
+    return response
+  } catch (error) {
+    ragBuildState.error = error.message || '准备检索专题失败'
+    throw error
+  } finally {
+    ragBuildState.loading = false
   }
 }
 
@@ -242,17 +351,36 @@ const retrieveUniversalRAG = async (params = {}) => {
   }
 }
 
+watch(activeProjectName, async (name) => {
+  ragSearchForm.topic = ''
+  ragTopicsState.options = []
+  ragTopicsState.error = ''
+  ragBuildForm.topic = ''
+  if (name) {
+    await loadRAGTopics()
+    await loadRemoteTopics()
+  }
+})
+
 export const useRAGTopics = () => {
   return {
     // States
     ragTopicsState,
     ragTopicOptions,
+    tagragTopicOptions,
+    routerTopicOptions,
+    remoteTopicsState,
+    remoteTopicOptions,
     ragSearchForm,
     ragRetrievalState,
     ragCacheState,
+    ragBuildState,
+    ragBuildForm,
 
     // Methods
     loadRAGTopics,
+    loadRemoteTopics,
+    buildRagTopic,
     retrieveTagRAG,
     retrieveRouterRAG,
     retrieveUniversalRAG

@@ -9,11 +9,12 @@ import time
 
 import lancedb
 
-from src.utils.setting.paths import get_data_root
+from src.utils.setting.paths import get_data_root, bucket
 from src.utils.io.excel import read_jsonl
 from src.utils.logging.logging import setup_logger, log_success, log_error
 from src.utils.rag.tagrag.tag_vec_data import vectorize_and_store
 from src.utils.rag.ragrouter.router_vec_data import run_ragrouter
+from src.fetch.data_fetch import fetch_range, get_topic_available_date_range
 
 _RAG_BUILD_STATUS: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
 _RAG_BUILD_LOCK = threading.Lock()
@@ -112,39 +113,72 @@ def list_project_routerrag_topics(project: str) -> List[str]:
     return topics
 
 
-def _latest_fetch_dir(project: str) -> Optional[Path]:
-    data_root = get_data_root()
-    project_dir = data_root / "projects" / project
-    fetch_root = project_dir / "fetch"
-    if not fetch_root.exists():
-        return None
-    candidates = []
-    for path in fetch_root.iterdir():
-        if not path.is_dir():
-            continue
-        overall = path / "总体.jsonl"
-        if overall.exists():
-            candidates.append(path)
-    if not candidates:
-        return None
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+def _fetch_dir_for_range(project: str, start: str, end: str) -> Path:
+    folder = f"{start}_{end}" if end and end != start else start
+    return bucket("fetch", project, folder)
 
 
 def _extract_texts_from_fetch(fetch_dir: Path) -> List[str]:
-    overall = fetch_dir / "总体.jsonl"
-    if not overall.exists():
-        return []
-    df = read_jsonl(overall)
-    if df is None or df.empty:
-        return []
     text_cols = ["contents", "content", "text", "正文"]
-    text_col = next((c for c in text_cols if c in df.columns), None)
-    if not text_col:
+    files: List[Path] = []
+    overall = fetch_dir / "总体.jsonl"
+    if overall.exists():
+        files.append(overall)
+    for candidate in sorted(fetch_dir.glob("*.jsonl")):
+        if candidate not in files:
+            files.append(candidate)
+
+    if not files:
         return []
-    return [str(v).strip() for v in df[text_col].fillna("") if str(v).strip()]
+
+    texts: List[str] = []
+    seen = set()
+
+    def _add_text(value: object) -> None:
+        if value is None:
+            return
+        text = str(value).strip()
+        if not text:
+            return
+        if text in seen:
+            return
+        seen.add(text)
+        texts.append(text)
+
+    for path in files:
+        df = None
+        try:
+            df = read_jsonl(path)
+        except Exception:
+            df = None
+        if df is not None and not df.empty:
+            text_col = next((c for c in text_cols if c in df.columns), None)
+            if text_col:
+                for value in df[text_col].fillna(""):
+                    _add_text(value)
+                if texts:
+                    continue
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except Exception:
+                        continue
+                    for col in text_cols:
+                        if col in payload:
+                            _add_text(payload.get(col))
+                            break
+        except Exception:
+            continue
+
+    return texts
 
 
-def ensure_tagrag_db(topic: str, project: str) -> Optional[Path]:
+def ensure_tagrag_db(topic: str, project: str, fetch_dir: Optional[Path] = None) -> Optional[Path]:
     rag_root = _project_rag_root(project)
     if not rag_root:
         return None
@@ -164,9 +198,8 @@ def ensure_tagrag_db(topic: str, project: str) -> Optional[Path]:
 
     logger = setup_logger(f"TagRAG_{project}", "default")
 
-    fetch_dir = _latest_fetch_dir(project)
-    if not fetch_dir:
-        log_error(logger, f"未找到fetch缓存，无法构建TagRAG: {project}", "TagRAG")
+    if fetch_dir is None:
+        log_error(logger, f"未提供fetch缓存，无法构建TagRAG: {project}", "TagRAG")
         return None
 
     _update_status(project, "tagrag", topic, "running", 10, "正在准备资料")
@@ -206,7 +239,7 @@ def ensure_tagrag_db(topic: str, project: str) -> Optional[Path]:
         return None
 
 
-def ensure_routerrag_db(topic: str, project: str) -> Optional[Path]:
+def ensure_routerrag_db(topic: str, project: str, fetch_dir: Optional[Path] = None) -> Optional[Path]:
     rag_root = _project_rag_root(project)
     if not rag_root:
         return None
@@ -218,9 +251,8 @@ def ensure_routerrag_db(topic: str, project: str) -> Optional[Path]:
 
     logger = setup_logger(f"RouterRAG_{project}", "default")
 
-    fetch_dir = _latest_fetch_dir(project)
-    if not fetch_dir:
-        log_error(logger, f"未找到fetch缓存，无法构建RouterRAG: {project}", "RouterRAG")
+    if fetch_dir is None:
+        log_error(logger, f"未提供fetch缓存，无法构建RouterRAG: {project}", "RouterRAG")
         return None
 
     _update_status(project, "routerrag", topic, "running", 10, "正在准备资料")
@@ -258,17 +290,47 @@ def ensure_routerrag_db(topic: str, project: str) -> Optional[Path]:
         return None
 
 
-def start_rag_build(project: str, rag_type: str, topic: str) -> Dict[str, Any]:
+def start_rag_build(
+    project: str,
+    rag_type: str,
+    topic: str,
+    *,
+    db_topic: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> Dict[str, Any]:
     status = get_rag_build_status(project, rag_type, topic)
     if status.get("status") == "running":
         return status
 
     def _run():
         try:
+            source_topic = db_topic or topic
+            range_start = start
+            range_end = end
+            if not range_start or not range_end:
+                avail = get_topic_available_date_range(source_topic)
+                if isinstance(avail, dict):
+                    range_start = avail.get("start")
+                    range_end = avail.get("end")
+                else:
+                    range_start, range_end = avail
+            if not range_start or not range_end:
+                _update_status(project, rag_type, topic, "error", 100, "未找到可用数据范围")
+                return
+
+            output_date = f"{range_start}_{range_end}" if range_end and range_end != range_start else range_start
+            logger = setup_logger(f"RAGBuild_{project}", output_date)
+            ok = fetch_range(project, range_start, range_end, output_date, logger, db_topic=source_topic)
+            if not ok:
+                _update_status(project, rag_type, topic, "error", 100, "资料准备失败")
+                return
+
+            fetch_dir = _fetch_dir_for_range(project, range_start, range_end)
             if rag_type == "tagrag":
-                ensure_tagrag_db(topic, project)
+                ensure_tagrag_db(topic, project, fetch_dir=fetch_dir)
             else:
-                ensure_routerrag_db(topic, project)
+                ensure_routerrag_db(topic, project, fetch_dir=fetch_dir)
         except Exception:
             _update_status(project, rag_type, topic, "error", 100, "准备失败，请稍后重试")
 

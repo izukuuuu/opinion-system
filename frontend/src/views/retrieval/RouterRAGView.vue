@@ -81,27 +81,36 @@
           <div class="space-y-2">
             <div class="flex items-center justify-between gap-2">
               <label class="text-xs font-semibold text-muted">选择专题 *</label>
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
-                :disabled="ragTopicsState.loading"
-                @click="loadTopics"
-              >
-                <ArrowPathIcon
-                  class="h-3 w-3"
-                  :class="ragTopicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
-                />
-                <span>{{ ragTopicsState.loading ? '刷新中…' : '刷新专题' }}</span>
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
+                  :disabled="ragTopicsState.loading"
+                  @click="loadTopics"
+                >
+                  <ArrowPathIcon
+                    class="h-3 w-3"
+                    :class="ragTopicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
+                  />
+                  <span>{{ ragTopicsState.loading ? '刷新中…' : '刷新专题' }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="text-[11px] font-medium text-brand-600 hover:text-brand-700"
+                  @click="toggleBuildPanel"
+                >
+                  生成检索库
+                </button>
+              </div>
             </div>
             <select
               v-model="ragSearchForm.topic"
               class="input"
-              :disabled="ragTopicsState.loading || !ragTopicOptions.length"
+              :disabled="ragTopicsState.loading || !selectableTopics.length"
               required
             >
               <option value="" disabled>请选择专题</option>
-              <option v-for="topic in ragTopicOptions" :key="topic" :value="topic">
+              <option v-for="topic in selectableTopics" :key="topic" :value="topic">
                 {{ topic }}
               </option>
             </select>
@@ -110,6 +119,46 @@
               <span v-else-if="ragTopicsState.error" class="text-danger">{{ ragTopicsState.error }}</span>
               <span v-else>选择要检索的专题数据</span>
             </p>
+            <div v-if="buildPanelVisible" class="rounded-xl border border-brand-100 bg-brand-50/50 p-4 text-xs text-muted">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-semibold text-brand-700">从远程专题生成本地检索库</span>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
+                  :disabled="remoteTopicsState.loading"
+                  @click="refreshRemoteTopics"
+                >
+                  <ArrowPathIcon
+                    class="h-3 w-3"
+                    :class="remoteTopicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
+                  />
+                  <span>{{ remoteTopicsState.loading ? '刷新中…' : '刷新远程' }}</span>
+                </button>
+              </div>
+              <div class="mt-3 grid gap-3 md:grid-cols-3">
+                <select
+                  v-model="ragBuildForm.topic"
+                  class="input"
+                  :disabled="remoteTopicsState.loading || !remoteTopicOptions.length"
+                >
+                  <option value="" disabled>请选择远程专题</option>
+                  <option v-for="topic in remoteTopicOptions" :key="`routerrag-build-${topic}`" :value="topic">
+                    {{ topic }}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  :disabled="ragBuildState.loading || !ragBuildForm.topic"
+                  @click="handleBuild"
+                >
+                  {{ ragBuildState.loading ? '准备中…' : '开始准备' }}
+                </button>
+              </div>
+              <p class="mt-2">同步远程专题内容到当前项目，并建立本地检索索引。</p>
+              <p v-if="remoteTopicsState.error" class="mt-1 text-danger">{{ remoteTopicsState.error }}</p>
+              <p v-if="ragBuildState.error" class="mt-1 text-danger">{{ ragBuildState.error }}</p>
+            </div>
           </div>
         </div>
 
@@ -265,23 +314,37 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowPathIcon } from '@heroicons/vue/24/outline'
 import { useRAGTopics } from '../../composables/useRAGTopics'
 import RagCacheToast from '../../components/rag/RagCacheToast.vue'
 
 const {
   ragTopicsState,
-  ragTopicOptions,
+  tagragTopicOptions,
+  routerTopicOptions,
+  remoteTopicsState,
+  remoteTopicOptions,
   ragSearchForm,
   ragRetrievalState,
   ragCacheState,
+  ragBuildState,
+  ragBuildForm,
   loadRAGTopics,
+  loadRemoteTopics,
+  buildRagTopic,
   retrieveRouterRAG,
   retrieveTagRAG
 } = useRAGTopics()
 
 const hasSearched = computed(() => ragRetrievalState.error !== '' || ragRetrievalState.results.length > 0)
+const showBuildPanel = ref(false)
+const selectableTopics = computed(() => {
+  if (ragSearchForm.rag_type === 'tagrag') return tagragTopicOptions.value
+  if (ragSearchForm.rag_type === 'routerrag') return routerTopicOptions.value
+  return [...new Set([...tagragTopicOptions.value, ...routerTopicOptions.value])]
+})
+const buildPanelVisible = computed(() => showBuildPanel.value || selectableTopics.value.length === 0)
 
 // Retrieval Modes
 const retrievalModes = [
@@ -300,6 +363,26 @@ const averageScore = computed(() => {
 // Methods
 const loadTopics = async () => {
   await loadRAGTopics()
+}
+
+const refreshRemoteTopics = async () => {
+  await loadRemoteTopics()
+}
+
+const toggleBuildPanel = () => {
+  showBuildPanel.value = !showBuildPanel.value
+  if (showBuildPanel.value && !remoteTopicOptions.value.length) {
+    loadRemoteTopics()
+  }
+}
+
+const handleBuild = async () => {
+  try {
+    const buildType = ragSearchForm.rag_type === 'tagrag' ? 'tagrag' : 'routerrag'
+    await buildRagTopic({ type: buildType })
+  } catch (error) {
+    // Error is already handled in the composable
+  }
 }
 
 const getCurrentModeLabel = () => {
@@ -363,5 +446,12 @@ const exportResults = () => {
 // Lifecycle
 onMounted(() => {
   loadTopics()
+  loadRemoteTopics()
+})
+
+watch(selectableTopics, (options) => {
+  if (!options.includes(ragSearchForm.topic)) {
+    ragSearchForm.topic = options[0] || ''
+  }
 })
 </script>

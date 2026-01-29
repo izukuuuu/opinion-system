@@ -2539,7 +2539,7 @@ def get_rag_topics():
             return success({
                 "data": {
                     "tagrag_topics": sorted({t.strip() for t in tagrag_topics if str(t).strip()}),
-                    "router_topics": sorted({t.strip() for t in router_topics if str(t).strip()})
+                    "router_topics": sorted({t.strip() for t in router_topics if str(t).strip()}),
                 }
             })
 
@@ -2572,6 +2572,32 @@ def get_rag_cache_status():
     return success({"data": status})
 
 
+@app.post("/api/rag/build")
+def rag_build():
+    payload = request.get_json(silent=True) or {}
+    topic = str(payload.get("topic") or "").strip()
+    project = str(payload.get("project") or "").strip()
+    rag_type = str(payload.get("type") or "").strip() or "tagrag"
+    start = str(payload.get("start") or "").strip() or None
+    end = str(payload.get("end") or "").strip() or None
+
+    if not topic or not project:
+        return error("Missing required field(s): project, topic")
+
+    project_bucket = PROJECT_MANAGER.resolve_identifier(project) if project else None
+    project_bucket = project_bucket or project
+
+    status = start_rag_build(
+        project_bucket,
+        rag_type,
+        topic,
+        db_topic=topic,
+        start=start,
+        end=end,
+    )
+    return success({"data": status})
+
+
 @app.post("/api/rag/tagrag/retrieve")
 def tagrag_retrieve():
     """TagRAG检索接口"""
@@ -2592,7 +2618,7 @@ def tagrag_retrieve():
             return error("Missing required field: topic")
 
         if project_bucket and not ensure_rag_ready(project_bucket, "tagrag", topic):
-            status = start_rag_build(project_bucket, "tagrag", topic)
+            status = start_rag_build(project_bucket, "tagrag", topic, db_topic=topic)
             return jsonify({
                 "status": "building",
                 "message": "正在准备检索资料，请稍后再试",
@@ -2641,7 +2667,7 @@ def routerrag_retrieve():
             return error("Missing required field: topic")
 
         if project_bucket and not ensure_rag_ready(project_bucket, "routerrag", topic):
-            status = start_rag_build(project_bucket, "routerrag", topic)
+            status = start_rag_build(project_bucket, "routerrag", topic, db_topic=topic)
             return jsonify({
                 "status": "building",
                 "message": "正在准备检索资料，请稍后再试",
@@ -2695,7 +2721,7 @@ def universal_rag_retrieve():
         if rag_type == "tagrag":
             from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents
             if project_bucket and not ensure_rag_ready(project_bucket, "tagrag", topic):
-                status = start_rag_build(project_bucket, "tagrag", topic)
+                status = start_rag_build(project_bucket, "tagrag", topic, db_topic=topic)
                 return jsonify({
                     "status": "building",
                     "message": "正在准备检索资料，请稍后再试",
@@ -2707,7 +2733,7 @@ def universal_rag_retrieve():
         elif rag_type == "routerrag":
             from src.utils.rag.ragrouter.router_retrieve_data import retrieve_documents
             if project_bucket and not ensure_rag_ready(project_bucket, "routerrag", topic):
-                status = start_rag_build(project_bucket, "routerrag", topic)
+                status = start_rag_build(project_bucket, "routerrag", topic, db_topic=topic)
                 return jsonify({
                     "status": "building",
                     "message": "正在准备检索资料，请稍后再试",
@@ -2724,14 +2750,14 @@ def universal_rag_retrieve():
 
                 if project_bucket:
                     if not ensure_rag_ready(project_bucket, "tagrag", topic):
-                        status = start_rag_build(project_bucket, "tagrag", topic)
+                        status = start_rag_build(project_bucket, "tagrag", topic, db_topic=topic)
                         return jsonify({
                             "status": "building",
                             "message": "正在准备检索资料，请稍后再试",
                             "data": status,
                         }), 202
                     if not ensure_rag_ready(project_bucket, "routerrag", topic):
-                        status = start_rag_build(project_bucket, "routerrag", topic)
+                        status = start_rag_build(project_bucket, "routerrag", topic, db_topic=topic)
                         return jsonify({
                             "status": "building",
                             "message": "正在准备检索资料，请稍后再试",
