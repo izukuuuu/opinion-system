@@ -171,7 +171,7 @@
           enter-from-class="translate-x-full opacity-0" enter-to-class="translate-x-0 opacity-100"
           leave-active-class="transform transition ease-in duration-200" leave-from-class="translate-x-0 opacity-100"
           leave-to-class="translate-x-full opacity-0">
-          <AiSidebar v-if="isAiSidebarOpen" @close="toggleAiSidebar" />
+          <AiSidebar v-if="isAiSidebarOpen" :isOpen="isAiSidebarOpen" @close="toggleAiSidebar" />
         </Transition>
       </div>
     </template>

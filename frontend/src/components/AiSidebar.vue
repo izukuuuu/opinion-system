@@ -1,6 +1,6 @@
 <template>
   <aside
-    class="fixed inset-y-0 right-0 z-50 w-full max-w-sm border-l border-soft bg-white shadow-2xl lg:w-[30rem] flex flex-col transition-all duration-300 transform">
+    class="fixed inset-y-0 right-0 z-50 w-full max-w-sm border-l border-soft bg-white shadow-2xl lg:w-[30rem] flex flex-col transition-all duration-300 transform overflow-hidden">
     <!-- Header -->
     <div
       class="flex items-center justify-between border-b border-soft px-4 py-3 bg-slate-50/50 backdrop-blur-sm shrink-0">
@@ -34,16 +34,16 @@
       <deep-chat :key="currentSessionId" ref="chatRef" class="deep-chat-container" :introMessage="introMessage"
         :connect.prop="requestConfig" :textInput.prop="textInputConfig" :messageStyles.prop="messageStyles"
         :submitButtonStyles.prop="submitButtonStyles" :inputAreaStyle.prop="inputAreaStyle"
-        :auxiliaryStyle.prop="auxiliaryStyle" :error.prop="errorConfig" :initialMessages.prop="currentMessages"
+        :auxiliaryStyle.prop="auxiliaryStyle" :error.prop="errorConfig" :history.prop="chatHistory"
         @message="onChatUpdate" style="height: 100%; width: 100%; border: none; display: block;"></deep-chat>
 
       <!-- History Overlay -->
       <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0 translate-y-1"
         enter-to-class="opacity-100 translate-y-0" leave-active-class="transition ease-in duration-150"
         leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 translate-y-1">
-        <div v-if="showHistory" class="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm p-4 overflow-y-auto">
+        <div v-if="showHistory" class="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm p-4 overflow-y-auto overscroll-contain">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-bold text-slate-900">会话历史 (最近 5 条)</h3>
+            <h3 class="text-sm font-bold text-slate-900">会话历史</h3>
             <button @click="showHistory = false" class="text-slate-400 hover:text-slate-600">
               <XMarkIcon class="h-5 w-5" />
             </button>
@@ -65,59 +65,137 @@
               </button>
             </div>
           </div>
+          <!-- History Disclaimer Footer -->
+          <div class="mt-6 pt-4 border-t border-slate-100">
+            <p class="text-[10px] text-slate-400 text-center leading-relaxed">
+              您的对话信息仅保存在本地浏览器中，不会上传云端或用于分析。清除浏览器缓存将清空所有记录。目前系统默认保留最近 {{ maxSessions }} 条会话。
+              <span @click="showSettings = true"
+                class="underline cursor-pointer hover:text-brand-600 block mt-1">修改保存设置...</span>
+            </p>
+          </div>
         </div>
       </transition>
+
+      <!-- Settings Overlay -->
+      <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0 scale-95"
+        enter-to-class="opacity-100 scale-100" leave-active-class="transition ease-in duration-150"
+        leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
+        <div v-if="showSettings"
+          class="absolute inset-x-4 top-1/4 z-30 bg-white rounded-2xl shadow-2xl border border-slate-200 p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-slate-900">会话存储设置</h3>
+            <button @click="showSettings = false" class="text-slate-400 hover:text-slate-600">
+              <XMarkIcon class="h-4 w-4" />
+            </button>
+          </div>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-500 mb-2">最多保留会话数</label>
+              <div class="flex items-center gap-3">
+                <input type="number" v-model.number="tempMaxSessions" min="1" max="100"
+                  class="block w-full rounded-lg border-slate-200 text-sm focus:border-brand-500 focus:ring-brand-500" />
+                <span class="text-xs text-slate-400">条</span>
+              </div>
+              <p class="mt-2 text-[10px] text-slate-400">建议范围：5 - 50 条。保存更多会话可能会占用更多本地存储空间。</p>
+            </div>
+            <button @click="handleSaveSettings"
+              class="w-full py-2 px-4 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-xl transition-colors">
+              保存设置
+            </button>
+          </div>
+        </div>
+      </transition>
+    </div>
+
+    <!-- Main Footer Container -->
+    <div class="px-4 py-2 bg-white border-t border-slate-100 shrink-0">
+      <p class="text-[10px] text-slate-400 text-center leading-relaxed italic">
+        AI 生成的消息可能包含错误信息，请人工核对
+      </p>
     </div>
   </aside>
 </template>
 
 <script setup>
 import 'deep-chat'
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { SparklesIcon, XMarkIcon, PlusIcon, ClockIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { useApiBase } from '../composables/useApiBase'
 import { useAiChat } from '../composables/useAiChat'
 
-defineProps({
+const props = defineProps({
   isOpen: Boolean
 })
 
 const emit = defineEmits(['close'])
+
 const { chatHandler } = useAiChat()
 const inputContent = ref('')
 const chatRef = ref(null)
 const showHistory = ref(false)
+const showSettings = ref(false)
 
 // Session Management Logic
 const STORAGE_KEY = 'opinion_system_ai_sessions'
-const MAX_SESSIONS = 5
+const SETTINGS_KEY = 'opinion_system_ai_max_sessions'
+const DEFAULT_MAX_SESSIONS = 20
+
+const maxSessions = ref(parseInt(localStorage.getItem(SETTINGS_KEY)) || DEFAULT_MAX_SESSIONS)
+const tempMaxSessions = ref(maxSessions.value)
 
 const sessions = ref([])
 const currentSessionId = ref('')
+const chatHistory = ref([])
 
 const loadSessions = () => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
-    const parsed = saved ? JSON.parse(saved) : []
-    sessions.value = parsed
-    if (parsed.length > 0) {
-      currentSessionId.value = parsed[0].id
-    } else {
+    if (!saved) {
+      console.log('[AiSidebar] No saved sessions found, creating first one.')
       createNewSession()
+      return
     }
+    const parsed = JSON.parse(saved)
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      console.log('[AiSidebar] Parsed sessions empty, creating first one.')
+      createNewSession()
+      return
+    }
+
+    sessions.value = parsed
+    
+    // Check if the most recent session is empty
+    const latestSession = parsed[0]
+    if (latestSession && Array.isArray(latestSession.messages) && latestSession.messages.length > 0) {
+      createNewSession()
+    } else {
+      currentSessionId.value = latestSession.id
+      chatHistory.value = [...latestSession.messages]
+    }
+    console.log('[AiSidebar] Successfully loaded sessions:', parsed.length)
   } catch (e) {
-    console.error('Failed to load sessions:', e)
+    console.error('[AiSidebar] Failed to load sessions:', e)
     createNewSession()
   }
 }
 
+// Initial load
+loadSessions()
+
 const saveSessions = () => {
   try {
+    if (sessions.value.length === 0) return // Safety: don't wipe data if called with empty state
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
+    console.log('[AiSidebar] Sessions saved to localStorage. Count:', sessions.value.length)
   } catch (e) {
-    console.error('Failed to save sessions:', e)
+    console.error('[AiSidebar] Failed to save sessions:', e)
   }
 }
+
+// Deep watch sessions for any changes (messages, titles, etc)
+watch(sessions, () => {
+  saveSessions()
+}, { deep: true })
 
 const createNewSession = () => {
   const newId = Date.now().toString()
@@ -129,17 +207,46 @@ const createNewSession = () => {
   }
 
   sessions.value.unshift(newSession)
-  if (sessions.value.length > MAX_SESSIONS) {
-    sessions.value = sessions.value.slice(0, MAX_SESSIONS)
+  if (sessions.value.length > maxSessions.value) {
+    sessions.value = sessions.value.slice(0, maxSessions.value)
   }
 
   currentSessionId.value = newId
+  chatHistory.value = [] // Reset for new session
   saveSessions()
   showHistory.value = false
 }
 
+const handleSaveSettings = () => {
+  if (tempMaxSessions.value < 1) tempMaxSessions.value = 1
+  if (tempMaxSessions.value > 100) tempMaxSessions.value = 100
+
+  maxSessions.value = tempMaxSessions.value
+  localStorage.setItem(SETTINGS_KEY, maxSessions.value.toString())
+
+  // Apply limit immediately if sessions exceed new limit
+  if (sessions.value.length > maxSessions.value) {
+    sessions.value = sessions.value.slice(0, maxSessions.value)
+    saveSessions()
+  }
+
+  showSettings.value = false
+}
+
 const switchSession = (id) => {
-  currentSessionId.value = id
+  if (currentSessionId.value === id) {
+    showHistory.value = false
+    return
+  }
+
+  const target = sessions.value.find(s => s.id === id)
+  if (target) {
+    currentSessionId.value = id
+    // Update chatHistory REF which is bound to deep-chat
+    // This triggers the key change OR prop change once
+    chatHistory.value = [...target.messages]
+    console.log('[AiSidebar] Switched to session:', id, 'messages:', chatHistory.value.length)
+  }
   showHistory.value = false
 }
 
@@ -156,6 +263,7 @@ const deleteSession = (id) => {
 }
 
 const currentMessages = computed(() => {
+  // This is now used mainly for debugging or if any other UI needs it
   const session = sessions.value.find(s => s.id === currentSessionId.value)
   return session ? session.messages : []
 })
@@ -173,31 +281,32 @@ const onChatUpdate = async () => {
 
   // Use getMessages() to fetch the internal state of deep-chat
   const allMessages = await chatRef.value.getMessages()
-  const sessionIndex = sessions.value.findIndex(s => s.id === currentSessionId.value)
+  const sessionId = currentSessionId.value
+  const sessionIndex = sessions.value.findIndex(s => s.id === sessionId)
 
-  if (sessionIndex !== -1 && Array.isArray(allMessages)) {
+  if (sessionIndex !== -1 && Array.isArray(allMessages) && allMessages.length > 0) {
     const session = sessions.value[sessionIndex]
 
-    // Standardize storage format: Deep Chat uses 'text' or 'content' (legacy)
-    // We save them as { role, text } to match deep-chat's internal structure
+    // Standardize role names for persistence
     session.messages = allMessages.map(m => ({
       role: m.role || 'ai',
-      text: m.text || m.content || ''
+      text: m.text || m.html || ''
     }))
 
     session.updatedAt = new Date().toISOString()
 
-    // Generate title from the very first message
-    if (!session.title || session.title === '新对话') {
-      const firstMsg = allMessages[0]
-      if (firstMsg && (firstMsg.text || firstMsg.content)) {
-        let title = (firstMsg.text || firstMsg.content).trim()
+    // Generate title from the first valid user message if it's currently generic
+    if (!session.title || session.title === '新对话' || session.title.trim() === '') {
+      const firstUserMsg = allMessages.find(m => m.role === 'user' && (m.text || m.html))
+      if (firstUserMsg) {
+        let title = (firstUserMsg.text || firstUserMsg.html).trim()
         if (title.length > 30) title = title.substring(0, 30) + '...'
-        session.title = title
+        session.title = title || '新对话'
+        console.log('[AiSidebar] Generated session title:', session.title)
       }
     }
-
-    saveSessions()
+  } else {
+    console.warn('[AiSidebar] onChatUpdate: Session not found or no messages!', sessionId)
   }
 }
 
@@ -212,7 +321,7 @@ const formatDate = (isoString) => {
 }
 
 onMounted(() => {
-  loadSessions()
+  console.log('[AiSidebar] Component mounted.')
 })
 
 // Initial welcome message
@@ -406,6 +515,12 @@ const auxiliaryStyle = `
   ::-webkit-scrollbar-thumb {
     background-color: #cbd5e1;
     border-radius: 3px;
+  }
+  #container {
+    overscroll-behavior: contain;
+  }
+  #messages {
+    overscroll-behavior: contain;
   }
 `
 
