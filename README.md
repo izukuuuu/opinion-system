@@ -7,54 +7,112 @@
 
 ---
 
-## 🚀 前端使用说明
+## 🚀 快速开始：环境配置与运行
 
-前端基于 Vue3 + Vite + TailwindCSS 构建，位于 `frontend/` 目录。
+本项目包含前端（Vue3）和后端（Python Flask）两部分，请按以下步骤配置环境并运行。
 
-### 1. 运行前端
+### 1. 后端环境配置
+
+后端基于 Python，使用 Flask 作为服务器框架。推荐使用 Conda 管理 Python 环境。
+
+#### 1.1 创建并激活 Conda 环境
 
 ```bash
-cd frontend
-npm install
-npm run dev
+# 创建 conda 环境（如已存在则跳过）
+conda create -n opinion-system python=3.10 -y
+
+# 激活环境
+conda activate opinion-system
 ```
 
-### 2. 前端环境变量配置
+#### 1.2 安装后端依赖
 
-前端环境变量文件为 `frontend/.env.local`，需写入后端 API 地址，例如：
-
-```env
-VITE_API_BASE_URL=http://127.0.0.1:8000/api
+```bash
+cd backend
+pip install -r requirements.txt
 ```
 
-如需自定义后端地址，请修改此项。
+#### 1.3 配置后端环境变量
 
-### 3. 主要依赖
-
-- Vue 3
-- Vite
-- TailwindCSS
-- ECharts
-
-### 4. 组件与开发
-
-页面组件位于 `frontend/src/components/`。
-
----
-
-## ⚙️ 后端与环境变量说明
-
-后端基于 Python，Flask 服务器入口为 `backend/server.py`。
-
-### 1. 后端环境变量
-
-后端环境变量文件为 `backend/.env`，需写入 API 密钥，例如：
+创建 `backend/.env` 文件，写入 API 密钥：
 
 ```env
 DASHSCOPE_API_KEY=your_api_key_here
 ```
 
-如需使用阿里云通义千问等大模型服务，请在此处填写对应的 API Key。
+> 💡 如需使用阿里云通义千问等大模型服务，请在此处填写对应的 API Key。
+
+#### 1.4 启动后端服务
+
+```bash
+cd backend
+python server.py
+```
+
+后端默认运行在 `http://127.0.0.1:8000`。
+
+---
+
+### 2. 前端环境配置
+
+前端基于 Vue3 + Vite + TailwindCSS 构建，位于 `frontend/` 目录。需要 Node.js 环境（推荐 v18+）。
+
+#### 2.1 安装前端依赖
+
+```bash
+cd frontend
+npm install
+```
+
+#### 2.2 配置前端环境变量
+
+前端环境变量文件为 `frontend/.env.local`，需写入后端 API 地址：
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000/api
+```
+
+> 💡 如后端运行在其他地址，请相应修改此配置。
+
+#### 2.3 启动前端开发服务器
+
+```bash
+cd frontend
+npm run dev
+```
+
+前端默认运行在 `http://localhost:5173`，浏览器访问即可使用系统。
+
+---
+
+### 3. 完整启动流程（推荐）
+
+```bash
+# 终端 1：启动后端
+conda activate opinion-system
+cd backend
+python server.py
+
+# 终端 2：启动前端
+cd frontend
+npm run dev
+```
+
+启动成功后，访问 `http://localhost:5173` 即可使用舆情分析系统。
+
+---
+
+### 4. 技术栈概览
+
+| 模块 | 技术 |
+|------|------|
+| 前端框架 | Vue 3 + Vite |
+| 前端样式 | TailwindCSS |
+| 图表 | ECharts |
+| 后端框架 | Flask |
+| AI 模型 | 阿里云通义千问 (Qwen) |
+| 向量数据库 | LanceDB |
+| 关系数据库 | PostgreSQL |
 
 ---
 
