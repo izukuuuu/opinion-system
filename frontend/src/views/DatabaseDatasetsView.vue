@@ -1,164 +1,104 @@
 <template>
-  <section class="space-y-6">
-    <header class="flex flex-wrap items-center justify-between gap-3 text-sm text-secondary">
-      <div class="flex items-center gap-2">
-        <span class="inline-flex items-center gap-1 rounded-full bg-brand-soft px-3 py-1 text-brand-600">
-          <TableCellsIcon class="h-4 w-4" />
+  <section class="datasets-page">
+    <!-- Page Header -->
+    <header class="page-header">
+      <div class="breadcrumb">
+        <span class="breadcrumb-badge">
+          <TableCellsIcon class="icon-sm" />
           <span>数据集</span>
         </span>
-        <ChevronRightIcon class="h-4 w-4 text-muted" />
+        <ChevronRightIcon class="icon-sm text-muted" />
         <span class="text-secondary">远程数据库</span>
       </div>
-      <div
-        v-if="loading"
-        class="inline-flex items-center gap-2 rounded-full bg-accent-faint px-3 py-1 text-xs font-semibold text-brand-600"
-      >
-        <ArrowPathIcon class="h-4 w-4 animate-spin" />
-        正在刷新最新数据…
-      </div>
-      <div
-        v-else-if="queriedAt"
-        class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500"
-      >
-        <ServerStackIcon class="h-4 w-4" />
-        最近刷新：{{ queriedAt }}
-      </div>
-    </header>
-
-    <section class="card-surface space-y-6 p-6">
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div class="flex items-start gap-4">
-          <TableCellsIcon class="h-12 w-12 text-brand" />
-          <div class="space-y-1">
-            <h1 class="text-2xl font-semibold text-slate-900">数据集概览</h1>
-            <p class="text-sm text-slate-500">查看并预览已经同步到远程数据库的专题数据表。</p>
-          </div>
+      <div class="header-right">
+        <div v-if="loading" class="status-badge status-loading">
+          <ArrowPathIcon class="icon-sm animate-spin" />
+          正在刷新最新数据…
         </div>
-        <button
-          type="button"
-          class="inline-flex items-center justify-center gap-2 rounded-full border border-soft px-4 py-2 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-ring-accent"
-          @click="refresh"
-          :disabled="loading"
-        >
-          <ArrowPathIcon
-            class="h-4 w-4"
-            :class="{ 'animate-spin text-brand-500': loading }"
-          />
+        <div v-else-if="queriedAt" class="status-badge status-idle">
+          <ServerStackIcon class="icon-sm" />
+          最近刷新：{{ queriedAt }}
+        </div>
+        <button type="button" class="btn-secondary" @click="refresh" :disabled="loading">
+          <ArrowPathIcon class="icon-sm" :class="{ 'animate-spin': loading }" />
           刷新数据
         </button>
       </div>
+    </header>
 
-      <section v-if="error" class="rounded-3xl border border-rose-200 bg-rose-50/70 p-6 text-sm text-rose-600" role="alert">
+    <!-- Main Content Card -->
+    <section class="main-card">
+
+      <!-- Error Alert -->
+      <section v-if="error" class="alert alert-danger" role="alert">
         <p>{{ error }}</p>
-        <p class="mt-2 text-rose-400">请检查后端服务与数据库配置，稍后再试。</p>
+        <p class="alert-hint">请检查后端服务与数据库配置，稍后再试。</p>
       </section>
 
-      <section
-        v-if="isInitialLoading"
-        class="flex flex-col items-center gap-2 rounded-3xl border border-slate-200 bg-white/80 p-10 text-sm text-slate-500"
-      >
-        <ArrowPathIcon class="h-6 w-6 animate-spin text-brand" />
-        正在刷新最新的数据库信息…
+      <!-- Loading State -->
+      <section v-if="loading" class="loading-state">
+        <ArrowPathIcon class="icon-md animate-spin text-brand" />
+        <span>正在刷新最新的数据库信息…</span>
       </section>
 
-      <section v-if="hasData" class="grid gap-6 lg:grid-cols-3">
-        <article class="rounded-3xl bg-brand-soft px-5 py-6 text-center">
-          <span class="text-xs uppercase tracking-widest text-brand">业务数据库</span>
-          <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.databaseCount }}</strong>
+      <!-- Summary Stats -->
+      <section v-if="hasData && !loading" class="stats-grid">
+        <article class="stat-card">
+          <span class="stat-value">{{ animatedDatabaseCount }}</span>
+          <span class="stat-label">业务数据库</span>
         </article>
-        <article class="rounded-3xl bg-brand-soft px-5 py-6 text-center">
-          <span class="text-xs uppercase tracking-widest text-brand">总表数</span>
-          <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.tableCount }}</strong>
+        <article class="stat-card">
+          <span class="stat-value">{{ animatedTableCount }}</span>
+          <span class="stat-label">总表数</span>
         </article>
-        <article class="rounded-3xl bg-brand-soft px-5 py-6 text-center">
-          <span class="text-xs uppercase tracking-widest text-brand">已统计行数</span>
-          <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.rowCount }}</strong>
+        <article class="stat-card">
+          <span class="stat-value">{{ animatedRowCount }}</span>
+          <span class="stat-label">已统计行数</span>
         </article>
       </section>
 
-      <section v-if="isRefreshing" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <div
-          v-for="index in 3"
-          :key="index"
-          class="h-48 rounded-3xl bg-slate-200/70 animate-pulse"
-        ></div>
-      </section>
-
-      <section v-if="hasData" class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        <article
-          v-for="database in databases"
-          :key="database.name"
-          class="card-surface space-y-5 border border-slate-200/80 bg-white/90 p-6 shadow-sm"
-        >
-          <header class="flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <CircleStackIcon class="h-5 w-5 text-brand" />
-              <h2 class="text-lg font-semibold text-slate-900">{{ database.name }}</h2>
+      <!-- Database Cards -->
+      <section v-if="hasData && !loading" class="database-grid">
+        <article v-for="database in databases" :key="database.name" class="database-card">
+          <header class="database-header">
+            <div class="database-title">
+              <CircleStackIcon class="icon-sm text-brand" />
+              <h2>{{ database.name }}</h2>
             </div>
-            <p class="text-sm text-slate-500">
+            <p class="database-meta">
               {{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行
             </p>
           </header>
-          <ul class="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-2 2xl:grid-cols-3">
-            <li
-              v-for="table in database.tables"
-              :key="table.name"
-              class="group relative h-full overflow-hidden rounded-2xl border border-slate-200/70 bg-slate-50/80 text-center transition hover:border-brand-soft hover:bg-white/90"
-              :class="{ 'border-rose-200 bg-rose-50/80 text-rose-600': table.error }"
-            >
-              <button
-                type="button"
-                class="flex h-full w-full flex-col items-center gap-3 p-4 text-center focus:outline-none focus-visible:ring-4 focus-visible:ring-brand/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-                @click="openTablePreview(database, table)"
-              >
-                <span
-                  v-if="getPlatformIcon(table.name)"
-                  class="flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm transition group-hover:scale-[1.03]"
-                >
-                  <img :src="getPlatformIcon(table.name)" :alt="`${table.name} 图标`" class="h-9 w-9" />
+          <ul class="table-grid">
+            <li v-for="table in database.tables" :key="table.name" class="table-item"
+              :class="{ 'table-item-error': table.error }">
+              <button type="button" class="table-button" @click="openTablePreview(database, table)">
+                <span v-if="getPlatformIcon(table.name)" class="table-icon">
+                  <img :src="getPlatformIcon(table.name)" :alt="`${table.name} 图标`" />
                 </span>
-                <span
-                  v-else
-                  class="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white text-slate-400 transition group-hover:scale-[1.03]"
-                >
-                  <CircleStackIcon class="h-6 w-6" />
+                <span v-else class="table-icon table-icon-placeholder">
+                  <CircleStackIcon class="icon-md" />
                 </span>
-                <span class="font-medium text-slate-900" :class="{ 'text-rose-600': table.error }">
+                <span class="table-name" :class="{ 'text-danger': table.error }">
                   {{ table.name }}
                 </span>
-                <span v-if="table.error" class="text-xs text-rose-500">{{ table.error }}</span>
-                <span v-else class="text-xs text-slate-500">{{ formatNumber(table.record_count) }} 行</span>
+                <span v-if="table.error" class="table-count text-danger">{{ table.error }}</span>
+                <span v-else class="table-count">{{ formatNumber(table.record_count) }} 行</span>
               </button>
             </li>
           </ul>
-          <p
-            v-if="!database.tables.length"
-            class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500"
-          >
-            该库暂无业务表。
-          </p>
+          <p v-if="!database.tables.length" class="empty-hint">该库暂无业务表。</p>
         </article>
       </section>
 
-      <p
-        v-if="!loading && !hasData && !error"
-        class="rounded-3xl border border-slate-200 bg-white/80 p-8 text-center text-sm text-slate-500"
-      >
+      <!-- Empty State -->
+      <p v-if="!loading && !hasData && !error" class="empty-state">
         未检索到业务数据库，请确认配置是否正确。
       </p>
     </section>
 
-    <AppModal
-      v-model="isPreviewOpen"
-      eyebrow="数据预览"
-      :title="previewTitle"
-      cancel-text="关闭"
-      confirm-text="确定"
-      :show-footer="false"
-      width="max-w-5xl"
-      :show-close="true"
-      @cancel="closeTablePreview"
-    >
+    <AppModal v-model="isPreviewOpen" eyebrow="数据预览" :title="previewTitle" cancel-text="关闭" confirm-text="确定"
+      :show-footer="false" width="max-w-5xl" :show-close="true" @cancel="closeTablePreview">
       <template #description>
         <p v-if="previewRows.length" class="text-sm text-slate-500">
           当前展示前 {{ previewRows.length }} 条记录，更多数据请在数据库中查看。
@@ -169,34 +109,19 @@
         <p v-else class="text-sm text-slate-500">暂无预览数据，请稍后重试。</p>
       </template>
 
-      <div
-        v-if="previewRows.length"
-        class="max-h-[420px] overflow-auto rounded-2xl border border-slate-200"
-      >
+      <div v-if="previewRows.length" class="max-h-[420px] overflow-auto rounded-2xl border border-slate-200">
         <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
           <thead class="sticky top-0 bg-slate-50">
             <tr>
-              <th
-                v-for="column in previewColumns"
-                :key="column"
-                :class="getPreviewColumnClasses(column, 'header')"
-              >
+              <th v-for="column in previewColumns" :key="column" :class="getPreviewColumnClasses(column, 'header')">
                 {{ column }}
               </th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 bg-white">
-            <tr
-              v-for="(row, rowIndex) in previewRows"
-              :key="rowIndex"
-              class="hover:bg-slate-50"
-            >
-              <td
-                v-for="column in previewColumns"
-                :key="column"
-                :class="getPreviewColumnClasses(column, 'cell')"
-                :title="column === 'url' ? formatPreviewCell(row[column]) : ''"
-              >
+            <tr v-for="(row, rowIndex) in previewRows" :key="rowIndex" class="hover:bg-slate-50">
+              <td v-for="column in previewColumns" :key="column" :class="getPreviewColumnClasses(column, 'cell')"
+                :title="column === 'url' ? formatPreviewCell(row[column]) : ''">
                 {{ formatPreviewCell(row[column]) }}
               </td>
             </tr>
@@ -207,11 +132,9 @@
         {{ previewError || '暂无预览数据，请刷新后重试。' }}
       </p>
       <div class="mt-4 flex justify-end">
-        <button
-          type="button"
+        <button type="button"
           class="inline-flex items-center justify-center rounded-full border border-soft px-4 py-2 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-ring-accent"
-          @click="closeTablePreview"
-        >
+          @click="closeTablePreview">
           关闭
         </button>
       </div>
@@ -220,9 +143,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   ArrowPathIcon,
+  ChartBarIcon,
   CircleStackIcon,
   ChevronRightIcon,
   ServerStackIcon,
@@ -286,11 +210,48 @@ const queriedAt = computed(() => {
 const summaryStats = computed(() => {
   const summary = payload.value?.summary ?? {}
   return {
-    databaseCount: summary.database_count ? formatNumber(summary.database_count) : '0',
-    tableCount: summary.table_count ? formatNumber(summary.table_count) : '0',
-    rowCount: summary.row_count ? formatNumber(summary.row_count) : '0'
+    databaseCount: summary.database_count ?? 0,
+    tableCount: summary.table_count ?? 0,
+    rowCount: summary.row_count ?? 0
   }
 })
+
+// Animated counters
+const animatedDatabaseCount = ref(0)
+const animatedTableCount = ref(0)
+const animatedRowCount = ref(0)
+
+const animateNumber = (start, end, duration, callback) => {
+  const startTime = performance.now()
+  const diff = end - start
+
+  const step = (currentTime) => {
+    const elapsed = currentTime - startTime
+    const progress = Math.min(elapsed / duration, 1)
+    // Easing: ease-out cubic
+    const easedProgress = 1 - Math.pow(1 - progress, 3)
+    const current = Math.round(start + diff * easedProgress)
+    callback(current)
+
+    if (progress < 1) {
+      requestAnimationFrame(step)
+    }
+  }
+
+  requestAnimationFrame(step)
+}
+
+watch(() => summaryStats.value, (newStats) => {
+  if (newStats.databaseCount > 0) {
+    animateNumber(0, newStats.databaseCount, 800, (v) => animatedDatabaseCount.value = formatNumber(v))
+  }
+  if (newStats.tableCount > 0) {
+    animateNumber(0, newStats.tableCount, 1000, (v) => animatedTableCount.value = formatNumber(v))
+  }
+  if (newStats.rowCount > 0) {
+    animateNumber(0, newStats.rowCount, 1200, (v) => animatedRowCount.value = formatNumber(v))
+  }
+}, { immediate: true })
 
 const hasPayload = computed(() => Boolean(payload.value))
 const databases = computed(() => payload.value?.databases ?? [])
@@ -397,3 +358,345 @@ const refresh = async () => {
 
 onMounted(refresh)
 </script>
+
+<style scoped>
+/* ===== Page Layout ===== */
+.datasets-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ===== Page Header ===== */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.breadcrumb-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  background-color: rgb(var(--color-brand-100) / 1);
+  color: rgb(var(--color-brand-600) / 1);
+  font-weight: 500;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-loading {
+  background-color: rgb(var(--color-accent-50) / 1);
+  color: rgb(var(--color-brand-600) / 1);
+}
+
+.status-idle {
+  background-color: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+/* ===== Main Card ===== */
+.main-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  border-radius: 1.5rem;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-soft);
+}
+
+/* ===== Alerts ===== */
+.alert {
+  padding: 1rem 1.25rem;
+  border-radius: 1rem;
+  font-size: 0.875rem;
+}
+
+.alert-danger {
+  background-color: rgb(var(--color-danger-50) / 1);
+  border: 1px solid rgb(var(--color-danger-200) / 1);
+  color: rgb(var(--color-danger-500) / 1);
+}
+
+.alert-hint {
+  margin-top: 0.5rem;
+  opacity: 0.8;
+}
+
+/* ===== Loading State ===== */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 2rem;
+  border-radius: 1rem;
+  background-color: var(--color-bg-base-soft);
+  border: 1px solid var(--color-border-soft);
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+/* ===== Stats Grid ===== */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1.5rem 1rem;
+  border-radius: 1rem;
+  background-color: rgb(var(--color-brand-100) / 1);
+  border: 1px solid rgb(var(--color-brand-200) / 0.5);
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: rgb(var(--color-brand-700) / 1);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: rgb(var(--color-brand-600) / 1);
+}
+
+/* ===== Database Grid ===== */
+.database-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+}
+
+@media (max-width: 1280px) {
+  .database-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .database-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.skeleton-card {
+  height: 6rem;
+  border-radius: 1rem;
+  background-color: var(--color-surface-muted);
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ===== Database Card ===== */
+.database-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-radius: 1rem;
+  background-color: var(--color-bg-base-soft);
+  border: 1px solid var(--color-border-soft);
+}
+
+.database-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.database-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.database-title h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.database-meta {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* ===== Table Grid ===== */
+.table-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+@media (min-width: 1536px) {
+  .table-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ===== Table Item ===== */
+.table-item {
+  border-radius: 0.75rem;
+  background-color: var(--color-surface);
+  border: 1px solid rgb(var(--color-brand-200) / 0.6);
+  overflow: hidden;
+}
+
+.table-item-error {
+  background-color: rgb(var(--color-danger-50) / 1);
+  border-color: rgb(var(--color-danger-200) / 1);
+}
+
+.table-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 1rem 0.75rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+}
+
+.table-button:focus {
+  outline: none;
+}
+
+.table-button:focus-visible {
+  outline: 2px solid var(--color-focus-outline);
+  outline-offset: -2px;
+  border-radius: 0.75rem;
+}
+
+.table-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.75rem;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-soft);
+}
+
+.table-icon img {
+  width: 2rem;
+  height: 2rem;
+}
+
+.table-icon-placeholder {
+  border-style: dashed;
+  color: var(--color-text-muted);
+}
+
+.table-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.table-count {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+/* ===== Empty States ===== */
+.empty-hint {
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background-color: var(--color-surface-muted);
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.empty-state {
+  padding: 2rem;
+  border-radius: 1rem;
+  background-color: var(--color-bg-base-soft);
+  border: 1px solid var(--color-border-soft);
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+/* ===== Icon Sizes ===== */
+.icon-sm {
+  width: 1rem;
+  height: 1rem;
+}
+
+.icon-md {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.icon-lg {
+  width: 2rem;
+  height: 2rem;
+}
+</style>
