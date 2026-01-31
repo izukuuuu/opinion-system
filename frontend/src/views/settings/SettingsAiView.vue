@@ -1,311 +1,272 @@
 <template>
-  <section class="card-surface space-y-6 p-6">
-    <header class="space-y-2">
-      <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">AI 服务</p>
-      <h2 class="text-xl font-semibold text-slate-900">大模型配置</h2>
-      <p class="text-sm text-slate-500">配置筛选流与对话流使用的模型提供方与参数。</p>
+  <section class="max-w-5xl mx-auto space-y-8 pb-12">
+    <header class="space-y-3">
+      <div class="flex items-center gap-2">
+        <SparklesIcon class="w-6 h-6 text-brand-600" />
+        <h2 class="text-2xl font-bold tracking-tight text-slate-900">AI 服务配置</h2>
+      </div>
+      <p class="text-base text-slate-500 max-w-2xl">
+        配置系统的智能核心。您可以接入不同的模型服务提供商，分别为筛选流程、对话助手和向量检索功能指定最合适的模型。
+      </p>
     </header>
 
-    <p v-if="llmState.error" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">{{ llmState.error }}</p>
-    <p v-if="llmState.message" class="rounded-2xl bg-emerald-100 px-4 py-3 text-sm text-emerald-600">{{ llmState.message }}</p>
+    <!-- Global Feedback -->
+    <div v-if="llmState.error || credentialState.error"
+      class="rounded-xl bg-red-50 p-4 border border-red-100 flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
+      <ExclamationCircleIcon class="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+      <p class="text-sm text-red-700 font-medium">{{ llmState.error || credentialState.error }}</p>
+    </div>
+    <div v-if="llmState.message || credentialState.message"
+      class="rounded-xl bg-green-50 p-4 border border-green-100 flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
+      <CheckCircleIcon class="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
+      <p class="text-sm text-green-700 font-medium">{{ llmState.message || credentialState.message }}</p>
+    </div>
 
+    <!-- API Keys Config -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
+        <h3 class="text-base font-semibold text-slate-900">API 凭证管理</h3>
+        <p class="text-sm text-slate-500 mt-1">集中管理所有模型服务的访问凭证。</p>
+      </div>
+      <div class="p-6 space-y-6">
+        <div class="grid gap-6 md:grid-cols-2">
+          <!-- Qwen Key -->
+          <div class="space-y-3">
+            <label class="block text-sm font-medium text-slate-700">DashScope API Key (通义千问)</label>
+            <div class="relative">
+              <input v-model.trim="credentialState.form.qwen_api_key" type="password" autocomplete="new-password"
+                placeholder="sk-..."
+                class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5 transition-shadow" />
+              <div class="absolute inset-y-0 right-3 flex items-center">
+                <span v-if="credentialState.summary.qwen.configured"
+                  class="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                  <CheckIcon class="w-3 h-3" />
+                  已配置
+                </span>
+                <span v-else
+                  class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  未配置
+                </span>
+              </div>
+            </div>
+            <div class="flex justify-end" v-if="credentialState.summary.qwen.configured">
+              <button type="button" class="text-xs text-slate-400 hover:text-red-500 transition-colors"
+                @click="clearCredential('qwen')">
+                清除密钥
+              </button>
+            </div>
+          </div>
 
-    <p v-if="credentialState.error" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">{{ credentialState.error }}</p>
-    <p v-if="credentialState.message" class="rounded-2xl bg-emerald-100 px-4 py-3 text-sm text-emerald-600">{{ credentialState.message }}</p>
-
-    <!-- API 密钥配置卡片 -->
-    <form class="space-y-4 card-surface p-5 config-card" @submit.prevent="submitCredentials">
-      <header class="space-y-1">
-        <h3 class="text-lg font-semibold text-slate-900">API 密钥配置</h3>
-        <p class="text-sm text-slate-500">集中管理千问 DashScope 与 OpenAI 兼容接口的 API Key 以及 Base URL。</p>
-      </header>
-      <div class="grid gap-4 md:grid-cols-2">
-        <div class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <label class="flex flex-col gap-2">
-            <span>DashScope API Key</span>
-            <input
-              v-model.trim="credentialState.form.qwen_api_key"
-              type="password"
-              autocomplete="new-password"
-              placeholder="输入新的 DashScope API Key"
-              class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-            />
-          </label>
-          <p class="text-xs font-normal text-slate-500">
-            当前状态：
-            <span v-if="credentialState.summary.qwen.configured">已配置 (****{{ credentialState.summary.qwen.last_four }})</span>
-            <span v-else>未配置</span>
-          </p>
-          <button
-            v-if="credentialState.summary.qwen.configured"
-            type="button"
-            class="w-max rounded-full border border-slate-300 px-4 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
-            :disabled="credentialState.loading"
-            @click="clearCredential('qwen')"
-          >
-            清空千问密钥
-          </button>
+          <!-- OpenAI Key -->
+          <div class="space-y-3">
+            <label class="block text-sm font-medium text-slate-700">OpenAI API Key (兼容接口)</label>
+            <div class="relative">
+              <input v-model.trim="credentialState.form.openai_api_key" type="password" autocomplete="new-password"
+                placeholder="sk-..."
+                class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5 transition-shadow" />
+              <div class="absolute inset-y-0 right-3 flex items-center">
+                <span v-if="credentialState.summary.openai.configured"
+                  class="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                  <CheckIcon class="w-3 h-3" />
+                  已配置
+                </span>
+                <span v-else
+                  class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  未配置
+                </span>
+              </div>
+            </div>
+            <div class="flex justify-end" v-if="credentialState.summary.openai.configured">
+              <button type="button" class="text-xs text-slate-400 hover:text-red-500 transition-colors"
+                @click="clearCredential('openai')">
+                清除密钥
+              </button>
+            </div>
+          </div>
         </div>
-        <div class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <label class="flex flex-col gap-2">
-            <span>OpenAI API Key</span>
-            <input
-              v-model.trim="credentialState.form.openai_api_key"
-              type="password"
-              autocomplete="new-password"
-              placeholder="输入新的 OpenAI API Key"
-              class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-            />
-          </label>
-          <p class="text-xs font-normal text-slate-500">
-            当前状态：
-            <span v-if="credentialState.summary.openai.configured">已配置 (****{{ credentialState.summary.openai.last_four }})</span>
-            <span v-else>未配置</span>
-          </p>
-          <button
-            v-if="credentialState.summary.openai.configured"
-            type="button"
-            class="w-max rounded-full border border-slate-300 px-4 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
-            :disabled="credentialState.loading"
-            @click="clearCredential('openai')"
-          >
-            清空 OpenAI 密钥
-          </button>
+
+        <div class="pt-4 border-t border-slate-100">
+          <label class="block text-sm font-medium text-slate-700 mb-2">OpenAI Base URL</label>
+          <div class="flex gap-4">
+            <div class="flex-1">
+              <input v-model.trim="credentialState.form.openai_base_url" type="text"
+                placeholder="https://api.openai.com/v1"
+                class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5 transition-shadow" />
+              <p class="mt-2 text-xs text-slate-500">仅在使用第三方代理或自建服务时需要修改，留空则使用默认地址。</p>
+            </div>
+            <div class="shrink-0">
+              <button type="button" class="btn-primary" :disabled="credentialState.loading" @click="submitCredentials">
+                <span v-if="credentialState.loading">保存中...</span>
+                <span v-else>保存凭证</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-      <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-        <span>OpenAI Base URL</span>
-        <input
-          v-model.trim="credentialState.form.openai_base_url"
-          type="text"
-          placeholder="https://api.example.com/v1"
-          class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-        />
-        <span class="text-xs font-normal text-slate-500">若使用自建或代理服务，请配置该地址；留空则使用官方默认地址。</span>
-      </label>
-      <div class="flex flex-wrap gap-3">
-        <button
-          type="submit"
-          class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60 no-shadow"
-          :disabled="credentialState.loading"
-        >
-          保存 API 凭证
-        </button>
-      </div>
-    </form>
+    </div>
 
-    <!-- 筛选模型配置卡片 -->
-    <form class="space-y-4 card-surface p-5 config-card" @submit.prevent="submitLlmFilter">
-      <header class="space-y-1">
-        <h3 class="text-lg font-semibold text-slate-900">筛选模型配置</h3>
-        <p class="text-sm text-slate-500">用于舆情筛选流程的 LLM 服务参数。</p>
-      </header>
-      <div class="grid gap-4 md:grid-cols-2">
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>服务提供方</span>
-          <select
-            v-model="llmState.filter.provider"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          >
-            <option
-              v-for="option in providerOptions"
-              :key="`filter-${option.value}`"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label
-          v-if="llmState.filter.provider === 'openai'"
-          class="flex flex-col gap-2 text-sm font-medium text-slate-600"
-        >
-          <span>API Base URL</span>
-          <input
-            v-model.trim="llmState.filter.base_url"
-            type="text"
-            placeholder="https://api.example.com/v1"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>模型名称</span>
-          <input
-            v-model.trim="llmState.filter.model"
-            type="text"
-            :placeholder="filterModelPlaceholder"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>QPS</span>
-          <input
-            v-model.number="llmState.filter.qps"
-            type="number"
-            min="0"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>批处理大小</span>
-          <input
-            v-model.number="llmState.filter.batch_size"
-            type="number"
-            min="1"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>截断长度</span>
-          <input
-            v-model.number="llmState.filter.truncation"
-            type="number"
-            min="0"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-      </div>
-      <div class="flex flex-wrap gap-3">
-        <button type="submit" class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 no-shadow">
-          保存筛选配置
-        </button>
-      </div>
-    </form>
+    <!-- Models Configuration Grid -->
+    <div class="grid gap-6 lg:grid-cols-2">
+      <!-- Chat Model -->
+      <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+        <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
+          <ChatBubbleBottomCenterTextIcon class="w-5 h-5 text-indigo-500" />
+          <div>
+            <h3 class="text-base font-semibold text-slate-900">对话模型</h3>
+            <p class="text-xs text-slate-500">用于 AI 助手问答交互</p>
+          </div>
+        </div>
+        <form @submit.prevent="submitLlmAssistant" class="p-6 space-y-5 flex-1 flex flex-col">
+          <div class="space-y-4 flex-1">
+            <div class="grid grid-cols-2 gap-4">
+              <div class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">服务提供方</label>
+                <select v-model="llmState.assistant.provider"
+                  class="form-select w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5">
+                  <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
+              </div>
 
-    <!-- 向量化模型配置卡片 -->
-    <form class="space-y-4 card-surface p-5 config-card" @submit.prevent="submitLlmEmbedding">
-      <header class="space-y-1">
-        <h3 class="text-lg font-semibold text-slate-900">向量化模型配置</h3>
-        <p class="text-sm text-slate-500">用于 BertTopic、RAG 检索的向量化模型参数。</p>
-      </header>
-      <div class="grid gap-4 md:grid-cols-2">
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>服务提供方</span>
-          <select
-            v-model="llmState.embedding.provider"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          >
-            <option
-              v-for="option in providerOptions"
-              :key="`embedding-${option.value}`"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label
-          v-if="llmState.embedding.provider === 'openai'"
-          class="flex flex-col gap-2 text-sm font-medium text-slate-600"
-        >
-          <span>API Base URL</span>
-          <input
-            v-model.trim="llmState.embedding.base_url"
-            type="text"
-            placeholder="https://api.example.com/v1"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>模型名称</span>
-          <input
-            v-model.trim="llmState.embedding.model"
-            type="text"
-            :placeholder="embeddingModelPlaceholder"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>向量维度</span>
-          <input
-            v-model.number="llmState.embedding.dimension"
-            type="number"
-            min="0"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-      </div>
-      <div class="flex flex-wrap gap-3">
-        <button type="submit" class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 no-shadow">
-          保存向量化配置
-        </button>
-      </div>
-    </form>
+              <div class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">模型名称</label>
+                <input v-model.trim="llmState.assistant.model" type="text" :placeholder="assistantModelPlaceholder"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
 
-    <!-- 对话模型配置卡片 -->
-    <form class="space-y-4 card-surface p-5 config-card" @submit.prevent="submitLlmAssistant">
-      <header class="space-y-1">
-        <h3 class="text-lg font-semibold text-slate-900">对话模型配置</h3>
-        <p class="text-sm text-slate-500">用于项目汇报与问答交互的模型参数。</p>
-      </header>
-      <div class="grid gap-4 md:grid-cols-2">
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>服务提供方</span>
-          <select
-            v-model="llmState.assistant.provider"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          >
-            <option
-              v-for="option in providerOptions"
-              :key="`assistant-${option.value}`"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label
-          v-if="llmState.assistant.provider === 'openai'"
-          class="flex flex-col gap-2 text-sm font-medium text-slate-600"
-        >
-          <span>API Base URL</span>
-          <input
-            v-model.trim="llmState.assistant.base_url"
-            type="text"
-            placeholder="https://api.example.com/v1"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>模型名称</span>
-          <input
-            v-model.trim="llmState.assistant.model"
-            type="text"
-            :placeholder="assistantModelPlaceholder"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>最大 Tokens</span>
-          <input
-            v-model.number="llmState.assistant.max_tokens"
-            type="number"
-            min="0"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-        <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-          <span>温度</span>
-          <input
-            v-model.number="llmState.assistant.temperature"
-            type="number"
-            min="0"
-            step="0.1"
-            class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          />
-        </label>
-      </div>
-      <div class="flex flex-wrap gap-3">
-        <button type="submit" class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 no-shadow">
-          保存对话配置
-        </button>
-      </div>
-    </form>
+              <div v-if="llmState.assistant.provider === 'openai'" class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Base URL</label>
+                <input v-model.trim="llmState.assistant.base_url" type="text" placeholder="继承全局设置"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">最大
+                  Tokens</label>
+                <input v-model.number="llmState.assistant.max_tokens" type="number"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+              <div>
+                <label
+                  class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Temperature</label>
+                <input v-model.number="llmState.assistant.temperature" type="number" step="0.1"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+            </div>
+          </div>
+          <div class="pt-4 flex justify-end">
+            <button type="submit"
+              class="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-500 hover:shadow disabled:opacity-60 disabled:shadow-none">保存对话配置</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Filter Model -->
+      <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+        <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
+          <FunnelIcon class="w-5 h-5 text-indigo-500" />
+          <div>
+            <h3 class="text-base font-semibold text-slate-900">筛选模型</h3>
+            <p class="text-xs text-slate-500">用于数据清洗与相关性判断</p>
+          </div>
+        </div>
+        <form @submit.prevent="submitLlmFilter" class="p-6 space-y-5 flex-1 flex flex-col">
+          <div class="space-y-4 flex-1">
+            <div class="grid grid-cols-2 gap-4">
+              <div class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">服务提供方</label>
+                <select v-model="llmState.filter.provider"
+                  class="form-select w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5">
+                  <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
+              </div>
+              <div class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">模型名称</label>
+                <input v-model.trim="llmState.filter.model" type="text" :placeholder="filterModelPlaceholder"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+              <div v-if="llmState.filter.provider === 'openai'" class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Base URL</label>
+                <input v-model.trim="llmState.filter.base_url" type="text" placeholder="继承全局设置"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">QPS 限制</label>
+                <input v-model.number="llmState.filter.qps" type="number"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Batch
+                  Size</label>
+                <input v-model.number="llmState.filter.batch_size" type="number"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+            </div>
+          </div>
+          <div class="pt-4 flex justify-end">
+            <button type="submit"
+              class="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-500 hover:shadow disabled:opacity-60 disabled:shadow-none">保存筛选配置</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Embedding Model -->
+      <section
+        class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col md:col-span-2 lg:col-span-1">
+        <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
+          <CpuChipIcon class="w-5 h-5 text-indigo-500" />
+          <div>
+            <h3 class="text-base font-semibold text-slate-900">向量模型</h3>
+            <p class="text-xs text-slate-500">用于检索增强生成 (RAG) 与聚类</p>
+          </div>
+        </div>
+        <form @submit.prevent="submitLlmEmbedding" class="p-6 space-y-5 flex-1 flex flex-col">
+          <div class="space-y-4 flex-1">
+            <div class="grid grid-cols-2 gap-4">
+              <div class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">服务提供方</label>
+                <select v-model="llmState.embedding.provider"
+                  class="form-select w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5">
+                  <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
+              </div>
+              <div class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">模型名称</label>
+                <input v-model.trim="llmState.embedding.model" type="text" :placeholder="embeddingModelPlaceholder"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+              <div v-if="llmState.embedding.provider === 'openai'" class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Base URL</label>
+                <input v-model.trim="llmState.embedding.base_url" type="text" placeholder="继承全局设置"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">向量维度</label>
+                <input v-model.number="llmState.embedding.dimension" type="number"
+                  class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
+              </div>
+            </div>
+          </div>
+          <div class="pt-4 flex justify-end">
+            <button type="submit"
+              class="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-500 hover:shadow disabled:opacity-60 disabled:shadow-none">保存向量配置</button>
+          </div>
+        </form>
+      </section>
+    </div>
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, watch } from 'vue'
+import {
+  SparklesIcon,
+  CheckBadgeIcon as CheckIcon,
+  ExclamationCircleIcon,
+  CheckCircleIcon,
+  ChatBubbleBottomCenterTextIcon,
+  FunnelIcon,
+  CpuChipIcon
+} from '@heroicons/vue/24/outline'
 import { useApiBase } from '../../composables/useApiBase'
 
 const { ensureApiBase } = useApiBase()
@@ -567,10 +528,10 @@ const fetchLlmSettings = async () => {
     const filterConfig =
       result && typeof result === 'object'
         ? (result.filter_llm && typeof result.filter_llm === 'object'
-            ? result.filter_llm
-            : result.filter && typeof result.filter === 'object'
-              ? result.filter
-              : {})
+          ? result.filter_llm
+          : result.filter && typeof result.filter === 'object'
+            ? result.filter
+            : {})
         : {}
     if (filterConfig && typeof filterConfig === 'object') {
       Object.assign(llmState.filter, filterConfig)
@@ -609,6 +570,7 @@ onMounted(() => {
 .config-card {
   border-radius: 14px !important;
 }
+
 .no-shadow {
   box-shadow: none !important;
 }

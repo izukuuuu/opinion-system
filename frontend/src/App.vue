@@ -1,18 +1,14 @@
 <template>
   <div class="min-h-screen bg-base text-primary">
-    <div
-      v-if="isLandingLayout"
-      class="flex min-h-screen flex-col"
-    >
-      <header class="flex items-center justify-between border-b border-soft bg-surface/90 px-6 py-4 backdrop-blur-sm sm:px-10">
+    <div v-if="isLandingLayout" class="flex min-h-screen flex-col">
+      <header
+        class="flex items-center justify-between border-b border-soft bg-surface/90 px-6 py-4 backdrop-blur-sm sm:px-10">
         <div class="flex items-center gap-3">
           <span class="text-lg font-semibold text-primary">Opinion System</span>
           <span class="hidden text-sm text-secondary sm:inline">舆情监测系统</span>
         </div>
-        <RouterLink
-          :to="backendEntryRoute"
-          class="inline-flex items-center justify-center rounded-full bg-white px-6 py-2 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary/90 hover:text-gray-600 focus-ring-accent"
-        >
+        <RouterLink :to="backendEntryRoute"
+          class="inline-flex items-center justify-center rounded-full bg-white px-6 py-2 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary/90 hover:text-gray-600 focus-ring-accent">
           进入后台
         </RouterLink>
       </header>
@@ -22,204 +18,162 @@
     </div>
 
     <template v-else>
-    <aside
-      v-if="sidebarCollapsed"
-      class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-24 lg:flex-col lg:border-r border-soft lg:bg-white/80 lg:backdrop-blur-md"
-    >
-      <div class="flex h-full flex-col px-3 py-6">
-        <div class="flex flex-col items-center gap-4 pb-5">
-          <button
-            type="button"
-            class="flex h-11 w-11 items-center justify-center rounded-2xl border border-soft bg-white/90 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
-            :aria-expanded="!sidebarCollapsed"
-            :aria-label="sidebarToggleLabel"
-            @click="toggleSidebar"
-          >
-            <Bars3Icon class="h-5 w-5" />
-          </button>
-        </div>
-
-        <nav class="collapsed-sidebar-scroll flex-1 overflow-y-auto">
-          <div class="flex flex-col items-center gap-4 pb-6">
-            <RouterLink
-              v-for="link in navigationLinks"
-              :key="link.label"
-              :to="link.to"
-              :class="getCollapsedLinkClasses(link)"
-              :aria-label="link.label"
-            >
-              <div :class="getCollapsedIconClasses(link)">
-                <component :is="link.icon" class="h-5 w-5" />
-              </div>
-              <span class="text-[11px] font-semibold leading-tight text-secondary">
-                {{ link.label }}
-              </span>
-            </RouterLink>
+      <aside v-if="sidebarCollapsed"
+        class="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-24 lg:flex-col lg:border-r border-soft lg:bg-white/80 lg:backdrop-blur-md">
+        <div class="flex h-full flex-col px-3 py-6">
+          <div class="flex flex-col items-center gap-4 pb-5">
+            <button type="button"
+              class="flex h-11 w-11 items-center justify-center rounded-2xl border border-soft bg-white/90 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+              :aria-expanded="!sidebarCollapsed" :aria-label="sidebarToggleLabel" @click="toggleSidebar">
+              <Bars3Icon class="h-5 w-5" />
+            </button>
           </div>
-        </nav>
-      </div>
-    </aside>
 
-    <header
-      class="fixed inset-x-0 top-0 z-20 border-b border-soft bg-white/70 px-4 py-3 shadow-sm backdrop-blur lg:hidden"
-    >
-      <div class="flex items-center gap-3">
-        <button
-          type="button"
-          class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-soft bg-surface text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
-          :aria-expanded="!sidebarCollapsed"
-          :aria-label="sidebarToggleLabel"
-          @click="toggleSidebar"
-        >
-          <ChevronDoubleRightIcon class="h-5 w-5" />
-        </button>
-        <div class="flex min-w-0 flex-1 flex-col">
-          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Opinion System</p>
-          <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
-        </div>
-        <ActiveProjectSwitcher
-          v-if="showGlobalProjectSwitcher"
-          class="ml-auto shrink-0"
-          :show-label="false"
-        />
-      </div>
-    </header>
-
-    <Transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="opacity-0 -translate-x-4"
-      enter-to-class="opacity-100 translate-x-0"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="opacity-100 translate-x-0"
-      leave-to-class="opacity-0 -translate-x-4"
-    >
-      <div
-        v-if="!sidebarCollapsed"
-        class="fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-soft bg-white shadow-lg lg:shadow-sm"
-      >
-        <div class="flex items-center gap-3 border-b border-soft px-5 py-4">
-          <button
-            type="button"
-            class="flex h-11 w-11 items-center justify-center rounded-2xl border border-soft bg-white/90 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
-            :aria-label="sidebarToggleLabel"
-            @click="toggleSidebar"
-          >
-            <Bars3Icon class="h-5 w-5" />
-            <span class="sr-only">{{ sidebarToggleLabel }}</span>
-          </button>
-          <div class="flex flex-col overflow-hidden">
-            <span class="text-lg font-semibold text-primary">Opinion System</span>
-            <span class="text-xs text-muted">舆情监测系统导航</span>
-          </div>
-        </div>
-
-        <div
-          ref="sidebarScrollEl"
-          :class="[
-            'sidebar-scroll flex flex-1 flex-col overflow-y-auto px-5 pb-8 pt-6',
-            { 'sidebar-scroll--hidden': !isSidebarScrollbarVisible }
-          ]"
-        >
-          <div class="flex flex-col gap-6">
-            <nav class="space-y-6">
-              <section
-                v-for="group in navigationGroups"
-                :key="group.label"
-                class="space-y-3"
-              >
-                <h2 class="text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-muted/80">
-                  {{ group.label }}
-                </h2>
-                <div class="space-y-2">
-                  <RouterLink
-                    v-for="link in group.links"
-                    :key="link.label"
-                    :to="link.to"
-                    custom
-                    v-slot="{ href, navigate }"
-                  >
-                    <a
-                      :href="href"
-                      @click="navigate"
-                      :class="getExpandedLinkClasses(link)"
-                    >
-                      <div :class="getExpandedIconClasses(link)">
-                        <component :is="link.icon" class="h-5 w-5" />
-                      </div>
-                      <div class="flex flex-col text-left">
-                        <span>{{ link.label }}</span>
-                        <span v-if="link.description" class="text-xs font-normal text-muted">
-                          {{ link.description }}
-                        </span>
-                      </div>
-                    </a>
-                  </RouterLink>
+          <nav class="collapsed-sidebar-scroll flex-1 overflow-y-auto">
+            <div class="flex flex-col items-center gap-4 pb-6">
+              <RouterLink v-for="link in navigationLinks" :key="link.label" :to="link.to"
+                :class="getCollapsedLinkClasses(link)" :aria-label="link.label">
+                <div :class="getCollapsedIconClasses(link)">
+                  <component :is="link.icon" class="h-5 w-5" />
                 </div>
-              </section>
-            </nav>
-          </div>
+                <span class="text-[11px] font-semibold leading-tight text-secondary">
+                  {{ link.label }}
+                </span>
+              </RouterLink>
+            </div>
+          </nav>
         </div>
-      </div>
-    </Transition>
+      </aside>
 
-    <Transition
-      enter-active-class="transition-opacity duration-200 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition-opacity duration-150 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
-      <div
-        v-if="!sidebarCollapsed"
-        class="fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-sm lg:hidden"
-        @click="toggleSidebar"
-        aria-hidden="true"
-      ></div>
-    </Transition>
-
-    <Transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="opacity-0 -translate-y-2"
-      enter-to-class="opacity-100 translate-y-0"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="opacity-100 translate-y-0"
-      leave-to-class="opacity-0 -translate-y-2"
-    >
       <header
-        v-if="showCompactHeader"
-        class="fixed inset-x-0 top-0 z-20 hidden items-center gap-3 border-b border-soft px-6 py-3 backdrop-blur lg:flex"
-        :style="[compactHeaderStyle, compactHeaderOffsetStyle]"
-      >
-        <div class="flex min-w-0 items-center gap-2">
-          <p class="shrink-0 text-xs font-semibold uppercase tracking-[0.3em] text-muted">Opinion System</p>
-          <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
+        class="fixed inset-x-0 top-0 z-20 border-b border-soft bg-white/70 px-4 py-3 shadow-sm backdrop-blur lg:hidden">
+        <div class="flex items-center gap-3">
+          <button type="button"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-soft bg-surface text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+            :aria-expanded="!sidebarCollapsed" :aria-label="sidebarToggleLabel" @click="toggleSidebar">
+            <ChevronDoubleRightIcon class="h-5 w-5" />
+          </button>
+          <div class="flex min-w-0 flex-1 flex-col">
+            <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Opinion System</p>
+            <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
+          </div>
+          <ActiveProjectSwitcher v-if="showGlobalProjectSwitcher" class="ml-auto shrink-0" :show-label="false" />
         </div>
       </header>
-    </Transition>
 
-    <div class="flex min-h-screen">
-      <div
-          :class="[
+      <Transition enter-active-class="transition duration-200 ease-out" enter-from-class="opacity-0 -translate-x-4"
+        enter-to-class="opacity-100 translate-x-0" leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100 translate-x-0" leave-to-class="opacity-0 -translate-x-4">
+        <div v-if="!sidebarCollapsed"
+          class="fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-soft bg-white shadow-lg lg:shadow-sm">
+          <div class="flex items-center gap-3 border-b border-soft px-5 py-4">
+            <button type="button"
+              class="flex h-11 w-11 items-center justify-center rounded-2xl border border-soft bg-white/90 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+              :aria-label="sidebarToggleLabel" @click="toggleSidebar">
+              <Bars3Icon class="h-5 w-5" />
+              <span class="sr-only">{{ sidebarToggleLabel }}</span>
+            </button>
+            <div class="flex flex-col overflow-hidden">
+              <span class="text-lg font-semibold text-primary">Opinion System</span>
+              <span class="text-xs text-muted">舆情监测系统导航</span>
+            </div>
+          </div>
+
+          <div ref="sidebarScrollEl" :class="[
+            'sidebar-scroll flex flex-1 flex-col overflow-y-auto px-5 pb-8 pt-6',
+            { 'sidebar-scroll--hidden': !isSidebarScrollbarVisible }
+          ]">
+            <div class="flex flex-col gap-6">
+              <nav class="space-y-6">
+                <section v-for="group in navigationGroups" :key="group.label" class="space-y-3">
+                  <h2 class="text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-muted/80">
+                    {{ group.label }}
+                  </h2>
+                  <div class="space-y-2">
+                    <RouterLink v-for="link in group.links" :key="link.label" :to="link.to" custom
+                      v-slot="{ href, navigate }">
+                      <a :href="href" @click="navigate" :class="getExpandedLinkClasses(link)">
+                        <div :class="getExpandedIconClasses(link)">
+                          <component :is="link.icon" class="h-5 w-5" />
+                        </div>
+                        <div class="flex flex-col text-left">
+                          <span>{{ link.label }}</span>
+                          <span v-if="link.description" class="text-xs font-normal text-muted">
+                            {{ link.description }}
+                          </span>
+                        </div>
+                      </a>
+                    </RouterLink>
+                  </div>
+                </section>
+              </nav>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      <Transition enter-active-class="transition-opacity duration-200 ease-out" enter-from-class="opacity-0"
+        enter-to-class="opacity-100" leave-active-class="transition-opacity duration-150 ease-in"
+        leave-from-class="opacity-100" leave-to-class="opacity-0">
+        <div v-if="!sidebarCollapsed" class="fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-sm lg:hidden"
+          @click="toggleSidebar" aria-hidden="true"></div>
+      </Transition>
+
+      <Transition enter-active-class="transition duration-200 ease-out" enter-from-class="opacity-0 -translate-y-2"
+        enter-to-class="opacity-100 translate-y-0" leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 -translate-y-2">
+        <header v-if="showCompactHeader"
+          class="fixed inset-x-0 top-0 z-20 hidden items-center gap-3 border-b border-soft px-6 py-3 backdrop-blur lg:flex"
+          :style="[compactHeaderStyle, compactHeaderOffsetStyle]">
+          <div class="flex min-w-0 items-center gap-2">
+            <p class="shrink-0 text-xs font-semibold uppercase tracking-[0.3em] text-muted">Opinion System</p>
+            <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
+          </div>
+          <div class="ml-auto flex items-center gap-2">
+            <button type="button"
+              class="hidden lg:flex h-8 w-8 items-center justify-center rounded-lg border border-soft bg-white/50 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+              :class="{ 'bg-brand-soft text-brand-700 border-brand-soft': isAiSidebarOpen }"
+              aria-label="Toggle AI Assistant" @click="toggleAiSidebar">
+              <SparklesIcon class="h-4 w-4" />
+            </button>
+          </div>
+        </header>
+      </Transition>
+
+      <div class="flex min-h-screen">
+        <div :class="[
           'flex min-h-screen flex-1 flex-col px-0 pt-[4rem] lg:pt-0',
           sidebarCollapsed ? 'lg:pl-24' : 'lg:pl-72'
-        ]"
-      >
-        <header
-          ref="mainHeaderEl"
-          class="flex flex-col gap-4 border-b border-soft bg-surface px-6 py-6"
-        >
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <p class="text-sm font-semibold uppercase tracking-[0.3em] text-muted">舆情监测系统</p>
-            <ActiveProjectSwitcher v-if="showGlobalProjectSwitcher" class="hidden lg:inline-flex" />
-          </div>
-          <h1 class="text-2xl font-semibold text-primary md:text-3xl">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
-        </header>
-        <main class="flex-1 px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
-          <RouterView />
-        </main>
+        ]">
+          <header ref="mainHeaderEl" class="flex flex-col gap-4 border-b border-soft bg-surface px-6 py-6">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <p class="text-sm font-semibold uppercase tracking-[0.3em] text-muted">舆情监测系统</p>
+              <div class="hidden lg:flex items-center gap-3">
+                <ActiveProjectSwitcher v-if="showGlobalProjectSwitcher" />
+                <button type="button"
+                  class="flex h-9 w-9 items-center justify-center rounded-lg border border-soft bg-white text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+                  :class="{ 'bg-brand-soft text-brand-700 border-brand-soft': isAiSidebarOpen }"
+                  aria-label="Toggle AI Assistant" @click="toggleAiSidebar">
+                  <SparklesIcon class="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <h1 class="text-2xl font-semibold text-primary md:text-3xl">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
+          </header>
+          <main class="flex-1 px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+            <RouterView />
+          </main>
+
+        </div>
+
+        <!-- AI Assistant Sidebar -->
+        <Transition enter-active-class="transform transition ease-out duration-300"
+          enter-from-class="translate-x-full opacity-0" enter-to-class="translate-x-0 opacity-100"
+          leave-active-class="transform transition ease-in duration-200" leave-from-class="translate-x-0 opacity-100"
+          leave-to-class="translate-x-full opacity-0">
+          <AiSidebar v-if="isAiSidebarOpen" @close="toggleAiSidebar" />
+        </Transition>
       </div>
-    </div>
     </template>
   </div>
 </template>
@@ -243,9 +197,12 @@ import {
   TableCellsIcon,
   MagnifyingGlassCircleIcon,
   ChartBarIcon,
-  PencilSquareIcon
+  PencilSquareIcon,
+  SparklesIcon,
+  XMarkIcon
 } from '@heroicons/vue/24/outline'
 import ActiveProjectSwitcher from './components/ActiveProjectSwitcher.vue'
+import AiSidebar from './components/AiSidebar.vue'
 import './assets/colors.css'
 
 const isClient = typeof window !== 'undefined'
@@ -643,7 +600,14 @@ onBeforeUnmount(() => {
   clearSidebarScrollbarTimer()
   detachSidebarScrollListeners()
   cleanupHeaderObserver?.()
+  cleanupHeaderObserver?.()
 })
+
+const isAiSidebarOpen = ref(false)
+const toggleAiSidebar = () => {
+  isAiSidebarOpen.value = !isAiSidebarOpen.value
+}
+
 </script>
 
 <style scoped>

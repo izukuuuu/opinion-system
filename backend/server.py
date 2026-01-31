@@ -37,6 +37,7 @@ from src.project import (  # type: ignore
 from src.utils.setting.paths import bucket, get_data_root, _normalise_topic  # type: ignore
 
 from src.topic.data_bertopic_qwen import run_topic_bertopic
+from openai import OpenAI
 
 from server_support import (  # type: ignore
     collect_layer_archives,
@@ -782,6 +783,68 @@ def update_llm_filter():
     config["filter_llm"] = filter_llm
     persist_llm_config(config)
     return success({"data": filter_llm})
+
+@app.route("/api/ai/chat", methods=["POST"])
+def chat_ai():
+    """
+    Stream chat completion using system LLM settings (Assistant profile).
+    Expected JSON payload: { "messages": [ { "role": "user", "content": "..." } ] }
+    """
+    data = request.json
+    messages = data.get("messages", [])
+    if not messages:
+        return jsonify({"error": "No messages provided"}), 400
+
+    config = load_llm_config()
+    assistant = config.get("assistant", {})
+    credentials = config.get("credentials", {})
+
+    # Determine provider details
+    provider = assistant.get("provider", "openai").lower()
+    model = assistant.get("model", "llama3")
+    
+    # Default defaults (Ollama-like)
+    api_key = "ollama"
+    base_url = "http://localhost:11434/v1"
+
+    if provider == "qwen":
+        api_key = credentials.get("qwen_api_key") or credentials.get("dashscope_api_key") or "EMPTY"
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    elif provider == "openai":
+         # Use configured OpenAI settings, which might point to a local server or real OpenAI
+         configured_base = credentials.get("openai_base_url")
+         if configured_base:
+             base_url = configured_base
+         
+         configured_key = credentials.get("openai_api_key") or credentials.get("opinion_openai_api_key")
+         if configured_key:
+             api_key = configured_key
+
+    client = OpenAI(
+        base_url=base_url,
+        api_key=api_key,
+    )
+
+    def generate():
+        try:
+            stream = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                stream=True,
+                max_tokens=assistant.get("max_tokens"),
+                temperature=assistant.get("temperature"),
+            )
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except Exception as e:
+            LOGGER.error(f"AI Chat Error: {e}")
+            yield f"Error: {str(e)}"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+
+
+
 
 
 @app.put("/api/settings/llm/assistant")
