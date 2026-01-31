@@ -36,7 +36,10 @@ const configForm = reactive({
     search_type: 'vector',
     include_metadata: true,
     score_type: 'cosine',
-    rerank: false
+    rerank: false,
+    enable_query_expansion: true,
+    enable_llm_summary: true,
+    llm_summary_mode: 'strict'
   },
   storage: {
     storage_type: 'file',
@@ -225,7 +228,10 @@ export const useRAGSimple = () => {
         search_type: 'vector',
         include_metadata: true,
         score_type: 'cosine',
-        rerank: false
+        rerank: false,
+        enable_query_expansion: true,
+        enable_llm_summary: true,
+        llm_summary_mode: 'strict'
       },
       storage: {
         storage_type: 'file',

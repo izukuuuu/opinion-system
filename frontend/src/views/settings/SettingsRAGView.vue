@@ -280,6 +280,46 @@
                 启用重排序 (暂不支持)
               </label>
             </div>
+
+            <div class="border-t pt-4 mt-4 space-y-4">
+              <h3 class="text-sm font-bold text-gray-700">RouterRAG 特有配置</h3>
+              
+              <div class="flex items-center">
+                <input
+                  v-model="ragState.configForm.retrieval.enable_query_expansion"
+                  type="checkbox"
+                  id="enable-query-expansion"
+                  class="checkbox-custom"
+                />
+                <label for="enable-query-expansion" class="ml-2 text-sm text-secondary">
+                  启用查询扩展 (Query Expansion)
+                </label>
+              </div>
+
+              <div class="flex items-center">
+                <input
+                  v-model="ragState.configForm.retrieval.enable_llm_summary"
+                  type="checkbox"
+                  id="enable-llm-summary"
+                  class="checkbox-custom"
+                />
+                <label for="enable-llm-summary" class="ml-2 text-sm text-secondary">
+                  启用 LLM 结果总结 (Result Summary)
+                </label>
+              </div>
+
+              <div v-if="ragState.configForm.retrieval.enable_llm_summary" class="ml-6 space-y-2">
+                <label class="text-xs font-semibold text-muted">总结模式</label>
+                <select
+                  v-model="ragState.configForm.retrieval.llm_summary_mode"
+                  class="input text-xs py-1"
+                >
+                  <option value="strict">严格模式 (仅限参考资料)</option>
+                  <option value="supplement">补充模式 (结合通用知识)</option>
+                </select>
+                <p class="text-xs text-muted">选择生成总结时的限制程度</p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -433,7 +473,130 @@
           </div>
         </div>
 
+
+        <!-- Prompts Configuration -->
+        <div v-if="activeTab === 'prompts'" class="space-y-6">
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-primary">RAG 提示词配置 (RouterRAG)</h2>
+            <div class="flex items-center gap-2">
+              <select
+                v-model="selectedPromptTopic"
+                class="input w-48 py-1.5 text-sm"
+                @change="loadPromptsForTopic"
+              >
+                <option value="" disabled>选择专题...</option>
+                <option v-for="topic in promptTopics" :key="topic" :value="topic">{{ topic }}</option>
+              </select>
+              <button
+                @click="loadPromptsForTopic"
+                class="btn-secondary py-1.5 text-xs"
+                title="刷新"
+              >
+                刷新
+              </button>
+              <button
+                @click="resetPromptsToDefault"
+                class="btn-secondary border-red-200 text-red-600 hover:bg-red-50 py-1.5 text-xs"
+                title="重置为默认"
+              >
+                重置为默认
+              </button>
+            </div>
+          </div>
+
+          <div v-if="promptConfig" class="space-y-8">
+            <!-- Time Extraction -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-bold text-gray-700">时间提取提示词 (Time Extraction)</label>
+                <span class="text-xs text-gray-400">用于识别查询中的时间信息</span>
+              </div>
+              <textarea
+                v-model="promptConfig.time_extraction.prompt"
+                rows="6"
+                class="input font-sans text-sm leading-relaxed"
+                placeholder="输入提示词模板..."
+              ></textarea>
+            </div>
+
+            <!-- Time Matching -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-bold text-gray-700">时间匹配提示词 (Time Matching)</label>
+                <span class="text-xs text-gray-400">用于匹配查询时间与文档时间</span>
+              </div>
+              <textarea
+                v-model="promptConfig.time_matching.prompt"
+                rows="6"
+                class="input font-sans text-sm leading-relaxed"
+                placeholder="输入提示词模板..."
+              ></textarea>
+            </div>
+
+            <!-- Query Expansion -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-bold text-gray-700">查询扩展提示词 (Query Expansion)</label>
+                <span class="text-xs text-gray-400">用于优化和扩展用户查询</span>
+              </div>
+              <textarea
+                v-model="promptConfig.query_expansion.prompt"
+                rows="6"
+                class="input font-sans text-sm leading-relaxed"
+                placeholder="输入提示词模板..."
+              ></textarea>
+            </div>
+
+            <!-- Result Summary (Strict) -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-bold text-gray-700">结果整理 - 严格模式 (Strict Summary)</label>
+                <span class="text-xs text-gray-400">仅使用检索资料回答</span>
+              </div>
+              <textarea
+                v-model="promptConfig.result_summary_strict.prompt"
+                rows="8"
+                class="input font-sans text-sm leading-relaxed"
+                placeholder="输入提示词模板..."
+              ></textarea>
+            </div>
+
+            <!-- Result Summary (Supplement) -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-bold text-gray-700">结果整理 - 补充模式 (Supplement Summary)</label>
+                <span class="text-xs text-gray-400">结合外部知识回答</span>
+              </div>
+              <textarea
+                v-model="promptConfig.result_summary_supplement.prompt"
+                rows="8"
+                class="input font-sans text-sm leading-relaxed"
+                placeholder="输入提示词模板..."
+              ></textarea>
+            </div>
+            
+            <div class="flex justify-end pt-4">
+               <button
+                  @click="savePrompts"
+                  :disabled="savingPrompts"
+                  class="btn-primary"
+                >
+                  <span v-if="savingPrompts">保存中...</span>
+                  <span v-else>保存当前专题提示词</span>
+                </button>
+            </div>
+          </div>
+          
+          <div v-else-if="selectedPromptTopic" class="text-center py-12 text-gray-500">
+             加载中...
+          </div>
+          <div v-else class="text-center py-12 text-gray-400">
+             请选择一个专题以编辑其 RouterRAG 提示词
+          </div>
+        </div>
+
         <!-- API Keys Configuration -->
+
         <div v-if="activeTab === 'api_keys'" class="space-y-6">
           <h2 class="text-lg font-semibold text-primary">API 密钥配置</h2>
 
@@ -555,10 +718,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRAGSimple } from '../../composables/useRAGSimple'
+import { useRAGTopics } from '../../composables/useRAGTopics'
+import { useApiBase } from '../../composables/useApiBase'
 
 const ragState = useRAGSimple()
+const { ragTopicsState, loadRAGTopics } = useRAGTopics()
+const { callApi } = useApiBase()
 
 // State
 const activeTab = ref('embedding')
@@ -566,14 +733,22 @@ const isTesting = ref(false)
 const statusMessage = ref('')
 const statusType = ref('success')
 
+// Prompts State
+const selectedPromptTopic = ref('')
+const promptConfig = ref(null)
+const savingPrompts = ref(false)
+
 const tabs = [
   { key: 'embedding', label: '嵌入模型' },
   { key: 'chunking', label: '文本分块' },
   { key: 'retrieval', label: '检索参数' },
   { key: 'storage', label: '存储配置' },
   { key: 'processing', label: '预处理' },
-  { key: 'api_keys', label: 'API 密钥' }
+  { key: 'api_keys', label: 'API 密钥' },
+  { key: 'prompts', label: '提示词' }
 ]
+
+const promptTopics = computed(() => ragTopicsState.router)
 
 // Methods
 const saveConfig = async () => {
@@ -624,8 +799,96 @@ const testConfig = async () => {
   }
 }
 
+// Prompt Methods
+const loadPromptsForTopic = async () => {
+  if (!selectedPromptTopic.value) return
+  
+  promptConfig.value = null
+  try {
+    const response = await callApi(`/api/settings/rag/prompts?topic=${encodeURIComponent(selectedPromptTopic.value)}`, {
+       method: 'GET'
+    })
+    
+    if (response?.data && Object.keys(response.data).length > 0) {
+       promptConfig.value = response.data
+    } else {
+       // Initialize with default structure if empty
+       promptConfig.value = {
+          time_extraction: { prompt: '' },
+          time_matching: { prompt: '' },
+          query_expansion: { prompt: '' },
+          result_summary_strict: { prompt: '' },
+          result_summary_supplement: { prompt: '' }
+       }
+    }
+  } catch (error) {
+    statusMessage.value = '加载提示词失败: ' + (error.message || '未知错误')
+    statusType.value = 'error'
+  }
+}
+
+const savePrompts = async () => {
+   if (!selectedPromptTopic.value || !promptConfig.value) return
+   
+   savingPrompts.value = true
+   try {
+      await callApi('/api/settings/rag/prompts', {
+         method: 'POST',
+         body: JSON.stringify({
+            topic: selectedPromptTopic.value,
+            prompts: promptConfig.value
+         })
+      })
+      statusMessage.value = '提示词保存成功'
+      statusType.value = 'success'
+      setTimeout(() => statusMessage.value = '', 3000)
+   } catch (error) {
+      statusMessage.value = '保存提示词失败: ' + (error.message || '未知错误')
+      statusType.value = 'error'
+   } finally {
+      savingPrompts.value = false
+   }
+}
+
+const resetPromptsToDefault = async () => {
+   if (!selectedPromptTopic.value) return
+   if (!confirm('确定要将该专题的提示词重置为默认值吗？')) return
+   
+   promptConfig.value = null
+   try {
+      // We can trigger a reset by sending an empty prompts object or a special flag, 
+      // but the backend load_router_prompt_config handles missing files.
+      // Easiest is to just send an empty body or special reset call if implemented.
+      // Alternatively, just load the default config from the backend.
+      const response = await callApi(`/api/settings/rag/prompts?topic=${encodeURIComponent(selectedPromptTopic.value)}&reset=true`, {
+         method: 'GET'
+      })
+      if (response?.data) {
+         promptConfig.value = response.data
+         statusMessage.value = '提示词已重置为默认值'
+         statusType.value = 'success'
+         setTimeout(() => statusMessage.value = '', 3000)
+      }
+   } catch (error) {
+      statusMessage.value = '重置失败: ' + (error.message || '未知错误')
+      statusType.value = 'error'
+   }
+}
+
 // Lifecycle
-onMounted(() => {
+onMounted(async () => {
   ragState.loadConfig()
+  await loadRAGTopics()
+  if (promptTopics.value.length > 0) {
+     selectedPromptTopic.value = promptTopics.value[0]
+     loadPromptsForTopic()
+  }
+})
+
+watch(activeTab, (newTab) => {
+   if (newTab === 'prompts' && !selectedPromptTopic.value && promptTopics.value.length > 0) {
+      selectedPromptTopic.value = promptTopics.value[0]
+      loadPromptsForTopic()
+   }
 })
 </script>

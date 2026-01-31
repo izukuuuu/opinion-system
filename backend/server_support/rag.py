@@ -12,11 +12,12 @@ import lancedb
 from src.utils.setting.paths import get_data_root, bucket
 from src.utils.io.excel import read_jsonl
 from src.utils.logging.logging import setup_logger, log_success, log_error
-from src.utils.rag.tagrag.tag_vec_data import vectorize_and_store
+from src.utils.rag.tagrag.tag_vec_data import vectorize_and_store, to_pinyin
 from src.utils.rag.ragrouter.router_vec_data import run_ragrouter
 from src.fetch.data_fetch import fetch_range, get_topic_available_date_range
 
 _RAG_BUILD_STATUS: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+_RAG_BUILD_THREADS: Dict[Tuple[str, str, str], threading.Thread] = {}
 _RAG_BUILD_LOCK = threading.Lock()
 
 
@@ -38,14 +39,32 @@ def _status_key(project: str, rag_type: str, topic: str) -> Tuple[str, str, str]
 
 
 def get_rag_build_status(project: str, rag_type: str, topic: str) -> Dict[str, Any]:
+    key = _status_key(project, rag_type, topic)
     with _RAG_BUILD_LOCK:
-        status = _RAG_BUILD_STATUS.get(_status_key(project, rag_type, topic))
-        return dict(status) if isinstance(status, dict) else {
-            "status": "idle",
-            "percent": 0,
-            "message": "",
-            "updated_at": None,
-        }
+        status = _RAG_BUILD_STATUS.get(key)
+    status_payload = dict(status) if isinstance(status, dict) else {
+        "status": "idle",
+        "percent": 0,
+        "message": "",
+        "updated_at": None,
+    }
+
+    if status_payload.get("status") != "running":
+        return status_payload
+
+    with _RAG_BUILD_LOCK:
+        thread = _RAG_BUILD_THREADS.get(key)
+    if thread is not None and thread.is_alive():
+        return status_payload
+
+    if ensure_rag_ready(project, rag_type, topic):
+        _update_status(project, rag_type, topic, "done", 100, "准备完成")
+    else:
+        _update_status(project, rag_type, topic, "error", 100, "构建中断，请重试")
+
+    with _RAG_BUILD_LOCK:
+        status = _RAG_BUILD_STATUS.get(key)
+    return dict(status) if isinstance(status, dict) else status_payload
 
 
 def _update_status(project: str, rag_type: str, topic: str, status: str, percent: int, message: str) -> None:
@@ -67,7 +86,8 @@ def _tagrag_db_ready(topic: str, project: str) -> bool:
         return False
     try:
         db = lancedb.connect(str(vector_dir))
-        return bool(db.table_names())
+        table_name = to_pinyin(topic)
+        return table_name in db.table_names()
     except Exception:
         return False
 
@@ -191,7 +211,9 @@ def ensure_tagrag_db(topic: str, project: str, fetch_dir: Optional[Path] = None)
 
     try:
         db = lancedb.connect(str(vector_dir))
-        if db.table_names() and any(name for name in db.table_names()):
+        table_name = to_pinyin(topic)
+        if table_name in db.table_names():
+            _update_status(project, "tagrag", topic, "done", 100, "准备完成")
             return vector_dir
     except Exception:
         pass
@@ -247,6 +269,7 @@ def ensure_routerrag_db(topic: str, project: str, fetch_dir: Optional[Path] = No
     base_path = rag_root / "routerrag" / f"{topic}数据库"
     vector_dir = base_path / "vector_db"
     if vector_dir.exists():
+        _update_status(project, "routerrag", topic, "done", 100, "准备完成")
         return base_path
 
     logger = setup_logger(f"RouterRAG_{project}", "default")
@@ -299,6 +322,7 @@ def start_rag_build(
     start: Optional[str] = None,
     end: Optional[str] = None,
 ) -> Dict[str, Any]:
+    key = _status_key(project, rag_type, topic)
     status = get_rag_build_status(project, rag_type, topic)
     if status.get("status") == "running":
         return status
@@ -333,9 +357,14 @@ def start_rag_build(
                 ensure_routerrag_db(topic, project, fetch_dir=fetch_dir)
         except Exception:
             _update_status(project, rag_type, topic, "error", 100, "准备失败，请稍后重试")
+        finally:
+            with _RAG_BUILD_LOCK:
+                _RAG_BUILD_THREADS.pop(key, None)
 
     _update_status(project, rag_type, topic, "running", 5, "开始准备")
     thread = threading.Thread(target=_run, daemon=True)
+    with _RAG_BUILD_LOCK:
+        _RAG_BUILD_THREADS[key] = thread
     thread.start()
     return get_rag_build_status(project, rag_type, topic)
 

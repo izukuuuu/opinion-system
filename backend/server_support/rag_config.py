@@ -52,8 +52,17 @@ def load_rag_config() -> Dict[str, Any]:
                 "search_type": "vector",
                 "include_metadata": True,
                 "score_type": "cosine",
-                "rerank": False
+                "rerank": False,
+                "enable_query_expansion": True,
+                "enable_llm_summary": True,
+                "llm_summary_mode": "strict"
             }
+        else:
+            # Add missing fields to existing config
+            ret = config["retrieval"]
+            if "enable_query_expansion" not in ret: ret["enable_query_expansion"] = True
+            if "enable_llm_summary" not in ret: ret["enable_llm_summary"] = True
+            if "llm_summary_mode" not in ret: ret["llm_summary_mode"] = "strict"
 
         if "storage" not in config:
             config["storage"] = {
@@ -115,7 +124,10 @@ def _get_default_rag_config() -> Dict[str, Any]:
             "search_type": "vector",
             "include_metadata": True,
             "score_type": "cosine",
-            "rerank": False
+            "rerank": False,
+            "enable_query_expansion": True,
+            "enable_llm_summary": True,
+            "llm_summary_mode": "strict"
         },
         "storage": {
             "storage_type": "file",

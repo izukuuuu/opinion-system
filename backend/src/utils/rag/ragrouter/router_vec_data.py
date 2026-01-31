@@ -608,71 +608,58 @@ class EntityRelationExtractor:
         return text_tags, entity_id_counter - 1, relation_id_counter - 1, current_batch_entities, current_batch_relations
 
 class EmbeddingGenerator:
-    """向量生成器 - 使用text-embedding-v4（高并发）"""
+    """向量生成器 - 使用配置的模型（高并发）"""
     
-    def __init__(self, api_key: str, max_concurrent: int = 100, model: str = "text-embedding-v4", logger=None):
-        self.api_url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
-        self.api_key = api_key
-        self.model = model
+    def __init__(self, api_key: str = None, max_concurrent: int = 100, model: str = None, logger=None):
+        from ..embedding import get_async_client
+        self.logger = logger
         self.max_concurrent = max_concurrent
         self.token_counter = TokenCounter(logger)
-        self.logger = logger
+        
+        try:
+            # api_key arg is ignored, we use config
+            self.client, self.model_name, self.dimension = get_async_client()
+            log_success(self.logger, f"Embedding模型: {self.model_name}", "RouterVectorize")
+        except Exception as e:
+            log_error(self.logger, f"EmbeddingClient初始化失败: {e}", "RouterVectorize")
+            self.client = None
     
-    async def generate_embedding(self, text: str, session: aiohttp.ClientSession, 
-                                task_name: str = "", max_retries: int = 5) -> Optional[List[float]]:
+    async def generate_embedding(self, text: str, task_name: str = "", max_retries: int = 5) -> Optional[List[float]]:
         """生成单个向量（带重试）"""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": self.model,
-            "input": {"texts": [text]}
-        }
+        if not self.client:
+            return None
+
+        from ..embedding import generate_embedding_async
         
         for attempt in range(max_retries):
             try:
-                async with session.post(self.api_url, json=data, headers=headers,
-                                       timeout=aiohttp.ClientTimeout(total=90)) as resp:
-                    result = await resp.json()
-                    
-                    if resp.status != 200:
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(1)
-                            continue
-                        return None
-                    
-                    embeddings = result.get("output", {}).get("embeddings", [])
-                    if embeddings:
-                        usage = result.get("usage", {})
-                        self.token_counter.add_tokens(usage.get("total_tokens", 0), 0)
-                        return embeddings[0].get("embedding", [])
-                    return None
-                    
-            except (asyncio.TimeoutError, Exception):
+                # generate_embedding_async handles the call
+                embedding = await generate_embedding_async(self.client, text, self.model_name)
+                # self.token_counter.add_tokens(...) # Token counting not supported in shared util yet
+                return embedding
+            except Exception as e:
                 if attempt < max_retries - 1:
                     await asyncio.sleep(1)
                     continue
+                log_error(self.logger, f"向量生成失败 {task_name}: {e}", "RouterVectorize")
                 return None
-        
         return None
     
     async def generate_batch(self, texts: List[str], desc: str = "向量") -> List[Optional[List[float]]]:
         """批量生成向量（高并发）"""        
-        async with aiohttp.ClientSession() as session:
-            semaphore = asyncio.Semaphore(self.max_concurrent)
-            
-            async def gen_one(text: str, idx: int):
-                async with semaphore:
-                    vec = await self.generate_embedding(text, session, f"{desc}{idx}")
-                    return vec
-            
-            vecs = await asyncio.gather(*[gen_one(t, i) for i, t in enumerate(texts)])
-            
-            success = sum(1 for v in vecs if v is not None)
-            success_rate = (success*100//len(texts)) if len(texts) > 0 else 0
-            
-            return vecs
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+        
+        async def gen_one(text: str, idx: int):
+            async with semaphore:
+                vec = await self.generate_embedding(text, f"{desc}{idx}")
+                return vec
+        
+        vecs = await asyncio.gather(*[gen_one(t, i) for i, t in enumerate(texts)])
+        
+        success = sum(1 for v in vecs if v is not None)
+        # success_rate = (success*100//len(texts)) if len(texts) > 0 else 0
+        
+        return vecs
 
 class LanceDBManager:
     """LanceDB管理器 - 管理向量数据库"""

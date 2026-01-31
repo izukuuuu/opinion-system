@@ -84,23 +84,8 @@ class Retriever:
     def _init_client(self):
         """初始化OpenAI客户端。"""
         try:
-            # 从配置文件获取LLM配置
-            llm_config = settings.get_llm_config()
-            embedding_config = llm_config.get('embedding_llm', {})
-            
-            # 使用统一的环境变量加载器获取API密钥
-            api_key = get_api_key()
-            base_url = embedding_config.get('base_url', "https://dashscope.aliyuncs.com/compatible-mode/v1")
-            
-            if not api_key:
-                if self.logger:
-                    log_error(self.logger, "未找到API密钥，请在配置文件的 credentials.qwen_api_key 中设置", "Retriever")
-                raise ValueError("API密钥未配置")
-            
-            self.client = OpenAI(
-                api_key=api_key,
-                base_url=base_url
-            )
+            from ..embedding import get_sync_client
+            self.client, self.model, self.dimension = get_sync_client()
             
             if self.logger:
                 pass  # OpenAI客户端初始化成功
@@ -147,15 +132,12 @@ class Retriever:
             查询语句的向量表示
         """
         try:
-            response = self.client.embeddings.create(
-                model="text-embedding-v4",
-                input=query
-            )
-            return response.data[0].embedding
+            from ..embedding import generate_embedding_sync
+            return generate_embedding_sync(self.client, query, self.model)
         except Exception as e:
             if self.logger:
                 log_error(self.logger, f"查询向量化失败: {e}", "Retriever")
-            return [0.0] * 1024  # 返回零向量
+            return [0.0] * getattr(self, "dimension", 1024)  # 返回零向量
     
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """

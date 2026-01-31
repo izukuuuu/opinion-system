@@ -40,7 +40,8 @@ const ragRetrievalState = reactive({
   loading: false,
   error: '',
   results: [],
-  total: 0
+  total: 0,
+  summary: ''
 })
 
 const ragBuildState = reactive({
@@ -261,6 +262,7 @@ const retrieveTagRAG = async (params = {}) => {
 
     ragRetrievalState.results = response?.data?.results || []
     ragRetrievalState.total = response?.data?.total || 0
+    ragRetrievalState.summary = response?.data?.summary || ''
 
     if (response?.status === 'building') {
       ragRetrievalState.error = response?.message || '正在准备检索资料，请稍后再试'
@@ -289,6 +291,12 @@ const retrieveRouterRAG = async (params = {}) => {
       body: JSON.stringify({
         query: params.query || ragSearchForm.query,
         topic: params.topic || ragSearchForm.topic,
+        mode: params.mode || (() => {
+          const type = ragSearchForm.rag_type
+          if (type === 'routerrag') return 'normalrag'
+          if (type === 'hybrid') return 'mixed'
+          return type
+        })(),
         project: params.project || activeProjectName.value || undefined,
         top_k: params.top_k || ragSearchForm.top_k,
         threshold: params.threshold || ragSearchForm.threshold
@@ -297,6 +305,7 @@ const retrieveRouterRAG = async (params = {}) => {
 
     ragRetrievalState.results = response?.data?.results || []
     ragRetrievalState.total = response?.data?.total || 0
+    ragRetrievalState.summary = response?.data?.summary || ''
 
     if (response?.status === 'building') {
       ragRetrievalState.error = response?.message || '正在准备检索资料，请稍后再试'
@@ -334,6 +343,7 @@ const retrieveUniversalRAG = async (params = {}) => {
 
     ragRetrievalState.results = response?.data?.results || []
     ragRetrievalState.total = response?.data?.total || 0
+    ragRetrievalState.summary = response?.data?.summary || ''
 
     if (response?.status === 'building') {
       ragRetrievalState.error = response?.message || '正在准备检索资料，请稍后再试'

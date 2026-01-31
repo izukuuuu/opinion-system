@@ -81,6 +81,10 @@ from server_support import (  # type: ignore
     mark_filter_job_finished,
     get_default_rag_config,
 )
+from server_support.router_prompts.utils import (
+    load_router_prompt_config,
+    persist_router_prompt_config,
+)
 
 PROJECT_MANAGER = get_project_manager()
 
@@ -2362,6 +2366,52 @@ def list_embedding_models():
         return error(message="Failed to list embedding models")
 
 
+@app.route("/api/settings/rag/prompts", methods=["GET"])
+def get_router_prompts():
+    """Get RouterRAG prompt configuration for a specific topic."""
+    try:
+        topic = request.args.get("topic", "")
+        reset = request.args.get("reset", "false").lower() == "true"
+        
+        if not topic:
+            return error(message="Missing 'topic' parameter")
+        
+        if reset:
+            from server_support.router_prompts.utils import DEFAULT_ROUTER_PROMPT_CONFIG
+            return success({"data": DEFAULT_ROUTER_PROMPT_CONFIG})
+        
+        # Load the prompt configuration for the topic
+        prompts = load_router_prompt_config(topic)
+        
+        return success({"data": prompts})
+    except Exception as e:
+        LOGGER.error(f"Failed to load router prompts for topic '{topic}': {e}")
+        return error(message=f"Failed to load prompts: {str(e)}")
+
+
+@app.route("/api/settings/rag/prompts", methods=["POST"])
+def save_router_prompts():
+    """Save RouterRAG prompt configuration for a specific topic."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        topic = payload.get("topic", "")
+        prompts = payload.get("prompts", {})
+        
+        if not topic:
+            return error(message="Missing 'topic' in request body")
+        
+        if not prompts:
+            return error(message="Missing 'prompts' in request body")
+        
+        # Persist the prompt configuration
+        persist_router_prompt_config(topic, prompts)
+        
+        return success({"message": f"Prompts saved successfully for topic '{topic}'"})
+    except Exception as e:
+        LOGGER.error(f"Failed to save router prompts: {e}")
+        return error(message=f"Failed to save prompts: {str(e)}")
+
+
 @app.route("/")
 def root():
     return jsonify({"message": "OpinionSystem API", "endpoints": [
@@ -2382,6 +2432,7 @@ def root():
         "/api/rag/config",
         "/api/rag/test",
         "/api/rag/embedding/models",
+        "/api/settings/rag/prompts",
     ]})
 
 
@@ -2682,14 +2733,18 @@ def routerrag_retrieve():
             base_path = ensure_routerrag_db(topic, project_bucket)
 
         # Retrieve documents
+        mode = payload.get("mode", "normalrag")
         results = retrieve_documents(
             query=query,
             topic=topic,
             top_k=top_k,
             threshold=payload.get("threshold", 0.0),
+            mode=mode,
             db_base_path=base_path,
         )
 
+        if isinstance(results, dict):
+            return success({"data": results})
         return success({"data": {"results": results, "total": len(results)}})
     except Exception as exc:
         LOGGER.exception("Failed to retrieve RouterRAG documents")
@@ -2767,16 +2822,27 @@ def universal_rag_retrieve():
                 tag_db_path = ensure_tagrag_db(topic, project_bucket) if project_bucket else None
                 router_base_path = ensure_routerrag_db(topic, project_bucket) if project_bucket else None
                 tagrag_results = tagrag_retrieve(query=query, topic=topic, top_k=top_k // 2, db_path=str(tag_db_path) if tag_db_path else None)
-                router_results = router_retrieve(query=query, topic=topic, top_k=top_k // 2, db_base_path=router_base_path)
+                router_payload = router_retrieve(query=query, topic=topic, top_k=top_k // 2, db_base_path=router_base_path)
+                
+                router_results = router_payload.get("results", []) if isinstance(router_payload, dict) else router_payload
+                summary = router_payload.get("summary", "") if isinstance(router_payload, dict) else ""
 
                 # Combine and deduplicate
                 results = tagrag_results + router_results
                 results = results[:top_k]  # Limit to top_k
+                
+                if summary:
+                    # If we have a summary, return the dict format
+                    results = {"results": results, "total": len(results), "summary": summary}
             except Exception as e:
                 LOGGER.warning(f"Hybrid retrieval failed, falling back to TagRAG: {e}")
                 from src.utils.rag.tagrag.tag_retrieve_data import retrieve_documents
                 results = retrieve_documents(query=query, topic=topic, top_k=top_k)
 
+        if isinstance(results, dict):
+            if "rag_type" not in results:
+                results["rag_type"] = rag_type
+            return success({"data": results})
         return success({"data": {"results": results, "total": len(results), "rag_type": rag_type}})
     except Exception as exc:
         LOGGER.exception("Failed to retrieve documents")

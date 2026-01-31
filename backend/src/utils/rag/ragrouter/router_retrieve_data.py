@@ -13,6 +13,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from ...setting.paths import get_project_root, get_configs_root
 from ...setting.env_loader import get_api_key
+from ...setting.settings import settings
 from ...logging.logging import setup_logger, log_success, log_error, log_module_start
 from ...ai.qwen import QwenClient
 
@@ -381,46 +382,36 @@ class LLMHelper:
             return original_query
 
 class EmbeddingGenerator:
-    """向量生成器 - 使用text-embedding-v4"""
+    """向量生成器"""
     
-    def __init__(self, logger, model: str = "text-embedding-v4"):
-        import aiohttp
-        self.api_url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
-        self.api_key = get_api_key()
-        self.model = model
+    def __init__(self, logger, model: str = None):
+        from ..embedding import get_async_client
         self.logger = logger
-        
-        if not self.api_key:
-            raise ValueError("API密钥未配置")
+        # 获取配置好的AsyncClient
+        try:
+            self.client, self.model_name, self.dimension = get_async_client()
+            # 如果传入了model且不为空，优先使用传入的? 不，应该优先使用配置的。
+            # 但为了兼容性，如果配置的model为空，使用传入的。
+            # get_async_client已经保证model有值 (from config or default).
+            
+            # 记录使用的模型
+            log_success(self.logger, f"Embedding模型: {self.model_name}", "RouterRAG")
+        except Exception as e:
+            log_error(self.logger, f"EmbeddingClient初始化失败: {e}", "Embedding")
+            self.client = None
     
     async def generate_embedding(self, text: str) -> Optional[List[float]]:
         """生成单个向量"""
-        import aiohttp
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": self.model,
-            "input": {"texts": [text]}
-        }
-        
+        if not self.client:
+            return None
+            
+        from ..embedding import generate_embedding_async
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.api_url, json=data, headers=headers,
-                                       timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    result = await resp.json()
-                    
-                    if resp.status != 200:
-                        return None
-                    
-                    embeddings = result.get("output", {}).get("embeddings", [])
-                    if embeddings:
-                        return embeddings[0].get("embedding", [])
-                    return None
+            return await generate_embedding_async(self.client, text, self.model_name)
         except Exception as e:
             log_error(self.logger, f"向量生成失败: {str(e)}", "embedding")
             return None
+
 
 
 class AdvancedRAGSearcher:
@@ -1125,9 +1116,7 @@ def router_retrieve(
         log_module_start(logger, "RouterRetrieve", f"正在进行Router检索 - 主题: {topic}")
 
         # 加载LLM配置
-        llm_config_path = get_configs_root() / "llm.yaml"
-        with open(llm_config_path, 'r', encoding='utf-8') as f:
-            llm_config = yaml.safe_load(f)
+        llm_config = settings.get_llm_config()
         
         # 获取router_retrieve配置
         router_config = llm_config.get('router_retrieve_llm', {})
@@ -1189,26 +1178,38 @@ def retrieve_documents(
     threshold: float = 0.0,
     mode: str = "normalrag",
     db_base_path: Optional[Path] = None,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
-    Adapter for API usage. Normalizes RouterRAG results into a flat list with
-    `text` and `score` for the frontend retrieval views.
+    Adapter for API usage. Normalizes RouterRAG results into a dictionary with
+    `results` (flat list) and optional `summary`.
     """
+    # 获取全局RAG配置中的功能开关
+    from ...setting.settings import settings
+    rag_config = settings.get_config("rag") or {}
+    retrieval_config = rag_config.get("retrieval", {})
+    
+    enable_qe = retrieval_config.get("enable_query_expansion", True)
+    enable_sum = retrieval_config.get("enable_llm_summary", False)
+    sum_mode = retrieval_config.get("llm_summary_mode", "strict")
+
     payload = router_retrieve(
         topic=topic,
         query=query,
         mode=mode,
         topk_normalrag=top_k,
         topk_tagrag=top_k,
-        enable_llm_summary=False,
-        return_format="index_only",
+        enable_query_expansion=enable_qe,
+        enable_llm_summary=enable_sum,
+        llm_summary_mode=sum_mode,
+        return_format="both",
         db_base_path=db_base_path,
     )
 
     if not isinstance(payload, dict):
-        return []
+        return {"results": [], "total": 0}
 
     results: List[Dict[str, Any]] = []
+    summary = payload.get("llm_summary", "")
 
     if mode == "tagrag":
         items = payload.get("tagrag", {}).get("text_blocks", [])
@@ -1227,9 +1228,55 @@ def retrieve_documents(
                     "text_tag": item.get("text_tag"),
                 },
             })
-        return results
+        return {"results": results, "total": len(results), "summary": summary}
 
-    # Default: normalrag
+    elif mode == "graphrag" or mode == "mixed":
+        graphrag_data = payload.get("graphrag", {})
+        
+        # 1. Extract Entities
+        entities = graphrag_data.get("entities", [])
+        if isinstance(entities, dict):
+            entities = entities.get("core", []) + entities.get("extended", [])
+            
+        for item in entities:
+            text = f"【实体】{item.get('name')} ({item.get('type')})\n{item.get('description')}"
+            results.append({
+                "id": item.get("entity_id") or item.get("name"),
+                "text": text,
+                "score": 0.95,
+                "metadata": {
+                    "type": "entity",
+                    "entity_type": item.get("type"),
+                    "name": item.get("name")
+                },
+            })
+
+        # 2. Extract Relationships
+        relationships = graphrag_data.get("relationships", [])
+        if isinstance(relationships, dict):
+             relationships = relationships.get("top3", []) + relationships.get("others", [])
+
+        for item in relationships:
+            src = item.get("source_entity", {}).get("name") or item.get("source")
+            tgt = item.get("target_entity", {}).get("name") or item.get("target")
+            desc = item.get("description", "")
+            
+            text = f"【关系】{src} -> {tgt}\n{desc}"
+            results.append({
+                "id": item.get("relationship_id") or f"{src}_{tgt}",
+                "text": text,
+                "score": 0.90,
+                "metadata": {
+                    "type": "relationship",
+                    "source": src,
+                    "target": tgt
+                },
+            })
+            
+        if mode == "graphrag":
+            return {"results": results, "total": len(results), "summary": summary}
+
+    # Default: normalrag (or mixed part 2)
     items = payload.get("normalrag", {}).get("sentences", [])
     for item in items:
         distance = float(item.get("score", 1.0))
@@ -1246,4 +1293,4 @@ def retrieve_documents(
             },
         })
 
-    return results
+    return {"results": results, "total": len(results), "summary": summary}

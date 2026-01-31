@@ -37,13 +37,13 @@ def load_data(json_file: str, logger) -> List[Dict[str, Any]]:
         log_error(logger, f"加载数据文件失败: {e}", "Tagvectorize")
         raise
 
-def get_embeddings(texts: List[str], client: OpenAI, logger, dimension: int = 1024) -> List[List[float]]:
-    """使用千问模型获取文本向量。"""
+def get_embeddings(texts: List[str], client: OpenAI, logger, dimension: int, model: str) -> List[List[float]]:
+    """使用指定模型获取文本向量。"""
     embeddings = []
     for i, text in enumerate(texts):
         try:
             response = client.embeddings.create(
-                model="text-embedding-v4",
+                model=model,
                 input=text
             )
             embeddings.append(response.data[0].embedding)
@@ -87,24 +87,9 @@ def vectorize_and_store(
     log_module_start(logger, "Tagvectorize", f"开始向量化数据 - 主题: {topic_name}")
     
     try:
-        # 从配置文件获取LLM配置
-        llm_config = settings.get_llm_config()
-        embedding_config = llm_config.get('embedding_llm', {})
-        
-        # 初始化OpenAI客户端
-        # 使用统一的环境变量加载器获取API密钥
-        api_key = get_api_key()
-        base_url = embedding_config.get('base_url', "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        
-        if not api_key:
-            log_error(logger, "未找到API密钥，请在配置文件的 credentials.qwen_api_key 中设置", "TagRAG")
-            raise ValueError("API密钥未配置")
-        
-        client = OpenAI(
-            api_key=api_key,
-            base_url=base_url
-        )
-        log_success(logger, "OpenAI客户端初始化成功", "Tagvectorize")
+        from ..embedding import get_sync_client
+        client, model, dimension = get_sync_client()
+        log_success(logger, f"客户端初始化成功 (Model: {model})", "Tagvectorize")
         
         # 加载数据
         # 使用绝对路径定位主题JSON文件（允许外部传入）
@@ -152,8 +137,8 @@ def vectorize_and_store(
             texts.append(item['tag'])  # 只对tag进行向量化
         
         # 获取标签向量
-        dimension = embedding_config.get('dimension', 1024)
-        tag_embeddings = get_embeddings(texts, client, logger, dimension)
+        tag_embeddings = get_embeddings(texts, client, logger, dimension, model)
+
         
         # 准备存储数据
         records = []
