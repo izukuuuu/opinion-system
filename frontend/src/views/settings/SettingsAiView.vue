@@ -139,6 +139,15 @@
                   class="form-input w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5" />
               </div>
 
+              <div class="col-span-2">
+                <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">系统提示词 (System
+                  Prompt)</label>
+                <textarea v-model.trim="llmState.assistant.system_prompt" rows="4"
+                  placeholder="如：你是一个专业的舆情分析助手，请结合提供的知识库内容回答问题。"
+                  class="form-textarea w-full rounded-xl border-slate-200 focus:border-brand-500 focus:ring-brand-500/20 text-sm py-2.5 transition-shadow resize-none"></textarea>
+                <p class="mt-1.5 text-xs text-slate-400">定义 AI 助手的角色、语气和基本行为准则。</p>
+              </div>
+
               <div>
                 <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">最大
                   Tokens</label>
@@ -158,6 +167,40 @@
               class="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-500 hover:shadow disabled:opacity-60 disabled:shadow-none">保存对话配置</button>
           </div>
         </form>
+      </section>
+
+      <!-- Knowledge Base Info (New) -->
+      <section class="bg-indigo-50/50 rounded-2xl border border-indigo-100 p-6 space-y-4 lg:col-span-2">
+        <div class="flex items-center gap-2">
+          <BookOpenIcon class="w-5 h-5 text-indigo-600" />
+          <h3 class="text-base font-semibold text-indigo-900">Markdown 知识库</h3>
+        </div>
+        <div class="grid md:grid-cols-2 gap-6 items-start">
+          <div class="text-sm text-indigo-800 space-y-2">
+            <p>系统现在支持自动化的知识库注入。只需将您的研究文档、业务规范或参考资料以 <code>.md</code> 格式放入以下文件夹：</p>
+            <div class="bg-white/60 p-2 rounded-lg border border-indigo-200 font-mono text-xs">
+              backend/knowledge_base/
+            </div>
+            <p class="text-xs text-indigo-600/80 mt-2 italic">提示：后端会自动聚合该目录下所有文档内容并作为上下文提供给对话模型。</p>
+          </div>
+          <div class="bg-indigo-600 rounded-xl p-4 text-white">
+            <h4 class="text-xs font-bold uppercase tracking-wider opacity-80 mb-2">生效方式</h4>
+            <ul class="text-xs space-y-2 opacity-90">
+              <li class="flex gap-2">
+                <span class="font-bold">1.</span>
+                <span>放入文件后立即对下一次对话生效</span>
+              </li>
+              <li class="flex gap-2">
+                <span class="font-bold">2.</span>
+                <span>建议配合上方“系统提示词”引导 AI 优先参考知识库</span>
+              </li>
+              <li class="flex gap-2">
+                <span class="font-bold">3.</span>
+                <span>如果文件较多，请注意不要超过模型的 Context Window 限制</span>
+              </li>
+            </ul>
+          </div>
+        </div>
       </section>
 
       <!-- Filter Model -->
@@ -265,7 +308,8 @@ import {
   CheckCircleIcon,
   ChatBubbleBottomCenterTextIcon,
   FunnelIcon,
-  CpuChipIcon
+  CpuChipIcon,
+  BookOpenIcon
 } from '@heroicons/vue/24/outline'
 import { useApiBase } from '../../composables/useApiBase'
 
@@ -293,7 +337,8 @@ const llmState = reactive({
     model: '',
     max_tokens: 0,
     temperature: 0,
-    base_url: ''
+    base_url: '',
+    system_prompt: ''
   },
   embedding: {
     provider: 'qwen',

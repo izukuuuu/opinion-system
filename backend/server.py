@@ -799,6 +799,40 @@ def chat_ai():
     assistant = config.get("assistant", {})
     credentials = config.get("credentials", {})
 
+    # Load Knowledge Base
+    kb_content = []
+    kb_dir = BACKEND_DIR / "knowledge_base"
+    if kb_dir.exists():
+        for md_file in kb_dir.glob("*.md"):
+            try:
+                content = md_file.read_text(encoding="utf-8")
+                if content.strip():
+                    kb_content.append(f"--- {md_file.name} ---\n{content}")
+            except Exception as e:
+                LOGGER.error(f"Failed to read KB file {md_file}: {e}")
+
+    # Build System Prompt
+    system_prompt_parts = []
+    
+    # 1. Custom System Prompt from Config
+    custom_system_prompt = assistant.get("system_prompt", "").strip()
+    if custom_system_prompt:
+        system_prompt_parts.append(custom_system_prompt)
+    else:
+        system_prompt_parts.append("You are a helpful assistant provided by OpinionSystem.")
+
+    # 2. Add Knowledge Base Context if available
+    if kb_content:
+        system_prompt_parts.append("\n[Context Information from Knowledge Base]")
+        system_prompt_parts.append("\n".join(kb_content))
+        system_prompt_parts.append("[End of Context Information]")
+
+    combined_system_message = "\n\n".join(system_prompt_parts)
+    
+    # Prepend system message to messages list
+    # Ensure we don't duplicate system message if client sent one, but usually client sends user/assistant
+    final_messages = [{"role": "system", "content": combined_system_message}] + messages
+
     # Determine provider details
     provider = assistant.get("provider", "openai").lower()
     model = assistant.get("model", "llama3")
@@ -829,7 +863,7 @@ def chat_ai():
         try:
             stream = client.chat.completions.create(
                 model=model,
-                messages=messages,
+                messages=final_messages,
                 stream=True,
                 max_tokens=assistant.get("max_tokens"),
                 temperature=assistant.get("temperature"),
@@ -853,7 +887,7 @@ def update_llm_assistant():
     config = load_llm_config()
     assistant = config.get("assistant", {})
 
-    for field in ["provider", "model", "base_url"]:
+    for field in ["provider", "model", "base_url", "system_prompt"]:
         if field in payload:
             assistant[field] = str(payload[field]).strip()
 

@@ -2,29 +2,33 @@ import { ref, unref } from 'vue'
 import { useApiBase } from './useApiBase'
 
 export function useAiChat() {
-    const messages = ref([])
-    const isLoading = ref(false)
-    const error = ref(null)
-    const { apiBase } = useApiBase()
+    const { ensureApiBase } = useApiBase()
 
-    const sendMessage = async (content) => {
-        if (!content.trim()) return
+    /**
+     * Handler for Deep Chat component
+     * @param {Object} body - Request body from Deep Chat (contains { messages: [] })
+     * @param {Object} signals - Deep Chat signals for stream control ({ onResponse, onStop, ... })
+     */
+    const chatHandler = async (body, signals) => {
+        const controller = new AbortController()
+        if (typeof signals.onStop === 'function') {
+            signals.onStop(() => controller.abort())
+        } else if (typeof signals.stopClicked === 'function') {
+            signals.stopClicked(() => controller.abort())
+        }
 
-        const userMessage = { role: 'user', content }
-        messages.value.push(userMessage)
-        isLoading.value = true
-        error.value = null
 
         try {
-            // Create a temporary assistant message for streaming
-            const assistantMessage = { role: 'assistant', content: '' }
-            messages.value.push(assistantMessage)
-            const assistantMessageIndex = messages.value.length - 1
+            const baseUrl = await ensureApiBase()
+            // Clean up base URL to ensure valid path concatenation
+            const cleanBase = baseUrl.replace(/\/+$/, '')
+            const url = `${cleanBase}/ai/chat`
 
-            // Use apiBase to construct the URL. apiBase already includes '/api'
-            // remove trailing slash if present to avoid double slashes, though generally harmless
-            const baseUrl = unref(apiBase).replace(/\/$/, '')
-            const url = `${baseUrl}/ai/chat`
+            // Deep Chat uses 'text', OpenAI expects 'content'
+            const messages = body.messages.map(msg => ({
+                role: msg.role,
+                content: msg.text || ''
+            }))
 
             const response = await fetch(url, {
                 method: 'POST',
@@ -32,12 +36,19 @@ export function useAiChat() {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    messages: messages.value.slice(0, -1), // Send history excluding the empty assistant placeholder
+                    messages
                 }),
+                signal: controller.signal
             })
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`)
+                const text = await response.text().catch(() => '')
+                throw new Error(`Server Error (${response.status}): ${text || response.statusText}`)
+            }
+
+            // Signal that streaming is starting
+            if (typeof signals.onOpen === 'function') {
+                signals.onOpen()
             }
 
             const reader = response.body.getReader()
@@ -46,30 +57,23 @@ export function useAiChat() {
             while (true) {
                 const { done, value } = await reader.read()
                 if (done) break
-
                 const text = decoder.decode(value, { stream: true })
-                messages.value[assistantMessageIndex].content += text
+                signals.onResponse({ text, overwrite: false })
+            }
+
+            // Signal that streaming is complete
+            if (typeof signals.onClose === 'function') {
+                signals.onClose()
             }
 
         } catch (e) {
-            console.error('Chat error:', e)
-            error.value = e.message
-            messages.value.push({ role: 'system', content: `Error: ${e.message}` })
-        } finally {
-            isLoading.value = false
+            if (e.name === 'AbortError') return
+            console.error('AI Chat Error:', e)
+            signals.onResponse({ error: e.message || 'Network error occurred' })
         }
     }
 
-    const clearChat = () => {
-        messages.value = []
-        error.value = null
-    }
-
     return {
-        messages,
-        isLoading,
-        error,
-        sendMessage,
-        clearChat
+        chatHandler
     }
 }
