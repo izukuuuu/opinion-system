@@ -8,20 +8,65 @@
         <SparklesIcon class="h-5 w-5 text-brand-600" />
         <h2 class="text-sm font-semibold text-primary">AI 助手</h2>
       </div>
-      <button type="button"
-        class="flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition hover:bg-surface hover:text-primary"
-        @click="$emit('close')">
-        <XMarkIcon class="h-5 w-5" />
-      </button>
+      <div class="flex items-center gap-1">
+        <!-- New Chat Button -->
+        <button type="button" @click="createNewSession" title="新建对话"
+          class="flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition hover:bg-surface hover:text-brand-600">
+          <PlusIcon class="h-5 w-5" />
+        </button>
+        <!-- History Button -->
+        <button type="button" @click="toggleHistory" title="会话历史"
+          :class="[showHistory ? 'text-brand-600 bg-surface' : 'text-secondary']"
+          class="flex h-8 w-8 items-center justify-center rounded-lg transition hover:bg-surface hover:text-brand-600">
+          <ClockIcon class="h-5 w-5" />
+        </button>
+        <!-- Close Button -->
+        <button type="button"
+          class="flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition hover:bg-surface hover:text-primary ml-1"
+          @click="$emit('close')">
+          <XMarkIcon class="h-5 w-5" />
+        </button>
+      </div>
     </div>
 
     <!-- Deep Chat Component -->
     <div class="flex-1 relative min-h-0 bg-white">
-      <deep-chat ref="chatRef" class="deep-chat-container" :introMessage="introMessage" :connect.prop="requestConfig"
-        :textInput.prop="textInputConfig" :messageStyles.prop="messageStyles"
+      <deep-chat :key="currentSessionId" ref="chatRef" class="deep-chat-container" :introMessage="introMessage"
+        :connect.prop="requestConfig" :textInput.prop="textInputConfig" :messageStyles.prop="messageStyles"
         :submitButtonStyles.prop="submitButtonStyles" :inputAreaStyle.prop="inputAreaStyle"
-        :auxiliaryStyle.prop="auxiliaryStyle" :error.prop="errorConfig" :initialMessages.prop="historyMessages"
-        @message="onNewMessage" style="height: 100%; width: 100%; border: none; display: block;"></deep-chat>
+        :auxiliaryStyle.prop="auxiliaryStyle" :error.prop="errorConfig" :initialMessages.prop="currentMessages"
+        @message="onChatUpdate" style="height: 100%; width: 100%; border: none; display: block;"></deep-chat>
+
+      <!-- History Overlay -->
+      <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0 translate-y-1"
+        enter-to-class="opacity-100 translate-y-0" leave-active-class="transition ease-in duration-150"
+        leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 translate-y-1">
+        <div v-if="showHistory" class="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm p-4 overflow-y-auto">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-slate-900">会话历史 (最近 5 条)</h3>
+            <button @click="showHistory = false" class="text-slate-400 hover:text-slate-600">
+              <XMarkIcon class="h-5 w-5" />
+            </button>
+          </div>
+          <div v-if="sessions.length === 0" class="text-center py-10">
+            <p class="text-xs text-slate-400">暂无历史会话</p>
+          </div>
+          <div class="space-y-2">
+            <div v-for="session in sortedSessions" :key="session.id" @click="switchSession(session.id)"
+              :class="[session.id === currentSessionId ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:border-brand-300 hover:bg-slate-50']"
+              class="group relative p-3 rounded-xl border transition-all cursor-pointer">
+              <div class="pr-8">
+                <p class="text-sm font-medium text-slate-800 truncate">{{ session.title || '新对话' }}</p>
+                <p class="text-[10px] text-slate-400 mt-1">{{ formatDate(session.updatedAt) }}</p>
+              </div>
+              <button @click.stop="deleteSession(session.id)"
+                class="absolute top-3 right-3 p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                <TrashIcon class="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
     </div>
   </aside>
 </template>
@@ -29,7 +74,7 @@
 <script setup>
 import 'deep-chat'
 import { computed, ref, onMounted } from 'vue'
-import { SparklesIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { SparklesIcon, XMarkIcon, PlusIcon, ClockIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { useApiBase } from '../composables/useApiBase'
 import { useAiChat } from '../composables/useAiChat'
 
@@ -41,32 +86,134 @@ const emit = defineEmits(['close'])
 const { chatHandler } = useAiChat()
 const inputContent = ref('')
 const chatRef = ref(null)
+const showHistory = ref(false)
 
-// Chat History Logic
-const HISTORY_KEY = 'opinion_system_chat_history'
-const MAX_HISTORY_MESSAGES = 10 // 5 rounds (User + AI)
+// Session Management Logic
+const STORAGE_KEY = 'opinion_system_ai_sessions'
+const MAX_SESSIONS = 5
 
-const loadHistory = () => {
+const sessions = ref([])
+const currentSessionId = ref('')
+
+const loadSessions = () => {
   try {
-    const saved = localStorage.getItem(HISTORY_KEY)
-    return saved ? JSON.parse(saved) : []
+    const saved = localStorage.getItem(STORAGE_KEY)
+    const parsed = saved ? JSON.parse(saved) : []
+    sessions.value = parsed
+    if (parsed.length > 0) {
+      currentSessionId.value = parsed[0].id
+    } else {
+      createNewSession()
+    }
   } catch (e) {
-    console.error('Failed to load chat history:', e)
-    return []
+    console.error('Failed to load sessions:', e)
+    createNewSession()
   }
 }
 
-const historyMessages = ref(loadHistory())
-
-const onNewMessage = (event) => {
-  // event.detail contains all messages in deep-chat
-  // We take all messages and keep the last 10
-  const allMessages = event.detail
-  if (Array.isArray(allMessages)) {
-    const trimmed = allMessages.slice(-MAX_HISTORY_MESSAGES)
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed))
+const saveSessions = () => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
+  } catch (e) {
+    console.error('Failed to save sessions:', e)
   }
 }
+
+const createNewSession = () => {
+  const newId = Date.now().toString()
+  const newSession = {
+    id: newId,
+    title: '',
+    messages: [],
+    updatedAt: new Date().toISOString()
+  }
+
+  sessions.value.unshift(newSession)
+  if (sessions.value.length > MAX_SESSIONS) {
+    sessions.value = sessions.value.slice(0, MAX_SESSIONS)
+  }
+
+  currentSessionId.value = newId
+  saveSessions()
+  showHistory.value = false
+}
+
+const switchSession = (id) => {
+  currentSessionId.value = id
+  showHistory.value = false
+}
+
+const deleteSession = (id) => {
+  sessions.value = sessions.value.filter(s => s.id !== id)
+  if (currentSessionId.value === id) {
+    if (sessions.value.length > 0) {
+      currentSessionId.value = sessions.value[0].id
+    } else {
+      createNewSession()
+    }
+  }
+  saveSessions()
+}
+
+const currentMessages = computed(() => {
+  const session = sessions.value.find(s => s.id === currentSessionId.value)
+  return session ? session.messages : []
+})
+
+const sortedSessions = computed(() => {
+  return [...sessions.value].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+})
+
+const toggleHistory = () => {
+  showHistory.value = !showHistory.value
+}
+
+const onChatUpdate = async () => {
+  if (!chatRef.value) return
+
+  // Use getMessages() to fetch the internal state of deep-chat
+  const allMessages = await chatRef.value.getMessages()
+  const sessionIndex = sessions.value.findIndex(s => s.id === currentSessionId.value)
+
+  if (sessionIndex !== -1 && Array.isArray(allMessages)) {
+    const session = sessions.value[sessionIndex]
+
+    // Standardize storage format: Deep Chat uses 'text' or 'content' (legacy)
+    // We save them as { role, text } to match deep-chat's internal structure
+    session.messages = allMessages.map(m => ({
+      role: m.role || 'ai',
+      text: m.text || m.content || ''
+    }))
+
+    session.updatedAt = new Date().toISOString()
+
+    // Generate title from the very first message
+    if (!session.title || session.title === '新对话') {
+      const firstMsg = allMessages[0]
+      if (firstMsg && (firstMsg.text || firstMsg.content)) {
+        let title = (firstMsg.text || firstMsg.content).trim()
+        if (title.length > 30) title = title.substring(0, 30) + '...'
+        session.title = title
+      }
+    }
+
+    saveSessions()
+  }
+}
+
+const formatDate = (isoString) => {
+  const date = new Date(isoString)
+  return date.toLocaleString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+onMounted(() => {
+  loadSessions()
+})
 
 // Initial welcome message
 const introMessage = {
