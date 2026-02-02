@@ -13,23 +13,23 @@
 
 ### 1. 后端环境配置
 
-后端基于 Python，使用 Flask 作为服务器框架。推荐使用 Conda 管理 Python 环境。
+后端基于 Python 3.11，使用 Flask 作为服务器框架。推荐使用 `uv` 管理 Python 环境和依赖。
 
-#### 1.1 创建并激活 Conda 环境
+#### 1.1 安装 uv（如未安装）
 
 ```bash
-# 创建 conda 环境（如已存在则跳过）
-conda create -n opinion-system python=3.10 -y
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-# 激活环境
-conda activate opinion-system
+# Linux/Mac
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 #### 1.2 安装后端依赖
 
 ```bash
 cd backend
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 #### 1.3 配置后端环境变量
@@ -46,7 +46,7 @@ DASHSCOPE_API_KEY=your_api_key_here
 
 ```bash
 cd backend
-python server.py
+uv run python server.py
 ```
 
 后端默认运行在 `http://127.0.0.1:8000`。
@@ -89,9 +89,8 @@ npm run dev
 
 ```bash
 # 终端 1：启动后端
-conda activate opinion-system
 cd backend
-python server.py
+uv run python server.py
 
 # 终端 2：启动前端
 cd frontend
@@ -241,17 +240,8 @@ OpinionSystem
 git clone <repository-url>
 cd OpinionSystem
 
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境
-# Windows:
-.\venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
-
-# 安装依赖
-pip install -r requirements.txt
+# 使用 uv 安装依赖 (Python 3.11)
+uv pip install -r requirements.txt
 ```
 
 ### 2. 配置环境
