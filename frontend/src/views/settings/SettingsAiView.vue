@@ -108,7 +108,7 @@
     <!-- Models Configuration Grid -->
     <div class="grid gap-6 lg:grid-cols-2">
       <!-- Chat Model -->
-      <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+      <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col lg:col-span-2">
         <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
           <ChatBubbleBottomCenterTextIcon class="w-5 h-5 text-indigo-500" />
           <div>

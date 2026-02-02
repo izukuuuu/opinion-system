@@ -1,0 +1,20 @@
+Current Connection DB: remote
+
+=== 1. ALL DATABASES on Server (pg_database) ===
+- postgres
+- graphrag
+- remote
+
+=== 2. SCHEMAS in 'remote' (pg_namespace) ===
+
+[Schema: pg_toast]
+  (No tables)
+
+[Schema: pg_catalog]
+  Tables (64): pg_statistic, pg_type, pg_foreign_table, pg_authid, pg_statistic_ext_data, pg_user_mapping, pg_subscription, pg_attribute, pg_proc, pg_class, pg_attrdef, pg_constraint, pg_inherits, pg_index, pg_operator, pg_opfamily, pg_opclass, pg_am, pg_amop, pg_amproc, pg_language, pg_largeobject_metadata, pg_aggregate, pg_statistic_ext, pg_rewrite, pg_trigger, pg_event_trigger, pg_description, pg_cast, pg_enum, pg_namespace, pg_conversion, pg_depend, pg_database, pg_db_role_setting, pg_tablespace, pg_auth_members, pg_shdepend, pg_shdescription, pg_ts_config, pg_ts_config_map, pg_ts_dict, pg_ts_parser, pg_ts_template, pg_extension, pg_foreign_data_wrapper, pg_foreign_server, pg_policy, pg_replication_origin, pg_default_acl, pg_init_privs, pg_seclabel, pg_shseclabel, pg_collation, pg_parameter_acl, pg_partitioned_table, pg_range, pg_transform, pg_sequence, pg_publication, pg_publication_namespace, pg_publication_rel, pg_subscription_rel, pg_largeobject
+
+[Schema: public]
+  Tables (11): telegram, tiktok, 推特, 电子报, 自媒体号, 视频, 论坛, 微信, 微博, 新闻app, 新闻网站
+
+[Schema: information_schema]
+  Tables (4): sql_features, sql_implementation_info, sql_parts, sql_sizing

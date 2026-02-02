@@ -57,7 +57,15 @@
             <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Opinion System</p>
             <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
           </div>
-          <ActiveProjectSwitcher v-if="showGlobalProjectSwitcher" class="ml-auto shrink-0" :show-label="false" />
+          <div class="ml-auto flex items-center gap-2 shrink-0">
+            <ActiveProjectSwitcher v-if="showGlobalProjectSwitcher" :show-label="false" />
+            <button type="button"
+              class="flex h-9 w-9 items-center justify-center rounded-lg border border-soft bg-white text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+              :class="{ 'bg-brand-soft text-brand-700 border-brand-soft': isAiSidebarOpen }"
+              aria-label="Toggle AI Assistant" @click="toggleAiSidebar">
+              <SparklesIcon class="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </header>
 

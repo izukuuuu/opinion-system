@@ -147,6 +147,36 @@ const sessions = ref([])
 const currentSessionId = ref('')
 const chatHistory = ref([])
 
+const saveSessions = () => {
+  try {
+    if (sessions.value.length === 0) return // Safety: don't wipe data if called with empty state
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
+    console.log('[AiSidebar] Sessions saved to localStorage. Count:', sessions.value.length)
+  } catch (e) {
+    console.error('[AiSidebar] Failed to save sessions:', e)
+  }
+}
+
+const createNewSession = () => {
+  const newId = Date.now().toString()
+  const newSession = {
+    id: newId,
+    title: '',
+    messages: [],
+    updatedAt: new Date().toISOString()
+  }
+
+  sessions.value.unshift(newSession)
+  if (sessions.value.length > maxSessions.value) {
+    sessions.value = sessions.value.slice(0, maxSessions.value)
+  }
+
+  currentSessionId.value = newId
+  chatHistory.value = [] // Reset for new session
+  saveSessions()
+  showHistory.value = false
+}
+
 const loadSessions = () => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
@@ -179,43 +209,13 @@ const loadSessions = () => {
   }
 }
 
-// Initial load
-loadSessions()
-
-const saveSessions = () => {
-  try {
-    if (sessions.value.length === 0) return // Safety: don't wipe data if called with empty state
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
-    console.log('[AiSidebar] Sessions saved to localStorage. Count:', sessions.value.length)
-  } catch (e) {
-    console.error('[AiSidebar] Failed to save sessions:', e)
-  }
-}
-
 // Deep watch sessions for any changes (messages, titles, etc)
 watch(sessions, () => {
   saveSessions()
 }, { deep: true })
 
-const createNewSession = () => {
-  const newId = Date.now().toString()
-  const newSession = {
-    id: newId,
-    title: '',
-    messages: [],
-    updatedAt: new Date().toISOString()
-  }
-
-  sessions.value.unshift(newSession)
-  if (sessions.value.length > maxSessions.value) {
-    sessions.value = sessions.value.slice(0, maxSessions.value)
-  }
-
-  currentSessionId.value = newId
-  chatHistory.value = [] // Reset for new session
-  saveSessions()
-  showHistory.value = false
-}
+// Initial load
+loadSessions()
 
 const handleSaveSettings = () => {
   if (tempMaxSessions.value < 1) tempMaxSessions.value = 1

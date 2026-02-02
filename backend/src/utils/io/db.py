@@ -30,7 +30,28 @@ class DatabaseManager:
 
         # 从databases.yaml读取配置
         db_config = settings.get('databases', {})
-        databases_url = db_config.get('db_url')
+        
+        # 优先使用 active 指定的连接
+        active_id = db_config.get('active')
+        databases_url = None
+        
+        if active_id:
+            connections = db_config.get('connections') or []
+            if isinstance(connections, list):
+                for conn in connections:
+                    if isinstance(conn, dict) and conn.get('id') == active_id:
+                        databases_url = conn.get('url')
+                        break
+        
+        # 如果没有找到 active 连接（或者没有设置 active），尝试使用遗留的 db_url 字段
+        if not databases_url:
+            databases_url = db_config.get('db_url')
+
+        # 如果仍然没有，尝试找第一个连接作为默认
+        if not databases_url and isinstance(db_config.get('connections'), list) and db_config['connections']:
+             first_conn = db_config['connections'][0]
+             if isinstance(first_conn, dict):
+                 databases_url = first_conn.get('url')
 
         self.db_url = db_url or env_url or databases_url or settings.get('defaults.db_url')
         self.engine: Optional[Engine] = None
@@ -71,13 +92,47 @@ class DatabaseManager:
             bool: 是否成功
         """
         try:
+            # Ensure we are connected to the server (no specific DB for creation)
             base_url = make_url(self.db_url).set(database=None)
-            engine = create_engine(base_url)
+            
+            # For creation, we usually need isolation_level="AUTOCOMMIT" 
+            # especially for Postgres which cannot CREATE DATABASE in a transaction block
+            engine = create_engine(base_url, isolation_level="AUTOCOMMIT")
+            
+            database_name_sanitized = database_name.replace("`", "").replace('"', "")
+            dialect_name = engine.dialect.name
+
             with engine.connect() as conn:
-                conn.execute(text(
-                    f"CREATE DATABASE IF NOT EXISTS `{database_name}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-                ))
-                conn.commit()
+                # Check if database exists first to avoid errors
+                # (IF NOT EXISTS is not standard across all versions/dialects in the exact same way)
+                exists = False
+                if dialect_name == 'postgresql':
+                    # Postgres check
+                    result = conn.execute(text(f"SELECT 1 FROM pg_database WHERE datname = '{database_name_sanitized}'"))
+                    exists = result.scalar() == 1
+                elif dialect_name == 'mysql':
+                    # MySQL check
+                    result = conn.execute(text(f"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '{database_name_sanitized}'"))
+                    exists = bool(result.scalar())
+                else:
+                    # Fallback check
+                    try:
+                        conn.execute(text(f"USE {database_name_sanitized}"))
+                        exists = True
+                    except Exception:
+                        exists = False
+
+                if not exists:
+                    if dialect_name == 'postgresql':
+                         conn.execute(text(f'CREATE DATABASE "{database_name_sanitized}"'))
+                    elif dialect_name == 'mysql':
+                        conn.execute(text(
+                            f"CREATE DATABASE IF NOT EXISTS `{database_name_sanitized}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                        ))
+                    else:
+                        # Fallback generic
+                        conn.execute(text(f"CREATE DATABASE {database_name_sanitized}"))
+            
             engine.dispose()
             return True
         except Exception as e:
@@ -127,13 +182,12 @@ class DatabaseManager:
             bool: 表是否存在
         """
         try:
+            from sqlalchemy import inspect
             engine = self.connect()
-            with engine.connect() as conn:
-                result = conn.execute(text(
-                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :table_name AND table_schema = DATABASE()"
-                ), {"table_name": table_name})
-                return result.scalar() > 0
+            inspector = inspect(engine)
+            return inspector.has_table(table_name)
         except Exception:
+            # log or handle error
             return False
     
     def create_table(self, table_name: str, columns: List[Dict[str, str]]) -> bool:
