@@ -259,11 +259,13 @@ def query_database_info(logger=None, include_counts: bool = True) -> Optional[Di
                 if dialect_name == 'postgresql':
                     tables_query = """
                     SELECT
-                        tablename as table_name,
-                        CAST(NULL AS INTEGER) as table_rows 
-                    FROM pg_tables
-                    WHERE schemaname = 'public'
-                    ORDER BY tablename
+                        t.tablename as table_name,
+                        c.reltuples::bigint as table_rows
+                    FROM pg_tables t
+                    JOIN pg_class c ON t.tablename = c.relname
+                    WHERE t.schemaname = 'public'
+                        AND c.relkind = 'r'
+                    ORDER BY t.tablename
                     """
                 else:
                     tables_query = """

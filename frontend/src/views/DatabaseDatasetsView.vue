@@ -68,6 +68,9 @@
             <p class="database-meta">
               {{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行
             </p>
+            <button class="btn-icon text-muted hover:text-danger" title="删除数据库" @click="confirmDeleteDatabase(database)">
+              <TrashIcon class="icon-sm" />
+            </button>
           </header>
           <ul class="table-grid">
             <li v-for="table in database.tables" :key="table.name" class="table-item"
@@ -139,6 +142,28 @@
         </button>
       </div>
     </AppModal>
+
+    <!-- Delete Confirmation Modal -->
+    <AppModal v-model="isDeleteModalOpen" 
+      eyebrow="删除数据库" 
+      title="确认删除此数据库？" 
+      cancel-text="取消" 
+      confirm-text="删除"
+      confirm-type="danger"
+      :loading="isDeleting"
+      description="此操作将永久删除该数据库及其所有数据，无法撤销。"
+      @cancel="closeDeleteModal" 
+      @confirm="deleteDatabase">
+      <div v-if="databaseToDelete" class="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+        <div class="flex items-center gap-2 mb-2">
+          <CircleStackIcon class="h-5 w-5 text-slate-500" />
+          <span class="font-medium text-slate-700">{{ databaseToDelete.name }}</span>
+        </div>
+        <p class="text-sm text-slate-500">
+          包含 {{ databaseToDelete.table_count }} 张表，约 {{ formatNumber(databaseToDelete.total_rows) }} 行数据
+        </p>
+      </div>
+    </AppModal>
   </section>
 </template>
 
@@ -150,7 +175,8 @@ import {
   CircleStackIcon,
   ChevronRightIcon,
   ServerStackIcon,
-  TableCellsIcon
+  TableCellsIcon,
+  TrashIcon
 } from '@heroicons/vue/24/outline'
 
 import AppModal from '../components/AppModal.vue'
@@ -162,6 +188,11 @@ const loading = ref(false)
 const error = ref('')
 const payload = ref(null)
 const selectedTable = ref(null)
+
+// Delete state
+const isDeleteModalOpen = ref(false)
+const isDeleting = ref(false)
+const databaseToDelete = ref(null)
 
 const numberFormatter = new Intl.NumberFormat('zh-CN')
 const formatNumber = (value) => {
@@ -293,6 +324,40 @@ const openTablePreview = (database, table) => {
 
 const closeTablePreview = () => {
   selectedTable.value = null
+}
+
+const confirmDeleteDatabase = (database) => {
+  databaseToDelete.value = database
+  isDeleteModalOpen.value = true
+}
+
+const closeDeleteModal = () => {
+  isDeleteModalOpen.value = false
+  databaseToDelete.value = null
+}
+
+const deleteDatabase = async () => {
+  if (!databaseToDelete.value) return
+  
+  isDeleting.value = true
+  try {
+    const response = await callApi(`/api/database/${databaseToDelete.value.name}`, { 
+      method: 'DELETE' 
+    })
+    
+    if (response && response.status === 'ok') {
+      closeDeleteModal()
+      // Refresh list
+      refresh()
+    } else {
+      throw new Error(response?.message || '删除失败')
+    }
+  } catch (err) {
+    console.error(err)
+    alert(err.message || '删除过程中发生错误')
+  } finally {
+    isDeleting.value = false
+  }
 }
 
 const formatPreviewCell = (value) => {
@@ -620,6 +685,30 @@ onMounted(refresh)
   border: none;
   cursor: pointer;
   text-align: center;
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border-radius: 0.375rem;
+  transition: all 0.2s;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-icon:hover {
+  background-color: var(--color-surface);
+}
+
+.text-danger {
+  color: rgb(var(--color-danger-500) / 1);
+}
+
+.hover\:text-danger:hover {
+  color: rgb(var(--color-danger-500) / 1);
 }
 
 .table-button:focus {

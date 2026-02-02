@@ -137,6 +137,49 @@ class DatabaseManager:
             return True
         except Exception as e:
             return False
+
+    def drop_database(self, database_name: str) -> bool:
+        """
+        删除数据库
+        
+        Args:
+            database_name (str): 数据库名称
+        
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # Connect to server (no specific DB)
+            base_url = make_url(self.db_url).set(database=None)
+            engine = create_engine(base_url, isolation_level="AUTOCOMMIT")
+            
+            database_name_sanitized = database_name.replace("`", "").replace('"', "")
+            dialect_name = engine.dialect.name
+
+            with engine.connect() as conn:
+                if dialect_name == 'postgresql':
+                    # Postgres requires forcing disconnection of other users before dropping
+                    # This might require superuser privileges
+                    try:
+                         conn.execute(text(f"""
+                            SELECT pg_terminate_backend(pid) 
+                            FROM pg_stat_activity 
+                            WHERE datname = '{database_name_sanitized}'
+                            AND pid <> pg_backend_pid()
+                         """))
+                    except Exception:
+                        pass # Best effort
+                    conn.execute(text(f'DROP DATABASE IF EXISTS "{database_name_sanitized}"'))
+                elif dialect_name == 'mysql':
+                    conn.execute(text(f"DROP DATABASE IF EXISTS `{database_name_sanitized}`"))
+                else:
+                    conn.execute(text(f"DROP DATABASE IF EXISTS {database_name_sanitized}"))
+            
+            engine.dispose()
+            return True
+        except Exception as e:
+            # log failure if needed, or caller handles it
+            return False
     
     def execute_query(self, query: str, params: Optional[Dict] = None) -> pd.DataFrame:
         """

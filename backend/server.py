@@ -1422,6 +1422,31 @@ def fetch_availability_endpoint():
     )
 
 
+@app.delete("/api/database/<database_name>")
+def delete_database_endpoint(database_name: str):
+    """
+    删除指定的远程数据库
+    """
+    db_name = str(database_name or "").strip()
+    if not db_name:
+        return error("Database name is required")
+
+    # Safety check: prevent deleting system databases (basic list)
+    system_dbs = {'information_schema', 'mysql', 'performance_schema', 'sys', 'postgres', 'test', 'phpmyadmin'}
+    if db_name.lower() in system_dbs:
+        return error(f"Cannot delete system database '{db_name}'", status_code=403)
+
+    from src.utils.io.db import db_manager
+    
+    # Optional: Check if database exists first? drop_database handles IF EXISTS
+    
+    success_flag = db_manager.drop_database(db_name)
+    if success_flag:
+        return success({"message": f"Database '{db_name}' deleted successfully"})
+    else:
+        return error(f"Failed to delete database '{db_name}'", status_code=500)
+
+
 @app.post("/api/fetch")
 def fetch_endpoint():
     payload = request.get_json(silent=True) or {}
