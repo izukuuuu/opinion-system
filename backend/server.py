@@ -1381,7 +1381,7 @@ def query_endpoint():
         "query",
         run_query,
         include_counts=include_counts,
-        log_context={"project": "GLOBAL", "params": {"source": "api"}},
+        log_context={"params": {"source": "api"}},
     )
     return jsonify(response), code
 
@@ -2606,7 +2606,7 @@ def list_topic_buckets():
                     "query",
                     run_query,
                     include_counts=True,
-                    log_context={"project": "GLOBAL", "params": {"source": "api"}}
+                    log_context={"params": {"source": "api"}}
                 )
 
                 if response.get("status") == "ok":

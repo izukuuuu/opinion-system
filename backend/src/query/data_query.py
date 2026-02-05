@@ -112,6 +112,10 @@ def _fetch_table_info(
             if isinstance(approx_rows, float) and math.isnan(approx_rows):
                 raise ValueError("NaN")
             
+            # Postgres returns -1 if statistics are missing
+            if int(approx_rows) < 0:
+                raise ValueError("Negative approx rows (missing stats)")
+
             table_info["record_count"] = int(approx_rows)
             use_approx = True
         except Exception:
@@ -147,6 +151,138 @@ def _fetch_table_info(
     return table_info
 
 
+def _process_database_metadata(
+    db_name: str,
+    base_engine_url: Any,
+    dialect_name: str,
+    include_counts: bool,
+    logger: Any
+) -> Dict[str, Any]:
+    """Process a single database to retrieve its tables and stats."""
+    
+    database_overview: Dict[str, Any] = {
+        "name": db_name,
+        "tables": [],
+    }
+    
+    # Decide which manager to use
+    scope_manager = None
+    
+    try:
+        if dialect_name == 'postgresql':
+            # Use sqlalchemy to build new URL with replaced database
+            from sqlalchemy.engine.url import make_url
+            
+            base_url = make_url(base_engine_url)
+            # Create a temporary manager for this specific database
+            target_url = base_url.set(database=db_name)
+            # IMPORTANT: render_as_string(hide_password=False) ensure password is not masked as ***
+            scope_manager = DatabaseManager(target_url.render_as_string(hide_password=False))
+        else:
+            # Re-use existing manager concept (conceptually) but we need a fresh one 
+            # if we want thread safety or just use a new one for consistency.
+            scope_manager = DatabaseManager(base_engine_url)
+
+        # 获取数据库中的表及 approximate 行数
+        if dialect_name == 'postgresql':
+            tables_query = """
+            SELECT
+                t.tablename as table_name,
+                c.reltuples::bigint as table_rows
+            FROM pg_tables t
+            JOIN pg_class c ON t.tablename = c.relname
+            WHERE t.schemaname = 'public'
+                AND c.relkind = 'r'
+            ORDER BY t.tablename
+            """
+        else:
+            tables_query = """
+            SELECT
+                TABLE_NAME as table_name,
+                TABLE_ROWS as table_rows
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = :db_name
+            ORDER BY TABLE_NAME
+            """
+
+        try:
+            tables_df = scope_manager.execute_query(tables_query, {"db_name": db_name})
+        except Exception as conn_err:
+            log_error(logger, f"无法连接或查询数据库 {db_name}: {conn_err}", "Query")
+            return database_overview
+
+        if tables_df.empty:
+            log_success(logger, f"数据库 {db_name} 无表", "Query")
+            database_overview.update(_summarise_tables([]))
+            return database_overview
+
+        table_names = tables_df['table_name'].tolist()
+        approx_rows_map = {}
+        if 'table_rows' in tables_df.columns:
+            approx_rows_map = {
+                row['table_name']: row['table_rows']
+                for _, row in tables_df.iterrows()
+            }
+        
+        log_success(
+            logger,
+            f"数据库 {db_name} 包含 {len(table_names)} 个表",
+            "Query",
+        )
+
+        # 轻量模式
+        if not include_counts:
+            database_overview["tables"] = [{"name": name} for name in table_names]
+            stats = {
+                "table_count": len(table_names),
+                "counted_table_count": 0,
+                "total_rows": 0,
+            }
+            database_overview.update(stats)
+            return database_overview
+
+        table_workers = min(MAX_TABLE_WORKERS, len(table_names)) or 1
+        
+        # We are already in a thread, so avoiding nested large thread pools is good,
+        # but fetching table info is IO bound.
+        # Let's verify sequentially if table count is small, or small pool.
+        
+        futures: Dict[Any, Tuple[int, str]] = {}
+        with ThreadPoolExecutor(max_workers=table_workers) as executor:
+            for index, table_name in enumerate(table_names):
+                approx_rows = approx_rows_map.get(table_name)
+                future = executor.submit(_fetch_table_info, scope_manager, db_name, table_name, logger, approx_rows)
+                futures[future] = (index, table_name)
+
+            table_results: List[Tuple[int, Dict[str, Any]]] = []
+            for future in as_completed(futures):
+                index, table_name = futures[future]
+                try:
+                    table_info = future.result()
+                except Exception as exc:
+                    log_error(
+                        logger,
+                        f"查询表 {db_name}.{table_name} 过程中发生异常: {exc}",
+                        "Query",
+                    )
+                    table_info = {"name": table_name, "error": str(exc)}
+                table_results.append((index, table_info))
+
+        table_results.sort(key=lambda pair: pair[0])
+        database_overview["tables"] = [info for _, info in table_results]
+
+        stats = _summarise_tables(database_overview["tables"])
+        database_overview.update(stats)
+        return database_overview
+        
+    finally:
+        if scope_manager:
+            try:
+                scope_manager.close()
+            except Exception:
+                pass
+
+
 def query_database_info(logger=None, include_counts: bool = True) -> Optional[Dict[str, Any]]:
     """
     查询数据库信息
@@ -157,7 +293,6 @@ def query_database_info(logger=None, include_counts: bool = True) -> Optional[Di
     Returns:
         Optional[Dict[str, Any]]: 查询结果摘要
     """
-
     db_manager: Optional[DatabaseManager] = None
 
     try:
@@ -190,13 +325,39 @@ def query_database_info(logger=None, include_counts: bool = True) -> Optional[Di
         except Exception:
             overview["connection"] = {"driver": "unknown"}
 
-        # 获取所有数据库（屏蔽系统库）
-        # 获取所有数据库（屏蔽系统库）
-        engine = db_manager.connect()
+        try:
+            # 获取所有数据库（屏蔽系统库）
+            engine = db_manager.connect()
+            # Force a connection check because create_engine is lazy
+            with engine.connect() as check_conn:
+                pass
+        except Exception as e:
+            # If default connection fails (e.g. database deleted), try fallback to 'postgres'
+            log_error(logger, f"Primary database connection failed ({e}). Attempting fallback to 'postgres'...", "Query")
+            try:
+                from sqlalchemy import create_engine
+                from sqlalchemy.engine.url import make_url
+                base_url = make_url(db_manager.db_url)
+                # Try 'postgres' first (common for PostgreSQL)
+                fallback_url = base_url.set(database='postgres')
+                db_manager.engine = create_engine(fallback_url)
+                engine = db_manager.engine
+                
+                # Verify fallback also works
+                with engine.connect() as check_conn:
+                    pass
+                    
+                # Update db_url to valid one so subsequent calls work
+                db_manager.db_url = fallback_url.render_as_string(hide_password=False)
+            except Exception as fallback_err:
+                 log_error(logger, f"Fallback connection also failed: {fallback_err}", "Query")
+                 # Re-raise the original or fallback error? 
+                 # If fallback fails, we can't do anything.
+                 raise fallback_err from e 
+
         dialect_name = engine.dialect.name
         
         if dialect_name == 'postgresql':
-            # Restore full list now that cross-db connection logic is fixed
             databases_query = """
             SELECT datname as database_name
             FROM pg_database
@@ -218,146 +379,45 @@ def query_database_info(logger=None, include_counts: bool = True) -> Optional[Di
             log_error(logger, "未找到任何数据库", "Query")
             return None
 
+        db_names = databases_df['database_name'].tolist()
         log_success(
             logger,
-            f"发现 {len(databases_df)} 个数据库: {', '.join(databases_df['database_name'].tolist())}",
+            f"发现 {len(db_names)} 个数据库: {', '.join(db_names)}",
             "Query",
         )
-
-        total_tables = 0
-        total_rows = 0
-
-        # 遍历每个数据库
-        for _, db_row in databases_df.iterrows():
-            db_name = db_row['database_name']
-            database_overview: Dict[str, Any] = {
-                "name": db_name,
-                "tables": [],
-            }
-            
-            # Decide which manager to use
-            scope_manager = db_manager
-            generated_manager = False
-
-            try:
-                if dialect_name == 'postgresql':
-                    # Use sqlalchemy to build new URL with replaced database
-                    from sqlalchemy import create_engine
-                    from sqlalchemy.engine.url import make_url
-                    
-                    base_url = make_url(db_manager.db_url)
-                    # Create a temporary manager for this specific database
-                    target_url = base_url.set(database=db_name)
-                    # IMPORTANT: render_as_string(hide_password=False) ensure password is not masked as ***
-                    scope_manager = DatabaseManager(target_url.render_as_string(hide_password=False))
-                    generated_manager = True
-
-                # 获取数据库中的表及 approximate 行数
-                # Note: scope_manager might fail to connect if we lack permissions for 'db_name'
-                # So we wrap in try/except for the connection check implicit in execute_query
-                
-                if dialect_name == 'postgresql':
-                    tables_query = """
-                    SELECT
-                        t.tablename as table_name,
-                        c.reltuples::bigint as table_rows
-                    FROM pg_tables t
-                    JOIN pg_class c ON t.tablename = c.relname
-                    WHERE t.schemaname = 'public'
-                        AND c.relkind = 'r'
-                    ORDER BY t.tablename
-                    """
-                else:
-                    tables_query = """
-                    SELECT
-                        TABLE_NAME as table_name,
-                        TABLE_ROWS as table_rows
-                    FROM information_schema.TABLES
-                    WHERE TABLE_SCHEMA = :db_name
-                    ORDER BY TABLE_NAME
-                    """
-
-                try:
-                    tables_df = scope_manager.execute_query(tables_query, {"db_name": db_name})
-                except Exception as conn_err:
-                    log_error(logger, f"无法连接或查询数据库 {db_name}: {conn_err}", "Query")
-                    overview["databases"].append(database_overview)
-                    if generated_manager:
-                         scope_manager.close()
-                    continue
-
-                if tables_df.empty:
-                    log_success(logger, f"数据库 {db_name} 无表", "Query")
-                    database_overview.update(_summarise_tables([]))
-                    overview["databases"].append(database_overview)
-                    if generated_manager:
-                         scope_manager.close()
-                    continue
-
-                table_names = tables_df['table_name'].tolist()
-                approx_rows_map = {}
-                if 'table_rows' in tables_df.columns:
-                    approx_rows_map = {
-                        row['table_name']: row['table_rows']
-                        for _, row in tables_df.iterrows()
-                    }
-                log_success(
-                    logger,
-                    f"数据库 {db_name} 包含 {len(table_names)} 个表: {', '.join(table_names)}",
-                    "Query",
+        
+        base_url_str = db_manager.db_url
+        
+        # Parallel Execution for databases
+        max_db_workers = min(8, len(db_names))
+        
+        futures_db = []
+        with ThreadPoolExecutor(max_workers=max_db_workers) as executor:
+            for db_name in db_names:
+                futures_db.append(
+                    executor.submit(
+                        _process_database_metadata,
+                        db_name,
+                        base_url_str,
+                        dialect_name,
+                        include_counts,
+                        logger
+                    )
                 )
-
-                # 轻量模式
-                if not include_counts:
-                    database_overview["tables"] = [{"name": name} for name in table_names]
-                    stats = {
-                        "table_count": len(table_names),
-                        "counted_table_count": 0,
-                        "total_rows": 0,
-                    }
-                    database_overview.update(stats)
-                    total_tables += stats["table_count"]
-                    total_rows += stats["total_rows"]
-                    overview["databases"].append(database_overview)
-                    if generated_manager:
-                         scope_manager.close()
-                    continue
-
-                table_workers = min(MAX_TABLE_WORKERS, len(table_names)) or 1
-                futures: Dict[Any, Tuple[int, str]] = {}
-                with ThreadPoolExecutor(max_workers=table_workers) as executor:
-                    for index, table_name in enumerate(table_names):
-                        approx_rows = approx_rows_map.get(table_name)
-                        # Important: pass scope_manager here
-                        future = executor.submit(_fetch_table_info, scope_manager, db_name, table_name, logger, approx_rows)
-                        futures[future] = (index, table_name)
-
-                    table_results: List[Tuple[int, Dict[str, Any]]] = []
-                    for future in as_completed(futures):
-                        index, table_name = futures[future]
-                        try:
-                            table_info = future.result()
-                        except Exception as exc:
-                            log_error(
-                                logger,
-                                f"查询表 {db_name}.{table_name} 过程中发生异常: {exc}",
-                                "Query",
-                            )
-                            table_info = {"name": table_name, "error": str(exc)}
-                        table_results.append((index, table_info))
-
-                table_results.sort(key=lambda pair: pair[0])
-                database_overview["tables"] = [info for _, info in table_results]
-
-                stats = _summarise_tables(database_overview["tables"])
-                database_overview.update(stats)
-                total_tables += stats["table_count"]
-                total_rows += stats["total_rows"]
-                overview["databases"].append(database_overview)
                 
-            finally:
-                if generated_manager and scope_manager:
-                    scope_manager.close() # Ensure we close the temporary connection
+            for future in as_completed(futures_db):
+                try:
+                    db_result = future.result()
+                    if db_result:
+                        overview["databases"].append(db_result)
+                except Exception as e:
+                    log_error(logger, f"处理数据库元数据失败: {e}", "Query")
+
+        overview["databases"].sort(key=lambda x: x["name"])
+
+        # Calculate totals
+        total_tables = sum(db.get("table_count", 0) for db in overview["databases"])
+        total_rows = sum(db.get("total_rows", 0) for db in overview["databases"])
 
         overview["summary"] = {
             "database_count": len(overview["databases"]),

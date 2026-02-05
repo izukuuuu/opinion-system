@@ -142,7 +142,7 @@ def query(show_json, save_path):
 
     result = run_query()
     success = _as_success(result)
-    _log_project_event("GLOBAL", "query", {"source": "cli"}, success)
+    _log_project_event(None, "query", {"source": "cli"}, success)
     if not success:
         print("查询失败")
         if isinstance(result, dict):

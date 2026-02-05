@@ -159,16 +159,21 @@ class DatabaseManager:
             with engine.connect() as conn:
                 if dialect_name == 'postgresql':
                     # Postgres requires forcing disconnection of other users before dropping
-                    # This might require superuser privileges
                     try:
+                         # 1. Disallow new connections to avoid race condition
+                         conn.execute(text(f"UPDATE pg_database SET datallowconn = 'false' WHERE datname = '{database_name_sanitized}'"))
+                         
+                         # 2. Terminate existing connections
                          conn.execute(text(f"""
                             SELECT pg_terminate_backend(pid) 
                             FROM pg_stat_activity 
                             WHERE datname = '{database_name_sanitized}'
                             AND pid <> pg_backend_pid()
                          """))
-                    except Exception:
-                        pass # Best effort
+                    except Exception as e:
+                        print(f"DEBUG: Terminate connections failed/ignored: {e}")
+                        pass 
+                    
                     conn.execute(text(f'DROP DATABASE IF EXISTS "{database_name_sanitized}"'))
                 elif dialect_name == 'mysql':
                     conn.execute(text(f"DROP DATABASE IF EXISTS `{database_name_sanitized}`"))
@@ -178,6 +183,7 @@ class DatabaseManager:
             engine.dispose()
             return True
         except Exception as e:
+            print(f"DEBUG: Drop database failed: {e}")
             # log failure if needed, or caller handles it
             return False
     
