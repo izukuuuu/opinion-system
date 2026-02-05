@@ -1,0 +1,28 @@
+Traceback (most recent call last):
+  File "pandas/_libs/tslibs/offsets.pyx", line 6213, in pandas._libs.tslibs.offsets._get_offset
+KeyError: 'H'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "pandas/_libs/tslibs/offsets.pyx", line 6344, in pandas._libs.tslibs.offsets.to_offset
+  File "pandas/_libs/tslibs/offsets.pyx", line 6219, in pandas._libs.tslibs.offsets._get_offset
+  File "pandas/_libs/tslibs/offsets.pyx", line 6137, in pandas._libs.tslibs.offsets.raise_invalid_freq
+ValueError: Invalid frequency: H. Failed to parse with error message: KeyError('H'). Did you mean h?
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "F:\opinion-system\scripts\test_fluid_integration.py", line 90, in <module>
+    if test_fluid_integration():
+       ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\opinion-system\scripts\test_fluid_integration.py", line 35, in test_fluid_integration
+    "published_at": pd.date_range(start="2024-01-01 10:00", periods=10, freq="H"),
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\opinion-system\.venv\Lib\site-packages\pandas\core\indexes\datetimes.py", line 1442, in date_range
+    freq = to_offset(freq)
+           ^^^^^^^^^^^^^^^
+  File "pandas/_libs/tslibs/offsets.pyx", line 6229, in pandas._libs.tslibs.offsets.to_offset
+  File "pandas/_libs/tslibs/offsets.pyx", line 6352, in pandas._libs.tslibs.offsets.to_offset
+  File "pandas/_libs/tslibs/offsets.pyx", line 6137, in pandas._libs.tslibs.offsets.raise_invalid_freq
+ValueError: Invalid frequency: H. Failed to parse with error message: ValueError("Invalid frequency: H. Failed to parse with error message: KeyError('H'). Did you mean h?") Did you mean h?

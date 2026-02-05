@@ -1538,6 +1538,54 @@ def analyze_endpoint():
     )
     return jsonify(response), code
 
+@app.post("/api/fluid")
+def fluid_endpoint():
+    payload = request.get_json(silent=True) or {}
+    valid, error_msg = require_fields(payload, "start", "end")
+    if not valid:
+        return jsonify(error_msg), 400
+
+    start = str(payload.get("start") or "").strip()
+    end = str(payload.get("end") or "").strip()
+    if not start or not end:
+        return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
+
+    try:
+        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    from src.fluid import run_fluid_analysis  # type: ignore
+
+    # 参数转换
+    window_hours = 3
+    if "window_hours" in payload:
+        try:
+            window_hours = int(payload["window_hours"])
+        except (ValueError, TypeError):
+            pass
+
+    response, code = _execute_operation(
+        "fluid",
+        run_fluid_analysis,
+        topic_identifier,
+        start,
+        end_date=end,
+        window_hours=window_hours,
+        log_context={
+            "project": log_project,
+            "params": {
+                "start": start,
+                "end": end,
+                "window": window_hours,
+                "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
+            },
+        },
+    )
+    return jsonify(response), code
+
 
 @app.get("/api/analyze/history")
 def get_analyze_history():

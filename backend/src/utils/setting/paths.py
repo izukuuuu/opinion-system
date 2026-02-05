@@ -8,7 +8,7 @@ from typing import Literal
 from ...project.manager import get_project_manager
 
 # 目录层级类型
-LAYERS = Literal['raw', 'merge', 'clean', 'filter', 'fetch', 'analyze', 'reports', 'results']
+LAYERS = Literal['raw', 'merge', 'clean', 'filter', 'fetch', 'analyze', 'reports', 'results', 'fluid']
 
 def get_project_root() -> Path:
     """

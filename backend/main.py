@@ -61,6 +61,23 @@ def cli():
     pass
 
 
+@cli.command('FluidAnalysis')
+@click.option('--topic', required=True, help='专题名称')
+@click.option('--start', required=True, help='开始日期 (YYYY-MM-DD)')
+@click.option('--end', required=False, help='结束日期 (YYYY-MM-DD)，如果不提供则使用start作为单日期')
+@click.option('--window-hours', default=3, type=int, help='时间窗口大小（小时），默认3小时')
+@click.option('--file', required=False, help='可选：指定要分析的文件名（例如: 论坛.csv），只分析该文件')
+def fluid_analysis(topic, start, end, window_hours, file):
+    """
+    运行舆论流体动力学指标计算与热度预测（基于数据库数据）
+    """
+    from src.fluid import run_fluid_analysis
+    ok = run_fluid_analysis(topic, start, end_date=end, window_hours=window_hours, target_file=file)
+    if not ok:
+        date_range = f"{start}_{end}" if end else start
+        print(f"FluidAnalysis 运行失败: {topic} - {date_range}")
+
+
 @cli.command('Merge')
 @click.option('--topic', required=True, help='专题名称')
 @click.option('--date', required=True, help='日期 (YYYY-MM-DD)')

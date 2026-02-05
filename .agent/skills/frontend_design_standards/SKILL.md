@@ -1,49 +1,37 @@
 ---
 name: Frontend Design Standards
-description: Enforces design rules including color usage and hover effect restrictions.
+description: Enforces strict design rules including color usage, hover effects restrictions, and theme prioritization.
 ---
 
 # Frontend Design Standards
 
-This skill enforces specific design constraints and standards for all frontend development tasks in the Opinion System project.
+This skill defines the strict design standards for the frontend of the Opinion System. All frontend changes must adhere to these rules.
 
-## Micro-description
-Use this skill for any task involving frontend code generation, UI design, CSS modifications, or component creation.
+## 1. Color Usage
 
-## Instructions
+-   **Source of Truth:** All colors MUST use the variables defined in `frontend/src/assets/colors.css`.
+-   **No Hardcoded Colors:** Do NOT use hex codes or RGB values directly in components (except when defining the variables in `colors.css` itself). Use the CSS variables or the utility classes.
+-   **Theme Prioritization:**
+    -   Use **Brand** colors (`--color-brand-*`) for primary actions, active states, and key branding elements.
+    -   Use **Accent** colors (`--color-accent-*`) for secondary information, highlights, and complementary elements.
+    -   Use **Neutral** colors (`--color-bg-base`, `--color-surface`, `--color-text-*`) for structure, backgrounds, and typography.
+    -   Use **Semantic** colors (Success, Danger, Warning) ONLY for their specific semantic meanings (success messages, errors, warnings).
 
-### 1. Source of Truth for Colors
-All colors MUST be sourced from `frontend/src/assets/colors.css`.
-- **Do not** hardcode hex values or RGB values if a variable exists.
-- **Do not** introduce new color palettes unless explicitly requested.
+## 2. Interaction Design
 
-### 2. Strict Design Constraints
-The user has explicit preferences that must be followed without exception:
-- **NO Hover Suspension**: Do not use `transform: translateY(...)` or similar effects on hover. Elements should remain static in position.
-- **NO Hover Shadows**: Do not add `box-shadow` or increase elevation on hover.
-- **NO Blue-Purple Gradients**: Avoid "mysterious" or generic blue-purple gradients often found in default templates.
-- **Theme Color Focus**: Stick to the project's defined theme colors (Brand, Accent, Success, Warning, Danger) defined in `colors.css`.
+-   **Hover Effects:**
+    -   **AVOID** unnecessary hover effects.
+    -   Buttons and interactive elements should have subtle state changes (e.g., slight color shift, opacity change) but avoid defining new, complex hover animations unless strictly required.
+    -   Do NOT add hover effects to non-interactive elements.
+-   **Shadows:**
+    -   **AVOID** heavy or large shadows.
+    -   Use flat design principles where possible.
+    -   If shadows are necessary for depth (e.g., modals, dropdowns), use the minimal shadow variables if available, or extremely subtle custom shadows.
 
-### 3. Usage Guidelines
+## 3. Typography
 
-#### Color Variable Usage
-- **Primary Actions/Brand**: Use `var(--color-brand-*)`.
-- **Backgrounds**: Use `var(--color-bg-base)`, `var(--color-bg-base-soft)`, or `var(--color-surface)`.
-- **Text**: Use `var(--color-text-primary)`, `var(--color-text-secondary)`, `var(--color-text-muted)`.
+-   Use the defined utility classes for text colors (`.text-primary`, `.text-secondary`, `.text-muted`, `.text-brand`, etc.).
 
-#### Component Styling
-When creating or modifying components (Vue, HTML, CSS):
-- Adhere to the flat, clean aesthetic implied by the "No Hover Shadow/Suspension" rule.
-- interactive states should use color changes (e.g., background-color darken/lighten) or border changes rather than spatial movement or shadows.
+## 4. Components
 
-### 4. Trigger Keywords
-- frontend
-- ui
-- design
-- css
-- style
-- vue
-- html
-- component
-- page
-- layout
+-   Reusable components (Buttons, Inputs, etc.) are defined in `colors.css` (e.g., `.btn-primary`, `.input`). Use these classes instead of recreating styles.
