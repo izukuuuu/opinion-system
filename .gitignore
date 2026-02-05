@@ -32,3 +32,6 @@ frontend/.env.local
 # Addon
 .claude
 venv/
+
+# Workflow
+merge/
