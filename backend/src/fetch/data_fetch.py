@@ -211,16 +211,38 @@ def _quote_identifier(conn, identifier: str) -> str:
     return f'"{safe}"'
 
 
+def _resolve_db_url(db_config: dict) -> Optional[str]:
+    """
+    Resolve the database URL from configuration, respecting the 'active' connection.
+    """
+    active_id = db_config.get('active')
+    if active_id:
+        connections = db_config.get('connections', [])
+        for conn in connections:
+            if conn.get('id') == active_id:
+                return conn.get('url')
+    
+    # Fallback to legacy top-level db_url
+    return db_config.get('db_url')
+
+
 def _query_table_date_range(conn, table_name: str, topic: str, logger=None) -> Tuple[Optional[date], Optional[date]]:
     if not table_exists(conn, table_name, topic):
         log_skip(logger, f"表 {topic}.{table_name} 不存在", "Fetch")
         return None, None
 
     quoted_table = _quote_identifier(conn, table_name)
+    
+    # Dialect-specific date function
+    if conn.dialect.name == 'postgresql':
+        date_expr = "CAST(published_at AS DATE)"
+    else:
+        date_expr = "DATE(published_at)"
+        
     query = f"""
     SELECT
-        MIN(DATE(published_at)) AS start_date,
-        MAX(DATE(published_at)) AS end_date
+        MIN({date_expr}) AS start_date,
+        MAX({date_expr}) AS end_date
     FROM {quoted_table}
     """
     try:
@@ -238,14 +260,27 @@ def _list_topic_tables(conn, topic: str, logger=None) -> List[str]:
     """
     获取专题数据库中包含 published_at 字段的所有表。
     """
-    query = """
-    SELECT DISTINCT TABLE_NAME AS table_name
-    FROM information_schema.columns
-    WHERE table_schema = :schema AND column_name = 'published_at'
-    ORDER BY TABLE_NAME
-    """
+    if conn.dialect.name == 'postgresql':
+        # PostgreSQL: Check public schema in the current database (already connected)
+        query = """
+        SELECT DISTINCT TABLE_NAME AS table_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND column_name = 'published_at'
+        ORDER BY TABLE_NAME
+        """
+        params = {}
+    else:
+        # MySQL: table_schema is the database name
+        query = """
+        SELECT DISTINCT TABLE_NAME AS table_name
+        FROM information_schema.columns
+        WHERE table_schema = :schema AND column_name = 'published_at'
+        ORDER BY TABLE_NAME
+        """
+        params = {"schema": topic}
+
     try:
-        result = conn.execute(text(query), {"schema": topic}).mappings()
+        result = conn.execute(text(query), params).mappings()
         tables = [row.get("table_name") for row in result if row and row.get("table_name")]
         if not tables:
             log_skip(logger, f"专题 {topic} 未找到包含 published_at 字段的表", "Fetch")
@@ -268,11 +303,20 @@ def table_exists(conn, table_name: str, topic: str) -> bool:
         bool: 表是否存在
     """
     try:
-        query = """
-        SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_schema = :schema AND table_name = :table
-        """
-        result = conn.execute(text(query), {"schema": topic, "table": table_name})
+        if conn.dialect.name == 'postgresql':
+            query = """
+            SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = :table
+            """
+            params = {"table": table_name}
+        else:
+            query = """
+            SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema = :schema AND table_name = :table
+            """
+            params = {"schema": topic, "table": table_name}
+            
+        result = conn.execute(text(query), params)
         return (result.scalar() or 0) > 0
     except Exception:
         return False
@@ -294,7 +338,8 @@ def get_available_date_range(topic: str, table_name: str, logger=None):
         logger = logging.getLogger("fetch-availability")
     db_topic = _normalise_db_topic(topic)
     db_config = settings.get('databases', {})
-    db_url = db_config.get('db_url')
+    
+    db_url = _resolve_db_url(db_config)
     if not db_url:
         log_error(logger, "未找到数据库连接配置", "Fetch")
         return None, None
@@ -340,7 +385,8 @@ def get_topic_available_date_range(topic: str, logger=None):
         logger = logging.getLogger("fetch-availability")
     db_topic = _normalise_db_topic(topic)
     db_config = settings.get('databases', {})
-    db_url = db_config.get('db_url')
+    
+    db_url = _resolve_db_url(db_config)
     if not db_url:
         log_error(logger, "未找到数据库连接配置", "Fetch")
         return {"start": None, "end": None, "channels": {}}

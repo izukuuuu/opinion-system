@@ -16,15 +16,15 @@ from flask_cors import CORS
 # 注意：所有新的辅助函数请存放在 ``backend/server_support`` 包中，
 # 并通过 ``from server_support import ...`` 或具体模块导入，保持 server.py 专注于路由逻辑。
 
-from server_support.paths import BACKEND_DIR, SRC_DIR  # type: ignore
-
+BACKEND_DIR = Path(__file__).resolve().parent
+SRC_DIR = BACKEND_DIR / "src"
+for path in (BACKEND_DIR, SRC_DIR):
+    s_path = str(path)
+    if s_path not in sys.path:
+        sys.path.insert(0, s_path)
 
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-for path in (BACKEND_DIR, SRC_DIR):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 from src.project import (  # type: ignore
     get_dataset_date_summary,
@@ -36,8 +36,6 @@ from src.project import (  # type: ignore
 )
 from src.utils.setting.paths import bucket, get_data_root, _normalise_topic  # type: ignore
 
-from src.topic.data_bertopic_qwen import run_topic_bertopic
-from openai import OpenAI
 
 from server_support import (  # type: ignore
     collect_layer_archives,
@@ -89,219 +87,18 @@ from server_support.router_prompts.utils import (
 
 PROJECT_MANAGER = get_project_manager()
 
-ANALYZE_FILE_MAP = {
-    "volume": "volume.json",
-    "attitude": "attitude.json",
-    "trends": "trends.json",
-    "geography": "geography.json",
-    "publishers": "publishers.json",
-    "keywords": "keywords.json",
-    "classification": "classification.json",
-}
-DEFAULT_ANALYZE_FILENAME = "result.json"
 
 
-def _log_with_context(operation: str, success: bool, context: Optional[Dict[str, Any]]) -> None:
-    if not context:
-        return
-    project = context.get("project")
-    if not project:
-        return
-    params = context.get("params") or {}
-    try:
-        PROJECT_MANAGER.log_operation(project, operation, params=params, success=success)
-    except Exception:  # pragma: no cover - logging失败不影响接口
-        LOGGER.warning("Failed to persist project log for operation %s", operation, exc_info=True)
+
+from server_support.ops import _execute_operation, _log_with_context
 
 
-def _execute_operation(
-    operation: str,
-    caller: Callable[..., Any],
-    *args: Any,
-    log_context: Optional[Dict[str, Any]] = None,
-    **kwargs: Any,
-) -> Tuple[Dict[str, Any], int]:
-    try:
-        result = caller(*args, **kwargs)
-        success = evaluate_success(result)
-        _log_with_context(operation, success, log_context)
-        serialised = serialise_result(result)
-        if success:
-            return {
-                "status": "ok",
-                "operation": operation,
-                "data": serialised,
-            }, 200
-
-        message = "操作执行失败"
-        if isinstance(serialised, dict):
-            message = serialised.get("message") or serialised.get("error") or message
-        elif isinstance(serialised, str):
-            message = serialised
-
-        return {
-            "status": "error",
-            "operation": operation,
-            "message": message,
-            "data": serialised,
-        }, 500
-    except Exception as exc:  # pragma: no cover - defensive: surface backend errors
-        LOGGER.exception("Error while executing operation %s", operation)
-        _log_with_context(operation, False, log_context)
-        return {
-            "status": "error",
-            "operation": operation,
-            "message": str(exc),
-        }, 500
 
 
-def _compose_analyze_folder(start: str, end: Optional[str]) -> str:
-    start = start.strip()
-    end = (end or "").strip()
-    if not start:
-        return ""
-    if end:
-        return f"{start}_{end}"
-    return start
-
-def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
-    valid, error_response = require_fields(payload, "topic", "start_date")
-    if not valid:
-        return error_response
-
-    raw_topic = str(payload.get("topic") or "").strip()
-    raw_project = str(payload.get("project") or "").strip()
-    raw_dataset_id = str(payload.get("dataset_id") or "").strip()
-
-    start_date = str(payload.get("start_date") or "").strip()
-    end_value = payload.get("end_date")
-    end_date = str(end_value).strip() if end_value else None
-
-    if not raw_topic and not raw_project and not raw_dataset_id:
-        return {
-            "status": "error",
-            "message": "Missing required field(s): topic, project, or dataset_id",
-        }
-
-    if not start_date:
-        return {
-            "status": "error",
-            "message": "Missing required field(s): start_date",
-        }
-
-    # 将云端/项目标识解析为本地 bucket 名称（与基础分析一致）
-    try:
-        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(
-            {
-                "topic": raw_topic,
-                "project": raw_project,
-                "dataset_id": raw_dataset_id,
-            },
-            PROJECT_MANAGER,
-        )
-    except ValueError:
-        topic_identifier = (raw_topic or raw_project or "").strip()
-        display_name = raw_topic or raw_project or topic_identifier
-        log_project = topic_identifier
-
-    bucket_topic = topic_identifier or raw_topic
-    db_topic = raw_topic or display_name or bucket_topic
-    topic_label = display_name or db_topic
-
-    # 确保存储目录存在，避免回落到旧路径
-    try:
-        PROJECT_MANAGER.ensure_project_storage(log_project or bucket_topic, create_if_missing=True)
-    except Exception:
-        LOGGER.warning("Failed to ensure project storage for BERTopic", exc_info=True)
-
-    # 使用新的BERTopic实现，集成fetch流程
-    try:
-        # 导入新的BERTopic模块
-        from src.topic.data_bertopic_qwen_v2 import run_topic_bertopic
-
-        # 确保fetch数据可用性检查
-        from src.fetch.data_fetch import get_topic_available_date_range
-
-        # 检查数据可用范围（使用数据库实际专题名）
-        availability = get_topic_available_date_range(db_topic)
-        if isinstance(availability, dict):
-            avail_start = availability.get("start")
-            avail_end = availability.get("end")
-        else:
-            avail_start, avail_end = availability
-
-        if avail_start and avail_end:
-            import pandas as pd
-            req_start = pd.to_datetime(start_date).date()
-            req_end = pd.to_datetime(end_date or start_date).date()
-            avail_start_date = pd.to_datetime(avail_start).date()
-            avail_end_date = pd.to_datetime(avail_end).date()
-
-            if req_start < avail_start_date or req_end > avail_end_date:
-                return {
-                    "status": "error",
-                    "message": f"请求的日期范围 {start_date}~{end_date or start_date} 超出可用范围 {avail_start}~{avail_end}",
-                }
-    except ImportError:
-        # 如果新模块不存在，回退到旧实现
-        from src.topic.data_bertopic_qwen import run_topic_bertopic
-
-    fetch_dir = payload.get("fetch_dir")
-    fetch_dir = str(fetch_dir).strip() if fetch_dir else None
-
-    userdict = payload.get("userdict")
-    userdict = str(userdict).strip() if userdict else None
-
-    stopwords = payload.get("stopwords")
-    stopwords = str(stopwords).strip() if stopwords else None
-
-    # 运行BERTopic分析
-    result = run_topic_bertopic(
-        bucket_topic,
-        start_date,
-        end_date,
-        fetch_dir=fetch_dir,
-        userdict=userdict,
-        stopwords=stopwords,
-        bucket_topic=bucket_topic,
-        db_topic=db_topic,
-        display_topic=topic_label,
-    )
-
-    if result:
-        # 返回成功响应，包含更多信息
-        folder_name = f"{start_date}_{end_date}" if end_date else start_date
-        return {
-            "status": "ok",
-            "operation": "topic-bertopic",
-            "data": {
-                "topic": topic_label,
-                "bucket": bucket_topic,
-                "start_date": start_date,
-                "end_date": end_date,
-                "folder": folder_name,
-                "message": "BERTopic分析完成，结果已保存"
-            }
-        }
-
-    return {
-        "status": "error",
-        "message": "BERTopic 主题分析执行失败，请检查后端日志",
-    }
 
 
-def _split_analyze_folder(folder: str) -> Tuple[str, str]:
-    folder = (folder or "").strip()
-    if not folder:
-        return "", ""
-    if "_" in folder:
-        start, end = folder.split("_", 1)
-        start = start.strip()
-        end = end.strip() or start
-    else:
-        start = folder
-        end = folder
-    return start, end
+
+
 
 
 def _summarise_api_key(value: Optional[str]) -> Dict[str, Any]:
@@ -343,57 +140,10 @@ def _build_filter_status_payload(
     return status_payload
 
 
-def _collect_analyze_history(
-    topic_identifier: str,
-    topic_label: str,
-    aliases: Optional[List[str]] = None,
-) -> List[Dict[str, Any]]:
-    data_root = get_data_root() / "projects"
-    data_root.mkdir(parents=True, exist_ok=True)
-    candidate_names: List[str] = [topic_identifier]
-    if aliases:
-        candidate_names.extend(aliases)
-    candidate_names.extend([_normalise_name(name) for name in candidate_names if name])
-
-    seen_dirs: set[str] = set()
-    records: List[Dict[str, Any]] = []
-
-    for name in candidate_names:
-        cleaned = (name or "").strip()
-        if not cleaned or cleaned in seen_dirs:
-            continue
-        seen_dirs.add(cleaned)
-        analyze_dir = data_root / cleaned / "analyze"
-        if not analyze_dir.exists():
-            continue
-        for entry in analyze_dir.iterdir():
-            if not entry.is_dir():
-                continue
-            start, end = _split_analyze_folder(entry.name)
-            if not start:
-                continue
-            stats = entry.stat()
-            records.append(
-                {
-                    "id": f"{cleaned}:{entry.name}",
-                    "topic": topic_label,
-                    "topic_identifier": cleaned,
-                    "start": start,
-                    "end": end,
-                    "folder": entry.name,
-                    "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats.st_mtime)),
-                    "_updated_ts": stats.st_mtime,
-                }
-            )
-
-    records.sort(key=lambda item: item.get("_updated_ts", 0), reverse=True)
-    for record in records:
-        record.pop("_updated_ts", None)
-    return records
 
 
-def _normalise_name(value: Optional[str]) -> str:
-    return _normalise_topic(value or "")
+
+
 
 
 def _submit_filter_job(
@@ -434,7 +184,15 @@ def _submit_filter_job(
     return FILTER_EXECUTOR.submit(_job)
 
 
+
+from src.fluid.api import fluid_bp
+from src.analyze.api import analyze_bp
+from src.topic.api import topic_bp
+
 app = Flask(__name__)
+app.register_blueprint(fluid_bp, url_prefix='/api/fluid')
+app.register_blueprint(analyze_bp, url_prefix='/api/analyze')
+app.register_blueprint(topic_bp, url_prefix='/api/topic')
 CORS(app)
 
 CONFIG = load_config()
@@ -1496,286 +1254,17 @@ def fetch_endpoint():
     return jsonify(response), code
 
 
-@app.post("/api/analyze")
-def analyze_endpoint():
-    payload = request.get_json(silent=True) or {}
-    valid, error = require_fields(payload, "start", "end")
-    if not valid:
-        return jsonify(error), 400
-
-    start = str(payload.get("start") or "").strip()
-    end = str(payload.get("end") or "").strip()
-    if not start or not end:
-        return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
-
-    try:
-        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
-
-    func = payload.get("function")
-
-    from src.analyze import run_Analyze  # type: ignore
-
-    response, code = _execute_operation(
-        "analyze",
-        run_Analyze,
-        topic_identifier,
-        start,
-        end_date=end,
-        only_function=func,
-        log_context={
-            "project": log_project,
-            "params": {
-                "start": start,
-                "end": end,
-                "function": func,
-                "source": "api",
-                "topic": display_name,
-                "bucket": topic_identifier,
-            },
-        },
-    )
-    return jsonify(response), code
-
-@app.post("/api/fluid")
-def fluid_endpoint():
-    payload = request.get_json(silent=True) or {}
-    valid, error_msg = require_fields(payload, "start", "end")
-    if not valid:
-        return jsonify(error_msg), 400
-
-    start = str(payload.get("start") or "").strip()
-    end = str(payload.get("end") or "").strip()
-    if not start or not end:
-        return jsonify({"status": "error", "message": "Missing required field(s): start, end"}), 400
-
-    try:
-        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
-
-    from src.fluid import run_fluid_analysis  # type: ignore
-
-    # 参数转换
-    window_hours = 3
-    if "window_hours" in payload:
-        try:
-            window_hours = int(payload["window_hours"])
-        except (ValueError, TypeError):
-            pass
-
-    response, code = _execute_operation(
-        "fluid",
-        run_fluid_analysis,
-        topic_identifier,
-        start,
-        end_date=end,
-        window_hours=window_hours,
-        log_context={
-            "project": log_project,
-            "params": {
-                "start": start,
-                "end": end,
-                "window": window_hours,
-                "source": "api",
-                "topic": display_name,
-                "bucket": topic_identifier,
-            },
-        },
-    )
-    return jsonify(response), code
 
 
-@app.get("/api/analyze/history")
-def get_analyze_history():
-    raw_topic = request.args.get("topic")
-    raw_project = request.args.get("project")
-    raw_dataset_id = request.args.get("dataset_id")
-
-    payload = {
-        "topic": raw_topic,
-        "project": raw_project,
-        "dataset_id": raw_dataset_id,
-    }
-
-    try:
-        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
-    except ValueError:
-        topic_identifier = (raw_topic or "").strip()
-        if not topic_identifier:
-            return error("Missing required query parameters: topic or project")
-        display_name = raw_topic or raw_project or topic_identifier
-
-    aliases = [alias for alias in (raw_topic, raw_project) if alias]
-    records = _collect_analyze_history(topic_identifier, display_name, aliases)
-    return success(
-        {
-            "records": records,
-            "topic": display_name,
-            "topic_identifier": topic_identifier,
-        }
-    )
 
 
-@app.get("/api/analyze/results")
-def get_analyze_results():
-    raw_topic = request.args.get("topic")
-    raw_project = request.args.get("project")
-    raw_dataset_id = request.args.get("dataset_id")
 
-    payload = {
-        "topic": raw_topic,
-        "project": raw_project,
-        "dataset_id": raw_dataset_id,
-    }
 
-    try:
-        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
-    except ValueError:
-        topic_identifier = (raw_topic or "").strip()
-        if not topic_identifier:
-            return error("Missing required query parameters: topic or project")
-        display_name = raw_topic or raw_project or topic_identifier
 
-    topic_display = display_name or raw_topic or raw_project or topic_identifier
 
-    start = (request.args.get("start") or "").strip()
-    if not start:
-        return error("Missing required query parameters: start")
 
-    end = (request.args.get("end") or "").strip() or None
-    function_alias = (request.args.get("function") or "").strip().lower() or None
-    target_alias = (request.args.get("target") or "").strip()
 
-    folder_name = _compose_analyze_folder(start, end)
-    if not folder_name:
-        return error("Invalid start date supplied")
 
-    analyze_root = bucket("analyze", topic_identifier, folder_name)
-    if not analyze_root.exists():
-        fallback_root: Optional[Path] = None
-        if end:
-            single_day_folder = start.strip()
-            if single_day_folder and single_day_folder != folder_name:
-                fallback_root = bucket("analyze", topic_identifier, single_day_folder)
-        if fallback_root and fallback_root.exists():
-            analyze_root = fallback_root
-        else:
-            return error("未找到对应的分析结果目录", status_code=404)
-
-    def _match_target(name: str) -> bool:
-        if not target_alias:
-            return True
-        return name.strip() == target_alias
-
-    requested_functions = []
-    if function_alias:
-        for child in analyze_root.iterdir():
-            if child.is_dir() and child.name.lower() == function_alias:
-                requested_functions = [child.name]
-                break
-        if not requested_functions:
-            requested_functions = [function_alias]
-    else:
-        requested_functions = [child.name for child in analyze_root.iterdir() if child.is_dir()]
-
-    results = []
-    for func_name in requested_functions:
-        func_dir = analyze_root / func_name
-        if not func_dir.exists() or not func_dir.is_dir():
-            continue
-        targets = []
-        for target_dir in sorted(func_dir.iterdir()):
-            if not target_dir.is_dir():
-                continue
-            target_name = target_dir.name
-            if not _match_target(target_name):
-                continue
-            filename = ANALYZE_FILE_MAP.get(func_name, DEFAULT_ANALYZE_FILENAME)
-            file_path = target_dir / filename
-            if not file_path.exists():
-                json_candidates = sorted(target_dir.glob("*.json"))
-                if json_candidates:
-                    file_path = json_candidates[0]
-                else:
-                    continue
-            try:
-                data = _load_json_file(file_path)
-            except Exception as exc:  # pragma: no cover - defensive
-                LOGGER.warning("Failed to load analyze result file %s", file_path, exc_info=True)
-                data = {"error": str(exc)}
-            targets.append(
-                {
-                    "target": target_name,
-                    "file": file_path.name,
-                    "data": data,
-                }
-            )
-        if targets:
-            results.append({"name": func_name, "targets": targets})
-
-    if not results:
-        return error("未找到匹配的分析结果文件", status_code=404)
-
-    response_payload = {
-        "topic": topic_display,
-        "range": {
-            "start": start,
-            "end": end or start,
-        },
-        "functions": results,
-    }
-
-    ai_summary_path = analyze_root / "ai_summary.json"
-    if ai_summary_path.exists():
-        try:
-            response_payload["ai_summary"] = _load_json_file(ai_summary_path)
-        except Exception as exc:  # pragma: no cover - defensive
-            LOGGER.warning("Failed to load AI summary file %s", ai_summary_path, exc_info=True)
-
-    return success(response_payload)
-
-@app.post("/api/analysis/topic/bertopic/run")
-def run_topic_bertopic_endpoint():
-    payload = request.get_json(silent=True) or {}
-    valid, error_response = require_fields(payload, "topic", "start_date")
-    if not valid:
-        return jsonify(error_response), 400
-
-    raw_topic = str(payload.get("topic") or "").strip()
-    raw_project = str(payload.get("project") or "").strip()
-    raw_dataset_id = str(payload.get("dataset_id") or "").strip()
-    try:
-        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(
-            {
-                "topic": raw_topic,
-                "project": raw_project,
-                "dataset_id": raw_dataset_id,
-            },
-            PROJECT_MANAGER,
-        )
-    except ValueError:
-        topic_identifier = raw_topic or raw_project
-        display_name = raw_topic or raw_project or topic_identifier
-        log_project = topic_identifier
-
-    response, code = _execute_operation(
-        "topic-bertopic",
-        _run_topic_bertopic_api,
-        payload,
-        log_context={
-            "project": log_project or topic_identifier,
-            "params": {
-                "start_date": str(payload.get("start_date") or "").strip(),
-                "end_date": str(payload.get("end_date") or "").strip(),
-                "topic": display_name or raw_topic or raw_project,
-                "bucket": topic_identifier,
-                "source": "api",
-            },
-        },
-    )
-    return jsonify(response), code
 
 
 @app.get("/api/analysis/topic/bertopic/availability")
@@ -1859,75 +1348,7 @@ def check_topic_availability():
     return success({"data": response})
 
 
-@app.get("/api/analysis/topic/bertopic/results")
-def get_topic_bertopic_results():
-    raw_topic = request.args.get("topic")
-    raw_project = request.args.get("project")
-    raw_dataset_id = request.args.get("dataset_id")
 
-    start = (request.args.get("start") or "").strip()
-    if not start:
-        return error("Missing required query parameters: start")
-    end = (request.args.get("end") or "").strip() or None
-
-    payload = {
-        "topic": raw_topic,
-        "project": raw_project,
-        "dataset_id": raw_dataset_id,
-    }
-
-    try:
-        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
-    except ValueError:
-        topic_identifier = (raw_topic or "").strip()
-        if not topic_identifier:
-            return error("Missing required query parameters: topic or project")
-        display_name = raw_topic or raw_project or topic_identifier
-
-    folder_name = _compose_analyze_folder(start, end)
-    if not folder_name:
-        return error("Invalid start date supplied")
-
-    topic_dir = bucket("topic", topic_identifier, folder_name)
-    if not topic_dir.exists():
-        fallback_dir = bucket("topic", topic_identifier, start)
-        if fallback_dir.exists():
-            topic_dir = fallback_dir
-        else:
-            return error("未找到对应的主题分析结果目录", status_code=404)
-
-    file_map = {
-        "summary": "1主题统计结果.json",
-        "keywords": "2主题关键词.json",
-        "coords": "3文档2D坐标.json",
-        "llm_clusters": "4大模型再聚类结果.json",
-        "llm_keywords": "5大模型主题关键词.json",
-    }
-
-    files_payload: Dict[str, Any] = {}
-    for key, filename in file_map.items():
-        file_path = topic_dir / filename
-        if file_path.exists():
-            try:
-                files_payload[key] = _load_json_file(file_path)
-            except Exception as exc:  # pragma: no cover - defensive
-                LOGGER.warning("Failed to load topic result file %s", file_path, exc_info=True)
-                files_payload[key] = {"error": str(exc)}
-
-    if not files_payload:
-        return error("未找到可用的 BERTopic 结果文件", status_code=404)
-
-    response_payload = {
-        "topic": display_name,
-        "topic_identifier": topic_identifier,
-        "range": {
-            "start": start,
-            "end": end or start,
-        },
-        "files": files_payload,
-    }
-
-    return success({"data": response_payload})
 
 
 @app.get("/api/projects")
@@ -2627,119 +2048,7 @@ def main() -> None:
         raise
 
 
-@app.get("/api/analysis/topic/bertopic/topics")
-def list_topic_buckets():
-    """获取所有可用的专题 Bucket 列表
 
-    Query parameters:
-        only_with_results: 如果为 true，只返回有 BERTopic 分析结果的专题（默认: false）
-        only_with_data: 如果为 true，只返回有可用数据的专题（默认: false）
-    """
-    try:
-        from src.utils.setting.paths import get_data_root
-        from src.query import run_query  # 使用query模块获取数据库专题列表
-        data_root = get_data_root()
-        projects_dir = data_root / "projects"
-
-        only_with_results = request.args.get("only_with_results", "false").lower() == "true"
-        only_with_data = request.args.get("only_with_data", "false").lower() == "true"
-
-        # 优先从数据库获取专题列表
-        topics = []
-
-        if only_with_data:
-            # 从远程数据库获取有数据的专题列表
-            try:
-                response, _ = _execute_operation(
-                    "query",
-                    run_query,
-                    include_counts=True,
-                    log_context={"params": {"source": "api"}}
-                )
-
-                if response.get("status") == "ok":
-                    databases = response.get("data", {}).get("databases", [])
-                    for db in databases:
-                        db_name = db.get("name", "").strip()
-                        if db_name:
-                            # 检查本地是否有对应的项目目录
-                            project_dir = projects_dir / db_name if projects_dir.exists() else None
-                            has_topic = False
-
-                            if project_dir and project_dir.exists():
-                                topic_dir = project_dir / "topic"
-                                has_topic = topic_dir.exists() and topic_dir.is_dir()
-
-                            # 过滤条件
-                            if not only_with_results or has_topic:
-                                topics.append({
-                                    "bucket": db_name,
-                                    "name": db_name,
-                                    "display_name": db.get("display_name", db_name),
-                                    "has_bertopic_results": has_topic,
-                                    "source": "database"
-                                })
-
-            except Exception as db_exc:
-                LOGGER.warning("Failed to get topics from database: %s", db_exc)
-                # 降级到本地文件系统扫描
-
-        # 如果没有从数据库获取到数据，或不需要只从数据库获取
-        if not topics or not only_with_data:
-            # 从本地文件系统扫描
-            if projects_dir.exists():
-                all_items = list(projects_dir.iterdir())
-                LOGGER.info("Found %d items in projects directory", len(all_items))
-
-                for item in sorted(all_items):
-                    if item.is_dir() and not item.name.startswith('.'):
-                        # 检查是否有 topic 目录
-                        topic_dir = item / "topic"
-                        has_topic = topic_dir.exists() and topic_dir.is_dir()
-
-                        # 检查是否有fetch数据（表示有可用数据）
-                        has_data = False
-                        fetch_dir = item / "fetch"
-                        if fetch_dir.exists():
-                            # 检查是否有任何fetch子目录
-                            has_data = any(fetch_dir.iterdir())
-
-                        # 过滤条件
-                        if not only_with_data or has_data:
-                            if not only_with_results or has_topic:
-                                topics.append({
-                                    "bucket": item.name,
-                                    "name": item.name,
-                                    "display_name": item.name,
-                                    "has_bertopic_results": has_topic,
-                                    "source": "local"
-                                })
-
-        # 去重（优先保留数据库来源的记录）
-        seen = set()
-        unique_topics = []
-        for topic in topics:
-            key = topic["bucket"]
-            if key not in seen:
-                seen.add(key)
-                unique_topics.append(topic)
-            elif topic.get("source") == "database":
-                # 如果已经有记录，但当前是数据库来源，更新记录
-                for i, existing in enumerate(unique_topics):
-                    if existing["bucket"] == key:
-                        unique_topics[i] = topic
-                        break
-
-        LOGGER.info("Returning %d topics", len(unique_topics))
-        return success({
-            "topics": unique_topics,
-            "data_root": str(data_root),
-            "projects_dir": str(projects_dir),
-            "source": "database" if any(t.get("source") == "database" for t in unique_topics) else "local"
-        })
-    except Exception as exc:
-        LOGGER.exception("Failed to list topic buckets")
-        return error(f"获取专题列表失败: {str(exc)}")
 
 
 # ====== RAG (Retrieval-Augmented Generation) API Endpoints ======

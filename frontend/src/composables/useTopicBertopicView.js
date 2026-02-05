@@ -136,7 +136,7 @@ const loadTopics = async (onlyWithData = false) => {
       console.warn('Failed to load topics from remote database:', dbError)
       // 如果远程数据库调用失败，回退到BERTopic专用API
       const queryParams = onlyWithData ? '?only_with_data=true' : ''
-      const response = await callApi(`/api/analysis/topic/bertopic/topics${queryParams}`, {
+      const response = await callApi(`/api/topic/bertopic/topics${queryParams}`, {
         method: 'GET'
       })
       topics = response?.data?.topics || response?.topics || []
@@ -250,7 +250,7 @@ const loadResults = async (range) => {
     }
     if (end) params.set('end', end)
 
-    const response = await callApi(`/api/analysis/topic/bertopic/results?${params.toString()}`, {
+    const response = await callApi(`/api/topic/bertopic/results?${params.toString()}`, {
       method: 'GET'
     })
 

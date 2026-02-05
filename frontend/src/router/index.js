@@ -146,7 +146,7 @@ export const routes = [
         component: ProjectBasicAnalysisResults,
         meta: {
           title: '基础分析 · 查看分析',
-        breadcrumb: '查看分析'
+          breadcrumb: '查看分析'
         }
       }
     ]
@@ -239,13 +239,37 @@ export const routes = [
     }
   },
   {
-    path: '/analysis/deep/fluid-dynamics',
-    name: 'deep-analysis-fluid-dynamics',
-    component: PlaceholderModuleView,
-    meta: {
-      title: '舆论流体力学',
-      placeholder: '舆论流体力学模块建设中，敬请期待。'
-    }
+    path: '/deep-analysis/fluid-dynamics',
+    component: () => import('../views/analysis/deep/fluid/FluidAnalysisLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'deep-analysis-fluid-dynamics',
+        component: () => import('../views/analysis/deep/fluid/FluidAnalysisOverview.vue'),
+        meta: {
+          title: '舆论流体力学 · 概览',
+          breadcrumb: '流程概览'
+        }
+      },
+      {
+        path: 'run',
+        name: 'deep-analysis-fluid-dynamics-run',
+        component: () => import('../views/analysis/deep/fluid/FluidAnalysisRun.vue'),
+        meta: {
+          title: '舆论流体力学 · 运行分析',
+          breadcrumb: '运行分析'
+        }
+      },
+      {
+        path: 'view',
+        name: 'deep-analysis-fluid-dynamics-view',
+        component: () => import('../views/analysis/deep/fluid/FluidAnalysisResults.vue'),
+        meta: {
+          title: '舆论流体力学 · 查看结果',
+          breadcrumb: '查看结果'
+        }
+      }
+    ]
   },
   {
     path: '/retrieval/tagrag',

@@ -219,7 +219,23 @@ def get_relative_path(absolute_path: Path) -> str:
         str: 相对路径字符串
     """
     try:
-        project_root = get_project_root()
-        return str(absolute_path.relative_to(project_root))
+        return str(absolute_path.relative_to(get_project_root()))
     except ValueError:
         return str(absolute_path)
+
+
+def iter_topics():
+    """
+    遍历所有项目专题名称
+    
+    Returns:
+        Iterator[str]: 专题名称迭代器
+    """
+    data_root = get_data_root() / "projects"
+    if not data_root.exists():
+        return
+        
+    for item in data_root.iterdir():
+        if item.is_dir() and not item.name.startswith('.'):
+            yield item.name
+
