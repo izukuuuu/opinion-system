@@ -1,208 +1,176 @@
 <template>
-  <div class="space-y-10">
-    <section class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-500 to-brand-700 px-6 py-10 text-white sm:px-10">
-      <div class="absolute inset-0 opacity-40">
-        <div class="absolute -top-28 left-1/3 h-72 w-72 -translate-x-1/2 rounded-full bg-white/25 blur-3xl"></div>
-        <div class="absolute bottom-0 right-10 h-56 w-56 rounded-full bg-brand-200/80 blur-3xl"></div>
-      </div>
-      <div class="relative space-y-6">
-        <div class="space-y-4">
-          <p class="text-sm font-semibold uppercase tracking-[0.4em] text-white/70">基础分析</p>
-          <h1 class="text-3xl font-semibold sm:text-4xl">专题基础分析</h1>
+  <div class="space-y-10 pb-12">
+    <!-- Hero Section -->
+    <section class="relative overflow-hidden rounded-3xl bg-surface border border-soft p-1 shadow-sm">
+      <div
+        class="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-brand-600 via-brand-700 to-indigo-900 px-6 py-10 text-white sm:px-10 sm:py-12">
+        <!-- Abstract background elements -->
+        <div class="absolute inset-0 overflow-hidden opacity-20 pointer-events-none">
+          <div class="absolute -top-1/4 -left-1/4 h-[400px] w-[400px] rounded-full bg-white/30 blur-[100px]"></div>
+          <div class="absolute -bottom-1/4 -right-1/4 h-[300px] w-[300px] rounded-full bg-brand-400 blur-[80px]"></div>
         </div>
-        
-        <div class="space-y-4">
-          <p class="text-sm text-white/90">
-            专题基础分析对指定时间范围内的数据进行统计和分类，帮助了解专题的传播情况、内容特征和用户反馈。
-          </p>
-          
-          <div>
-            <p class="mb-2 text-sm font-semibold text-white">主要输出</p>
-            <p class="text-sm leading-relaxed text-white/80">
-              系统会统计舆情声量变化趋势、各平台分布情况、内容类型占比、高频关键词、发布者信息、情感倾向分布等数据，并以图表形式展示分析结果。
+
+        <div class="relative z-10 grid gap-8 lg:grid-cols-2 lg:items-center">
+          <div class="space-y-6">
+            <div class="space-y-2">
+              <div
+                class="inline-flex items-center rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-brand-100 backdrop-blur-md border border-white/10">
+                Core Module
+              </div>
+              <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
+                专题基础分析
+              </h1>
+              <p class="max-w-xl text-base text-brand-50/80 leading-relaxed font-medium">
+                深度挖掘专题传播趋势、内容特征与公众反馈。提供多维度统计能力，助力科学决策与舆情研判。
+              </p>
+            </div>
+
+            <div class="flex flex-wrap gap-2 text-[10px]">
+              <span v-for="tag in activeDimensions" :key="tag"
+                class="rounded-full bg-white/10 px-3 py-1 font-semibold text-white backdrop-blur-sm border border-white/5">
+                {{ tag }}
+              </span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3 pt-2">
+              <button type="button"
+                class="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-brand-800 transition-all active:scale-95 group"
+                @click="goToRun">
+                <PlayIcon class="h-4 w-4 fill-current" />
+                <span class="text-sm font-bold">立即配置分析任务</span>
+              </button>
+
+              <button type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-5 py-2.5 text-white text-sm transition-all"
+                @click="scrollToProcess">
+                <InformationCircleIcon class="h-4 w-4" />
+                <span>了解工作流</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Feature highlight -->
+          <div class="hidden lg:block">
+            <div class="relative rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
+              <h3 class="mb-3 text-xs font-bold text-brand-200">主要输出 (Core Outputs)</h3>
+              <ul class="space-y-2.5 text-[13px] text-white/70">
+                <li class="flex items-start gap-3">
+                  <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-400"></div>
+                  <span>舆情声量峰值识别与全渠道分布统计</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-400"></div>
+                  <span>多颗粒度话题自动聚类与事实/观点研判</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-400"></div>
+                  <span>精细化情感极性分布与关键意见领袖画像</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Workflow Section -->
+    <section id="workflow-section" class="space-y-6 scroll-mt-6">
+      <div class="text-center space-y-1">
+        <h2 class="text-2xl font-bold text-primary tracking-tight">分析流程</h2>
+        <p class="mx-auto max-w-xl text-secondary text-sm">
+          通过简单的三步，从原始数据到专业的可视化报告。
+        </p>
+      </div>
+
+      <div class="grid gap-5 md:grid-cols-2">
+        <article v-for="step in steps" :key="step.title" class="card-surface p-6 transition-all">
+          <div class="flex items-start gap-4">
+            <div
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft/50 text-lg font-black text-brand-600 border border-brand-soft">
+              {{ step.index }}
+            </div>
+            <div class="space-y-3">
+              <div class="space-y-0.5">
+                <h3 class="text-lg font-bold text-primary">{{ step.title }}</h3>
+                <p class="text-[11px] font-medium text-brand-600/70">{{ step.subtitle }}</p>
+              </div>
+              <p class="text-sm leading-relaxed text-secondary/80">
+                {{ step.description }}
+              </p>
+              <button type="button"
+                class="inline-flex items-center gap-1 text-sm font-bold text-brand-600 transition hover:underline group"
+                @click="router.push(step.route)">
+                前往执行
+                <ArrowSmallRightIcon class="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Example Section -->
+    <section class="space-y-6">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-bold text-primary tracking-tight">分析解读示例</h2>
+        <div class="h-px flex-1 bg-soft mx-4 hidden sm:block"></div>
+        <span class="text-[10px] font-bold text-muted uppercase tracking-widest">Insight Examples</span>
+      </div>
+
+      <div class="card-surface p-6 space-y-8">
+        <!-- AI Summary Mockup -->
+        <div class="rounded-xl bg-brand-soft/20 p-5 border border-brand-soft/30">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="h-7 w-7 rounded-full bg-brand-500 flex items-center justify-center text-white">
+              <SparklesIcon class="h-4 w-4" />
+            </div>
+            <h3 class="text-base font-bold text-primary">AI 摘要深度解读</h3>
+          </div>
+
+          <div class="grid gap-6 lg:grid-cols-3">
+            <div class="lg:col-span-2 space-y-3">
+              <p class="text-sm leading-relaxed text-secondary font-medium">
+                “2025年9月23日舆情声量达峰值369，社交平台由自媒体主导。舆论聚合于戒烟建议与健康关联，关键词 nicotine、肺癌反映出公众侧重科学风险。整体情绪稳定，但负面风险点在于医疗成本争议。”
+              </p>
+              <div class="flex flex-wrap gap-2 pt-1">
+                <span v-for="id in activeDimensionIds" :key="id"
+                  class="inline-flex items-center rounded-md bg-white px-2 py-0.5 text-[9px] font-bold text-brand-600 border border-brand-soft shadow-sm">
+                  # {{ id }}
+                </span>
+              </div>
+            </div>
+            <div class="bg-white/50 rounded-lg p-3.5 border border-white/50 space-y-2.5">
+              <h4 class="text-[10px] font-black text-muted uppercase tracking-wider">核心发现</h4>
+              <ul class="space-y-1.5 text-xs text-secondary">
+                <li class="flex items-center gap-2">
+                  <CheckBadgeIcon class="h-3.5 w-3.5 text-green-500" />
+                  <span>峰值预警：9月23日</span>
+                </li>
+                <li class="flex items-center gap-2">
+                  <CheckBadgeIcon class="h-3.5 w-3.5 text-green-500" />
+                  <span>主导渠道：微信+自媒体</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Capability Grid -->
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div v-for="example in examples" :key="example.title"
+            class="flex flex-col rounded-xl border border-soft bg-surface-muted/30 p-4 transition-all">
+            <div class="mb-3 flex items-center justify-between">
+              <div class="flex h-9 w-9 items-center justify-center rounded-lg shadow-sm" :class="example.colorClass">
+                <component :is="example.icon" class="h-4 w-4" />
+              </div>
+              <span class="text-[9px] font-black text-muted opacity-30 uppercase">{{ example.id }}</span>
+            </div>
+            <h4 class="mb-1 text-sm font-bold text-primary">{{ example.title }}</h4>
+            <p class="text-xs leading-relaxed text-secondary/80">
+              {{ example.description }}
             </p>
           </div>
-          
-          <div>
-            <p class="mb-2 text-sm font-semibold text-white">分析维度</p>
-            <div class="flex flex-wrap gap-2">
-              <span class="inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">地域分析</span>
-              <span class="inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">关键词分析</span>
-              <span class="inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">趋势洞察</span>
-              <span class="inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">发布者分析</span>
-              <span class="inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">情感分析</span>
-              <span class="inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">声量概览</span>
-              <span class="inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">话题分类</span>
-            </div>
-          </div>
         </div>
-        
-        <div class="flex justify-end">
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-brand-700 transition hover:bg-gray-50 focus-ring-accent"
-            @click="goToRun"
-          >
-            <span class="flex h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-brand-700">
-              <PlayCircleIcon class="h-4 w-4" />
-            </span>
-            <span class="text-sm font-semibold">立即运行分析</span>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <section class="space-y-6">
-      <header class="space-y-2">
-        <h2 class="text-2xl font-semibold text-primary">基础分析流程</h2>
-        <p class="text-sm text-secondary">请先针对各个专题运行各项基础分析功能之后，在查看分析界面查看基础统计</p>
-      </header>
-
-      <div class="grid gap-6 md:grid-cols-2">
-        <article
-          v-for="step in steps"
-          :key="step.title"
-          class="card-surface flex flex-col gap-4 p-6"
-        >
-          <div class="flex items-center gap-3">
-            <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-soft text-lg font-semibold text-brand-600">
-              {{ step.index }}
-            </span>
-            <div>
-              <h3 class="text-lg font-semibold text-primary">{{ step.title }}</h3>
-              <p class="text-sm text-secondary">{{ step.subtitle }}</p>
-            </div>
-          </div>
-          <p class="flex-1 text-sm leading-relaxed text-secondary">
-            {{ step.description }}
-          </p>
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 self-start rounded-full border border-brand-soft px-4 py-1.5 text-sm font-semibold text-brand-600 transition hover:bg-brand-soft focus-ring-accent"
-            @click="router.push(step.route)"
-          >
-            <ArrowRightIcon class="h-4 w-4" />
-            前往
-          </button>
-        </article>
-      </div>
-    </section>
-
-    <section class="space-y-6">
-      <header class="space-y-2">
-        <h2 class="text-2xl font-semibold text-primary">分析解读示例</h2>
-      </header>
-
-      <div class="card-surface space-y-6 p-5 sm:p-6">
-        <section class="space-y-4">
-        <h3 class="text-lg font-semibold text-primary">AI 摘要解读</h3>
-        
-        <div>
-          <p class="mb-2 text-sm font-semibold text-primary">主要发现</p>
-          <p class="text-sm leading-relaxed text-secondary">
-            2025年9月23日舆情声量达峰值369，社交平台与自媒体主导传播，信息传递类内容占主流。舆论聚焦戒烟与健康关联，nicotine、肺癌等关键词反映公众对吸烟风险的科学关切，情绪总体平稳但负面略显突出。
-          </p>
-        </div>
-        
-        <div>
-          <p class="mb-2 text-sm text-secondary">依据：</p>
-          <div class="flex flex-wrap gap-2">
-            <span class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">情感分析</span>
-            <span class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">话题分类</span>
-            <span class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">地域分析</span>
-            <span class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">关键词分析</span>
-            <span class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">发布者分析</span>
-            <span class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">趋势洞察</span>
-            <span class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">声量概览</span>
-          </div>
-        </div>
-      </section>
-
-      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <article class="flex h-full flex-col rounded-2xl border border-soft bg-base-soft p-4">
-          <div class="mb-3 flex items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-50 text-purple-600">
-              <HeartIcon class="h-4 w-4" />
-            </div>
-            <h4 class="text-sm font-semibold text-primary">情感分析</h4>
-          </div>
-          <p class="flex-1 text-sm leading-relaxed text-secondary">
-            舆情整体以中性为主，负面略高于正面，情绪倾向总体平稳。
-          </p>
-        </article>
-
-        <article class="flex h-full flex-col rounded-2xl border border-soft bg-base-soft p-4">
-          <div class="mb-3 flex items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-              <TagIcon class="h-4 w-4" />
-            </div>
-            <h4 class="text-sm font-semibold text-primary">话题分类</h4>
-          </div>
-          <p class="flex-1 text-sm leading-relaxed text-secondary">
-            报道事实类内容显著多于评论观点类，舆论场以信息传递为主导。
-          </p>
-        </article>
-
-        <article class="flex h-full flex-col rounded-2xl border border-soft bg-base-soft p-4">
-          <div class="mb-3 flex items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-green-50 text-green-600">
-              <MapPinIcon class="h-4 w-4" />
-            </div>
-            <h4 class="text-sm font-semibold text-primary">地域分析</h4>
-          </div>
-          <p class="flex-1 text-sm leading-relaxed text-secondary">
-            地域分布显示舆情主要集中在广东、河北、浙江等地，华北与东南沿海省份占比较高，另有118条来源未知，需进一步核查数据准确性。
-          </p>
-        </article>
-
-        <article class="flex h-full flex-col rounded-2xl border border-soft bg-base-soft p-4">
-          <div class="mb-3 flex items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-50 text-orange-600">
-              <MagnifyingGlassIcon class="h-4 w-4" />
-            </div>
-            <h4 class="text-sm font-semibold text-primary">关键词分析</h4>
-          </div>
-          <p class="flex-1 text-sm leading-relaxed text-secondary">
-            戒烟与健康关联最密切，控烟、烟草危害及吸烟风险成舆论焦点，nicotine、肺癌等关键词凸显公众对吸烟健康后果的科学关注。
-          </p>
-        </article>
-
-        <article class="flex h-full flex-col rounded-2xl border border-soft bg-base-soft p-4">
-          <div class="mb-3 flex items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
-              <UserGroupIcon class="h-4 w-4" />
-            </div>
-            <h4 class="text-sm font-semibold text-primary">发布者分析</h4>
-          </div>
-          <p class="flex-1 text-sm leading-relaxed text-secondary">
-            青少年控烟与健康、梦中情郎各发布5次居首，悦子鸭鸭、仁心药士等各3次紧随，头部发布者集中度较高。
-          </p>
-        </article>
-
-        <article class="flex h-full flex-col rounded-2xl border border-soft bg-base-soft p-4">
-          <div class="mb-3 flex items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-pink-50 text-pink-600">
-              <ChartBarIcon class="h-4 w-4" />
-            </div>
-            <h4 class="text-sm font-semibold text-primary">趋势洞察</h4>
-          </div>
-          <p class="flex-1 text-sm leading-relaxed text-secondary">
-            2025年9月23日舆情总量达369，为当前周期内峰值，显示该日事件引发显著舆论关注。
-          </p>
-        </article>
-
-        <article class="flex h-full flex-col rounded-2xl border border-soft bg-base-soft p-4">
-          <div class="mb-3 flex items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-50 text-cyan-600">
-              <SpeakerWaveIcon class="h-4 w-4" />
-            </div>
-            <h4 class="text-sm font-semibold text-primary">声量概览</h4>
-          </div>
-          <p class="flex-1 text-sm leading-relaxed text-secondary">
-            自媒体号和微信平台声量领先，微博与视频次之，论坛关注度最低，整体传播以社交和自媒体渠道为主导。
-          </p>
-        </article>
-      </div>
       </div>
     </section>
   </div>
@@ -211,16 +179,16 @@
 <script setup>
 import { useRouter } from 'vue-router'
 import {
-  ArrowRightIcon,
-  PlayCircleIcon,
+  ArrowSmallRightIcon,
+  PlayIcon,
+  InformationCircleIcon,
+  SparklesIcon,
+  CheckBadgeIcon,
   HeartIcon,
   TagIcon,
   MapPinIcon,
-  MagnifyingGlassIcon,
-  UserGroupIcon,
-  ChartBarIcon,
-  SpeakerWaveIcon
-} from '@heroicons/vue/24/outline'
+  ChartBarIcon
+} from '@heroicons/vue/24/solid'
 
 const router = useRouter()
 
@@ -228,20 +196,59 @@ const goToRun = () => {
   router.push({ name: 'project-data-analysis-run' })
 }
 
+const scrollToProcess = () => {
+  const el = document.getElementById('workflow-section')
+  if (el) el.scrollIntoView({ behavior: 'smooth' })
+}
+
+const activeDimensions = ['地域分析', '关键词', '趋势洞察', '发布者', '情感分析', '声量概览', '话题分类']
+const activeDimensionIds = ['Attitude', 'Classification', 'Geography', 'Keywords', 'Publishers', 'Trends', 'Volume']
+
 const steps = [
   {
     index: 1,
     title: '运行分析',
-    subtitle: '拉取数据并执行',
-    description: '选择远程数据库的专题并指定时间区间，运行基础分析，结果将保存到后台以供查看。',
+    subtitle: '数据生产节点',
+    description: '选择专题数据源，配置时间粒度，触发流水线。由后台完成数据清洗到特征抽取的全过程。',
     route: { name: 'project-data-analysis-run' }
   },
   {
     index: 2,
-    title: '查看分析',
-    subtitle: '刷新与浏览结果',
-    description: '从历史记录中选择分析任务，查看可视化面板，并快速定位到具体模块。',
+    title: '统计面板',
+    subtitle: '可视化洞察节点',
+    description: '浏览多维度的图表报告，分析异常波动。支持刷新同步最新数据，并生成结构化的摘要解读。',
     route: { name: 'project-data-analysis-view' }
+  }
+]
+
+const examples = [
+  {
+    id: 'AT',
+    title: '情感分析',
+    icon: HeartIcon,
+    colorClass: 'bg-rose-50 text-rose-600',
+    description: '语义识别提取公众情绪极性，识别负面风险点。'
+  },
+  {
+    id: 'CL',
+    title: '话题分类',
+    icon: TagIcon,
+    colorClass: 'bg-amber-50 text-amber-600',
+    description: '聚类讨论议题，区分事实陈述与评论。'
+  },
+  {
+    id: 'GE',
+    title: '地域分析',
+    icon: MapPinIcon,
+    colorClass: 'bg-emerald-50 text-emerald-600',
+    description: '识别高发省份与城市，掌握空间传播规律。'
+  },
+  {
+    id: 'TR',
+    title: '趋势洞察',
+    icon: ChartBarIcon,
+    colorClass: 'bg-blue-50 text-blue-600',
+    description: '追踪周期声量涨落，定位突发事件时间轴。'
   }
 ]
 </script>
