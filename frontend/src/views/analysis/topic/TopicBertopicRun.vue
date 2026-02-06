@@ -1,225 +1,196 @@
 <template>
-  <div class="space-y-8">
-    <header class="rounded-2xl border border-soft bg-surface p-6 shadow-sm">
-      <div class="flex flex-col gap-2">
-        <p class="text-xs font-medium uppercase tracking-wide text-secondary">主题分析 · BERTopic</p>
-        <h1 class="text-2xl font-semibold text-primary">运行 BERTopic + Qwen 主题分析</h1>
-        <p class="text-sm text-secondary">
-          选择专题与时间区间，触发后端的 BERTopic 分析流程，并生成 1~5 号 JSON 结果文件。
-        </p>
-      </div>
-    </header>
-
-    <section class="rounded-2xl border border-soft bg-surface p-6 shadow-sm">
-      <h2 class="text-lg font-semibold text-primary">分析参数</h2>
-      <form class="mt-6 space-y-6" @submit.prevent="handleRun">
-        <div class="grid gap-4 md:grid-cols-2">
-          <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-semibold text-muted">专题 Topic *</span>
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
-                :disabled="topicsState.loading"
-                @click="loadTopics(true)"
-              >
-                <ArrowPathIcon
-                  class="h-3 w-3"
-                  :class="topicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
-                />
-                <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
-              </button>
-            </div>
-            <select
-              v-model="form.topic"
-              class="input"
-              :disabled="topicsState.loading || topicOptions.length === 0"
-              @change="handleTopicChange"
-            >
-              <option value="" disabled>请选择远程专题</option>
-              <option v-for="option in topicOptions" :key="option.bucket" :value="option.bucket">
-                {{ option.display_name || option.name }}
-              </option>
-            </select>
-            <p class="text-xs text-muted">
-              <span v-if="topicsState.loading">正在读取专题列表…</span>
-              <span v-else-if="topicsState.error" class="text-danger">{{ topicsState.error }}</span>
-              <span v-else>修改专题后会自动检查可用数据范围。</span>
-            </p>
-          </label>
-          <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            <span class="text-xs font-semibold text-muted">开始日期 Start *</span>
-            <input
-              v-model.trim="form.startDate"
-              type="date"
-              class="input"
-              :disabled="availableRange.loading"
-            />
-          </label>
-          <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            <span class="text-xs font-semibold text-muted">结束日期 End</span>
-            <input
-              v-model.trim="form.endDate"
-              type="date"
-              class="input"
-              :disabled="availableRange.loading"
-              :min="form.startDate"
-            />
-          </label>
-          <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            fetch 目录（可选）
-            <input
-              v-model.trim="form.fetchDir"
-              type="text"
-              placeholder="F:/opinion-system/backend/data/projects/<topic>/fetch/<range>"
-              class="input"
-            />
-          </label>
-          <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            自定义 userdict（可选）
-            <input
-              v-model.trim="form.userdict"
-              type="text"
-              placeholder="F:/opinion-system/backend/configs/userdict.txt"
-              class="input"
-            />
-          </label>
-          <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            自定义 stopwords（可选）
-            <input
-              v-model.trim="form.stopwords"
-              type="text"
-              placeholder="F:/opinion-system/backend/configs/stopwords.txt"
-              class="input"
-            />
-          </label>
+  <div class="mx-auto max-w-5xl pt-0 pb-12 space-y-6">
+    <form class="space-y-6" @submit.prevent="handleRun">
+      <!-- Analysis Parameters -->
+      <section class="card-surface space-y-4 p-6">
+        <div class="mb-5 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-primary">分析参数</h2>
+          <button type="button"
+            class="flex items-center gap-1 text-xs text-brand-600 transition-colors hover:text-brand-700 disabled:opacity-50"
+            :disabled="topicsState.loading" @click="loadTopics(true)">
+            <ArrowPathIcon class="h-3 w-3" :class="{ 'animate-spin': topicsState.loading }" />
+            {{ topicsState.loading ? '正在同步专题...' : '刷新同步' }}
+          </button>
         </div>
 
-        <!-- 数据可用性提示 -->
-        <div v-if="availableRange.start || availableRange.error" class="rounded-xl border p-3 text-sm"
-             :class="availableRange.error ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'">
+        <div class="grid gap-6 md:grid-cols-2">
+          <!-- Topic Selection -->
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-muted tracking-wide uppercase">专题 Topic *</label>
+            <div class="relative">
+              <select v-model="form.topic" class="input w-full appearance-none pr-8"
+                :disabled="topicsState.loading || topicOptions.length === 0" required @change="handleTopicChange">
+                <option value="" disabled>请选择远程专题</option>
+                <option v-for="option in topicOptions" :key="option.bucket" :value="option.bucket">
+                  {{ option.display_name || option.name }}
+                </option>
+              </select>
+              <div class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted">
+                <ChevronUpDownIcon class="h-4 w-4" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Date Range -->
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <label class="text-xs font-semibold text-muted tracking-wide uppercase">开始日期 Start *</label>
+              <input v-model.trim="form.startDate" type="date" class="input w-full" required
+                :disabled="availableRange.loading" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-xs font-semibold text-muted tracking-wide uppercase">结束日期 End</label>
+              <input v-model.trim="form.endDate" type="date" class="input w-full" :disabled="availableRange.loading"
+                :min="form.startDate" />
+            </div>
+          </div>
+
+          <!-- Optional Fields -->
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-muted tracking-wide uppercase">fetch 目录（可选）</label>
+            <input v-model.trim="form.fetchDir" type="text" placeholder="默认从 fetch/<range> 读取" class="input w-full" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-muted tracking-wide uppercase">自定义 userdict（可选）</label>
+            <input v-model.trim="form.userdict" type="text" placeholder="configs/userdict.txt" class="input w-full" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-muted tracking-wide uppercase">自定义 stopwords（可选）</label>
+            <input v-model.trim="form.stopwords" type="text" placeholder="configs/stopwords.txt" class="input w-full" />
+          </div>
+        </div>
+
+        <!-- Data Availability Hint -->
+        <div v-if="availableRange.start || availableRange.error" class="rounded-xl border p-4 text-sm mt-4"
+          :class="availableRange.error ? 'border-red-200 bg-red-50 text-red-700' : 'border-brand-soft bg-brand-soft/10 text-brand-700'">
           <div class="flex items-start gap-2">
-            <span class="text-base">{{ availableRange.error ? '⚠️' : 'ℹ️' }}</span>
+            <InformationCircleIcon v-if="!availableRange.error" class="h-5 w-5 shrink-0" />
+            <ExclamationTriangleIcon v-else class="h-5 w-5 shrink-0" />
             <div>
-              <p class="font-medium" :class="availableRange.error ? 'text-red-700' : 'text-blue-700'">
-                数据可用性
-              </p>
-              <p v-if="availableRange.error" class="text-red-600 text-xs mt-1">{{ availableRange.error }}</p>
-              <p v-else class="text-blue-600 text-xs mt-1">
-                数据范围：{{ availableRange.start }} ~ {{ availableRange.end }}
+              <p class="font-bold">数据可用性</p>
+              <p class="text-xs mt-0.5 opacity-80">
+                {{ availableRange.error || `有效范围：${availableRange.start} ~ ${availableRange.end}` }}
               </p>
             </div>
           </div>
         </div>
 
-        <div class="flex flex-wrap gap-3">
-          <button
-            type="submit"
-            class="btn btn-primary"
-            :disabled="!canSubmit"
-          >
-            {{ runState.running ? '正在运行…' : '运行 BERTopic 分析' }}
+        <div class="flex flex-wrap gap-3 pt-2 text-sm">
+          <button type="submit" class="btn-primary min-w-[160px] py-2.5" :disabled="!canSubmit">
+            <span v-if="runState.running" class="flex items-center gap-2">
+              <ArrowPathIcon class="h-4 w-4 animate-spin" />
+              正在执行
+            </span>
+            <span v-else>运行主题分析</span>
           </button>
-          <button
-            type="button"
-            class="btn btn-soft"
-            @click="resetOptionalFields"
-            :disabled="runState.running"
-          >
+          <button type="button" class="btn-ghost px-4" @click="resetOptionalFields" :disabled="runState.running">
             清空可选参数
           </button>
-          <button
-            type="button"
-            class="btn btn-ghost"
-            @click="resetAll"
-            :disabled="runState.running"
-          >
-            重置全部
+          <button type="button" class="btn-ghost px-4 text-muted" @click="resetAll" :disabled="runState.running">
+            重置任务
           </button>
         </div>
-      </form>
-    </section>
+      </section>
 
-    <!-- 执行日志 -->
-    <AnalysisLogList
-      v-if="logs.length > 0"
-      :logs="logs"
-      empty-label="暂无执行记录，运行分析时会自动触发数据准备与进度。"
-    />
+      <!-- Logs -->
+      <section v-if="logs.length > 0" class="card-surface p-6">
+        <h3 class="text-sm font-bold text-muted uppercase tracking-widest mb-4">执行流水线</h3>
+        <AnalysisLogList :logs="logs" class="max-h-[300px] overflow-y-auto" empty-label="暂无执行记录" />
+      </section>
 
-    <section v-if="logs.some(log => log.status === 'error')" class="rounded-2xl border border-red-200 bg-red-50/70 p-5 text-red-700">
-      <p class="font-medium">运行失败</p>
-      <p class="text-sm mt-1">{{ logs.find(log => log.status === 'error')?.message || '发生错误' }}</p>
-    </section>
-
-    <section v-if="lastResult" class="result-section">
-      <div class="result-header">
-        <div class="result-header__icon">✅</div>
-        <div>
-          <h2 class="result-header__title">运行结果</h2>
-          <p class="result-header__subtitle">分析任务已成功完成</p>
+      <!-- Failure Warning -->
+      <section v-if="logs.some(log => log.status === 'error')"
+        class="rounded-2xl border border-danger/20 bg-danger/5 p-5 text-danger">
+        <div class="flex items-center gap-3">
+          <ExclamationCircleIcon class="h-6 w-6" />
+          <div>
+            <p class="font-bold">分析运行中止</p>
+            <p class="text-sm mt-0.5">{{logs.find(log => log.status === 'error')?.message || '发生未知环境或数据错误'}}</p>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div class="result-grid">
-        <div class="result-card result-card--success">
-          <div class="result-card__icon">📊</div>
-          <div class="result-card__content">
-            <p class="result-card__label">运行状态</p>
-            <p class="result-card__value">{{ lastResult.status === 'ok' ? '完成' : lastResult.status }}</p>
-            <p class="result-card__meta">operation: {{ lastResult.operation }}</p>
+      <!-- Results Container -->
+      <section v-if="lastResult" class="card-surface p-6 space-y-6">
+        <div class="flex items-center gap-4 border-b border-soft pb-4">
+          <div
+            class="flex h-12 w-12 items-center justify-center rounded-2xl bg-green-50 text-green-600 border border-green-100">
+            <CheckBadgeIcon class="h-8 w-8" />
+          </div>
+          <div>
+            <h2 class="text-xl font-bold text-primary">分析成功</h2>
+            <p class="text-sm text-secondary">主题建模流水线已顺利完成</p>
           </div>
         </div>
 
-        <div class="result-card result-card--info">
-          <div class="result-card__icon">📅</div>
-          <div class="result-card__content">
-            <p class="result-card__label">时间区间</p>
-            <p class="result-card__value">
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="rounded-xl border border-soft bg-surface-muted/30 p-4">
+            <p class="text-[10px] font-black text-muted uppercase tracking-wider mb-2">RUN STATUS</p>
+            <p class="text-lg font-bold text-primary">{{ lastResult.status === 'ok' ? '已就绪' : lastResult.status }}</p>
+            <p class="text-xs text-secondary mt-1">Operation: {{ lastResult.operation }}</p>
+          </div>
+
+          <div class="rounded-xl border border-soft bg-surface-muted/30 p-4">
+            <p class="text-[10px] font-black text-muted uppercase tracking-wider mb-2">DATE RANGE</p>
+            <p class="text-lg font-bold text-primary">
               {{ lastResult.data?.start_date || lastResult.data?.start || '-' }}
-              <span v-if="lastResult.data?.end_date || lastResult.data?.end" class="result-card__arrow">
-                → {{ lastResult.data?.end_date || lastResult.data?.end }}
-              </span>
+              <span class="text-muted font-normal mx-2">→</span>
+              {{ lastResult.data?.end_date || lastResult.data?.end || '-' }}
             </p>
-            <p class="result-card__meta">专题：{{ lastResult.data?.topic || '-' }}</p>
+            <p class="text-xs text-secondary mt-1">Topic: {{ lastResult.data?.topic || '-' }}</p>
           </div>
         </div>
-      </div>
 
-      <div class="result-info-box">
-        <div class="result-info-box__header">
-          <span class="result-info-box__icon">📁</span>
-          <span class="result-info-box__title">生成的文件位置</span>
-        </div>
-        <div class="result-info-box__content">
-          <div class="result-info-box__path">
-            <code class="path-code">data/topic/{{ form.topic || lastResult.data?.topic }}/&lt;日期范围&gt;/</code>
+        <div class="rounded-2xl border border-brand-soft/30 bg-brand-soft/10 p-5">
+          <div class="flex items-center gap-3 mb-4">
+            <FolderOpenIcon class="h-5 w-5 text-brand-600" />
+            <h3 class="text-base font-bold text-primary">生成的文件资产</h3>
           </div>
-          <p class="result-info-box__hint">
-            💡 可在"查看结果"页面或数据目录中查看这些文件，完成可视化或二次分析
+          <div class="rounded-xl bg-white/60 border border-white p-3 font-mono text-xs text-brand-700 break-all">
+            data/topic/{{ form.topic || lastResult.data?.topic }}/&lt;range&gt;/results.json
+          </div>
+          <p class="mt-4 text-xs text-secondary flex items-center gap-2">
+            <SparklesIcon class="h-3.5 w-3.5 text-amber-500" />
+            <span>你可以立即前往结果页查看这些生成的主题维度分析。</span>
           </p>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section v-if="lastPayload" class="request-section">
-      <div class="request-header" @click="showRequestPayload = !showRequestPayload">
-        <div class="request-header__left">
-          <span class="request-header__icon">📤</span>
-          <h2 class="request-header__title">最近一次请求体</h2>
+      <!-- Debug Payload -->
+      <section v-if="lastPayload"
+        class="rounded-2xl border border-soft border-dashed p-6 bg-surface-muted/10 transition-colors">
+        <div class="flex items-center justify-between cursor-pointer group"
+          @click="showRequestPayload = !showRequestPayload">
+          <div class="flex items-center gap-3">
+            <CommandLineIcon class="h-5 w-5 text-muted group-hover:text-primary" />
+            <h2 class="text-sm font-bold text-secondary group-hover:text-primary tracking-tight">最近一次任务请求明细</h2>
+          </div>
+          <ChevronDownIcon class="h-5 w-5 text-muted transition-transform duration-300"
+            :class="{ 'rotate-180': showRequestPayload }" />
         </div>
-        <span class="request-header__toggle">{{ showRequestPayload ? '▼' : '▶' }}</span>
-      </div>
-      <div v-if="showRequestPayload" class="request-content">
-        <pre class="request-code">{{ formattedPayload }}</pre>
-      </div>
-    </section>
+        <div v-if="showRequestPayload" class="mt-5">
+          <pre
+            class="rounded-xl bg-gray-950 p-5 text-xs text-gray-300 overflow-x-auto leading-relaxed">{{ formattedPayload }}</pre>
+        </div>
+      </section>
+    </form>
   </div>
 </template>
 
 <script setup>
-import { computed, watch, onMounted } from 'vue'
-import { ArrowPathIcon } from '@heroicons/vue/24/outline'
+import { computed, watch, onMounted, ref } from 'vue'
+import {
+  ArrowPathIcon,
+  ChevronUpDownIcon,
+  ChevronDownIcon,
+  CheckBadgeIcon,
+  InformationCircleIcon,
+  ExclamationTriangleIcon,
+  ExclamationCircleIcon,
+  FolderOpenIcon,
+  SparklesIcon,
+  CommandLineIcon
+} from '@heroicons/vue/24/solid'
 import { useTopicBertopicAnalysis } from '@/composables/useTopicBertopicAnalysis'
 import { useActiveProject } from '@/composables/useActiveProject'
 import AnalysisLogList from '@/components/analysis/AnalysisLogList.vue'
@@ -236,23 +207,22 @@ const {
   loadTopics,
   resetState,
   runBertopicAnalysis,
-  resetForm,
   resetOptionalFields
 } = useTopicBertopicAnalysis()
 
 const { activeProjectName } = useActiveProject()
+const showRequestPayload = ref(false)
 
 onMounted(() => {
-  // 只加载有数据的专题
   loadTopics(true)
 })
 
 watch(
   activeProjectName,
   (value) => {
-    form.project = value || ''
-    if (value && !form.topic) {
-      // 查找匹配的专题
+    if (!value) return
+    form.project = value
+    if (!form.topic) {
       const matched = topicOptions.value.find(t =>
         t.name === value || t.display_name === value || t.bucket === value
       )
@@ -278,8 +248,6 @@ const formattedPayload = computed(() => {
 })
 
 const resetAll = () => {
-  const topic = form.topic
-  form.topic = topic
   form.startDate = ''
   form.endDate = ''
   resetOptionalFields()
@@ -297,342 +265,15 @@ const handleRun = async () => {
       stopwords: form.stopwords
     })
   } catch {
-    // 错误信息已通过日志显示
+    // 错误处理已在日志组件体现
   }
 }
 
 const handleTopicChange = () => {
-  // 清空可选字段
   resetOptionalFields()
 }
 </script>
 
 <style scoped>
-.input {
-  width: 100%;
-  border-radius: 0.75rem;
-  border: 1px solid var(--color-border-soft);
-  background-color: var(--color-surface);
-  padding: 0.5rem 0.85rem;
-  font-size: 0.95rem;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.input:focus {
-  border-color: var(--color-brand-500-hex);
-  outline: none;
-  box-shadow: 0 0 0 2px rgb(var(--color-brand-100) / 1);
-}
-.input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.relative .input {
-  padding-right: 2.5rem;
-}
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.75rem;
-  padding: 0.5rem 1.25rem;
-  font-size: 0.95rem;
-  font-weight: 500;
-  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
-}
-.btn-primary {
-  background-color: var(--color-brand-600-hex);
-  color: #fff;
-}
-.btn-primary:hover:not(:disabled) {
-  background-color: var(--color-brand-500-hex);
-}
-.btn-primary:disabled {
-  cursor: not-allowed;
-  background-color: rgb(var(--color-brand-200) / 1);
-}
-.btn-soft {
-  border: 1px solid var(--color-border-soft);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
-}
-.btn-soft:hover:not(:disabled) {
-  background-color: rgb(var(--color-brand-100) / 0.4);
-}
-.btn-soft:disabled {
-  cursor: not-allowed;
-  color: var(--color-text-secondary);
-}
-.btn-ghost {
-  color: var(--color-text-secondary);
-  border: 1px solid transparent;
-}
-.btn-ghost:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background-color: rgb(var(--color-brand-100) / 0.4);
-}
-.btn-ghost:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-/* 运行结果部分样式 */
-.result-section {
-  border-radius: 1.5rem;
-  border: 1px solid var(--color-border-soft);
-  background: var(--color-surface);
-  padding: 1.5rem;
-  box-shadow: 0 10px 25px rgba(22, 30, 52, 0.05);
-}
-
-.result-header {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
-  border-bottom: 2px solid var(--color-border-soft);
-}
-
-.result-header__icon {
-  font-size: 2rem;
-  line-height: 1;
-}
-
-.result-header__title {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
-.result-header__subtitle {
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-  margin: 0.25rem 0 0 0;
-}
-
-.result-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.result-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-  padding: 1.25rem;
-  border-radius: 1rem;
-  border: 1px solid var(--color-border-soft);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.7) 100%);
-  transition: all 0.3s ease;
-}
-
-.result-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(67, 97, 238, 0.15);
-}
-
-.result-card--success {
-  border-left: 4px solid #10b981;
-}
-
-.result-card--info {
-  border-left: 4px solid #4361ee;
-}
-
-.result-card__icon {
-  font-size: 1.75rem;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.result-card__content {
-  flex: 1;
-  min-width: 0;
-}
-
-.result-card__label {
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-secondary);
-  margin: 0 0 0.5rem 0;
-}
-
-.result-card__value {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0 0 0.25rem 0;
-}
-
-.result-card__arrow {
-  color: var(--color-text-secondary);
-  font-weight: 600;
-  margin-left: 0.5rem;
-}
-
-.result-card__meta {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-  margin: 0;
-  word-break: break-all;
-}
-
-.result-info-box {
-  border-radius: 1rem;
-  border: 1px solid var(--color-border-soft);
-  background: linear-gradient(135deg, rgba(67, 97, 238, 0.05) 0%, rgba(67, 97, 238, 0.02) 100%);
-  overflow: hidden;
-}
-
-.result-info-box__header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 1rem 1.25rem;
-  background: rgba(67, 97, 238, 0.08);
-  border-bottom: 1px solid var(--color-border-soft);
-}
-
-.result-info-box__icon {
-  font-size: 1.25rem;
-}
-
-.result-info-box__title {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
-.result-info-box__content {
-  padding: 1.25rem;
-}
-
-.result-info-box__path {
-  margin-bottom: 1rem;
-}
-
-.path-code {
-  display: inline-block;
-  padding: 0.5rem 0.75rem;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 0.5rem;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 0.875rem;
-  color: #4361ee;
-  font-weight: 500;
-  border: 1px solid rgba(67, 97, 238, 0.2);
-}
-
-.result-info-box__hint {
-  font-size: 0.8125rem;
-  color: var(--color-text-secondary);
-  margin: 0;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--color-border-soft);
-}
-
-/* 请求体部分样式 */
-.request-section {
-  border-radius: 1.5rem;
-  border: 1px dashed var(--color-border-soft);
-  background: var(--color-surface-muted);
-  overflow: hidden;
-  transition: all 0.3s ease;
-}
-
-.request-section:hover {
-  border-color: #4361ee;
-  background: rgba(67, 97, 238, 0.02);
-}
-
-.request-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1.25rem 1.5rem;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.2s ease;
-}
-
-.request-header:hover {
-  background: rgba(67, 97, 238, 0.05);
-}
-
-.request-header__left {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.request-header__icon {
-  font-size: 1.25rem;
-}
-
-.request-header__title {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
-.request-header__toggle {
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-  transition: transform 0.2s ease;
-}
-
-.request-content {
-  padding: 0 1.5rem 1.5rem 1.5rem;
-  animation: slideDown 0.3s ease;
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.request-code {
-  margin: 0;
-  padding: 1.25rem;
-  background: rgba(0, 0, 0, 0.85);
-  border-radius: 0.75rem;
-  overflow-x: auto;
-  font-size: 0.8125rem;
-  line-height: 1.6;
-  color: #e2e8f0;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-.request-code::-webkit-scrollbar {
-  height: 8px;
-}
-
-.request-code::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
-}
-
-.request-code::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-}
-
-.request-code::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
-}
+/* Removed old custom styles as they are replaced by global utility classes */
 </style>

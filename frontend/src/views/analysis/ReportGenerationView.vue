@@ -10,11 +10,13 @@
         <span class="text-secondary">九三阅兵舆情报告</span>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+        <span
+          class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
           <ClockIcon class="h-4 w-4" />
           {{ reportMeta.rangeText }}
         </span>
-        <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+        <span
+          class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
           <BoltIcon class="h-4 w-4" />
           AI生成分析
         </span>
@@ -32,20 +34,15 @@
           <p class="text-sm text-slate-500">{{ reportMeta.subtitle }}</p>
         </div>
         <div class="flex flex-wrap gap-3">
-          <button
-            type="button"
+          <button type="button"
             class="inline-flex items-center gap-2 rounded-full border border-soft bg-white px-4 py-2 text-sm font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-700 focus-ring-accent"
-            :disabled="loading"
-            @click="handleRefresh"
-          >
+            :disabled="loading" @click="handleRefresh">
             <ArrowPathIcon class="h-4 w-4" :class="loading ? 'animate-spin text-brand-600' : ''" />
             <span>{{ loading ? '刷新中…' : '刷新数据' }}</span>
           </button>
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-brand/90 focus-ring-accent"
-            @click="handleRegenerate"
-          >
+          <button type="button"
+            class="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brand/90 focus-ring-accent"
+            @click="handleRegenerate">
             <SparklesIcon class="h-4 w-4" />
             <span>重新生成</span>
           </button>
@@ -78,7 +75,7 @@
         <span class="text-xs text-muted">全渠道统计摘要</span>
       </header>
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article class="flex flex-col gap-3 rounded-2xl border border-soft bg-surface p-5 shadow-sm">
+        <article class="flex flex-col gap-3 rounded-2xl border border-soft bg-surface p-5">
           <div class="flex items-start justify-between gap-2">
             <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">总声量</p>
             <span class="rounded-full bg-brand-soft px-2 py-1 text-xs font-semibold text-brand-700">全渠道</span>
@@ -87,7 +84,7 @@
           <p class="text-sm text-secondary">覆盖全渠道有效数据</p>
         </article>
 
-        <article class="flex flex-col gap-3 rounded-2xl border border-soft bg-surface p-5 shadow-sm">
+        <article class="flex flex-col gap-3 rounded-2xl border border-soft bg-surface p-5">
           <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">峰值</p>
           <div class="flex items-center gap-6">
             <div class="rounded-2xl bg-orange-50 px-3 py-2">
@@ -102,7 +99,7 @@
           <p class="text-sm text-secondary">高潮爆发期</p>
         </article>
 
-        <article class="flex flex-col gap-3 rounded-2xl border border-soft bg-surface p-5 shadow-sm">
+        <article class="flex flex-col gap-3 rounded-2xl border border-soft bg-surface p-5">
           <div class="flex items-start justify-between gap-2">
             <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">情感</p>
             <span class="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">正向为主</span>
@@ -123,7 +120,7 @@
           </div>
         </article>
 
-        <article class="flex flex-col gap-3 rounded-2xl border border-soft bg-surface p-5 shadow-sm">
+        <article class="flex flex-col gap-3 rounded-2xl border border-soft bg-surface p-5">
           <div class="flex items-start justify-between gap-2">
             <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">内容结构</p>
             <span class="rounded-full bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">报道为主</span>
@@ -146,33 +143,17 @@
     </section>
 
     <section class="grid gap-6 xl:grid-cols-3">
-      <AnalysisChartPanel
-        title="渠道声量分布"
-        description="全渠道声量覆盖：官方媒体定调，社交媒体扩散"
-        :option="channelChartOption"
-        :has-data="hasChannelData"
-      />
-      <AnalysisChartPanel
-        title="情感态度"
-        description="正向与中性情绪占比超九成"
-        :option="sentimentChartOption"
-        :has-data="hasSentimentData"
-      />
-      <AnalysisChartPanel
-        title="内容结构"
-        description="报道事实为主，评论观点补充引导"
-        :option="contentSplitOption"
-        :has-data="hasContentSplitData"
-      />
+      <AnalysisChartPanel title="渠道声量分布" description="全渠道声量覆盖：官方媒体定调，社交媒体扩散" :option="channelChartOption"
+        :has-data="hasChannelData" />
+      <AnalysisChartPanel title="情感态度" description="正向与中性情绪占比超九成" :option="sentimentChartOption"
+        :has-data="hasSentimentData" />
+      <AnalysisChartPanel title="内容结构" description="报道事实为主，评论观点补充引导" :option="contentSplitOption"
+        :has-data="hasContentSplitData" />
     </section>
 
     <section class="grid gap-6 xl:grid-cols-[2fr,1fr]">
-      <AnalysisChartPanel
-        title="时间趋势"
-        description="预热→爆发→余热的四阶段曲线"
-        :option="trendChartOption"
-        :has-data="hasTrendData"
-      />
+      <AnalysisChartPanel title="时间趋势" description="预热→爆发→余热的四阶段曲线" :option="trendChartOption"
+        :has-data="hasTrendData" />
       <article class="card-surface space-y-4 p-5">
         <header class="flex items-center justify-between gap-3">
           <div class="flex items-center gap-2">
@@ -187,14 +168,12 @@
           <span class="text-xs text-muted">按阶段拆分</span>
         </header>
         <ul class="space-y-3 text-sm text-secondary">
-          <li
-            v-for="stage in report.stageNotes"
-            :key="stage.title"
-            class="rounded-2xl border border-soft bg-surface p-3 shadow-sm"
-          >
+          <li v-for="stage in report.stageNotes" :key="stage.title"
+            class="rounded-2xl border border-soft bg-surface p-3">
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2">
-                <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-600/10 text-brand-700">
+                <span
+                  class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-600/10 text-brand-700">
                   {{ stage.badge }}
                 </span>
                 <div>
@@ -211,18 +190,10 @@
     </section>
 
     <section class="grid gap-6 xl:grid-cols-2">
-      <AnalysisChartPanel
-        title="关键词热度"
-        description="事件主线、装备亮点与外交议题并行"
-        :option="keywordChartOption"
-        :has-data="hasKeywordData"
-      />
-      <AnalysisChartPanel
-        title="主题分布"
-        description="历史叙事与国际政治形成双核心"
-        :option="themeChartOption"
-        :has-data="hasThemeData"
-      />
+      <AnalysisChartPanel title="关键词热度" description="事件主线、装备亮点与外交议题并行" :option="keywordChartOption"
+        :has-data="hasKeywordData" />
+      <AnalysisChartPanel title="主题分布" description="历史叙事与国际政治形成双核心" :option="themeChartOption"
+        :has-data="hasThemeData" />
     </section>
 
     <section class="card-surface space-y-5 p-6">
@@ -233,10 +204,12 @@
         </div>
         <span class="text-xs text-muted">根据结构化数据生成</span>
       </header>
-      <article class="relative overflow-hidden rounded-3xl border border-brand-soft bg-gradient-to-br from-brand-50 via-white to-white p-6">
+      <article
+        class="relative overflow-hidden rounded-3xl border border-brand-soft bg-gradient-to-br from-brand-50 via-white to-white p-6">
         <div class="absolute -top-16 right-0 h-44 w-44 rounded-full bg-brand-200/40 blur-3xl"></div>
         <div class="relative space-y-3">
-          <span class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-700">
+          <span
+            class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-700">
             洞察亮点
           </span>
           <ul class="space-y-2 text-base text-secondary">
@@ -260,19 +233,12 @@
         </div>
       </article>
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <article
-          v-for="insight in report.insights"
-          :key="insight.title"
-          class="h-full rounded-2xl border border-soft bg-surface p-4 shadow-sm"
-        >
+        <article v-for="insight in report.insights" :key="insight.title"
+          class="h-full rounded-2xl border border-soft bg-surface p-4">
           <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{{ insight.title }}</p>
           <p class="mt-2 text-base font-semibold text-primary">{{ insight.headline }}</p>
           <ul class="mt-3 space-y-2 text-sm text-secondary">
-            <li
-              v-for="(point, idx) in insight.points"
-              :key="`${insight.title}-${idx}`"
-              class="flex gap-2"
-            >
+            <li v-for="(point, idx) in insight.points" :key="`${insight.title}-${idx}`" class="flex gap-2">
               <span class="mt-[3px] h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600"></span>
               <span class="leading-relaxed">{{ point }}</span>
             </li>
@@ -290,27 +256,20 @@
         </div>
       </header>
       <div class="flex flex-wrap items-center justify-end gap-3">
-        <button
-          type="button"
+        <button type="button"
           class="inline-flex items-center gap-2 rounded-full border border-soft bg-white px-4 py-2 text-sm font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-700 focus-ring-accent"
-          @click="handleSaveTemplate"
-        >
+          @click="handleSaveTemplate">
           <BookmarkIcon class="h-4 w-4" />
           <span>保存为模板</span>
         </button>
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 rounded-full border border-soft bg-white px-4 py-2 text-sm font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-700 focus-ring-accent"
-        >
+        <button type="button"
+          class="inline-flex items-center gap-2 rounded-full border border-soft bg-white px-4 py-2 text-sm font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-700 focus-ring-accent">
           <DocumentTextIcon class="h-4 w-4" />
           <span>导出详细 DOCX 报告</span>
         </button>
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-brand/90 focus-ring-accent"
-          :disabled="exporting"
-          @click="exportHtmlReport"
-        >
+        <button type="button"
+          class="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brand/90 focus-ring-accent"
+          :disabled="exporting" @click="exportHtmlReport">
           <ArrowDownTrayIcon class="h-4 w-4" />
           <span>{{ exporting ? '导出中…' : '导出 HTML 报告' }}</span>
         </button>

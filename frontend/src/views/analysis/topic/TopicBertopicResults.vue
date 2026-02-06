@@ -1,6 +1,6 @@
 <template>
   <div class="topic-dashboard space-y-8">
-    <header class="rounded-2xl border border-soft bg-surface p-6 shadow-sm">
+    <header class="rounded-2xl border border-soft bg-surface p-6">
       <div class="flex flex-col gap-2">
         <p class="text-xs font-medium uppercase tracking-wide text-secondary">主题分析 · BERTopic</p>
         <h1 class="text-2xl font-semibold text-primary">查看 BERTopic + Qwen 主题分析结果</h1>
@@ -11,24 +11,17 @@
     </header>
 
     <!-- 查询参数 -->
-    <section class="rounded-2xl border border-soft bg-surface p-6 shadow-sm">
+    <section class="rounded-2xl border border-soft bg-surface p-6">
       <h2 class="text-lg font-semibold text-primary mb-6">查询参数</h2>
 
       <!-- 历史记录选择 -->
       <div v-if="analysisHistory.length > 0" class="mb-6">
         <label class="block text-sm font-medium text-primary mb-2">
           <span class="text-xs font-semibold text-muted">历史记录</span>
-          <select
-            v-model="selectedHistoryId"
-            class="input mt-1"
-            @change="applyHistorySelection(selectedHistoryId, { shouldLoad: true })"
-          >
+          <select v-model="selectedHistoryId" class="input mt-1"
+            @change="applyHistorySelection(selectedHistoryId, { shouldLoad: true })">
             <option value="">选择历史分析记录...</option>
-            <option
-              v-for="record in analysisHistory"
-              :key="record.id"
-              :value="record.id"
-            >
+            <option v-for="record in analysisHistory" :key="record.id" :value="record.id">
               {{ formatTimestamp(record.start) }} - {{ formatTimestamp(record.end) }} ({{ record.topic }})
             </option>
           </select>
@@ -41,24 +34,16 @@
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
             <div class="flex items-center justify-between gap-2">
               <span class="text-xs font-semibold text-muted">专题 Topic *</span>
-              <button
-                type="button"
+              <button type="button"
                 class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
-                :disabled="topicsState.loading"
-                @click="loadTopics(true)"
-              >
-                <ArrowPathIcon
-                  class="h-3 w-3"
-                  :class="topicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'"
-                />
+                :disabled="topicsState.loading" @click="loadTopics(true)">
+                <ArrowPathIcon class="h-3 w-3"
+                  :class="topicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'" />
                 <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
               </button>
             </div>
-            <select
-              v-model="viewManualForm.topic"
-              class="input"
-              :disabled="topicsState.loading || topicOptions.length === 0"
-            >
+            <select v-model="viewManualForm.topic" class="input"
+              :disabled="topicsState.loading || topicOptions.length === 0">
               <option value="" disabled>请选择专题</option>
               <option v-for="option in topicOptions" :key="option.bucket" :value="option.bucket">
                 {{ option.display_name || option.name }}
@@ -68,29 +53,19 @@
 
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
             <span class="text-xs font-semibold text-muted">开始日期 Start *</span>
-            <input
-              v-model.trim="viewManualForm.start"
-              type="date"
-              class="input"
-              :disabled="loadState.loading"
-            />
+            <input v-model.trim="viewManualForm.start" type="date" class="input" :disabled="loadState.loading" />
           </label>
 
           <label class="flex flex-col gap-1 text-sm font-medium text-primary">
             <span class="text-xs font-semibold text-muted">结束日期 End</span>
-            <input
-              v-model.trim="viewManualForm.end"
-              type="date"
-              class="input"
-              :disabled="loadState.loading"
-              :min="viewManualForm.start"
-            />
+            <input v-model.trim="viewManualForm.end" type="date" class="input" :disabled="loadState.loading"
+              :min="viewManualForm.start" />
           </label>
         </div>
 
         <!-- 数据可用性提示 -->
         <div v-if="availableRange.start || availableRange.error" class="rounded-xl border p-3 text-sm"
-             :class="availableRange.error ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'">
+          :class="availableRange.error ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'">
           <div class="flex items-start gap-2">
             <span class="text-base">{{ availableRange.error ? '⚠️' : 'ℹ️' }}</span>
             <div>
@@ -106,19 +81,13 @@
         </div>
 
         <div class="flex flex-wrap gap-3">
-          <button
-            type="submit"
-            class="btn btn-primary"
-            :disabled="!viewManualForm.topic || !viewManualForm.start || loadState.loading"
-          >
+          <button type="submit" class="btn btn-primary"
+            :disabled="!viewManualForm.topic || !viewManualForm.start || loadState.loading">
             {{ loadState.loading ? '加载中…' : '加载结果' }}
           </button>
-          <button
-            type="button"
-            class="btn btn-soft"
+          <button type="button" class="btn btn-soft"
             @click="viewManualForm.topic = viewSelection.topic; viewManualForm.start = viewSelection.start; viewManualForm.end = viewSelection.end"
-            :disabled="loadState.loading"
-          >
+            :disabled="loadState.loading">
             重置为当前选择
           </button>
         </div>
@@ -147,13 +116,8 @@
         <label class="topic-dashboard__range">
           <span>📈 显示数量 (Top-N)</span>
           <div class="range-input">
-            <input
-              :value="controls.topN"
-              type="range"
-              min="3"
-              :max="Math.max(7, maxTopN)"
-              @input="updateTopN($event.target.value)"
-            />
+            <input :value="controls.topN" type="range" min="3" :max="Math.max(7, maxTopN)"
+              @input="updateTopN($event.target.value)" />
             <span>{{ controls.topN }}</span>
           </div>
         </label>
@@ -163,41 +127,37 @@
         <div class="overview-header">
           <h3 class="overview-header__title">📈 数据概览</h3>
           <div class="overview-actions">
-            <button 
-              class="btn-export" 
-              @click="exportData"
-              title="导出数据"
-            >
+            <button class="btn-export" @click="exportData" title="导出数据">
               📥 导出数据
             </button>
           </div>
         </div>
-      <div class="dashboard-stats">
+        <div class="dashboard-stats">
           <div class="stat-card stat-card--primary">
             <div class="stat-card__icon">📊</div>
             <div class="stat-card__content">
-          <p class="stat-card__value">{{ llmStats.count }}</p>
-          <p class="stat-card__label">新主题总数</p>
+              <p class="stat-card__value">{{ llmStats.count }}</p>
+              <p class="stat-card__label">新主题总数</p>
               <p v-if="docStats.topicCount > 0" class="stat-card__subtext">
                 原始主题: {{ docStats.topicCount }}
               </p>
-        </div>
+            </div>
           </div>
           <div class="stat-card stat-card--success">
             <div class="stat-card__icon">📄</div>
             <div class="stat-card__content">
-          <p class="stat-card__value">{{ llmStats.totalDocs.toLocaleString() }}</p>
-          <p class="stat-card__label">文档总数</p>
+              <p class="stat-card__value">{{ llmStats.totalDocs.toLocaleString() }}</p>
+              <p class="stat-card__label">文档总数</p>
               <p v-if="docStats.topicCount > 0" class="stat-card__subtext">
                 平均: {{ Math.round(llmStats.totalDocs / docStats.topicCount) }} 篇/主题
               </p>
-        </div>
+            </div>
           </div>
           <div class="stat-card stat-card--info">
             <div class="stat-card__icon">📈</div>
             <div class="stat-card__content">
-          <p class="stat-card__value">{{ llmStats.maxDocs.toLocaleString() }}</p>
-          <p class="stat-card__label">最大主题文档数</p>
+              <p class="stat-card__value">{{ llmStats.maxDocs.toLocaleString() }}</p>
+              <p class="stat-card__label">最大主题文档数</p>
               <p v-if="llmStats.totalDocs > 0" class="stat-card__subtext">
                 占比: {{ ((llmStats.maxDocs / llmStats.totalDocs) * 100).toFixed(1) }}%
               </p>
@@ -219,33 +179,16 @@
 
     <section v-if="hasSummary" class="space-y-6">
       <div class="topic-dashboard__chart-grid">
-        <PlotlyChartPanel
-          :data="barPlotlyData"
-          :layout="barPlotlyLayout"
-          :config="barPlotlyConfig"
-          :has-data="barPlotlyHasData"
-          title="📊 主题规模对比（横向条形）"
-          description="支持搜索、排序与 Top-N 显示控制，便于定位关注主题。"
-        />
-        <PlotlyChartPanel
-          :data="donutPlotlyData"
-          :layout="donutPlotlyLayout"
-          :config="donutPlotlyConfig"
-          :has-data="donutPlotlyHasData"
-          title="🥧 主题占比（环形图）"
-          description="基于文档数计算占比，直观呈现主题贡献度。"
-        />
+        <PlotlyChartPanel :data="barPlotlyData" :layout="barPlotlyLayout" :config="barPlotlyConfig"
+          :has-data="barPlotlyHasData" title="📊 主题规模对比（横向条形）" description="支持搜索、排序与 Top-N 显示控制，便于定位关注主题。" />
+        <PlotlyChartPanel :data="donutPlotlyData" :layout="donutPlotlyLayout" :config="donutPlotlyConfig"
+          :has-data="donutPlotlyHasData" title="🥧 主题占比（环形图）" description="基于文档数计算占比，直观呈现主题贡献度。" />
       </div>
 
       <div v-if="sankeyPlotlyHasData" class="chart-panel--tall">
-        <PlotlyChartPanel
-          :data="sankeyPlotlyData"
-          :layout="sankeyPlotlyLayout"
-          :config="sankeyPlotlyConfig"
-          :has-data="sankeyPlotlyHasData"
-          title="🌊 原始主题 → 新主题合并关系（桑基图）"
-          description="展示 BERTopic 原始主题与 LLM 新主题之间的合并关系。"
-        />
+        <PlotlyChartPanel :data="sankeyPlotlyData" :layout="sankeyPlotlyLayout" :config="sankeyPlotlyConfig"
+          :has-data="sankeyPlotlyHasData" title="🌊 原始主题 → 新主题合并关系（桑基图）"
+          description="展示 BERTopic 原始主题与 LLM 新主题之间的合并关系。" />
       </div>
     </section>
 
@@ -253,22 +196,10 @@
       <div class="umap-controls">
         <div class="umap-control-row">
           <label>密度视图：</label>
-          <input 
-            v-model="umapControls.density" 
-            type="checkbox" 
-            @change="updateUMAPChart"
-            aria-label="启用密度视图"
-          />
+          <input v-model="umapControls.density" type="checkbox" @change="updateUMAPChart" aria-label="启用密度视图" />
           <label>降采样上限：</label>
-          <input 
-            v-model.number="umapControls.maxPoints" 
-            type="number" 
-            min="1000" 
-            step="1000" 
-            @change="updateUMAPChart"
-            aria-label="降采样上限"
-            placeholder="5000"
-          />
+          <input v-model.number="umapControls.maxPoints" type="number" min="1000" step="1000" @change="updateUMAPChart"
+            aria-label="降采样上限" placeholder="5000" />
           <button @click="updateUMAPChart">应用</button>
           <button @click="downloadSelectedDocIds">下载选中 doc_id</button>
           <span class="umap-selected-info">已选 {{ selectedDocIds.length }} 条</span>
@@ -277,24 +208,14 @@
           <span>按主题筛选：</span>
           <div class="umap-topics-box">
             <label v-for="topicId in availableTopics" :key="topicId" class="umap-topic-item">
-              <input
-                type="checkbox"
-                :value="topicId"
-                v-model="umapControls.selectedTopics"
-                @change="updateUMAPChart"
-              />
+              <input type="checkbox" :value="topicId" v-model="umapControls.selectedTopics" @change="updateUMAPChart" />
               <span>{{ topicId }}</span>
             </label>
           </div>
         </div>
       </div>
-      <AnalysisChartPanel
-        ref="umapChartRef"
-        :option="coordsOption.option"
-        :has-data="coordsOption.hasData"
-        title="文档分布地图（UMAP 2D）"
-        description="散点≈6k：颜色=topic_id；缩放/拖拽/框选；密度开关；超5k自动降采样。"
-      />
+      <AnalysisChartPanel ref="umapChartRef" :option="coordsOption.option" :has-data="coordsOption.hasData"
+        title="文档分布地图（UMAP 2D）" description="散点≈6k：颜色=topic_id；缩放/拖拽/框选；密度开关；超5k自动降采样。" />
     </section>
 
     <!-- LLM 再聚类结果详细展示 -->
@@ -304,11 +225,7 @@
         <p class="section-header__subtitle">大模型重新命名和聚类的主题详情</p>
       </div>
       <div class="llm-clusters-grid">
-        <div 
-          v-for="cluster in sortedLLMClusters" 
-          :key="cluster.name"
-          class="llm-cluster-card"
-        >
+        <div v-for="cluster in sortedLLMClusters" :key="cluster.name" class="llm-cluster-card">
           <div class="llm-cluster-card__header">
             <div class="llm-cluster-card__title-group">
               <p class="llm-cluster-card__label">{{ cluster.name }}</p>
@@ -324,17 +241,13 @@
             <template v-for="(orig, idx) in cluster.original" :key="idx">
               <span class="llm-cluster-card__original-tag" :title="formatOriginalTopicName(orig)">
                 {{ getOriginalTopicSummary(orig) }}
-            </span>
+              </span>
             </template>
           </div>
           <div v-if="cluster.keywords && cluster.keywords.length > 0" class="llm-cluster-card__keywords">
             <span class="llm-cluster-card__keywords-label">关键词：</span>
-            <span 
-              v-for="(kw, idx) in cluster.keywords" 
-              :key="idx"
-              class="llm-cluster-card__keyword-tag"
-              :title="Array.isArray(kw) ? `权重: ${(kw[1] * 100).toFixed(1)}%` : ''"
-            >
+            <span v-for="(kw, idx) in cluster.keywords" :key="idx" class="llm-cluster-card__keyword-tag"
+              :title="Array.isArray(kw) ? `权重: ${(kw[1] * 100).toFixed(1)}%` : ''">
               {{ Array.isArray(kw) ? kw[0] : kw }}
             </span>
           </div>
@@ -342,10 +255,8 @@
       </div>
     </section>
 
-    <section
-      v-if="!loadState.loading && !loadState.error && !hasSummary"
-      class="topic-dashboard__card topic-dashboard__empty"
-    >
+    <section v-if="!loadState.loading && !loadState.error && !hasSummary"
+      class="topic-dashboard__card topic-dashboard__empty">
       暂无可视化数据，请先填写专题与时间并点击"加载结果"。
     </section>
   </div>
@@ -528,59 +439,59 @@ const llmClusters = computed(() => {
   const clusters = results.value.llm_clusters || {}
   // llm_keywords 包含大模型主题关键词
   const llmKeywords = results.value.llm_keywords || {}
-  
+
   if (!clusters || Object.keys(clusters).length === 0) {
     return []
   }
-  
+
   const entries = Array.isArray(clusters)
     ? clusters.map((item, idx) => {
-        const name = item.name || `新主题${idx}`
-        // 尝试从 llm_keywords 中获取关键词
-        const keywordsFromFile = llmKeywords[name]?.['关键词'] || llmKeywords[name] || []
-        // 处理原始主题集合，确保是数组格式
-        let originalTopics = []
-        if (Array.isArray(item['原始主题集合'])) {
-          originalTopics = item['原始主题集合'].map(t => String(t).trim()).filter(t => t)
-        } else if (item['原始主题集合']) {
-          // 如果不是数组，尝试转换
-          const orig = item['原始主题集合']
-          if (typeof orig === 'string') {
-            originalTopics = orig.split(',').map(t => t.trim()).filter(t => t)
-          }
+      const name = item.name || `新主题${idx}`
+      // 尝试从 llm_keywords 中获取关键词
+      const keywordsFromFile = llmKeywords[name]?.['关键词'] || llmKeywords[name] || []
+      // 处理原始主题集合，确保是数组格式
+      let originalTopics = []
+      if (Array.isArray(item['原始主题集合'])) {
+        originalTopics = item['原始主题集合'].map(t => String(t).trim()).filter(t => t)
+      } else if (item['原始主题集合']) {
+        // 如果不是数组，尝试转换
+        const orig = item['原始主题集合']
+        if (typeof orig === 'string') {
+          originalTopics = orig.split(',').map(t => t.trim()).filter(t => t)
         }
-        return {
-          name,
-          title: item['主题命名'] || name,
-          description: item['主题描述'] || '',
-          original: originalTopics,
-          keywords: keywordsFromFile.length > 0 ? keywordsFromFile.slice(0, 10) : (item['关键词'] || []).slice(0, 10),
-          count: item['文档数'] || (Array.isArray(item['文档ID']) ? item['文档ID'].length : 0)
-        }
-      })
+      }
+      return {
+        name,
+        title: item['主题命名'] || name,
+        description: item['主题描述'] || '',
+        original: originalTopics,
+        keywords: keywordsFromFile.length > 0 ? keywordsFromFile.slice(0, 10) : (item['关键词'] || []).slice(0, 10),
+        count: item['文档数'] || (Array.isArray(item['文档ID']) ? item['文档ID'].length : 0)
+      }
+    })
     : Object.entries(clusters).map(([name, info]) => {
-        // 尝试从 llm_keywords 中获取关键词
-        const keywordsFromFile = llmKeywords[name]?.['关键词'] || llmKeywords[name] || []
-        // 处理原始主题集合，确保是数组格式
-        let originalTopics = []
-        if (Array.isArray(info?.['原始主题集合'])) {
-          originalTopics = info['原始主题集合'].map(t => String(t).trim()).filter(t => t)
-        } else if (info?.['原始主题集合']) {
-          // 如果不是数组，尝试转换
-          const orig = info['原始主题集合']
-          if (typeof orig === 'string') {
-            originalTopics = orig.split(',').map(t => t.trim()).filter(t => t)
-          }
+      // 尝试从 llm_keywords 中获取关键词
+      const keywordsFromFile = llmKeywords[name]?.['关键词'] || llmKeywords[name] || []
+      // 处理原始主题集合，确保是数组格式
+      let originalTopics = []
+      if (Array.isArray(info?.['原始主题集合'])) {
+        originalTopics = info['原始主题集合'].map(t => String(t).trim()).filter(t => t)
+      } else if (info?.['原始主题集合']) {
+        // 如果不是数组，尝试转换
+        const orig = info['原始主题集合']
+        if (typeof orig === 'string') {
+          originalTopics = orig.split(',').map(t => t.trim()).filter(t => t)
         }
-        return {
-          name,
-          title: info?.['主题命名'] || name,
-          description: info?.['主题描述'] || '',
-          original: originalTopics,
-          keywords: keywordsFromFile.length > 0 ? keywordsFromFile.slice(0, 10) : (info?.['关键词'] || []).slice(0, 10),
-          count: info?.['文档数'] || (Array.isArray(info?.['文档ID']) ? info['文档ID'].length : 0)
-        }
-      })
+      }
+      return {
+        name,
+        title: info?.['主题命名'] || name,
+        description: info?.['主题描述'] || '',
+        original: originalTopics,
+        keywords: keywordsFromFile.length > 0 ? keywordsFromFile.slice(0, 10) : (info?.['关键词'] || []).slice(0, 10),
+        count: info?.['文档数'] || (Array.isArray(info?.['文档ID']) ? info['文档ID'].length : 0)
+      }
+    })
   return entries
 })
 
@@ -651,18 +562,18 @@ const formatOriginalTopicName = (orig) => {
 // 获取原始主题的关键词摘要
 const getOriginalTopicSummary = (origTopicName) => {
   if (!origTopicName) return ''
-  
+
   const topicName = formatOriginalTopicName(origTopicName)
-  
+
   // 从 summaryEntries 中查找该主题的关键词
   const topic = summaryEntries.value.entries.find(t => t.name === topicName)
-  
+
   if (topic && topic.keywords && topic.keywords.length > 0) {
     // 取前3-5个关键词，用顿号连接
     const topKeywords = topic.keywords.slice(0, 5).map(kw => kw[0]).join('、')
     return `${topicName}: ${topKeywords}`
   }
-  
+
   // 如果没有找到关键词，返回主题名称
   return topicName
 }
@@ -696,14 +607,14 @@ const barPlotlyData = computed(() => {
   // 如果有LLM聚类，使用LLM聚类；否则使用原始主题
   const dataSource = llmClusters.value.length > 0 ? llmClusters.value : topTopics.value
   if (!dataSource.length) return []
-  
+
   // 对LLM聚类进行排序和筛选
   let sortedData = [...dataSource]
   if (llmClusters.value.length > 0) {
     // LLM聚类模式：按文档数排序，支持搜索和Top-N
     const keyword = controls.search.trim()
     if (keyword) {
-      sortedData = sortedData.filter(item => 
+      sortedData = sortedData.filter(item =>
         item.name?.toLowerCase().includes(keyword.toLowerCase()) ||
         item.title?.toLowerCase().includes(keyword.toLowerCase())
       )
@@ -720,9 +631,9 @@ const barPlotlyData = computed(() => {
     })
     sortedData = sortedData.slice(0, controls.topN)
   }
-  
+
   const colors = ['#4361ee', '#3a0ca3', '#7209b7', '#f72585', '#4cc9f0', '#4895ef', '#560bad']
-  
+
   return [{
     y: sortedData.map(item => {
       if (llmClusters.value.length > 0) {
@@ -752,7 +663,7 @@ const barPlotlyData = computed(() => {
       if (llmClusters.value.length > 0) {
         return Array.isArray(item.original) ? item.original.join(', ') : ''
       } else {
-        const llmCluster = llmClusters.value.find(c => 
+        const llmCluster = llmClusters.value.find(c =>
           Array.isArray(c.original) && c.original.includes(item.name)
         )
         return llmCluster ? llmCluster.original.join(', ') : item.name
@@ -784,11 +695,11 @@ const donutPlotlyHasData = computed(() => {
 const donutPlotlyData = computed(() => {
   const dataSource = llmClusters.value.length > 0 ? llmClusters.value : topTopics.value
   if (!dataSource.length) return []
-  
+
   const docCounts = dataSource.map(item => llmClusters.value.length > 0 ? item.count : item.docCount)
   const totalDocs = docCounts.reduce((a, b) => a + b, 0)
   const colors = ['#4361ee', '#3a0ca3', '#7209b7', '#f72585', '#4cc9f0', '#4895ef', '#560bad']
-  
+
   return [{
     values: docCounts,
     labels: dataSource.map(item => {
@@ -841,12 +752,12 @@ const donutPlotlyConfig = {
 const sankeyPlotlyHasData = computed(() => llmClusters.value.length > 0)
 const sankeyPlotlyData = computed(() => {
   if (!llmClusters.value.length) return []
-  
+
   const nodes = []
   const links = []
   const nodeSet = new Set()
   const nodeIndexMap = {}
-  
+
   // 构建节点和链接
   llmClusters.value.forEach((cluster) => {
     const targetName = cluster.name || cluster.title
@@ -855,14 +766,14 @@ const sankeyPlotlyData = computed(() => {
       nodeIndexMap[targetName] = nodes.length
       nodes.push({ name: targetName })
     }
-    
+
     cluster.original.forEach((origTopic) => {
       if (!nodeSet.has(origTopic)) {
         nodeSet.add(origTopic)
         nodeIndexMap[origTopic] = nodes.length
         nodes.push({ name: origTopic })
       }
-      
+
       const value = topicDocMap.value[origTopic] || Math.max(1, Math.round((cluster.count || 1) / (cluster.original.length || 1)))
       links.push({
         source: nodeIndexMap[origTopic],
@@ -871,9 +782,9 @@ const sankeyPlotlyData = computed(() => {
       })
     })
   })
-  
+
   if (!links.length) return []
-  
+
   // 生成节点标签
   const getNodeLabel = (nodeName) => {
     if (nodeName.startsWith('主题') && !nodeName.startsWith('新主题')) {
@@ -886,13 +797,13 @@ const sankeyPlotlyData = computed(() => {
     }
     return nodeName
   }
-  
+
   const colors = ['#4361ee', '#3a0ca3', '#7209b7', '#f72585', '#4cc9f0', '#4895ef', '#560bad', '#b5179e', '#3f37c9', '#4ade80', '#16a34a', '#f59e0b', '#ef4444']
   const nodeColors = {}
   nodes.forEach((n, idx) => {
     nodeColors[n.name] = colors[idx % colors.length]
   })
-  
+
   return [{
     type: 'sankey',
     orientation: 'h',
@@ -977,7 +888,7 @@ const computeHeatmap = (points, bins = 80) => {
 const coordsOption = computed(() => {
   let coords = []
   const coordsData = results.value.coords || results.value.coords_data || {}
-  
+
   if (Array.isArray(coordsData)) {
     coords = coordsData
   } else if (coordsData['文档2D坐标']) {
@@ -987,21 +898,21 @@ const coordsOption = computed(() => {
   } else if (coordsData['data']) {
     coords = coordsData['data']
   }
-  
+
   if (!Array.isArray(coords) || !coords.length) {
     return { hasData: false, option: null }
   }
-  
+
   // 过滤噪声点并初始化原始数据
   const filteredCoords = coords.filter(d => {
     const topicId = String(d.topic_id || d.topic_id)
     return topicId !== '-1' && topicId !== '-1'
   })
-  
+
   if (!filteredCoords.length) {
     return { hasData: false, option: null }
   }
-  
+
   // 保存原始数据
   umapRawData.value = filteredCoords.map(d => ({
     doc_id: d.doc_id,
@@ -1009,7 +920,7 @@ const coordsOption = computed(() => {
     x: Number(d.x),
     y: Number(d.y)
   })).filter(d => Number.isFinite(d.x) && Number.isFinite(d.y))
-  
+
   // 更新可用主题列表
   const uniqueTopics = [...new Set(umapRawData.value.map(d => d.topic_id))].sort((a, b) => Number(a) - Number(b))
   if (availableTopics.value.length === 0 || JSON.stringify(availableTopics.value) !== JSON.stringify(uniqueTopics)) {
@@ -1018,21 +929,21 @@ const coordsOption = computed(() => {
       umapControls.selectedTopics = [...uniqueTopics]
     }
   }
-  
+
   // 根据选中的主题筛选
   const activeTopics = new Set(umapControls.selectedTopics.length > 0 ? umapControls.selectedTopics : uniqueTopics)
   let pts = umapRawData.value.filter(d => activeTopics.has(d.topic_id))
-  
+
   // 降采样或密度视图
   const sampled = umapControls.density ? pts : downsample(pts, Math.max(1000, umapControls.maxPoints))
-  
+
   const topics = [...new Set(sampled.map(d => d.topic_id))].sort((a, b) => Number(a) - Number(b))
   const palette = ['#5ad8a6', '#6ad1ff', '#ffb36b', '#c38bff', '#ff8f6b', '#78a3ff', '#28c197', '#8bd3ff', '#ffd666', '#95de64', '#ff85c0', '#ffa39e']
   const colorMap = {}
   topics.forEach((t, i) => {
     colorMap[t] = palette[i % palette.length]
   })
-  
+
   const tooltip = {
     formatter: (p) => {
       const d = p.value
@@ -1042,22 +953,22 @@ const coordsOption = computed(() => {
     borderColor: '#2a3a63',
     textStyle: { color: '#eaf2ff' }
   }
-  
+
   const series = []
-  
+
   if (umapControls.density) {
     // 密度视图 - 使用scatter + visualMap实现，因为heatmap在连续坐标中可能不稳定
     const heat = computeHeatmap(pts, 100)
-    
+
     // 检查数据是否为空
     if (!heat.data || heat.data.length === 0) {
       console.warn('[UMAP密度视图] 热力图数据为空，pts数量:', pts.length)
       return { hasData: false, option: null }
     }
-    
+
     // 将热力图数据转换为scatter格式 [x, y, value]
     const scatterData = heat.data.map(d => [d[0], d[1], d[2]])
-    
+
     // 计算点的大小，基于数据范围
     const xRange = heat.extent[0]
     const yRange = heat.extent[1]
@@ -1066,7 +977,7 @@ const coordsOption = computed(() => {
     const avgSpan = (xSpan + ySpan) / 2
     // 根据数据范围动态计算点大小
     const baseSize = Math.max(8, Math.min(40, avgSpan / 15))
-    
+
     series.push({
       type: 'scatter',
       name: '密度',
@@ -1145,7 +1056,7 @@ const coordsOption = computed(() => {
           right: 20,
           top: 'center',
           textStyle: { color: '#4a5568' },
-          inRange: { 
+          inRange: {
             color: ['#e2e8f0', '#4361ee', '#6ad1ff']
           },
           dimension: 2,  // 使用数据的第3个维度（value，即密度值）进行颜色映射
@@ -1184,7 +1095,7 @@ const coordsOption = computed(() => {
       }
     }
   }
-  
+
   // 散点视图
   topics.forEach(t => {
     const arr = sampled.filter(d => d.topic_id === t)
@@ -1200,7 +1111,7 @@ const coordsOption = computed(() => {
       data: arr.map(d => [d.x, d.y, d.topic_id, d.doc_id])
     })
   })
-  
+
   return {
     hasData: true,
     option: {
@@ -1355,7 +1266,7 @@ watch(
       // 等待DOM更新和图表渲染完成
       await nextTick()
       await new Promise(resolve => setTimeout(resolve, 100)) // 额外等待确保图表已渲染
-      
+
       const chartEl = umapChartRef.value.$el?.querySelector('.analysis-chart-card__canvas')
       if (chartEl) {
         umapChartInstance = echarts.getInstanceByDom(chartEl)
@@ -1373,7 +1284,7 @@ watch(
                 if (s && s.data) {
                   // 检查是否是密度视图（数据格式为 [x, y, density_value]）
                   const isDensityView = s.type === 'scatter' && s.data.length > 0 && Array.isArray(s.data[0]) && s.data[0].length === 3
-                  
+
                   if (isDensityView) {
                     // 密度视图：根据选中的数据点的坐标范围，从原始数据中筛选
                     const selectedPoints = (sel.dataIndex || []).map(idx => s.data[idx]).filter(p => p && Array.isArray(p))
@@ -1396,11 +1307,11 @@ watch(
                         // 每个网格的大小约为 span/bins，添加1.5倍容差
                         const xTolerance = (xSpan / binSize) * 1.5
                         const yTolerance = (ySpan / binSize) * 1.5
-                        
+
                         // 从原始数据中筛选在范围内的点
                         umapRawData.value.forEach(d => {
-                          if (d.x >= (minX - xTolerance) && d.x <= (maxX + xTolerance) && 
-                              d.y >= (minY - yTolerance) && d.y <= (maxY + yTolerance)) {
+                          if (d.x >= (minX - xTolerance) && d.x <= (maxX + xTolerance) &&
+                            d.y >= (minY - yTolerance) && d.y <= (maxY + yTolerance)) {
                             selectedDocIds.value.push(d.doc_id)
                           }
                         })
@@ -1420,11 +1331,11 @@ watch(
             }
             console.log('[Brush] 选中的doc_id数量:', selectedDocIds.value.length)
           })
-          
+
           // 确保brush功能已启用并测试
           const currentOption = umapChartInstance.getOption()
           console.log('[Brush] 当前brush配置:', currentOption.brush)
-          
+
           // 测试brush是否可用
           try {
             // 尝试手动触发brush测试
@@ -1433,7 +1344,7 @@ watch(
           } catch (e) {
             console.warn('[Brush] 无法获取brush组件:', e)
           }
-          
+
           // 监听所有可能的事件以调试
           umapChartInstance.on('brush', (params) => {
             console.log('[Brush] brush事件触发:', params)
@@ -1445,7 +1356,7 @@ watch(
               console.log('[Brush] brushEnd包含areas:', params.areas)
             }
           })
-          
+
           // 检查brush是否真的启用了
           console.log('[Brush] 图表配置:', {
             hasBrush: !!currentOption.brush,
@@ -1478,15 +1389,18 @@ const updateTopN = (value) => {
   color: white;
   box-shadow: 0 10px 30px rgba(122, 146, 176, 0.35);
 }
+
 .topic-dashboard__hero h1 {
   font-size: 2rem;
   font-weight: 700;
   margin-bottom: 0.5rem;
 }
+
 .topic-dashboard__hero p {
   max-width: 700px;
   font-size: 0.95rem;
 }
+
 .topic-dashboard__label {
   text-transform: uppercase;
   font-size: 0.75rem;
@@ -1495,6 +1409,7 @@ const updateTopN = (value) => {
   margin-bottom: 0.5rem;
   display: inline-block;
 }
+
 .topic-dashboard__card {
   border-radius: 24px;
   border: 1px solid var(--color-border-soft);
@@ -1502,6 +1417,7 @@ const updateTopN = (value) => {
   padding: 24px;
   box-shadow: 0 10px 25px rgba(22, 30, 52, 0.05);
 }
+
 .topic-dashboard__form {
   display: grid;
   gap: 16px;
@@ -1509,8 +1425,10 @@ const updateTopN = (value) => {
 }
 
 .topic-select-wrapper {
-  grid-column: 1 / -1; /* 专题选择框占满整行 */
+  grid-column: 1 / -1;
+  /* 专题选择框占满整行 */
 }
+
 .topic-dashboard__form label {
   display: flex;
   flex-direction: column;
@@ -1518,6 +1436,7 @@ const updateTopN = (value) => {
   font-size: 0.9rem;
   color: var(--color-text-secondary);
 }
+
 .topic-dashboard__form input {
   padding: 10px 12px;
   border-radius: 16px;
@@ -1528,7 +1447,8 @@ const updateTopN = (value) => {
 
 .topic-select-wrapper {
   position: relative;
-  grid-column: 1 / -1; /* 专题选择框占满整行 */
+  grid-column: 1 / -1;
+  /* 专题选择框占满整行 */
 }
 
 .topic-select-container {
@@ -1583,12 +1503,14 @@ const updateTopN = (value) => {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
 }
+
 .topic-dashboard__form-actions {
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
 }
+
 .topic-dashboard__error {
   margin-top: 16px;
   padding: 12px 16px;
@@ -1598,11 +1520,13 @@ const updateTopN = (value) => {
   color: #991b1b;
   font-size: 0.9rem;
 }
+
 .dashboard-controls {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
 }
+
 .dashboard-controls label {
   display: flex;
   flex-direction: column;
@@ -1610,17 +1534,20 @@ const updateTopN = (value) => {
   font-size: 0.85rem;
   color: var(--color-text-secondary);
 }
+
 .dashboard-controls input,
 .dashboard-controls select {
   padding: 9px 12px;
   border-radius: 14px;
   border: 1px solid var(--color-border-soft);
 }
+
 .topic-dashboard__range .range-input {
   display: flex;
   align-items: center;
   gap: 12px;
 }
+
 .dashboard-overview {
   margin-bottom: 2rem;
 }
@@ -1750,27 +1677,33 @@ const updateTopN = (value) => {
   color: var(--color-text-secondary);
   margin: 0;
 }
+
 .topic-dashboard__chart-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 20px;
 }
+
 .chart-panel--tall :deep(.analysis-chart-card__canvas) {
   height: 520px;
 }
+
 :deep(.analysis-chart-card__canvas) {
   min-height: 280px;
 }
+
 .topic-dashboard__section-header h2 {
   font-size: 1.2rem;
   font-weight: 600;
   margin-bottom: 4px;
 }
+
 .topic-dashboard__keywords-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
 }
+
 .keyword-card {
   border-radius: 18px;
   border: 1px solid var(--color-border-soft);
@@ -1780,21 +1713,25 @@ const updateTopN = (value) => {
   flex-direction: column;
   gap: 12px;
 }
+
 .keyword-card__header {
   display: flex;
   justify-content: space-between;
   gap: 10px;
 }
+
 .keyword-card__label {
   font-size: 0.75rem;
   color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
 .keyword-card__title {
   font-size: 1rem;
   font-weight: 600;
 }
+
 .keyword-card__badge {
   background: var(--color-border-soft);
   color: var(--color-text-primary);
@@ -1802,11 +1739,13 @@ const updateTopN = (value) => {
   border-radius: 999px;
   font-size: 0.75rem;
 }
+
 .keyword-card__chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
+
 .keyword-card__chips span {
   background: var(--color-surface);
   border-radius: 999px;
@@ -1815,6 +1754,7 @@ const updateTopN = (value) => {
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border-soft);
 }
+
 .llm-card {
   border-radius: 18px;
   border: 1px solid var(--color-border-soft);
@@ -1824,37 +1764,44 @@ const updateTopN = (value) => {
   flex-direction: column;
   gap: 10px;
 }
+
 .llm-card__header {
   display: flex;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
 }
+
 .llm-card__label {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-secondary);
 }
+
 .llm-card__title {
   font-size: 1rem;
   font-weight: 600;
 }
+
 .llm-card__meta {
   display: flex;
   gap: 12px;
   font-size: 0.8rem;
   color: var(--color-text-secondary);
 }
+
 .llm-card__desc {
   font-size: 0.9rem;
   color: var(--color-text-secondary);
 }
+
 .topic-dashboard__empty {
   text-align: center;
   color: var(--color-text-secondary);
   font-size: 0.95rem;
 }
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -1867,14 +1814,17 @@ const updateTopN = (value) => {
   cursor: pointer;
   transition: background 0.2s ease;
 }
+
 .btn-primary {
   background: #9ab2cb;
   color: white;
 }
+
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
 .btn-soft {
   background: var(--color-surface-muted);
   color: var(--color-text-primary);
@@ -1890,15 +1840,18 @@ const updateTopN = (value) => {
   font-size: 0.95rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
+
 .input:focus {
   border-color: var(--color-brand-500-hex);
   outline: none;
   box-shadow: 0 0 0 2px rgb(var(--color-brand-100) / 1);
 }
+
 .input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
 .relative .input {
   padding-right: 2.5rem;
 }

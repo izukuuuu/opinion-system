@@ -116,7 +116,7 @@
           <span v-if="analyzeState.running" class="text-sm text-brand-600 animate-pulse font-medium">
             系统任务处理中，请稍候...
           </span>
-          <button type="submit" class="btn-primary min-w-[150px] shadow-lg shadow-brand-500/20 py-3 text-base"
+          <button type="submit" class="btn-primary min-w-[150px] py-3 text-base"
             :disabled="analyzeState.running || !selectedFunctions.length">
             <span v-if="analyzeState.running" class="flex items-center gap-2">
               <ArrowPathIcon class="h-5 w-5 animate-spin" />

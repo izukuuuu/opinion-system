@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-10 pb-12">
     <!-- Hero Section -->
-    <section class="relative overflow-hidden rounded-3xl bg-surface border border-soft p-1 shadow-sm">
+    <section class="relative overflow-hidden rounded-3xl bg-surface border border-soft p-1">
       <div
         class="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-brand-600 via-brand-700 to-indigo-900 px-6 py-10 text-white sm:px-10 sm:py-12">
         <!-- Abstract background elements -->
@@ -134,7 +134,7 @@
               </p>
               <div class="flex flex-wrap gap-2 pt-1">
                 <span v-for="id in activeDimensionIds" :key="id"
-                  class="inline-flex items-center rounded-md bg-white px-2 py-0.5 text-[9px] font-bold text-brand-600 border border-brand-soft shadow-sm">
+                  class="inline-flex items-center rounded-md bg-white px-2 py-0.5 text-[9px] font-bold text-brand-600 border border-brand-soft">
                   # {{ id }}
                 </span>
               </div>
@@ -160,7 +160,7 @@
           <div v-for="example in examples" :key="example.title"
             class="flex flex-col rounded-xl border border-soft bg-surface-muted/30 p-4 transition-all">
             <div class="mb-3 flex items-center justify-between">
-              <div class="flex h-9 w-9 items-center justify-center rounded-lg shadow-sm" :class="example.colorClass">
+              <div class="flex h-9 w-9 items-center justify-center rounded-lg" :class="example.colorClass">
                 <component :is="example.icon" class="h-4 w-4" />
               </div>
               <span class="text-[9px] font-black text-muted opacity-30 uppercase">{{ example.id }}</span>

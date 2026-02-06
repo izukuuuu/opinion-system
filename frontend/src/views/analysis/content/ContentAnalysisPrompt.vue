@@ -6,7 +6,8 @@
         <h1 class="text-2xl font-semibold text-primary">内容分析 · 提示词工作台</h1>
         <p class="text-sm text-secondary">按专题搭建一级/二级编码，生成可直接使用的提示词并保存。</p>
       </div>
-      <div class="inline-flex items-center gap-2 rounded-full bg-brand-soft px-4 py-1.5 text-xs font-semibold text-brand-700">
+      <div
+        class="inline-flex items-center gap-2 rounded-full bg-brand-soft px-4 py-1.5 text-xs font-semibold text-brand-700">
         <AdjustmentsHorizontalIcon class="h-4 w-4" />
         <span>编码工作台</span>
       </div>
@@ -21,11 +22,9 @@
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <label class="flex items-center gap-2">
             <span class="text-xs font-semibold text-muted">专题</span>
-            <select
-              v-model="selectedTopic"
+            <select v-model="selectedTopic"
               class="rounded-2xl border border-soft px-3 py-2 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              :disabled="topicsState.loading || !topicOptions.length"
-            >
+              :disabled="topicsState.loading || !topicOptions.length">
               <option value="" disabled>请选择专题</option>
               <option v-for="option in topicOptions" :key="option" :value="option">{{ option }}</option>
             </select>
@@ -35,21 +34,24 @@
             刷新专题
           </button>
           <button type="button" class="btn-ghost px-3 py-1" @click="resetBuilderToBlank">清空方案</button>
-          <button type="button" class="btn-ghost px-3 py-1" @click="loadPresetExample" :disabled="promptState.loading">载入示例</button>
+          <button type="button" class="btn-ghost px-3 py-1" @click="loadPresetExample"
+            :disabled="promptState.loading">载入示例</button>
           <span v-if="promptState.path" class="text-[11px] text-muted">存储路径：{{ promptState.path }}</span>
         </div>
       </header>
 
       <div class="grid gap-6">
-        <div class="rounded-3xl border border-soft bg-surface p-4 shadow-sm space-y-4">
+        <div class="rounded-3xl border border-soft bg-surface p-4 space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="space-y-1">
               <h3 class="text-sm font-semibold text-primary">编码方案工作台</h3>
               <p class="text-xs text-muted">通过设置编码组（一级/二级，单选/多选）并添加对应编码项，完善提示词配置。</p>
             </div>
             <div class="flex flex-wrap gap-2 text-[11px] text-muted">
-              <button type="button" class="btn-secondary px-3 py-1" @click="addBlock({ level: 'level1', selection: 'single' })">新增一级组</button>
-              <button type="button" class="btn-secondary px-3 py-1" @click="addBlock({ level: 'level2', selection: 'multi' })">新增二级组</button>
+              <button type="button" class="btn-secondary px-3 py-1"
+                @click="addBlock({ level: 'level1', selection: 'single' })">新增一级组</button>
+              <button type="button" class="btn-secondary px-3 py-1"
+                @click="addBlock({ level: 'level2', selection: 'multi' })">新增二级组</button>
             </div>
           </div>
 
@@ -64,52 +66,41 @@
               </ul>
             </div>
             <div class="md:col-span-3 space-y-4">
-              <div
-                v-for="(block, blockIndex) in builder.blocks"
-                :key="block.id"
-                class="rounded-3xl border border-soft bg-white p-5"
-              >
+              <div v-for="(block, blockIndex) in builder.blocks" :key="block.id"
+                class="rounded-3xl border border-soft bg-white p-5">
                 <div class="flex flex-wrap items-center justify-between gap-3">
                   <div class="flex items-center gap-2 text-sm font-semibold text-primary">
-                        <Squares2X2Icon class="h-4 w-4 text-brand-600" />
+                    <Squares2X2Icon class="h-4 w-4 text-brand-600" />
                     <span>字段 {{ blockIndex + 1 }}</span>
                     <span class="text-xs font-normal text-secondary">&middot; {{ block.title || '未命名组' }}</span>
                   </div>
-                  <button
-                    type="button"
+                  <button type="button"
                     class="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-danger"
-                    @click="removeBlock(blockIndex)"
-                  >
+                    @click="removeBlock(blockIndex)">
                     <TrashIcon class="h-3 w-3" />
                     删除组
                   </button>
                 </div>
-                <div class="mt-4 grid gap-3 md:grid-cols-[minmax(220px,1.5fr)_repeat(2,minmax(160px,1fr))_minmax(160px,0.9fr)]">
+                <div
+                  class="mt-4 grid gap-3 md:grid-cols-[minmax(220px,1.5fr)_repeat(2,minmax(160px,1fr))_minmax(160px,0.9fr)]">
                   <label class="flex flex-col gap-1 text-xs text-muted">
                     <span>组名</span>
-                    <input
-                      v-model="block.title"
-                      type="text"
+                    <input v-model="block.title" type="text"
                       class="h-10 rounded-2xl border border-soft bg-surface px-3 text-sm font-medium text-primary focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                      placeholder="如 信息类别 / 议题编码"
-                    />
+                      placeholder="如 信息类别 / 议题编码" />
                   </label>
                   <label class="flex flex-col gap-1 text-xs text-muted">
                     <span>编码层级</span>
-                    <select
-                      v-model="block.level"
-                      class="h-10 rounded-2xl border border-soft bg-surface px-3 text-sm font-medium focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                    >
+                    <select v-model="block.level"
+                      class="h-10 rounded-2xl border border-soft bg-surface px-3 text-sm font-medium focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200">
                       <option value="level1">一级编码</option>
                       <option value="level2">二级编码</option>
                     </select>
                   </label>
                   <label class="flex flex-col gap-1 text-xs text-muted">
                     <span>选项类型</span>
-                    <select
-                      v-model="block.selection"
-                      class="h-10 rounded-2xl border border-soft bg-surface px-3 text-sm font-medium focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                    >
+                    <select v-model="block.selection"
+                      class="h-10 rounded-2xl border border-soft bg-surface px-3 text-sm font-medium focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200">
                       <option value="single">单选（唯一）</option>
                       <option value="multi">多选（可多项）</option>
                     </select>
@@ -126,14 +117,17 @@
                   <div class="mb-3 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
                     <div class="flex items-center gap-2 text-sm text-primary">
                       <span>编码项（逐条添加，可混排）</span>
-                      <span class="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-secondary">共 {{ block.codes.length }} 项</span>
+                      <span class="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-secondary">共 {{
+                        block.codes.length }} 项</span>
                     </div>
                     <div class="flex flex-wrap items-center gap-2 text-sm">
-                      <button v-if="block.level === 'level2'" type="button" class="btn-ghost h-9 px-3 text-sm" @click="addGroup(block)">
+                      <button v-if="block.level === 'level2'" type="button" class="btn-ghost h-9 px-3 text-sm"
+                        @click="addGroup(block)">
                         <PlusSmallIcon class="mr-1 h-4 w-4" />
                         新增大类
                       </button>
-                      <button v-if="block.level !== 'level2'" type="button" class="btn-ghost h-9 px-3 text-sm" @click="addCode(block)">
+                      <button v-if="block.level !== 'level2'" type="button" class="btn-ghost h-9 px-3 text-sm"
+                        @click="addCode(block)">
                         <PlusSmallIcon class="mr-1 h-4 w-4" />
                         新增编码
                       </button>
@@ -142,81 +136,56 @@
                   <p v-if="!block.codes.length" class="text-xs text-muted">请为该组添加编码项。</p>
                   <div v-else>
                     <div v-if="shouldGroupBlock(block)" class="space-y-3">
-                      <div
-                        v-for="group in getGroupedCodes(block)"
-                        :key="group.key"
-                        class="rounded-2xl border border-soft bg-white p-3"
-                      >
-                        <div class="mb-2 flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-muted">
+                      <div v-for="group in getGroupedCodes(block)" :key="group.key"
+                        class="rounded-2xl border border-soft bg-white p-3">
+                        <div
+                          class="mb-2 flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-muted">
                           <div class="flex flex-wrap items-center gap-2">
                             <span v-if="group.prefix" class="text-[10px] text-secondary">L{{ group.prefix }}</span>
-                            <input
-                              :value="group.rawTitle"
+                            <input :value="group.rawTitle"
                               class="h-9 w-40 rounded-2xl border border-soft bg-surface px-3 text-sm font-semibold text-primary focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                              placeholder="填写大类名称"
-                              @input="updateGroupTitle(block, group, $event.target.value)"
-                            />
+                              placeholder="填写大类名称" @input="updateGroupTitle(block, group, $event.target.value)" />
                           </div>
                           <div class="flex flex-wrap items-center gap-2 font-semibold text-muted">
                             <span>{{ group.codes.length }} 项</span>
-                            <button
-                              type="button"
-                              class="btn-ghost h-9 px-3 text-sm"
-                              @click="addCode(block, { group: group.rawTitle || group.title || '' })"
-                            >
+                            <button type="button" class="btn-ghost h-9 px-3 text-sm"
+                              @click="addCode(block, { group: group.rawTitle || group.title || '' })">
                               <PlusSmallIcon class="mr-1 h-4 w-4" />
                               新增子项
                             </button>
-                            <button
-                              type="button"
-                              class="btn-ghost h-9 px-3 text-sm text-danger"
-                              @click="toggleGroupDelete(block, group)"
-                            >
+                            <button type="button" class="btn-ghost h-9 px-3 text-sm text-danger"
+                              @click="toggleGroupDelete(block, group)">
                               删除大类
                             </button>
                           </div>
                         </div>
-                        <div
-                          v-if="block.pendingGroupDelete === group.key"
-                          class="mb-3 rounded-xl border border-soft bg-surface px-3 py-2 text-xs text-danger"
-                        >
+                        <div v-if="block.pendingGroupDelete === group.key"
+                          class="mb-3 rounded-xl border border-soft bg-surface px-3 py-2 text-xs text-danger">
                           <p>确认删除「{{ group.rawTitle || group.title }}」及其 {{ group.codes.length }} 个子项？</p>
                           <div class="mt-2 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              class="btn-primary px-3 py-1 text-xs"
-                              @click="confirmGroupDelete(block, group)"
-                            >
+                            <button type="button" class="btn-primary px-3 py-1 text-xs"
+                              @click="confirmGroupDelete(block, group)">
                               确认删除
                             </button>
-                            <button type="button" class="btn-ghost px-3 py-1 text-xs" @click="cancelGroupDelete(block)">取消</button>
+                            <button type="button" class="btn-ghost px-3 py-1 text-xs"
+                              @click="cancelGroupDelete(block)">取消</button>
                           </div>
                         </div>
                         <div class="grid gap-3 md:grid-cols-2">
-                          <div
-                            v-for="code in group.codes"
-                            :key="code.id"
-                            class="rounded-2xl border border-soft bg-white px-3 py-2"
-                          >
+                          <div v-for="code in group.codes" :key="code.id"
+                            class="rounded-2xl border border-soft bg-white px-3 py-2">
                             <div class="flex flex-wrap items-center gap-2 text-sm">
-                              <span class="rounded-full bg-surface-muted px-2 py-1 text-[11px] font-semibold text-muted">{{ block.level === 'level1' ? 'L1' : 'L2' }}</span>
-                              <input
-                                v-model="code.code"
-                                type="text"
+                              <span
+                                class="rounded-full bg-surface-muted px-2 py-1 text-[11px] font-semibold text-muted">{{
+                                  block.level === 'level1' ? 'L1' : 'L2' }}</span>
+                              <input v-model="code.code" type="text"
                                 class="h-9 w-24 rounded-xl border border-soft px-2 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                                placeholder="编码"
-                              />
-                              <input
-                                v-model="code.label"
-                                type="text"
+                                placeholder="编码" />
+                              <input v-model="code.label" type="text"
                                 class="h-9 flex-1 rounded-xl border border-soft px-3 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                                placeholder="描述，如 青少年 / 观点性报道"
-                              />
-                              <button
-                                type="button"
-                                class="text-xs text-muted hover:text-rose-500"
-                                @click="removeCode(block, block.codes.indexOf(code))"
-                              >
+                                placeholder="描述，如 青少年 / 观点性报道" />
+                              <button type="button" class="text-xs text-muted hover:text-rose-500"
+                                @click="removeCode(block, block.codes.indexOf(code))">
                                 删除
                               </button>
                             </div>
@@ -225,36 +194,21 @@
                       </div>
                     </div>
                     <div v-else class="grid gap-3 md:grid-cols-2">
-                      <div
-                        v-for="(code, codeIndex) in block.codes"
-                        :key="code.id"
-                        class="flex flex-wrap items-center gap-2 rounded-2xl border border-soft bg-white px-3 py-2 text-sm"
-                      >
-                        <span class="rounded-full bg-surface-muted px-2 py-1 text-[11px] font-semibold text-muted">{{ block.level === 'level1' ? 'L1' : 'L2' }}</span>
-                        <input
-                          v-model="code.code"
-                          type="text"
+                      <div v-for="(code, codeIndex) in block.codes" :key="code.id"
+                        class="flex flex-wrap items-center gap-2 rounded-2xl border border-soft bg-white px-3 py-2 text-sm">
+                        <span class="rounded-full bg-surface-muted px-2 py-1 text-[11px] font-semibold text-muted">{{
+                          block.level === 'level1' ? 'L1' : 'L2' }}</span>
+                        <input v-model="code.code" type="text"
                           class="h-9 w-24 rounded-xl border border-soft px-2 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                          placeholder="编码"
-                        />
-                        <input
-                          v-model="code.label"
-                          type="text"
+                          placeholder="编码" />
+                        <input v-model="code.label" type="text"
                           class="h-9 flex-1 rounded-xl border border-soft px-3 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                          placeholder="描述，如 青少年 / 观点性报道"
-                        />
-                        <input
-                          v-if="block.level === 'level2'"
-                          v-model="code.group"
-                          type="text"
+                          placeholder="描述，如 青少年 / 观点性报道" />
+                        <input v-if="block.level === 'level2'" v-model="code.group" type="text"
                           class="h-9 w-40 rounded-xl border border-soft px-3 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                          placeholder="所属大类"
-                        />
-                        <button
-                          type="button"
-                          class="text-xs text-muted hover:text-rose-500"
-                          @click="removeCode(block, codeIndex)"
-                        >
+                          placeholder="所属大类" />
+                        <button type="button" class="text-xs text-muted hover:text-rose-500"
+                          @click="removeCode(block, codeIndex)">
                           删除
                         </button>
                       </div>
@@ -272,15 +226,13 @@
                 <span class="text-xs font-semibold text-muted">特定情况提示</span>
                 <button type="button" class="btn-ghost px-2 py-1 text-[11px]" @click="applyEdgeCases">填入常用规则</button>
               </div>
-              <textarea
-                v-model="builder.edgeCases"
-                rows="5"
-                class="w-full rounded-2xl border border-dashed border-soft bg-surface px-3 py-2 text-sm leading-relaxed text-primary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                placeholder="请输入强制规则与特定情况处理，这将更好地指导AI进行编码。"
-              />
+              <textarea v-model="builder.edgeCases" rows="5"
+                class="w-full rounded-2xl border border-dashed border-soft bg-surface px-3 py-2 text-sm leading-relaxed text-primary transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+                placeholder="请输入强制规则与特定情况处理，这将更好地指导AI进行编码。" />
             </label>
             <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
-              <button type="button" class="btn-primary" @click="buildPrompts" :disabled="promptState.saving || !currentTopic">生成 Prompt</button>
+              <button type="button" class="btn-primary" @click="buildPrompts"
+                :disabled="promptState.saving || !currentTopic">生成 Prompt</button>
               <button type="button" class="btn-ghost" @click="saveDraft">保存草稿</button>
               <span>生成后可下方微调文本再保存到后端。</span>
             </div>
@@ -293,42 +245,26 @@
               <span class="text-xs font-semibold text-muted">System Prompt *</span>
               <span class="text-[11px] text-muted">指导提示词</span>
             </div>
-            <textarea
-              v-model="promptState.system_prompt"
-              rows="10"
-              class="w-full rounded-3xl border border-soft bg-surface px-4 py-3 text-sm leading-relaxed text-primary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              placeholder="You are a strict content-coding engine. Your only job is to return a JSON..."
-            />
+            <textarea v-model="promptState.system_prompt" rows="10"
+              class="w-full rounded-3xl border border-soft bg-surface px-4 py-3 text-sm leading-relaxed text-primary transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+              placeholder="You are a strict content-coding engine. Your only job is to return a JSON..." />
           </label>
           <label class="space-y-2 text-sm text-secondary">
             <div class="flex items-center justify-between">
               <span class="text-xs font-semibold text-muted">Analysis Prompt *</span>
               <span class="text-[11px] text-muted">编码提示词</span>
             </div>
-            <textarea
-              v-model="promptState.analysis_prompt"
-              rows="14"
-              class="w-full rounded-3xl border border-soft bg-surface px-4 py-3 text-sm leading-relaxed text-primary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              placeholder="Coding rules with 信息类别 / 议题编码 / 信源编码 / 报道体裁 / 诉求方式..."
-            />
+            <textarea v-model="promptState.analysis_prompt" rows="14"
+              class="w-full rounded-3xl border border-soft bg-surface px-4 py-3 text-sm leading-relaxed text-primary transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
+              placeholder="Coding rules with 信息类别 / 议题编码 / 信源编码 / 报道体裁 / 诉求方式..." />
           </label>
         </div>
 
         <div class="flex flex-wrap items-center gap-3 text-sm">
-          <button
-            type="button"
-            class="btn-primary"
-            :disabled="promptState.saving || !currentTopic"
-            @click="savePrompt"
-          >
+          <button type="button" class="btn-primary" :disabled="promptState.saving || !currentTopic" @click="savePrompt">
             {{ promptState.saving ? '保存中…' : '保存提示词' }}
           </button>
-          <button
-            type="button"
-            class="btn-secondary"
-            :disabled="promptState.loading"
-            @click="loadPrompt"
-          >
+          <button type="button" class="btn-secondary" :disabled="promptState.loading" @click="loadPrompt">
             重新加载
           </button>
           <span v-if="!currentTopic" class="text-xs text-danger">请先选择专题</span>
@@ -584,11 +520,11 @@ const addBlock = (preset) => {
     ? preset.codes
     : Array.isArray(preset?.groups)
       ? preset.groups.flatMap((group) =>
-          (group.codes || []).map((code) => ({
-            ...code,
-            group: code.group || group.title || group.name || ''
-          }))
-        )
+        (group.codes || []).map((code) => ({
+          ...code,
+          group: code.group || group.title || group.name || ''
+        }))
+      )
       : []
   const codes = presetCodes.map((item) => createCode(item))
   builder.blocks.push({
@@ -715,7 +651,7 @@ const buildPrompts = () => {
 
 const loadPresetExample = () => {
   builder.blocks = []
-  ;(contentAnalysisPreset.blocks || []).forEach((p) => addBlock(p))
+    ; (contentAnalysisPreset.blocks || []).forEach((p) => addBlock(p))
   builder.edgeCases = contentAnalysisPreset.edgeCases || ''
   buildPrompts()
   promptState.message = contentAnalysisPreset.description || '已载入示例，可直接保存或继续调整。'
@@ -759,14 +695,14 @@ const loadDraft = () => {
     if (!raw) return false
     const payload = JSON.parse(raw)
     builder.blocks = []
-    ;(payload.blocks || []).forEach((b) =>
-      addBlock({
-        title: b.title,
-        selection: b.selection,
-        level: b.level,
-        codes: b.codes || []
-      })
-    )
+      ; (payload.blocks || []).forEach((b) =>
+        addBlock({
+          title: b.title,
+          selection: b.selection,
+          level: b.level,
+          codes: b.codes || []
+        })
+      )
     builder.edgeCases = payload.edgeCases || ''
     promptState.system_prompt = payload.system_prompt || ''
     promptState.analysis_prompt = payload.analysis_prompt || ''
