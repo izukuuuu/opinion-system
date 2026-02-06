@@ -35,3 +35,4 @@ venv/
 
 # Workflow
 merge/frontend/.vite/
+frontend/.vite/
