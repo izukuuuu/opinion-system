@@ -247,7 +247,7 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
             df['title'] = df['content']
 
         # 补全并保留列（保留 title；缺失统一填充"未知"）
-        keep_cols = ['id', 'title', 'contents', 'platform', 'author', 'published_at', 'url', 'region', 'hit_words', 'polarity']
+        keep_cols = ['id', 'title', 'contents', 'platform', 'author', 'published_at', 'url', 'region', 'hit_words', 'polarity', 'likecount']
         missing_cols = []
         for col in ['title', 'author', 'url', 'hit_words', 'polarity']:
             if col not in df.columns:
@@ -256,6 +256,12 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
             else:
                 # 将空字符串/NaN 填充为 "未知"
                 df[col] = df[col].replace('', '未知').fillna('未知')
+        
+        # 数值列处理
+        if 'likecount' not in df.columns:
+            df['likecount'] = 0
+        else:
+            df['likecount'] = pd.to_numeric(df['likecount'], errors='coerce').fillna(0).astype(int)
 
         # 重编号（每表独立）
         df = df.reset_index(drop=True)
