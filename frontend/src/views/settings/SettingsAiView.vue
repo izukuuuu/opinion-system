@@ -1,14 +1,6 @@
 <template>
   <section class="max-w-5xl mx-auto space-y-8 pb-12">
-    <header class="space-y-3">
-      <div class="flex items-center gap-2">
-        <SparklesIcon class="w-6 h-6 text-brand-600" />
-        <h2 class="text-2xl font-bold tracking-tight text-slate-900">AI 服务配置</h2>
-      </div>
-      <p class="text-base text-slate-500 max-w-2xl">
-        配置系统的智能核心。您可以接入不同的模型服务提供商，分别为筛选流程、对话助手和向量检索功能指定最合适的模型。
-      </p>
-    </header>
+
 
     <!-- Global Feedback -->
     <div v-if="llmState.error || credentialState.error"
@@ -23,7 +15,7 @@
     </div>
 
     <!-- API Keys Config -->
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+    <div class="card-surface">
       <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
         <h3 class="text-base font-semibold text-slate-900">API 凭证管理</h3>
         <p class="text-sm text-slate-500 mt-1">集中管理所有模型服务的访问凭证。</p>
@@ -108,7 +100,7 @@
     <!-- Models Configuration Grid -->
     <div class="grid gap-6 lg:grid-cols-2">
       <!-- Chat Model -->
-      <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col lg:col-span-2">
+      <section class="card-surface flex flex-col lg:col-span-2">
         <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
           <ChatBubbleBottomCenterTextIcon class="w-5 h-5 text-indigo-500" />
           <div>
@@ -204,7 +196,7 @@
       </section>
 
       <!-- Filter Model -->
-      <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+      <section class="card-surface flex flex-col">
         <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
           <FunnelIcon class="w-5 h-5 text-indigo-500" />
           <div>
@@ -253,8 +245,7 @@
       </section>
 
       <!-- Embedding Model -->
-      <section
-        class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col md:col-span-2 lg:col-span-1">
+      <section class="card-surface flex flex-col md:col-span-2 lg:col-span-1">
         <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
           <CpuChipIcon class="w-5 h-5 text-indigo-500" />
           <div>
@@ -610,13 +601,3 @@ onMounted(() => {
   fetchLlmCredentials()
 })
 </script>
-
-<style scoped>
-.config-card {
-  border-radius: 14px !important;
-}
-
-.no-shadow {
-  box-shadow: none !important;
-}
-</style>
