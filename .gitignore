@@ -34,4 +34,5 @@ frontend/.env.local
 venv/
 
 # Workflow
-merge/
+merge/frontend/.vite/
+frontend/.vite/
