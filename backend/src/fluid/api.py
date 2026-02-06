@@ -57,3 +57,34 @@ def get_result():
     except Exception as e:
         LOGGER.exception("Error retrieving fluid analysis result")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@fluid_bp.route('/archives', methods=['GET'])
+def list_archives():
+    topic = request.args.get('topic')
+    if not topic:
+        return jsonify({"status": "error", "message": "Missing topic"}), 400
+
+    try:
+        # bucket("fluid", topic, "") returns the parent directory for all date ranges
+        # e.g. data/projects/topic/fluid/
+        base_dir = bucket("fluid", topic, "")
+        
+        if not base_dir.exists():
+            return jsonify({"status": "ok", "data": []})
+
+        archives = []
+        for item in base_dir.iterdir():
+            if item.is_dir():
+                # Check if it contains the result file
+                if (item / "fluid_indicators_unified.json").exists():
+                    archives.append(item.name)
+        
+        # Sort archives descending (latest first)
+        # Assumes format YYYYMMDD or YYYYMMDD_YYYYMMDD
+        archives.sort(reverse=True)
+
+        return jsonify({"status": "ok", "data": archives})
+
+    except Exception as e:
+        LOGGER.exception("Error listing fluid archives")
+        return jsonify({"status": "error", "message": str(e)}), 500

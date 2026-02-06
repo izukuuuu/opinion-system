@@ -5,18 +5,21 @@
             <div class="flex flex-wrap gap-4">
                 <label class="flex flex-col text-xs font-semibold text-secondary">
                     <span>专题 Topic</span>
-                    <select v-model="currentTopic" class="input mt-1 min-w-[150px]" @change="refreshData">
+                    <select v-model="currentTopic" class="input mt-1 min-w-[150px]" @change="loadArchives">
                         <option v-for="t in topicOptions" :key="t" :value="t">{{ t }}</option>
                     </select>
                 </label>
                 <label class="flex flex-col text-xs font-semibold text-secondary">
-                    <span>开始日期 Start</span>
-                    <input v-model="startDate" type="date" class="input mt-1" @change="refreshData" />
+                    <span>分析存档 Archive</span>
+                    <select v-model="selectedArchive" class="input mt-1 min-w-[200px]" @change="onArchiveChange">
+                        <option value="" disabled>请选择分析存档</option>
+                        <option v-for="arc in archiveOptions" :key="arc" :value="arc">{{ arc }}</option>
+                    </select>
                 </label>
-                <label class="flex flex-col text-xs font-semibold text-secondary">
-                    <span>结束日期 End</span>
-                    <input v-model="endDate" type="date" class="input mt-1" @change="refreshData" />
-                </label>
+                <!-- Hidden inputs for compatibility or display if needed, but not user editable -->
+                <div v-if="startDate && endDate" class="flex flex-col text-xs text-secondary mt-1">
+                    <span>时间范围: {{ startDate }} ~ {{ endDate }}</span>
+                </div>
             </div>
             <button class="btn-primary flex items-center gap-2" @click="refreshData" :disabled="loading">
                 <ArrowPathIcon class="h-4 w-4" :class="{ 'animate-spin': loading }" />
@@ -83,22 +86,34 @@
 
             <!-- Indicators -->
             <section class="card-surface p-6">
-                <h3 class="text-lg font-semibold text-primary mb-2">观点极化程度 (涡度)</h3>
+                <h3 class="text-lg font-semibold text-primary mb-2 flex items-center gap-2">
+                    观点极化程度 (涡度)
+                    <span v-if="currentVortex > thresholds.vortex"
+                        class="px-2 py-0.5 bg-red-500 text-white text-[10px] rounded uppercase font-bold">高风险</span>
+                </h3>
                 <p class="text-xs text-secondary mb-4">衡量舆论场中观点对立和极化的程度，超过 {{ thresholds.vortex }} 表示高风险</p>
                 <div ref="vortexChartRef" class="w-full h-[300px]"></div>
             </section>
 
             <section class="card-surface p-6">
-                <h3 class="text-lg font-semibold text-primary mb-2">影响力驱动 (压强梯度)</h3>
+                <h3 class="text-lg font-semibold text-primary mb-2 flex items-center gap-2">
+                    影响力驱动 (压强梯度)
+                    <span v-if="currentPressure > thresholds.pressure"
+                        class="px-2 py-0.5 bg-red-500 text-white text-[10px] rounded uppercase font-bold">高风险</span>
+                </h3>
                 <p class="text-xs text-secondary mb-4">反映意见领袖与普通用户之间的影响力差异，超过 {{ thresholds.pressure }} 表示高风险</p>
                 <div ref="pressureChartRef" class="w-full h-[300px]"></div>
             </section>
 
             <section class="card-surface p-6">
-                <h3 class="text-lg font-semibold text-primary mb-2">
+                <h3 class="text-lg font-semibold text-primary mb-2 flex flex-wrap items-center gap-2">
                     舆论场稳定度 (雷诺数)
-                    <span v-if="currentFlowState" class="ml-2 px-2 py-0.5 rounded text-xs text-white bg-blue-500">流态: {{
-                        currentFlowState }}</span>
+                    <span v-if="currentReynolds > thresholds.reynolds"
+                        class="px-2 py-0.5 bg-red-500 text-white text-[10px] rounded uppercase font-bold">高风险</span>
+                    <span v-if="currentFlowState"
+                        class="px-2 py-0.5 rounded text-[10px] text-white bg-blue-600 font-bold uppercase tracking-wider">流态:
+                        {{
+                            currentFlowState }}</span>
                 </h3>
                 <p class="text-xs text-secondary mb-4">评估舆论场的稳定状态，超过 {{ thresholds.reynolds }} 表示高风险</p>
                 <div ref="reynoldsChartRef" class="w-full h-[300px]"></div>
@@ -124,12 +139,28 @@
                                 'text-red-500': aiAnalysis['风险等级'] === '高'
                             }">{{ aiAnalysis['风险等级'] }}</div>
                         </div>
+                        <div v-if="aiAnalysis['关键指标'] && aiAnalysis['关键指标'].length"
+                            class="bg-indigo-50 p-4 rounded-xl border-l-4 border-indigo-600">
+                            <div class="font-bold text-indigo-800 text-sm mb-1">🎯 关键指标</div>
+                            <div class="text-sm text-indigo-900">{{ aiAnalysis['关键指标'].join('、') }}</div>
+                        </div>
+                        <div v-if="aiAnalysis['风险点'] && aiAnalysis['风险点'].length"
+                            class="bg-indigo-50 p-4 rounded-xl border-l-4 border-indigo-600">
+                            <div class="font-bold text-indigo-800 text-sm mb-1">⚡ 风险点</div>
+                            <ul class="list-disc list-inside text-sm text-indigo-900 space-y-1">
+                                <li v-for="(risk, idx) in aiAnalysis['风险点']" :key="idx">{{ risk }}</li>
+                            </ul>
+                        </div>
                         <div v-if="aiAnalysis['建议措施'] && aiAnalysis['建议措施'].length"
                             class="bg-indigo-50 p-4 rounded-xl border-l-4 border-indigo-600">
                             <div class="font-bold text-indigo-800 text-sm mb-1">💡 建议措施</div>
                             <ul class="list-decimal list-inside text-sm text-indigo-900 space-y-1">
                                 <li v-for="(measure, idx) in aiAnalysis['建议措施']" :key="idx">{{ measure }}</li>
                             </ul>
+                        </div>
+                        <div v-if="aiAnalysis['预警提示']" class="bg-indigo-50 p-4 rounded-xl border-l-4 border-indigo-600">
+                            <div class="font-bold text-indigo-800 text-sm mb-1">🔔 预警提示</div>
+                            <div class="text-sm text-indigo-900 italic font-medium">{{ aiAnalysis['预警提示'] }}</div>
                         </div>
                     </div>
                     <div v-else-if="recommendations.length">
@@ -165,6 +196,8 @@ const error = ref(null)
 const hasData = ref(false)
 const topicOptions = ref([])
 const currentTopic = ref('')
+const archiveOptions = ref([])
+const selectedArchive = ref('')
 const startDate = ref('')
 const endDate = ref('')
 
@@ -190,25 +223,31 @@ let reynoldsChart = null
 // Computed for current window data
 const currentFiveDim = computed(() => {
     const res = calculationResults.value[selectedWindowIndex.value] || {}
-    // Need to extract raw values or normalized values depending on display needs.
-    // Assuming calculationResults structure matches backend output
+    const getVal = (v) => (v && typeof v === 'object') ? (v.值 || 0) : (v || 0)
+
     return {
-        diffusionSpeed: res['流速(I)'] || 0,
-        platformConcentration: res['粘度(C)'] || 0,
-        participationDensity: res['密度(D)'] || 0,
-        sentimentTemperature: res['温度(T)'] || 0,
-        externalPressure: res['压力(S)'] || 0
+        diffusionSpeed: getVal(res['流速(I)']),
+        platformConcentration: getVal(res['粘度(C)']),
+        participationDensity: getVal(res['密度(D)']),
+        sentimentTemperature: getVal(res['温度(T)']),
+        externalPressure: getVal(res['压力(S)'])
     }
 })
 
 const currentFlowState = computed(() => {
     const res = calculationResults.value[selectedWindowIndex.value] || {}
-    return res['流态'] || ''
+    return res['流态'] || (res['雷诺数(Re)'] && res['雷诺数(Re)'].流态) || '未知'
 })
 
 const currentDateRec = computed(() => {
     return calculationResults.value[selectedWindowIndex.value] || {}
 })
+
+const getNumericVal = (v) => (v && typeof v === 'object') ? (v.值 || 0) : (v || 0)
+
+const currentVortex = computed(() => getNumericVal(currentDateRec.value['涡度(Ω)'] || currentDateRec.value['涡度']))
+const currentPressure = computed(() => getNumericVal(currentDateRec.value['压强梯度(G)'] || currentDateRec.value['压强梯度']))
+const currentReynolds = computed(() => getNumericVal(currentDateRec.value['雷诺数(Re)'] || currentDateRec.value['雷诺数']))
 
 watch(selectedWindowIndex, () => {
     updateRadarChart()
@@ -230,6 +269,54 @@ const loadTopics = async () => {
                 .filter(name => name)
         }
     } catch (e) { console.error(e) }
+}
+
+const loadArchives = async () => {
+    archiveOptions.value = []
+    selectedArchive.value = ''
+    if (!currentTopic.value) return
+
+    try {
+        const url = new URL(`${backendUrl}/api/fluid/archives`)
+        url.searchParams.append('topic', currentTopic.value)
+        const res = await fetch(url)
+        const json = await res.json()
+        if (json.status === 'ok') {
+            archiveOptions.value = json.data || []
+            // Auto select latest if available
+            if (archiveOptions.value.length > 0) {
+                selectedArchive.value = archiveOptions.value[0]
+                onArchiveChange()
+            }
+        }
+    } catch (e) {
+        console.error("Failed to load archives", e)
+    }
+}
+
+const onArchiveChange = () => {
+    if (!selectedArchive.value) return
+
+    // Parse start/end from archive name (e.g. "20230101_20230131" or "20230101")
+    const parts = selectedArchive.value.split('_')
+    if (parts.length === 2) {
+        // Simple heuristic: assume format YYYYMMDD
+        // Convert to YYYY-MM-DD for API/display consistency if needed or keep raw
+        // The API likely expects the exact strings passed during creation or generic strings
+        // But for "start_date" param in get_result, we might need to be careful.
+        // Actually api.py get_result reconstructs `date_range = f"{start_date}_{end_date}"`
+
+        // Let's assume the archive name IS the date_range identifier.
+        // We need to reverse engineer start_date and end_date to pass to /result API
+        // which reconstructs it. 
+        // /result?topic=T&start_date=20230101&end_date=20230131 => date_range="20230101_20230131"
+        startDate.value = parts[0]
+        endDate.value = parts[1]
+    } else {
+        startDate.value = selectedArchive.value
+        endDate.value = ''
+    }
+    refreshData()
 }
 
 const refreshData = async () => {
@@ -309,28 +396,30 @@ const initCharts = () => {
 }
 
 const renderHeatChart = () => {
+    if (!heatChart) return
     const dates = calculationResults.value.map(item => {
-        // Format date nicely if possible
         const d = item['日期'] || ''
-        return d.split(' ')[1] || d // Extract time part if format is "YYYY-MM-DD HH:MM:SS"
+        return d.split(' ')[1] || d
     })
 
-    // H_Predict and H_Real
-    // Note: Backend might not return prediction if not requested, but fluid_analysis.py returns '窗口热度'(Display) and 'H'(Theoretical)
-    // Adjust key names based on fluid_analysis.py output
-    const heatValues = calculationResults.value.map(item => item['窗口热度'] || 0)
+    const getVal = (v) => (v && typeof v === 'object') ? (v.值 || 0) : (v || 0)
+
+    // Support H_预测 or H_真实
+    const realValues = calculationResults.value.map(item => getVal(item['H_真实'] || item['窗口热度']))
+    const predValues = calculationResults.value.map(item => getVal(item['H_预测'] || item['热度(H)']))
 
     const option = {
         title: { text: '' },
         tooltip: { trigger: 'axis' },
-        legend: { data: ['热度'] },
-        xAxis: { type: 'category', data: dates },
+        legend: { data: ['实际热度', '预测模型'] },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: dates, boundaryGap: false },
         yAxis: { type: 'value' },
         series: [
             {
-                name: '热度',
+                name: '实际热度',
                 type: 'line',
-                data: heatValues,
+                data: realValues,
                 color: '#ff7043',
                 lineStyle: { width: 3 },
                 areaStyle: {
@@ -339,7 +428,17 @@ const renderHeatChart = () => {
                         { offset: 1, color: 'rgba(255, 112, 67, 0.0)' }
                     ])
                 },
-                smooth: true
+                smooth: true,
+                symbol: 'none'
+            },
+            {
+                name: '预测模型',
+                type: 'line',
+                data: predValues,
+                color: '#3b82f6',
+                lineStyle: { width: 2, type: 'dashed' },
+                smooth: true,
+                symbol: 'none'
             }
         ]
     }
@@ -347,6 +446,7 @@ const renderHeatChart = () => {
 }
 
 const updateRadarChart = () => {
+    if (!radarChart) return
     const data = currentFiveDim.value
     const option = {
         radar: {
@@ -388,18 +488,20 @@ const updateRadarChart = () => {
 }
 
 const updateIndicators = () => {
+    if (!vortexChart || !pressureChart || !reynoldsChart) return
     const res = currentDateRec.value
+    const getVal = (v) => (v && typeof v === 'object') ? (v.值 || 0) : (v || 0)
 
     // Vortex
-    const vortexVal = res['涡度(Ω)'] || 0
+    const vortexVal = getVal(res['涡度(Ω)'] || res['涡度'])
     renderGauge(vortexChart, '涡度', vortexVal, thresholds.vortex, 1.5)
 
     // Pressure
-    const pressVal = res['压强梯度(G)'] || 0
+    const pressVal = getVal(res['压强梯度(G)'] || res['压强梯度'])
     renderGauge(pressureChart, '压强梯度', pressVal, thresholds.pressure, 1.5)
 
     // Reynolds
-    const reVal = res['雷诺数(Re)'] || 0
+    const reVal = getVal(res['雷诺数(Re)'] || res['雷诺数'])
     renderGauge(reynoldsChart, '雷诺数', reVal, thresholds.reynolds, 4000)
 }
 
@@ -440,8 +542,8 @@ onMounted(() => {
     if (route.query.start) startDate.value = route.query.start
     if (route.query.end) endDate.value = route.query.end
 
-    if (currentTopic.value && startDate.value) {
-        refreshData()
+    if (currentTopic.value) {
+        loadArchives()
     }
 
     window.addEventListener('resize', resizeCharts)

@@ -16,9 +16,11 @@
                 <div class="grid gap-6 md:grid-cols-3">
                     <!-- Topic Selection -->
                     <div class="space-y-2">
-                        <label class="text-xs font-semibold text-muted tracking-wide uppercase">专题 Topic *</label>
+                        <div class="flex items-center h-5">
+                            <label class="text-xs font-semibold text-muted tracking-wide uppercase">专题 Topic *</label>
+                        </div>
                         <div class="relative">
-                            <select v-model="form.topic" class="input w-full appearance-none pr-8"
+                            <select v-model="form.topic" class="input w-full appearance-none pr-8 h-11"
                                 :disabled="topicsState.loading || !topicOptions.length" required>
                                 <option value="" disabled>请选择远程专题</option>
                                 <option v-for="option in topicOptions" :key="`fluid-${option}`" :value="option">
@@ -34,17 +36,20 @@
 
                     <!-- Date Range -->
                     <div class="col-span-2 space-y-2">
-                        <span class="text-xs font-semibold text-muted tracking-wide uppercase">分析时间范围 Date Range
-                            *</span>
+                        <div class="flex items-center gap-2 h-5">
+                            <label class="text-xs font-semibold text-muted tracking-wide uppercase">分析时间范围 Date Range
+                                *</label>
+                            <ArrowPathIcon v-if="fetchingDates" class="h-3 w-3 animate-spin text-brand-600" />
+                        </div>
                         <div class="flex items-center gap-4">
                             <div class="relative flex-1">
-                                <input v-model="form.start_date" type="date" class="input w-full" required />
+                                <input v-model="form.start_date" type="date" class="input w-full h-11 px-3" required />
                                 <span
                                     class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted uppercase">Start</span>
                             </div>
-                            <span class="text-muted">→</span>
+                            <span class="text-muted shrink-0">→</span>
                             <div class="relative flex-1">
-                                <input v-model="form.end_date" type="date" class="input w-full" required />
+                                <input v-model="form.end_date" type="date" class="input w-full h-11 px-3" required />
                                 <span
                                     class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted uppercase">End</span>
                             </div>
@@ -139,6 +144,47 @@ const form = reactive({
 const loading = ref(false)
 const message = ref('')
 const success = ref(false)
+const fetchingDates = ref(false)
+
+const fetchDateRange = async (newTopic) => {
+    if (!newTopic) return
+    fetchingDates.value = true
+
+    try {
+        const url = new URL(`${backendUrl}/api/fetch/availability`)
+        url.searchParams.append('topic', newTopic)
+
+        const res = await fetch(url)
+        const json = await res.json()
+
+        // Backend typically uses 'ok' or 'success'. Checking both to be safe.
+        // The data structure is json.data.range.start/end
+        if ((json.status === 'ok' || json.status === 'success') && json.data && json.data.range) {
+            const { start, end } = json.data.range
+
+            const toDateStr = (d) => {
+                if (!d) return ''
+                if (d.includes('-')) return d // Already ISO-like
+                if (d.length === 8) {
+                    return `${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}`
+                }
+                return d
+            }
+
+            if (start) form.start_date = toDateStr(start)
+            if (end) form.end_date = toDateStr(end)
+        }
+    } catch (e) {
+        console.error("Failed to fetch date range", e)
+    } finally {
+        fetchingDates.value = false
+    }
+}
+
+import { watch } from 'vue'
+watch(() => form.topic, (newVal) => {
+    fetchDateRange(newVal)
+})
 
 const runAnalysis = async () => {
     loading.value = true

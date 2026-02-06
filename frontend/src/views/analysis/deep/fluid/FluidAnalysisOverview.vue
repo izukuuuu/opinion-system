@@ -182,7 +182,7 @@ import {
     ChartBarIcon,
     GlobeAltIcon,
     BeakerIcon,
-    WaveformIcon,
+    SignalIcon,
     AdjustmentsHorizontalIcon,
     VariableIcon
 } from '@heroicons/vue/24/solid'
