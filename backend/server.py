@@ -1711,6 +1711,31 @@ def main() -> None:
 
 # ====== RAG (Retrieval-Augmented Generation) API Endpoints ======
 
+
+@app.post("/api/rag/config")
+def update_rag_config():
+    """更新RAG配置"""
+    try:
+        payload = request.get_json(silent=True) or {}
+
+        # Validate required fields
+        if not payload.get("config"):
+            return error("Missing required field: config")
+
+        # Save config
+        config_path = BACKEND_DIR / "src" / "rag" / "config" / "default.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        import json
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(payload["config"], f, indent=2, ensure_ascii=False)
+
+        return success({"message": "RAG配置已更新"})
+    except Exception as exc:
+        LOGGER.exception("Failed to update RAG config")
+        return error(f"更新RAG配置失败: {str(exc)}")
+
+
 @app.get("/api/rag/topics")
 def get_rag_topics():
     """获取可用的RAG专题列表"""
@@ -1984,6 +2009,46 @@ def universal_rag_retrieve():
     except Exception as exc:
         LOGGER.exception("Failed to retrieve documents")
         return error(f"检索失败: {str(exc)}")
+
+
+@app.post("/api/rag/evaluate")
+def rag_evaluate():
+    """RAG 评估接口：Precision、Recall、LLM Judge（仅 RouterRAG）"""
+    try:
+        payload = request.get_json(silent=True) or {}
+        topic = (payload.get("topic") or "").strip()
+        eval_data_path = (payload.get("eval_data_path") or "").strip()
+        mode = payload.get("mode", "mixed")
+        use_judge = payload.get("use_judge", True)
+        judge_mode = payload.get("judge_mode", "with_reference")
+        fill_relevant_docs_with_keywords = payload.get("fill_relevant_docs_with_keywords", True)
+        relevant_method = payload.get("relevant_method", "embedding")
+
+        if not topic:
+            return error("Missing required field: topic")
+        if not eval_data_path:
+            return error("Missing required field: eval_data_path")
+
+        from pathlib import Path
+        from src.rag.evaluator import run_evaluation
+
+        path = Path(eval_data_path)
+        if not path.is_file():
+            return error("eval_data_path is not an existing file")
+
+        result = run_evaluation(
+            topic=topic,
+            eval_data_path=path,
+            mode=mode,
+            use_judge=use_judge,
+            judge_mode=judge_mode,
+            fill_relevant_docs_with_keywords=fill_relevant_docs_with_keywords,
+            relevant_method=relevant_method,
+        )
+        return success(result)
+    except Exception as exc:
+        LOGGER.exception("RAG evaluate failed")
+        return error(f"RAG 评估失败: {str(exc)}")
 
 
 @app.post("/api/rag/export")

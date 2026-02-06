@@ -143,6 +143,28 @@ def upload(topic, date):
         print(f"上传失败: {topic} - {date}{extra}")
 
 
+@cli.command('GraphSync')
+@click.option('--topic', required=True, help='专题名称')
+@click.option('--date', required=True, help='日期 (YYYY-MM-DD)')
+def graph_sync(topic, date):
+    """
+    将已上传的专题数据同步到 Neo4j 图数据库
+    """
+    try:
+        from src.graph.sync_mysql_to_neo4j import sync_after_upload
+        result = sync_after_upload(topic, date, logger=None)
+        ok = result.get("status") == "ok"
+        _log_project_event(topic, "graph_sync", {"date": date, "source": "cli", "result": result}, ok)
+        if ok:
+            print(f"Neo4j 同步成功: {topic} - {date}")
+        else:
+            msg = result.get("message", "")
+            print(f"Neo4j 同步失败: {topic} - {date}" + (f" - {msg}" if msg else ""))
+    except Exception as e:
+        _log_project_event(topic, "graph_sync", {"date": date, "source": "cli", "error": str(e)}, False)
+        print(f"Neo4j 同步异常: {topic} - {date} - {e}")
+
+
 @cli.command('Query')
 @click.option('--json', 'show_json', is_flag=True, help='以JSON格式输出完整结果')
 @click.option(
@@ -401,7 +423,18 @@ def data_pipeline(topic, date):
     if not _as_success(upload_success):
         print("上传步骤失败")
         return False
-    
+
+    # 5. Neo4j 图同步（Upload 成功后；未配置或失败仅打日志，不中断流水线）
+    try:
+        from src.graph.sync_mysql_to_neo4j import sync_after_upload
+        graph_result = sync_after_upload(topic, date, logger=None)
+        _log_project_event(topic, "graph_sync", {"date": date, "source": "pipeline", "result": graph_result}, graph_result.get("status") == "ok")
+        if graph_result.get("status") == "error":
+            print("Neo4j 图同步失败（流水线继续）:", graph_result.get("message", ""))
+    except Exception as e:
+        _log_project_event(topic, "graph_sync", {"date": date, "source": "pipeline", "error": str(e)}, False)
+        print("Neo4j 图同步异常（流水线继续）:", e)
+
     return True
 
 
@@ -557,6 +590,39 @@ def router_retrieve_command(topic, query, mode, topk_graphrag, topk_normalrag, t
         
     except Exception as e:
         print(f"RouterRetrieve检索失败: {e}")
+        return False
+
+
+@cli.command('EvalRAG')
+@click.option('--topic', required=True, help='RouterRAG 主题名称')
+@click.option('--eval-data', 'eval_data_path', required=True, type=click.Path(exists=True, path_type=Path), help='评估数据 JSON 文件路径')
+@click.option('--mode', default='mixed', type=click.Choice(['mixed', 'graphrag', 'normalrag', 'tagrag']), help='检索模式')
+@click.option('--relevant-method', default='embedding', type=click.Choice(['embedding', 'keywords']),
+              help='无标注时判定相关文档的方式：embedding=向量相似度，keywords=关键词匹配（默认 embedding）')
+@click.option('--judge-mode', default='with_reference', type=click.Choice(['with_reference', 'no_reference']),
+              help='Judge 评分方式：with_reference=问题+标准答案+模型答案，no_reference=仅问题+模型答案不依赖文档（默认 with_reference）')
+@click.option('--no-judge', is_flag=True, help='禁用 LLM Judge')
+@click.option('--no-fill-relevant', is_flag=True, help='不自动补充 relevant_doc_ids（需在 JSON 中提供）')
+def eval_rag_command(topic, eval_data_path, mode, relevant_method, judge_mode, no_judge, no_fill_relevant):
+    """
+    运行 RAG 评估：Precision、Recall、LLM Judge（RouterRAG）
+    """
+    from src.rag.evaluator import run_evaluation
+
+    try:
+        result = run_evaluation(
+            topic=topic,
+            eval_data_path=eval_data_path,
+            mode=mode,
+            use_judge=not no_judge,
+            judge_mode=judge_mode,
+            fill_relevant_docs_with_keywords=not no_fill_relevant,
+            relevant_method=relevant_method,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return True
+    except Exception as e:
+        print(f"EvalRAG 失败: {e}")
         return False
 
 
