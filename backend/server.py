@@ -402,12 +402,6 @@ def chat_ai():
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
-
-
-
-
-
-
 @app.get("/api/filter/template")
 def get_filter_template():
     topic_param = str(request.args.get("topic", "") or "").strip()

@@ -3,6 +3,10 @@ from server_support.ops import _execute_operation
 from server_support.responses import error, success
 from server_support import require_fields, resolve_topic_identifier
 from src.project import get_project_manager
+from src.topic.prompt_config import (
+    load_topic_bertopic_prompt_config,
+    persist_topic_bertopic_prompt_config,
+)
 
 PROJECT_MANAGER = get_project_manager()
 from src.utils.setting.paths import bucket, get_data_root
@@ -85,9 +89,11 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
         LOGGER.warning("Failed to ensure project storage for BERTopic", exc_info=True)
 
     # 使用新的BERTopic实现，集成fetch流程
+    supports_run_params = False
     try:
         # 导入新的BERTopic模块
         from src.topic.data_bertopic_qwen_v2 import run_topic_bertopic
+        supports_run_params = True
 
         # 确保fetch数据可用性检查
         from src.fetch.data_fetch import get_topic_available_date_range
@@ -124,18 +130,27 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     stopwords = payload.get("stopwords")
     stopwords = str(stopwords).strip() if stopwords else None
+    run_params = payload.get("run_params")
+    if not isinstance(run_params, dict):
+        run_params = {}
 
     # 运行BERTopic分析
+    run_kwargs = {
+        "fetch_dir": fetch_dir,
+        "userdict": userdict,
+        "stopwords": stopwords,
+        "bucket_topic": bucket_topic,
+        "display_topic": topic_label,
+    }
+    if supports_run_params:
+        run_kwargs["db_topic"] = db_topic
+        run_kwargs["run_params"] = run_params
+
     result = run_topic_bertopic(
         bucket_topic,
         start_date,
         end_date,
-        fetch_dir=fetch_dir,
-        userdict=userdict,
-        stopwords=stopwords,
-        bucket_topic=bucket_topic,
-        db_topic=db_topic,
-        display_topic=topic_label,
+        **run_kwargs,
     )
 
     if result:
@@ -274,6 +289,85 @@ def check_topic_availability():
     }
 
     return success({"data": response})
+
+
+@topic_bp.route('/bertopic/prompt', methods=['GET'])
+def get_topic_bertopic_prompt():
+    """获取 BERTopic 提示词配置。"""
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+
+    if not any([topic, project, dataset_id]):
+        return error("Missing required field(s): topic/project/dataset_id")
+
+    payload = {
+        "topic": topic,
+        "project": project,
+        "dataset_id": dataset_id,
+    }
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError:
+        topic_identifier = (topic or project or dataset_id).strip()
+        if not topic_identifier:
+            return error("Missing required field(s): topic/project/dataset_id")
+        display_name = topic or project or topic_identifier
+
+    try:
+        data = load_topic_bertopic_prompt_config(topic_identifier)
+    except Exception as exc:
+        LOGGER.exception("Failed to load BERTopic prompt config")
+        return error(f"加载 BERTopic 提示词配置失败: {str(exc)}")
+
+    data["topic_identifier"] = topic_identifier
+    data["topic"] = display_name or topic_identifier
+    return success({"data": data})
+
+
+@topic_bp.route('/bertopic/prompt', methods=['POST'])
+def save_topic_bertopic_prompt():
+    """保存 BERTopic 提示词配置。"""
+    payload = request.get_json(silent=True) or {}
+    topic = str(payload.get("topic") or "").strip()
+    project = str(payload.get("project") or "").strip()
+    dataset_id = str(payload.get("dataset_id") or "").strip()
+
+    if not any([topic, project, dataset_id]):
+        return error("Missing required field(s): topic/project/dataset_id")
+
+    resolution_payload = {
+        "topic": topic,
+        "project": project,
+        "dataset_id": dataset_id,
+    }
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(
+            resolution_payload,
+            PROJECT_MANAGER,
+        )
+    except ValueError:
+        topic_identifier = (topic or project or dataset_id).strip()
+        if not topic_identifier:
+            return error("Missing required field(s): topic/project/dataset_id")
+        display_name = topic or project or topic_identifier
+
+    try:
+        data = persist_topic_bertopic_prompt_config(
+            topic_identifier,
+            payload.get("target_topics", payload.get("targetTopics")),
+            str(payload.get("recluster_system_prompt") or ""),
+            str(payload.get("recluster_user_prompt") or ""),
+            str(payload.get("keyword_system_prompt") or ""),
+            str(payload.get("keyword_user_prompt") or ""),
+        )
+    except Exception as exc:
+        LOGGER.exception("Failed to save BERTopic prompt config")
+        return error(f"保存 BERTopic 提示词配置失败: {str(exc)}")
+
+    data["topic_identifier"] = topic_identifier
+    data["topic"] = display_name or topic_identifier
+    return success({"data": data})
 
 
 @topic_bp.route('/bertopic/results', methods=['GET'])

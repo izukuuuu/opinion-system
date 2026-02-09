@@ -12,6 +12,35 @@ const topicsState = reactive({
 
 const topicOptions = computed(() => topicsState.options)
 
+const DEFAULT_BERTOPIC_RUN_PARAMS = Object.freeze({
+  vectorizer: {
+    ngram_min: 1,
+    ngram_max: 2,
+    min_df: 2,
+    max_df: 0.8
+  },
+  umap: {
+    n_neighbors: 15,
+    n_components: 5,
+    min_dist: 0.0,
+    metric: 'cosine',
+    random_state: 42
+  },
+  hdbscan: {
+    min_cluster_size: 10,
+    min_samples: 5,
+    metric: 'euclidean',
+    cluster_selection_method: 'eom'
+  },
+  bertopic: {
+    top_n_words: 10,
+    calculate_probabilities: false,
+    verbose: true
+  }
+})
+
+const createDefaultRunParams = () => JSON.parse(JSON.stringify(DEFAULT_BERTOPIC_RUN_PARAMS))
+
 const form = reactive({
   topic: '',
   project: '',
@@ -19,8 +48,27 @@ const form = reactive({
   endDate: '',
   fetchDir: '',
   userdict: '',
-  stopwords: ''
+  stopwords: '',
+  runParams: createDefaultRunParams()
 })
+
+const DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS = 8
+
+const bertopicPromptState = reactive({
+  loading: false,
+  saving: false,
+  error: '',
+  message: '',
+  exists: false,
+  path: '',
+  targetTopics: DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS,
+  reclusterSystemPrompt: '',
+  reclusterUserPrompt: '',
+  keywordSystemPrompt: '',
+  keywordUserPrompt: ''
+})
+
+const bertopicPromptBaseline = ref(null)
 
 const availableRange = reactive({
   loading: false,
@@ -47,7 +95,94 @@ const historyState = reactive({
 
 const analysisHistory = ref([])
 
+const hasPromptDraftChanges = computed(() => {
+  const baseline = bertopicPromptBaseline.value
+  if (!baseline) return false
+  const current = capturePromptSnapshot()
+  return JSON.stringify(current) !== JSON.stringify(baseline)
+})
+
 let initialized = false
+
+const normalizePromptText = (value) => (typeof value === 'string' ? value : '').trim()
+
+const normalizeTargetTopics = (value) => {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  if (Number.isNaN(parsed)) return DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS
+  if (parsed < 2) return 2
+  if (parsed > 50) return 50
+  return parsed
+}
+
+const capturePromptSnapshot = () => ({
+  targetTopics: normalizeTargetTopics(bertopicPromptState.targetTopics),
+  reclusterSystemPrompt: normalizePromptText(bertopicPromptState.reclusterSystemPrompt),
+  reclusterUserPrompt: normalizePromptText(bertopicPromptState.reclusterUserPrompt),
+  keywordSystemPrompt: normalizePromptText(bertopicPromptState.keywordSystemPrompt),
+  keywordUserPrompt: normalizePromptText(bertopicPromptState.keywordUserPrompt)
+})
+
+const setPromptStateFromPayload = (payload) => {
+  const data = payload || {}
+  bertopicPromptState.exists = Boolean(data.exists)
+  bertopicPromptState.path = data.path || ''
+  bertopicPromptState.targetTopics = normalizeTargetTopics(data.target_topics ?? data.targetTopics)
+  bertopicPromptState.reclusterSystemPrompt = data.recluster_system_prompt || data.reclusterSystemPrompt || ''
+  bertopicPromptState.reclusterUserPrompt = data.recluster_user_prompt || data.reclusterUserPrompt || ''
+  bertopicPromptState.keywordSystemPrompt = data.keyword_system_prompt || data.keywordSystemPrompt || ''
+  bertopicPromptState.keywordUserPrompt = data.keyword_user_prompt || data.keywordUserPrompt || ''
+  bertopicPromptBaseline.value = capturePromptSnapshot()
+}
+
+const clearPromptState = () => {
+  bertopicPromptState.exists = false
+  bertopicPromptState.path = ''
+  bertopicPromptState.targetTopics = DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS
+  bertopicPromptState.reclusterSystemPrompt = ''
+  bertopicPromptState.reclusterUserPrompt = ''
+  bertopicPromptState.keywordSystemPrompt = ''
+  bertopicPromptState.keywordUserPrompt = ''
+  bertopicPromptState.error = ''
+  bertopicPromptState.message = ''
+  bertopicPromptState.loading = false
+  bertopicPromptState.saving = false
+  bertopicPromptBaseline.value = null
+}
+
+const sanitizeRunParamsForPayload = (params = {}) => {
+  const source = params || {}
+  const vectorizer = source.vectorizer || {}
+  const umap = source.umap || {}
+  const hdbscan = source.hdbscan || {}
+  const bertopic = source.bertopic || {}
+
+  return {
+    vectorizer: {
+      ngram_min: Number.parseInt(String(vectorizer.ngram_min ?? 1), 10),
+      ngram_max: Number.parseInt(String(vectorizer.ngram_max ?? 2), 10),
+      min_df: Number(vectorizer.min_df ?? 2),
+      max_df: Number(vectorizer.max_df ?? 0.8)
+    },
+    umap: {
+      n_neighbors: Number.parseInt(String(umap.n_neighbors ?? 15), 10),
+      n_components: Number.parseInt(String(umap.n_components ?? 5), 10),
+      min_dist: Number(umap.min_dist ?? 0),
+      metric: String(umap.metric || 'cosine').trim() || 'cosine',
+      random_state: Number.parseInt(String(umap.random_state ?? 42), 10)
+    },
+    hdbscan: {
+      min_cluster_size: Number.parseInt(String(hdbscan.min_cluster_size ?? 10), 10),
+      min_samples: Number.parseInt(String(hdbscan.min_samples ?? 5), 10),
+      metric: String(hdbscan.metric || 'euclidean').trim() || 'euclidean',
+      cluster_selection_method: String(hdbscan.cluster_selection_method || 'eom').trim() || 'eom'
+    },
+    bertopic: {
+      top_n_words: Number.parseInt(String(bertopic.top_n_words ?? 10), 10),
+      calculate_probabilities: Boolean(bertopic.calculate_probabilities),
+      verbose: Boolean(bertopic.verbose)
+    }
+  }
+}
 
 export const useTopicBertopicAnalysis = () => {
   if (!initialized) {
@@ -59,6 +194,8 @@ export const useTopicBertopicAnalysis = () => {
     topicsState,
     topicOptions,
     form,
+    bertopicPromptState,
+    hasPromptDraftChanges,
     availableRange,
     runState,
     lastResult,
@@ -67,11 +204,14 @@ export const useTopicBertopicAnalysis = () => {
     historyState,
     analysisHistory,
     loadTopics,
+    loadBertopicPrompt,
+    saveBertopicPrompt,
     loadAvailableRange,
     resetState,
     runBertopicAnalysis,
     resetForm,
     resetOptionalFields,
+    resetRunParams,
     appendLog,
     clearLogs
   }
@@ -86,11 +226,22 @@ function initializeStore() {
     (newTopic) => {
       if (newTopic) {
         loadAvailableRange()
+        loadBertopicPrompt(newTopic)
       } else {
         clearAvailableRange()
+        clearPromptState()
       }
     },
     { immediate: true }
+  )
+
+  watch(
+    () => form.project,
+    () => {
+      if (!form.topic) return
+      loadAvailableRange()
+      loadBertopicPrompt(form.topic)
+    }
   )
 }
 
@@ -228,6 +379,72 @@ const loadAvailableRange = async () => {
   }
 }
 
+const loadBertopicPrompt = async (topicOverride = '') => {
+  const topic = (topicOverride || form.topic || '').trim()
+  if (!topic) {
+    clearPromptState()
+    return
+  }
+
+  bertopicPromptState.loading = true
+  bertopicPromptState.error = ''
+  bertopicPromptState.message = ''
+
+  try {
+    const params = new URLSearchParams({ topic })
+    const project = (form.project || '').trim()
+    if (project) {
+      params.set('project', project)
+    }
+    const response = await callApi(`/api/topic/bertopic/prompt?${params.toString()}`, { method: 'GET' })
+    const data = response?.data || {}
+    setPromptStateFromPayload(data)
+  } catch (error) {
+    bertopicPromptState.error = error instanceof Error ? error.message : '加载 BERTopic 提示词失败'
+  } finally {
+    bertopicPromptState.loading = false
+  }
+}
+
+const saveBertopicPrompt = async (options = {}) => {
+  const topic = (options.topic || form.topic || '').trim()
+  if (!topic) {
+    bertopicPromptState.error = '请先选择专题再保存提示词'
+    return null
+  }
+
+  const snapshot = capturePromptSnapshot()
+
+  bertopicPromptState.saving = true
+  bertopicPromptState.error = ''
+  bertopicPromptState.message = ''
+
+  try {
+    const response = await callApi('/api/topic/bertopic/prompt', {
+      method: 'POST',
+      body: JSON.stringify({
+        topic,
+        project: form.project || undefined,
+        target_topics: snapshot.targetTopics,
+        recluster_system_prompt: snapshot.reclusterSystemPrompt,
+        recluster_user_prompt: snapshot.reclusterUserPrompt,
+        keyword_system_prompt: snapshot.keywordSystemPrompt,
+        keyword_user_prompt: snapshot.keywordUserPrompt
+      })
+    })
+
+    const data = response?.data || {}
+    setPromptStateFromPayload(data)
+    bertopicPromptState.message = 'BERTopic 提示词已保存'
+    return data
+  } catch (error) {
+    bertopicPromptState.error = error instanceof Error ? error.message : '保存 BERTopic 提示词失败'
+    throw error
+  } finally {
+    bertopicPromptState.saving = false
+  }
+}
+
 const resetState = () => {
   lastResult.value = null
   lastPayload.value = null
@@ -246,6 +463,10 @@ const resetOptionalFields = () => {
   form.fetchDir = ''
   form.userdict = ''
   form.stopwords = ''
+}
+
+const resetRunParams = () => {
+  form.runParams = createDefaultRunParams()
 }
 
 const currentTimeString = () => new Date().toLocaleTimeString()
@@ -345,7 +566,8 @@ const runBertopicAnalysis = async (params) => {
       end_date: form.endDate || undefined,
       fetch_dir: form.fetchDir || undefined,
       userdict: form.userdict || undefined,
-      stopwords: form.stopwords || undefined
+      stopwords: form.stopwords || undefined,
+      run_params: sanitizeRunParamsForPayload(form.runParams)
     }
 
     lastPayload.value = payload
