@@ -89,18 +89,7 @@ from server_support.settings_config import register_settings_endpoints
 PROJECT_MANAGER = get_project_manager()
 
 
-
-
 from server_support.ops import _execute_operation, _log_with_context
-
-
-
-
-
-
-
-
-
 
 
 def _resolve_filter_status_inputs(
@@ -133,12 +122,6 @@ def _build_filter_status_payload(
             context["resolved_date"] = resolved_date
             context["requested_date"] = fallback_from
     return status_payload
-
-
-
-
-
-
 
 
 def _submit_filter_job(
@@ -177,7 +160,6 @@ def _submit_filter_job(
             mark_filter_job_finished(topic_identifier, resolved_date)
 
     return FILTER_EXECUTOR.submit(_job)
-
 
 
 from src.fluid.api import fluid_bp
@@ -889,9 +871,10 @@ def fetch_endpoint():
     response, code = _execute_operation(
         "fetch",
         run_fetch,
-        db_topic,
+        topic_identifier,
         start,
         end,
+        db_topic=db_topic,
         log_context={
             "project": log_project,
             "params": {
@@ -919,85 +902,7 @@ def fetch_endpoint():
 
 
 
-@app.get("/api/analysis/topic/bertopic/availability")
-def check_topic_availability():
-    """检查专题的数据可用性范围
 
-    Query parameters:
-        topic: 专题名称
-        project: 项目名称（可选）
-        dataset_id: 数据集ID（可选）
-    """
-    topic = str(request.args.get("topic") or "").strip()
-    project = str(request.args.get("project") or "").strip()
-    dataset_id = str(request.args.get("dataset_id") or "").strip()
-
-    if not any([topic, project, dataset_id]):
-        return error("Missing required field(s): topic/project/dataset_id")
-
-    payload = {
-        "topic": topic,
-        "project": project,
-        "dataset_id": dataset_id,
-    }
-
-    try:
-        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
-    except ValueError as exc:
-        return error(str(exc))
-
-    # 对于远程数据源，使用真实数据库名
-    db_topic = topic or display_name or topic_identifier
-
-    from src.fetch.data_fetch import get_topic_available_date_range
-
-    # 获取数据可用日期范围
-    avail_start, avail_end = get_topic_available_date_range(db_topic)
-
-    # 检查本地缓存情况
-    from src.utils.setting.paths import bucket, get_data_root
-    data_root = get_data_root() / "projects"
-    project_dir = data_root / topic_identifier
-
-    fetch_caches = []
-    if project_dir.exists():
-        fetch_dir = project_dir / "fetch"
-        if fetch_dir.exists():
-            for cache_dir in fetch_dir.iterdir():
-                if cache_dir.is_dir():
-                    # 解析日期范围
-                    dir_name = cache_dir.name
-                    if "_" in dir_name:
-                        start, end = dir_name.split("_", 1)
-                    else:
-                        start, end = dir_name, dir_name
-
-                    # 检查是否有总体.jsonl文件
-                    has_data = (cache_dir / "总体.jsonl").exists()
-
-                    fetch_caches.append({
-                        "folder": dir_name,
-                        "start": start,
-                        "end": end,
-                        "has_data": has_data,
-                        "path": str(cache_dir.relative_to(get_data_root()))
-                    })
-
-            # 按日期排序
-            fetch_caches.sort(key=lambda x: (x["start"], x["end"]), reverse=True)
-
-    response = {
-        "topic": display_name or db_topic,
-        "topic_identifier": topic_identifier,
-        "database_range": {
-            "start": avail_start,
-            "end": avail_end
-        },
-        "local_caches": fetch_caches,
-        "has_cache": len(fetch_caches) > 0
-    }
-
-    return success({"data": response})
 
 
 

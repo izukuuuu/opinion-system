@@ -533,7 +533,7 @@ const runBertopicAnalysis = async (params) => {
       status: 'running'
     })
     try {
-      await callApi('/api/fetch', {
+      const fetchResponse = await callApi('/api/fetch', {
         method: 'POST',
         body: JSON.stringify({
           topic: form.topic,
@@ -546,6 +546,36 @@ const runBertopicAnalysis = async (params) => {
         status: 'ok',
         message: '数据拉取完成，可开始主题分析'
       })
+
+      // 自动优化参数逻辑
+      try {
+        const fetchedCount = fetchResponse.data?.count || 0
+        if (fetchedCount >= 2000) {
+          const currentMinCluster = parseInt(form.runParams.hdbscan.min_cluster_size)
+          // 仅在当前设置较小（默认值附近）时触发自动调整
+          if (currentMinCluster <= 20) {
+            let suggested = 0
+            if (fetchedCount < 20000) {
+              suggested = Math.floor(fetchedCount / 200)
+            } else {
+              suggested = 100
+            }
+            suggested = Math.max(suggested, currentMinCluster, 10)
+
+            if (suggested > currentMinCluster) {
+              form.runParams.hdbscan.min_cluster_size = suggested
+              appendLog({
+                label: '参数优化',
+                message: `检测到数据量(${fetchedCount}条)较大，已自动调整最小聚类规模: ${currentMinCluster} -> ${suggested}`,
+                status: 'info'
+              })
+            }
+          }
+        }
+      } catch (optError) {
+        console.warn('Parameter optimization failed:', optError)
+      }
+
     } catch (fetchError) {
       updateLog(fetchLogId, {
         status: 'error',

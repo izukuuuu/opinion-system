@@ -40,3 +40,7 @@ dependencies = [
     "python-docx>=1.0.0",
     "psycopg2-binary>=2.9.0",
 ]
+
+# Note: PyTorch with CUDA 11.8 must be installed manually after uv sync.
+# Run: uv pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# See .agent/workflows/setup-cuda.md for details

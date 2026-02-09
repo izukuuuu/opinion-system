@@ -35,3 +35,14 @@ This skill defines the strict design standards for the frontend of the Opinion S
 ## 4. Components
 
 -   Reusable components (Buttons, Inputs, etc.) are defined in `colors.css` (e.g., `.btn-primary`, `.input`). Use these classes instead of recreating styles.
+-   **Cards:**
+    -   Use the `.card-surface` class for all card-like containers.
+    -   **Reason:** This ensures consistent styling across the application, specifically:
+        -   **Rounded Corners:** Applies `rounded-3xl` for a modern, soft look.
+        -   **Background:** Uses `var(--color-surface)` for consistent theming.
+        -   **Border:** Uses `var(--color-border-soft)` for subtle separation.
+        -   **Effects:** Includes `backdrop-blur` and `overflow-hidden` for polished visuals.
+-   **Icons:**
+    -   Use **Heroicons** for all icon needs.
+    -   Import from `@heroicons/vue/24/outline` for outline icons or `@heroicons/vue/24/solid` for solid icons.
+    -   **Reason:** Heroicons provides a consistent, modern icon set that integrates seamlessly with Vue, ensuring visual consistency across the application.

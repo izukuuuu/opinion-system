@@ -19,11 +19,7 @@ const viewSelection = reactive({
   end: ''
 })
 
-const viewManualForm = reactive({
-  topic: '',
-  start: '',
-  end: ''
-})
+// viewManualForm removed - users now select from archive history only
 
 const loadState = reactive({
   loading: false,
@@ -71,6 +67,31 @@ const FILE_MAP = {
   coords: "3文档2D坐标",
   llm_clusters: "4大模型再聚类结果",
   llm_keywords: "5大模型主题关键词"
+}
+
+const normalizeHistoryRecords = (records, fallbackTopic = '') => {
+  if (!Array.isArray(records)) return []
+
+  return records
+    .map((item, index) => {
+      const topic = String(item?.topic || fallbackTopic || '').trim()
+      const displayTopic = String(item?.display_topic || item?.displayTopic || topic).trim()
+      const start = String(item?.start || '').trim()
+      const end = String(item?.end || start).trim()
+      const folder = String(item?.folder || '').trim()
+      const id = String(item?.id || `${topic}:${folder || `${start}_${end}`}:${index}`)
+
+      return {
+        ...item,
+        id,
+        topic,
+        display_topic: displayTopic || topic,
+        start,
+        end,
+        folder
+      }
+    })
+    .filter((item) => item.topic && item.start)
 }
 
 // BERTopic特有的统计
@@ -166,75 +187,53 @@ const loadHistory = async (topic, projectOverride = '') => {
   if (!trimmed) {
     analysisHistory.value = []
     historyState.topic = ''
+    historyState.loading = false
     return
   }
 
   historyState.topic = trimmed
   const project = (projectOverride || viewSelection.project || '').trim()
-  const archiveTopic = project || trimmed
 
   try {
-    // 先从analyze API获取历史
+    // BERTopic 专用历史
     const params = new URLSearchParams({ topic: trimmed })
     if (project) {
       params.set('project', project)
     }
-    const response = await callApi(`/api/analyze/history?${params.toString()}`, {
+    const response = await callApi(`/api/topic/bertopic/history?${params.toString()}`, {
       method: 'GET'
     })
-
-    if (response?.records?.length) {
-      analysisHistory.value = response.records
-      historyState.topic = trimmed
-      return
-    }
-
-    // 如果没有，从archives获取
-    const encodedTopic = encodeURIComponent(archiveTopic)
-    const archiveResponse = await callApi(`/api/projects/${encodedTopic}/archives?layers=analyze`, {
-      method: 'GET'
-    })
-
-    const entries = archiveResponse?.archives?.analyze || []
+    const entries = normalizeHistoryRecords(response?.data?.records || response?.records || [], trimmed)
     analysisHistory.value = entries
     historyState.topic = trimmed
 
     if (!entries.length) {
-      historyState.error = '当前专题暂无分析存档'
+      selectedHistoryId.value = ''
+      historyState.error = '当前专题暂无 BERTopic 结果存档'
+      return
     }
-  } catch (primaryError) {
-    try {
-      // 降级到archives
-      const encodedTopic = encodeURIComponent(archiveTopic)
-      const archiveResponse = await callApi(`/api/projects/${encodedTopic}/archives?layers=analyze`, {
-        method: 'GET'
-      })
 
-      const entries = archiveResponse?.archives?.analyze || []
-      analysisHistory.value = entries
-      historyState.topic = trimmed
-
-      if (!entries.length) {
-        historyState.error = '当前专题暂无分析存档'
-      }
-    } catch (fallbackError) {
-      historyState.error = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
-      analysisHistory.value = []
-      historyState.topic = ''
+    const hasSelected = entries.some((item) => item.id === selectedHistoryId.value)
+    if (!hasSelected) {
+      selectedHistoryId.value = entries[0].id
     }
+  } catch (error) {
+    historyState.error = error instanceof Error ? error.message : String(error)
+    analysisHistory.value = []
+    selectedHistoryId.value = ''
   } finally {
     historyState.loading = false
   }
 }
 
-// 加载结果数据
+// 加载结果数据（从存档记录）
 const loadResults = async (range) => {
   const targetRange = range ? range : viewSelection
   const { topic, start, end } = targetRange
   const project = (targetRange?.project || viewSelection.project || '').trim()
 
   if (!topic || !start) {
-    loadState.error = '请选择专题和时间范围'
+    loadState.error = '请选择专题和存档时间范围'
     return
   }
 
@@ -242,6 +241,7 @@ const loadResults = async (range) => {
   viewSelection.start = start
   viewSelection.end = end
   loadState.loading = true
+  loadState.error = ''
 
   try {
     const params = new URLSearchParams({ topic, start })
@@ -262,13 +262,7 @@ const loadResults = async (range) => {
     }
 
     bertopicData.value = response?.data || response
-
-    if (bertopicData.value?.topic && bertopicData.value.range) {
-      lastLoaded.value = new Date().toLocaleString()
-      viewManualForm.topic = bertopicData.value.topic
-      viewManualForm.start = bertopicData.value.range.start || start
-      viewManualForm.end = bertopicData.value.range.end || end
-    }
+    lastLoaded.value = new Date().toLocaleString()
   } catch (error) {
     loadState.error = error instanceof Error ? error.message : String(error)
     bertopicData.value = null
@@ -277,45 +271,21 @@ const loadResults = async (range) => {
   }
 }
 
-// 从历史记录加载数据
-const applyHistorySelection = async (recordId, { shouldLoad = false } = {}) => {
+// 从历史记录加载数据（默认自动加载）
+const applyHistorySelection = async (recordId) => {
   const entry = analysisHistory.value.find((item) => item.id === recordId)
   if (!entry) return
 
-  viewSelection.topic = entry.topic
+  // Don't set viewSelection.topic here - it's already set and we don't want to trigger watchers
+  // Just update the date range
   viewSelection.start = entry.start
   viewSelection.end = entry.end
-  viewManualForm.topic = entry.topic
-  viewManualForm.start = entry.start
-  viewManualForm.end = entry.end
 
-  if (shouldLoad) {
-    await loadResults(entry)
-  }
+  // Always load the results when selecting an archive
+  await loadResults(entry)
 }
 
-// 手动输入查询
-const loadResultsFromManual = async () => {
-  const manualRange = {
-    topic:
-      viewManualForm.topic ||
-      viewSelection.topic ||
-      topicOptions.value[0] ||
-      '',
-    start: viewManualForm.start,
-    end: viewManualForm.end,
-    project: viewSelection.project
-  }
-
-  const range = manualRange
-  if (!range.topic || !range.start) {
-    loadState.error = '请填写专题和开始日期'
-    return
-  }
-
-  selectedHistoryId.value = ''
-  await loadResults(range)
-}
+// loadResultsFromManual removed - users now select from archive history only
 
 const refreshHistory = async () => {
   if (historyState.loading || loadState.loading) return
@@ -353,9 +323,12 @@ function initializeStore() {
   // 监听活动项目变化
   watch(
     () => viewSelection.topic,
-    (topic) => {
+    async (topic) => {
       if (topic) {
-        loadHistory(topic, viewSelection.project)
+        await loadHistory(topic, viewSelection.project)
+        if (selectedHistoryId.value) {
+          await applyHistorySelection(selectedHistoryId.value)
+        }
       }
     }
   )
@@ -372,7 +345,6 @@ export const useTopicBertopicView = () => {
     topicOptions,
     selectableTopicOptions,
     viewSelection,
-    viewManualForm,
     loadState,
     analysisData,
     bertopicData,
@@ -387,7 +359,6 @@ export const useTopicBertopicView = () => {
     loadTopics,
     loadHistory,
     loadResults,
-    loadResultsFromManual,
     refreshHistory,
     applyHistorySelection,
     formatTimestamp

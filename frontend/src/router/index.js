@@ -179,7 +179,7 @@ export const routes = [
     }
   },
   {
-    path: '/analysis/topic/bertopic',
+    path: '/topic/bertopic',
     component: TopicBertopicLayout,
     children: [
       {
@@ -399,6 +399,15 @@ export const routes = [
         meta: {
           title: 'RAG 配置',
           breadcrumb: 'RAG 配置'
+        }
+      },
+      {
+        path: 'bertopic',
+        name: 'settings-bertopic',
+        component: () => import('../views/settings/SettingsBertopicView.vue'),
+        meta: {
+          title: 'BERTopic 配置',
+          breadcrumb: 'BERTopic 配置'
         }
       },
       {

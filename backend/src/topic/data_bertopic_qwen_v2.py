@@ -47,6 +47,8 @@ from .prompt_config import (
     DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS,
     load_topic_bertopic_prompt_config,
 )
+from sentence_transformers import SentenceTransformer
+from .config import load_bertopic_config
 
 # 配置常量
 TARGET_TOPICS = DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS  # 大模型合并后的目标主题数
@@ -299,11 +301,11 @@ def _ensure_fetch_data(topic: str, start_date: str, end_date: str, logger, bucke
     success = fetch_range(storage_topic, start_date, end_date, output_date, logger, db_topic=db_name)
 
     if success:
-        log_success(logger, f"数据拉取完成", "TopicBertopic")
+        log_success(logger, f"数据拉取完成: {success}条", "TopicBertopic")
     else:
         log_error(logger, f"数据拉取失败", "TopicBertopic")
 
-    return success
+    return bool(success)
 
 
 def _load_and_merge_data(fetch_dir: Path, logger) -> pd.DataFrame:
@@ -579,6 +581,32 @@ def _run_bertopic(
         hdbscan_params = resolved_params["hdbscan"]
         bertopic_params = resolved_params["bertopic"]
 
+        # 动态调整配置：根据数据量自动优化 min_cluster_size
+        # 用户反馈：数据量大时，默认的 10 太小，导致碎片化严重或运行失败
+        n_docs = len(texts)
+        if n_docs >= 2000:
+            current_min_cluster = int(hdbscan_params["min_cluster_size"])
+            # 仅在当前设置较小（默认值附近）时触发自动调整
+            if current_min_cluster <= 20:
+                # 启发式规则：
+                # 2k ~ 10k: 线性增加，约 n / 200 (例: 5000 -> 25)
+                # 10k+: 稍微平缓，上限 100 (例: 20000 -> 100)
+                if n_docs < 20000:
+                    suggested_size = int(n_docs / 200)
+                else:
+                    suggested_size = 100
+                
+                # 确保不低于原始值，且不低于 10
+                suggested_size = max(suggested_size, current_min_cluster, 10)
+                
+                if suggested_size > current_min_cluster:
+                    log_success(
+                        logger,
+                        f"检测到数据量较大({n_docs}条)，自动调整 min_cluster_size: {current_min_cluster} -> {suggested_size}",
+                        "TopicBertopic"
+                    )
+                    hdbscan_params["min_cluster_size"] = suggested_size
+
         log_success(
             logger,
             (
@@ -607,7 +635,8 @@ def _run_bertopic(
             n_components=int(umap_params["n_components"]),
             min_dist=float(umap_params["min_dist"]),
             metric=str(umap_params["metric"]),
-            random_state=int(umap_params["random_state"])
+            random_state=int(umap_params["random_state"]),
+            low_memory=True
         )
 
         hdbscan_model = HDBSCAN(
@@ -617,12 +646,28 @@ def _run_bertopic(
             cluster_selection_method=str(hdbscan_params["cluster_selection_method"])
         )
 
+        # 加载嵌入模型配置
+        try:
+            config = load_bertopic_config()
+            embedding_config = config.get("embedding", {})
+            model_name = embedding_config.get("model_name", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+            device = embedding_config.get("device", "cpu")
+            if device and device.lower() == "auto":
+                device = None  # SentenceTransformer 默认 auto
+
+            log_success(logger, f"加载嵌入模型: {model_name} (device={device})", "TopicBertopic")
+            embedding_model = SentenceTransformer(model_name, device=device)
+        except Exception as e:
+            log_error(logger, f"加载嵌入模型失败，使用默认: {e}", "TopicBertopic")
+            embedding_model = None  # 让 BERTopic 使用其默认值
+
         # 初始化BERTopic
         topic_model = BERTopic(
+            embedding_model=embedding_model,
             vectorizer_model=vectorizer_model,
             umap_model=umap_model,
             hdbscan_model=hdbscan_model,
-            language="chinese",
+            language="chinese (simplified)",
             top_n_words=int(bertopic_params["top_n_words"]),
             calculate_probabilities=bool(bertopic_params["calculate_probabilities"]),
             verbose=bool(bertopic_params["verbose"])
@@ -673,27 +718,65 @@ def _run_bertopic(
             json.dump(topic_keywords, f, ensure_ascii=False, indent=2)
 
         # 3. 保存文档2D坐标（用于可视化）
-        if hasattr(topic_model, 'topic_embeddings_') and topic_model.topic_embeddings_ is not None:
-            # 获取文档嵌入
-            doc_embeddings = topic_model.document_embeddings_
-            # 获取主题嵌入
-            topic_embeddings = topic_model.topic_embeddings_
+        doc_coords: List[Dict[str, Any]] = []
+        try:
+            reduced_doc_embeddings = None
 
-            # 保存文档坐标
+            # BERTopic 0.17.x 可稳定从 UMAP 模型读取降维结果；
+            # 一些版本不再暴露 document_embeddings_，因此这里优先读取 embedding_。
+            umap_embedding = getattr(getattr(topic_model, "umap_model", None), "embedding_", None)
+            if umap_embedding is not None:
+                reduced_doc_embeddings = np.asarray(umap_embedding)
+                log_success(logger, "使用 UMAP embedding_ 生成文档坐标", "TopicBertopic")
+            else:
+                doc_embedding_attr = getattr(topic_model, "document_embeddings_", None)
+                if doc_embedding_attr is not None:
+                    raw_doc_embeddings = np.asarray(doc_embedding_attr)
+                    if raw_doc_embeddings.ndim == 2 and raw_doc_embeddings.shape[1] >= 2:
+                        if raw_doc_embeddings.shape[1] == 2:
+                            reduced_doc_embeddings = raw_doc_embeddings
+                        else:
+                            reducer_2d = UMAP(
+                                n_neighbors=15,
+                                n_components=2,
+                                min_dist=0.0,
+                                metric="cosine",
+                                random_state=42,
+                                low_memory=True,
+                            )
+                            reduced_doc_embeddings = reducer_2d.fit_transform(raw_doc_embeddings)
+                        log_success(logger, "使用 document_embeddings_ 生成文档坐标", "TopicBertopic")
+
+            if (
+                reduced_doc_embeddings is not None
+                and len(reduced_doc_embeddings) == len(topics)
+                and reduced_doc_embeddings.ndim == 2
+                and reduced_doc_embeddings.shape[1] >= 2
+            ):
+                for i, (topic_id, embedding) in enumerate(zip(topics, reduced_doc_embeddings)):
+                    if topic_id != -1:  # 排除离群点
+                        doc_coords.append({
+                            "doc_id": i,
+                            "topic_id": int(topic_id),
+                            "x": float(embedding[0]),
+                            "y": float(embedding[1]),
+                        })
+            else:
+                log_skip(logger, "未获取到可用的文档2D坐标，跳过可视化坐标输出", "TopicBertopic")
+        except Exception as e:
+            log_error(logger, f"生成文档2D坐标失败，已跳过: {e}", "TopicBertopic")
             doc_coords = []
-            for i, (topic_id, embedding) in enumerate(zip(topics, doc_embeddings)):
-                if topic_id != -1:  # 排除离群点
-                    doc_coords.append({
-                        "doc_id": i,
-                        "topic_id": int(topic_id),
-                        "x": float(embedding[0]),
-                        "y": float(embedding[1])
-                    })
 
+        if doc_coords:
             with open(output_dir / "3文档2D坐标.json", 'w', encoding='utf-8') as f:
-                json.dump({
-                    "documents": doc_coords
-                }, f, ensure_ascii=False, indent=2)
+                json.dump(
+                    {
+                        "documents": doc_coords
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
         # 4-5. 使用大模型进行主题聚类和生成新关键词
         if topic_stats and len(topic_stats) > 0:
@@ -711,7 +794,8 @@ def _run_bertopic(
         return True
 
     except Exception as e:
-        log_error(logger, f"BERTopic运行失败: {e}", "TopicBertopic")
+        import traceback
+        log_error(logger, f"BERTopic运行失败: {e}\n{traceback.format_exc()}", "TopicBertopic")
         return False
 
 
@@ -917,7 +1001,9 @@ def run_topic_bertopic(
     db_name = db_topic or topic
     topic_label = display_topic or topic
 
-    logger = setup_logger("topic_bertopic")
+    # 确定日志使用的日期标识
+    log_date_str = f"{start_date}_{end_date}" if end_date else start_date
+    logger = setup_logger("topic_bertopic", log_date_str)
     log_module_start(logger, f"BERTopic主题分析: {topic_label} {start_date}~{end_date or start_date}")
 
     try:
