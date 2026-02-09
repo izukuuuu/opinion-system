@@ -1,5 +1,5 @@
 <template>
-  <div class="mx-auto max-w-4xl pt-0 pb-12 space-y-6">
+  <div class="pt-0 pb-12 space-y-6">
     <form class="space-y-6" @submit.prevent="handleRun">
       <!-- Main Configuration -->
       <section class="card-surface p-6">
@@ -63,16 +63,17 @@
 
         <div class="mt-8 flex items-center justify-between border-t border-soft pt-6">
           <div class="flex items-center gap-4">
-             <button type="button" 
+            <button type="button"
               class="flex items-center gap-2 text-sm font-medium text-secondary hover:text-primary transition-colors"
               @click="showAdvancedSettings = !showAdvancedSettings">
               <AdjustmentsHorizontalIcon class="h-5 w-5" />
               <span>{{ showAdvancedSettings ? '隐藏高级设置' : '显示高级设置' }}</span>
             </button>
           </div>
-          
+
           <div class="flex items-center gap-3">
-             <button type="button" class="btn btn-ghost text-muted hover:text-primary" @click="resetAll" :disabled="runState.running">
+            <button type="button" class="btn btn-ghost text-muted hover:text-primary" @click="resetAll"
+              :disabled="runState.running">
               重置
             </button>
             <button type="submit" class="btn btn-primary min-w-[140px]" :disabled="!canSubmit">
@@ -88,7 +89,7 @@
 
       <!-- Advanced Configuration (Collapsible) -->
       <div v-show="showAdvancedSettings" class="space-y-6 animate-in slide-in-from-top-2 duration-200">
-        
+
         <!-- Optional Paths -->
         <section class="card-surface p-6">
           <h3 class="text-sm font-bold text-primary mb-4 flex items-center gap-2">
@@ -106,14 +107,15 @@
             </div>
             <div class="space-y-2">
               <label class="text-xs font-bold text-muted uppercase tracking-wider">自定义 Stopwords</label>
-              <input v-model.trim="form.stopwords" type="text" placeholder="configs/stopwords.txt" class="input w-full" />
+              <input v-model.trim="form.stopwords" type="text" placeholder="configs/stopwords.txt"
+                class="input w-full" />
             </div>
           </div>
         </section>
 
         <!-- Runtime Parameters -->
         <section class="card-surface p-6">
-           <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center justify-between mb-4">
             <h3 class="text-sm font-bold text-primary flex items-center gap-2">
               <CpuChipIcon class="h-4 w-4 text-muted" />
               <span>算法参数配置</span>
@@ -123,7 +125,7 @@
               恢复默认值
             </button>
           </div>
-          
+
           <div class="space-y-8">
             <!-- CountVectorizer -->
             <div>
@@ -132,22 +134,26 @@
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">最小词组长度</span>
                   <span class="block text-[10px] text-muted font-mono">ngram_min</span>
-                  <input v-model.number="form.runParams.vectorizer.ngram_min" type="number" min="1" class="input w-full" />
+                  <input v-model.number="form.runParams.vectorizer.ngram_min" type="number" min="1"
+                    class="input w-full" />
                 </label>
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">最大词组长度</span>
                   <span class="block text-[10px] text-muted font-mono">ngram_max</span>
-                  <input v-model.number="form.runParams.vectorizer.ngram_max" type="number" min="1" class="input w-full" />
+                  <input v-model.number="form.runParams.vectorizer.ngram_max" type="number" min="1"
+                    class="input w-full" />
                 </label>
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">最小词频过滤</span>
                   <span class="block text-[10px] text-muted font-mono">min_df</span>
-                  <input v-model.number="form.runParams.vectorizer.min_df" type="number" min="0" step="0.1" class="input w-full" />
+                  <input v-model.number="form.runParams.vectorizer.min_df" type="number" min="0" step="0.1"
+                    class="input w-full" />
                 </label>
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">最大词频过滤</span>
                   <span class="block text-[10px] text-muted font-mono">max_df</span>
-                  <input v-model.number="form.runParams.vectorizer.max_df" type="number" min="0" step="0.1" class="input w-full" />
+                  <input v-model.number="form.runParams.vectorizer.max_df" type="number" min="0" step="0.1"
+                    class="input w-full" />
                 </label>
               </div>
             </div>
@@ -169,7 +175,8 @@
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">点间最小距离</span>
                   <span class="block text-[10px] text-muted font-mono">min_dist</span>
-                  <input v-model.number="form.runParams.umap.min_dist" type="number" min="0" step="0.05" class="input w-full" />
+                  <input v-model.number="form.runParams.umap.min_dist" type="number" min="0" step="0.05"
+                    class="input w-full" />
                 </label>
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">距离度量</span>
@@ -195,12 +202,14 @@
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">最小聚类规模</span>
                   <span class="block text-[10px] text-muted font-mono">min_cluster_size</span>
-                  <input v-model.number="form.runParams.hdbscan.min_cluster_size" type="number" min="2" class="input w-full" />
+                  <input v-model.number="form.runParams.hdbscan.min_cluster_size" type="number" min="2"
+                    class="input w-full" />
                 </label>
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">核心点邻域样本</span>
                   <span class="block text-[10px] text-muted font-mono">min_samples</span>
-                  <input v-model.number="form.runParams.hdbscan.min_samples" type="number" min="1" class="input w-full" />
+                  <input v-model.number="form.runParams.hdbscan.min_samples" type="number" min="1"
+                    class="input w-full" />
                 </label>
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">距离度量</span>
@@ -229,13 +238,15 @@
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary">主题词展示数</span>
                   <span class="block text-[10px] text-muted font-mono">top_n_words</span>
-                  <input v-model.number="form.runParams.bertopic.top_n_words" type="number" min="5" class="input w-full" />
+                  <input v-model.number="form.runParams.bertopic.top_n_words" type="number" min="5"
+                    class="input w-full" />
                 </label>
                 <label class="space-y-1.5">
                   <span class="block text-sm font-medium text-primary mb-1">计算文档-主题概率</span>
                   <span class="block text-[10px] text-muted font-mono mb-2">calculate_probabilities</span>
                   <div class="flex items-center gap-2 pt-1">
-                    <input v-model="form.runParams.bertopic.calculate_probabilities" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+                    <input v-model="form.runParams.bertopic.calculate_probabilities" type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
                     <span class="text-xs text-secondary">启用</span>
                   </div>
                 </label>
@@ -243,7 +254,8 @@
                   <span class="block text-sm font-medium text-primary mb-1">输出详细日志</span>
                   <span class="block text-[10px] text-muted font-mono mb-2">verbose</span>
                   <div class="flex items-center gap-2 pt-1">
-                    <input v-model="form.runParams.bertopic.verbose" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+                    <input v-model="form.runParams.bertopic.verbose" type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
                     <span class="text-xs text-secondary">启用</span>
                   </div>
                 </label>
@@ -265,33 +277,37 @@
               </p>
             </div>
             <div class="flex items-center gap-2 shrink-0">
-               <button type="button" class="btn btn-ghost btn-sm whitespace-nowrap" :disabled="bertopicPromptState.loading"
-                @click="loadBertopicPrompt(form.topic)">
+              <button type="button" class="btn btn-ghost btn-sm whitespace-nowrap"
+                :disabled="bertopicPromptState.loading" @click="loadBertopicPrompt(form.topic)">
                 {{ bertopicPromptState.loading ? '加载中…' : '重载配置' }}
               </button>
-              <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" :disabled="!canSavePrompt" @click="handleSavePrompt">
+              <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" :disabled="!canSavePrompt"
+                @click="handleSavePrompt">
                 {{ bertopicPromptState.saving ? '保存中…' : '保存修改' }}
               </button>
             </div>
           </div>
 
           <div class="space-y-4">
-             <label class="block">
+            <label class="block">
               <span class="text-xs font-bold text-muted uppercase tracking-wider">目标主题数 Target Topics</span>
-              <input v-model.number="bertopicPromptState.targetTopics" type="number" min="2" max="50" class="input w-full mt-1.5" />
+              <input v-model.number="bertopicPromptState.targetTopics" type="number" min="2" max="50"
+                class="input w-full mt-1.5" />
             </label>
 
             <div class="grid gap-4 md:grid-cols-2">
               <label class="block">
                 <span class="text-xs font-bold text-muted uppercase tracking-wider">再聚类 System Prompt</span>
-                <textarea v-model="bertopicPromptState.reclusterSystemPrompt" rows="4" class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+                <textarea v-model="bertopicPromptState.reclusterSystemPrompt" rows="4"
+                  class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
               </label>
-               <label class="block">
+              <label class="block">
                 <span class="text-xs font-bold text-muted uppercase tracking-wider">再聚类 User Prompt</span>
-                <textarea v-model="bertopicPromptState.reclusterUserPrompt" rows="4" class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+                <textarea v-model="bertopicPromptState.reclusterUserPrompt" rows="4"
+                  class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
               </label>
             </div>
-            
+
             <div class="bg-surface-muted/30 rounded-lg p-3 text-xs text-secondary space-y-1">
               <p class="font-semibold">可用变量：</p>
               <p class="font-mono opacity-80">{TARGET_TOPICS}, {input_data}, {topic_list}, {topic_stats_json}</p>
@@ -300,11 +316,13 @@
             <div class="grid gap-4 md:grid-cols-2">
               <label class="block">
                 <span class="text-xs font-bold text-muted uppercase tracking-wider">关键词 System Prompt</span>
-                <textarea v-model="bertopicPromptState.keywordSystemPrompt" rows="3" class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+                <textarea v-model="bertopicPromptState.keywordSystemPrompt" rows="3"
+                  class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
               </label>
               <label class="block">
                 <span class="text-xs font-bold text-muted uppercase tracking-wider">关键词 User Prompt</span>
-                <textarea v-model="bertopicPromptState.keywordUserPrompt" rows="3" class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+                <textarea v-model="bertopicPromptState.keywordUserPrompt" rows="3"
+                  class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
               </label>
             </div>
 
@@ -341,9 +359,11 @@
       </section>
 
       <!-- Success Result -->
-      <section v-if="lastResult" class="rounded-2xl border border-green-200 bg-green-50/50 p-6 animate-in slide-in-from-bottom-2">
+      <section v-if="lastResult"
+        class="rounded-2xl border border-green-200 bg-green-50/50 p-6 animate-in slide-in-from-bottom-2">
         <div class="flex items-center gap-5">
-          <div class="flex h-14 w-14 items-center justify-center rounded-full bg-green-100 text-green-600 border border-green-200 shadow-sm">
+          <div
+            class="flex h-14 w-14 items-center justify-center rounded-full bg-green-100 text-green-600 border border-green-200 shadow-sm">
             <CheckBadgeIcon class="h-8 w-8" />
           </div>
           <div class="space-y-1">
@@ -351,7 +371,7 @@
             <p class="text-sm text-gray-600">主题模型已成功构建，相关数据资产已生成。</p>
           </div>
           <div class="ml-auto">
-             <router-link :to="`/analysis/topic/bertopic/results`" class="btn btn-primary drop-shadow-sm">
+            <router-link :to="`/analysis/topic/bertopic/results`" class="btn btn-primary drop-shadow-sm">
               查看分析报告
               <ArrowRightIcon class="h-4 w-4 ml-1" />
             </router-link>

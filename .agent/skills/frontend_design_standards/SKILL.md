@@ -37,6 +37,9 @@ This skill defines the strict design standards for the frontend of the Opinion S
 -   Reusable components (Buttons, Inputs, etc.) are defined in `colors.css` (e.g., `.btn-primary`, `.input`). Use these classes instead of recreating styles.
 -   **Cards:**
     -   Use the `.card-surface` class for all card-like containers.
+    -   **Layout Rules:**
+        -   Use `space-y-6` for vertical spacing between elements within the card or between stacks of cards.
+        -   Do **NOT** add horizontal padding to the main card container itself; content should be managed internally if needed.
     -   **Reason:** This ensures consistent styling across the application, specifically:
         -   **Rounded Corners:** Applies `rounded-3xl` for a modern, soft look.
         -   **Background:** Uses `var(--color-surface)` for consistent theming.

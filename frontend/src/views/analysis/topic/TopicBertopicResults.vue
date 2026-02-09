@@ -1,24 +1,13 @@
 <template>
-  <div class="topic-dashboard space-y-8">
-    <header class="rounded-2xl border border-soft bg-surface p-6">
-      <div class="flex flex-col gap-2">
-        <p class="text-xs font-medium uppercase tracking-wide text-secondary">主题分析 · BERTopic</p>
-        <h1 class="text-2xl font-semibold text-primary">查看 BERTopic + Qwen 主题分析结果</h1>
-        <p class="text-sm text-secondary">
-          选择专题与存档日期范围，查看已生成的 BERTopic 分析结果，包括主题统计、关键词、降维坐标以及 LLM 再聚类结果。
-        </p>
-      </div>
-    </header>
-
+  <div class="topic-dashboard pb-8 space-y-6">
     <!-- 存档选择 -->
     <section class="card-surface p-6 space-y-4">
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-semibold text-primary">选择分析存档</h2>
         <button type="button"
-          class="inline-flex items-center gap-1 text-xs font-medium text-brand-600 transition-colors disabled:cursor-default disabled:opacity-60"
+          class="inline-flex items-center gap-1 text-xs font-medium text-brand-600 disabled:cursor-default disabled:opacity-60"
           :disabled="topicsState.loading" @click="loadTopics(true)">
-          <ArrowPathIcon class="h-3.5 w-3.5"
-            :class="topicsState.loading ? 'animate-spin' : ''" />
+          <ArrowPathIcon class="h-3.5 w-3.5" :class="topicsState.loading ? 'animate-spin' : ''" />
           <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
         </button>
       </div>
@@ -43,7 +32,8 @@
             <select v-model="selectedHistoryId" class="input"
               :disabled="historyState.loading || analysisHistory.length === 0"
               @change="applyHistorySelection(selectedHistoryId)">
-              <option value="">{{ historyState.loading ? '加载中…' : analysisHistory.length === 0 ? '暂无存档' : '请选择存档日期范围' }}</option>
+              <option value="">{{ historyState.loading ? '加载中…' : analysisHistory.length === 0 ? '暂无存档' : '请选择存档日期范围' }}
+              </option>
               <option v-for="record in analysisHistory" :key="record.id" :value="record.id">
                 {{ record.start }} ~ {{ record.end }}
               </option>
@@ -51,7 +41,7 @@
           </label>
 
           <!-- 无存档提示 -->
-          <p v-if="!historyState.loading && analysisHistory.length === 0" 
+          <p v-if="!historyState.loading && analysisHistory.length === 0"
             class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
             <span class="inline-flex items-center gap-1.5 font-medium">
               <ExclamationTriangleIcon class="h-4 w-4" />
@@ -61,14 +51,13 @@
           </p>
 
           <!-- 历史记录错误 -->
-          <p v-if="historyState.error" 
-            class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <p v-if="historyState.error" class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {{ historyState.error }}
           </p>
         </div>
 
         <!-- 当前选中的存档信息 -->
-        <div v-if="selectedRecord && !loadState.loading" 
+        <div v-if="selectedRecord && !loadState.loading"
           class="rounded-xl border border-soft bg-surface-muted p-4 space-y-1">
           <p class="text-xs font-semibold text-muted uppercase tracking-wide">当前查看</p>
           <p class="text-base font-bold text-primary">{{ selectedRecord.display_topic || selectedRecord.topic }}</p>
@@ -77,8 +66,7 @@
         </div>
 
         <!-- 加载状态 -->
-        <div v-if="loadState.loading" 
-          class="rounded-xl border border-brand-200 bg-brand-50 p-4 text-sm text-brand-700">
+        <div v-if="loadState.loading" class="rounded-xl border border-brand-200 bg-brand-50 p-4 text-sm text-brand-700">
           <div class="flex items-center gap-2">
             <ArrowPathIcon class="h-4 w-4 animate-spin" />
             <span class="font-medium">正在加载分析结果...</span>
@@ -86,8 +74,7 @@
         </div>
 
         <!-- 加载错误 -->
-        <p v-if="loadState.error" 
-          class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p v-if="loadState.error" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {{ loadState.error }}
         </p>
       </div>
@@ -120,7 +107,7 @@
             显示数量 (Top-N)
           </span>
           <div class="range-input">
-            <input :value="controls.topN" type="range" min="3" :max="Math.max(7, maxTopN)"
+            <input :value="controls.topN" type="range" min="1" :max="Math.max(7, maxTopN)"
               @input="updateTopN($event.target.value)" />
             <span>{{ controls.topN }}</span>
           </div>
@@ -177,18 +164,6 @@
               </p>
             </div>
           </div>
-          <div class="stat-card stat-card--warning">
-            <div class="stat-card__icon">
-              <ChartPieIcon class="h-6 w-6" />
-            </div>
-            <div class="stat-card__content">
-              <p class="stat-card__value">{{ docStats.topicCount }}</p>
-              <p class="stat-card__label">原始主题数</p>
-              <p v-if="llmStats.count > 0" class="stat-card__subtext">
-                合并率: {{ ((1 - llmStats.count / docStats.topicCount) * 100).toFixed(1) }}%
-              </p>
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -203,8 +178,7 @@
 
       <div v-if="sankeyPlotlyHasData" class="chart-panel--tall">
         <PlotlyChartPanel :data="sankeyPlotlyData" :layout="sankeyPlotlyLayout" :config="sankeyPlotlyConfig"
-          :has-data="sankeyPlotlyHasData" title="原始主题 → 新主题合并关系（桑基图）"
-          description="展示 BERTopic 原始主题与 LLM 新主题之间的合并关系。" />
+          :has-data="sankeyPlotlyHasData" title="原始主题 → 新主题合并关系（桑基图）" description="展示 BERTopic 原始主题与 LLM 新主题之间的合并关系。" />
       </div>
     </section>
 
@@ -237,7 +211,7 @@
     <!-- LLM 再聚类结果详细展示 -->
     <section v-if="llmClusters.length > 0" class="topic-dashboard__card">
       <div class="section-header">
-        <h2 class="section-header__title">🤖 LLM 再聚类结果</h2>
+        <h2 class="section-header__title">LLM 再聚类结果</h2>
         <p class="section-header__subtitle">大模型重新命名和聚类的主题详情</p>
       </div>
       <div class="llm-clusters-grid">
@@ -662,8 +636,8 @@ const barPlotlyData = computed(() => {
   return [{
     y: sortedData.map(item => {
       if (llmClusters.value.length > 0) {
-        // LLM聚类模式
-        return `${item.name} - ${item.title}`
+        // LLM聚类模式 - 只显示title，不重复
+        return item.title || item.name
       } else {
         // 原始主题模式
         const llmInfo = originalTopicToLLMName.value[item.name]
@@ -700,7 +674,7 @@ const barPlotlyLayout = computed(() => ({
   title: { text: '主题文档数排名', font: { size: 14, color: '#2d3748' }, x: 0.5 },
   xaxis: { title: '文档数量', tickfont: { size: 11 }, titlefont: { size: 12 } },
   yaxis: { tickfont: { size: 10 }, autorange: 'reversed' },
-  margin: { l: 300, r: 50, t: 50, b: 50 },
+  margin: { l: 180, r: 50, t: 50, b: 50 },
   plot_bgcolor: 'rgba(255,255,255,.5)',
   paper_bgcolor: 'rgba(255,255,255,.7)',
   font: { family: 'Segoe UI, PingFang SC, Microsoft YaHei' }
@@ -729,11 +703,13 @@ const donutPlotlyData = computed(() => {
     values: docCounts,
     labels: dataSource.map(item => {
       if (llmClusters.value.length > 0) {
-        return `${item.name}\n${item.title}`
+        // LLM聚类模式 - 只显示title
+        return item.title || item.name
       } else {
+        // 原始主题模式
         const llmInfo = originalTopicToLLMName.value[item.name]
         const label = llmInfo?.title || item.name
-        return `${item.name}\n${label}`
+        return label
       }
     }),
     type: 'pie',
@@ -813,12 +789,14 @@ const sankeyPlotlyData = computed(() => {
   // 生成节点标签
   const getNodeLabel = (nodeName) => {
     if (nodeName.startsWith('主题') && !nodeName.startsWith('新主题')) {
+      // 原始主题：保留主题名 + 关键词
       const kw = getOriginalTopicKeywords(nodeName)
       return kw ? `${nodeName}\n${kw}` : nodeName
     }
+    // LLM聚类节点：只显示title，不重复
     const cluster = llmClusters.value.find(c => (c.name || c.title) === nodeName)
     if (cluster) {
-      return `${nodeName}\n${cluster.title || nodeName}`
+      return cluster.title || nodeName
     }
     return nodeName
   }
@@ -1608,13 +1586,6 @@ const updateTopN = (value) => {
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-export:hover {
-  background: rgba(67, 97, 238, 0.1);
-  border-color: #4361ee;
-  color: #4361ee;
 }
 
 .dashboard-stats {
@@ -1627,18 +1598,11 @@ const updateTopN = (value) => {
   display: flex;
   align-items: flex-start;
   gap: 1rem;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(5px);
+  background: var(--color-surface);
   border-radius: 0.75rem;
   padding: 1.25rem;
   border-left: 4px solid #4361ee;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--color-border-soft);
 }
 
 .stat-card--primary {
@@ -1926,12 +1890,6 @@ const updateTopN = (value) => {
   color: white;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
-}
-
-.umap-control-row button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(67, 97, 238, 0.4);
 }
 
 .umap-selected-info {
@@ -1979,12 +1937,6 @@ const updateTopN = (value) => {
   background: rgba(67, 97, 238, 0.15);
   border-radius: 8px;
   border: 1px solid rgba(67, 97, 238, 0.3);
-  transition: all 0.2s ease;
-}
-
-.umap-topic-item:hover {
-  background: rgba(67, 97, 238, 0.25);
-  border-color: #4361ee;
 }
 
 .umap-topic-item input[type="checkbox"] {
@@ -2037,13 +1989,6 @@ const updateTopN = (value) => {
   font-size: 0.8125rem;
   color: var(--color-text-primary);
   border: 1px solid var(--color-border-soft);
-  transition: all 0.2s ease;
-}
-
-.keyword-chip:hover {
-  background: rgba(67, 97, 238, 0.1);
-  border-color: #4361ee;
-  transform: translateY(-1px);
 }
 
 .keyword-chip__weight {
@@ -2064,13 +2009,6 @@ const updateTopN = (value) => {
   border: 1px solid var(--color-border-soft);
   background: linear-gradient(135deg, rgba(67, 97, 238, 0.05) 0%, rgba(255, 255, 255, 0.9) 100%);
   padding: 1.25rem;
-  transition: all 0.3s ease;
-}
-
-.llm-cluster-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(67, 97, 238, 0.15);
-  border-color: #4361ee;
 }
 
 .llm-cluster-card__header {
@@ -2156,12 +2094,6 @@ const updateTopN = (value) => {
   padding: 0.25rem 0.625rem;
   border-radius: 0.375rem;
   border: 1px solid var(--color-border-soft);
-  transition: all 0.2s ease;
-}
-
-.llm-cluster-card__keyword-tag:hover {
-  background: rgba(67, 97, 238, 0.1);
-  border-color: #4361ee;
 }
 
 /* 统计表格 */
@@ -2198,14 +2130,6 @@ const updateTopN = (value) => {
 
 .stats-table th:last-child {
   border-top-right-radius: 0.75rem;
-}
-
-.stats-table__row {
-  transition: background 0.2s ease;
-}
-
-.stats-table__row:hover {
-  background: rgba(67, 97, 238, 0.05);
 }
 
 .stats-table__row td {

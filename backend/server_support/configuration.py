@@ -132,6 +132,15 @@ def load_llm_config() -> Dict[str, Any]:
         embedding_llm.update(dynamic_embedding)
     config["embedding_llm"] = embedding_llm
 
+    langchain: Dict[str, Any] = {}
+    static_langchain = static_config.get("langchain")
+    if isinstance(static_langchain, dict):
+        langchain.update(static_langchain)
+    dynamic_langchain = config.get("langchain")
+    if isinstance(dynamic_langchain, dict):
+        langchain.update(dynamic_langchain)
+    config["langchain"] = langchain
+
     credentials = config.get("credentials")
     if not isinstance(credentials, dict):
         credentials = {}

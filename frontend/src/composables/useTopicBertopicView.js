@@ -195,7 +195,6 @@ const loadHistory = async (topic, projectOverride = '') => {
   const project = (projectOverride || viewSelection.project || '').trim()
 
   try {
-    // BERTopic 专用历史
     const params = new URLSearchParams({ topic: trimmed })
     if (project) {
       params.set('project', project)
@@ -276,8 +275,7 @@ const applyHistorySelection = async (recordId) => {
   const entry = analysisHistory.value.find((item) => item.id === recordId)
   if (!entry) return
 
-  // Don't set viewSelection.topic here - it's already set and we don't want to trigger watchers
-  // Just update the date range
+  // Only update date range, NOT topic (topic is already set and shouldn't change)
   viewSelection.start = entry.start
   viewSelection.end = entry.end
 
