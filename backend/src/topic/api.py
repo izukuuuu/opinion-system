@@ -169,14 +169,6 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     if result:
-        # 如果请求同步到 Neo4j
-        if payload.get("sync_neo4j"):
-            try:
-                from src.graph.sync_bertopic import sync_bertopic_results
-                sync_bertopic_results(bucket_topic, start_date, end_date)
-            except Exception as e:
-                LOGGER.error(f"Failed to sync to Neo4j: {e}", exc_info=True)
-
         # 返回成功响应，包含更多信息
         folder_name = f"{start_date}_{end_date}" if end_date else start_date
         return {
