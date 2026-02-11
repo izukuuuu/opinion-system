@@ -8,7 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..rag.core.chunker import ChunkConfig, TextChunker
-from .neo4j_client import get_driver, get_session
+from .neo4j_client import get_driver
 from .sync_mysql_to_neo4j import _post_global_id
 
 LOG = logging.getLogger(__name__)
@@ -41,9 +41,7 @@ def write_chunks_for_post(
     chunks = _chunk_text(contents, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     if not chunks:
         return 0
-    
-    # 使用 get_session() 确保连接到配置的数据库
-    with get_session() as session:
+    with driver.session() as session:
         for chunk_text, chunk_index in chunks:
             chunk_id = f"{post_global_id}_chunk_{chunk_index}"
             session.run(

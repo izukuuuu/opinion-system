@@ -19,7 +19,7 @@ from ..utils.io.excel import read_csv
 class ContentAnalyze:
     """内容分析器"""
     
-    def __init__(self, topic: str, start_date: str, end_date: str, prompt_config_path: Optional[Path] = None):
+    def __init__(self, topic: str, start_date: str, end_date: str):
         """
         初始化内容分析器
         
@@ -27,14 +27,12 @@ class ContentAnalyze:
             topic (str): 专题名称
             start_date (str): 开始日期字符串
             end_date (str): 结束日期字符串
-            prompt_config_path (Optional[Path]): 提示词配置文件路径，如果提供则优先使用
         """
         self.topic = topic
         self.start_date = start_date
         self.end_date = end_date
         self.date_range = f"{start_date}_{end_date}"
         self.logger = setup_logger(f"ContentAnalyze_{topic}", self.date_range)
-        self.prompt_config_path = prompt_config_path
         
         # 获取API配置
         self.api_key = get_api_key()
@@ -65,11 +63,6 @@ class ContentAnalyze:
             Dict[str, str]: 提示词配置
         """
         try:
-            # 如果指定了配置文件路径，直接使用
-            if self.prompt_config_path and self.prompt_config_path.exists():
-                with open(self.prompt_config_path, 'r', encoding='utf-8') as f:
-                    return yaml.safe_load(f)
-
             configs_root = get_configs_root()
             contentanalysis_dir = configs_root / "prompt" / "contentanalysis"
             
