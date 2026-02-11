@@ -11,8 +11,9 @@ from ..utils.setting.paths import bucket
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_skip
 from ..utils.io.excel import read_jsonl, sanitize_dataframe, get_standard_table_schema
 from ..utils.io.db import db_manager
-from sqlalchemy import text
+from sqlalchemy import DateTime, MetaData, String, Table, Text, Column, inspect, text
 from sqlalchemy.exc import IntegrityError as SAIntegrityError
+from sqlalchemy.dialects.mysql import LONGTEXT
 
 try:  # Optional dependency; PyMySQL is used by default
     from pymysql.err import IntegrityError as PyMysqlIntegrityError
@@ -34,16 +35,30 @@ def create_table_with_standard_schema(conn, table_name: str, topic: str, logger)
         bool: 是否成功
     """
     try:
-        schema = get_standard_table_schema()
-        column_defs = [f"`{col}` {mysql_type}" for col, mysql_type in schema.items()]
-        
-        create_sql = f"""
-        CREATE TABLE IF NOT EXISTS `{table_name}` (
-            {', '.join(column_defs)}
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        
-        conn.execute(text(create_sql))
+        # Use SQLAlchemy DDL so MySQL/PostgreSQL syntax is handled correctly.
+        # Keep LONGTEXT semantics for MySQL, fall back to TEXT for other dialects.
+        long_text = Text().with_variant(LONGTEXT(), "mysql")
+
+        metadata = MetaData()
+        table = Table(
+            table_name,
+            metadata,
+            Column("id", String(64), primary_key=True),
+            Column("title", long_text),
+            Column("contents", long_text),
+            Column("platform", String(50)),
+            Column("author", long_text),
+            Column("published_at", DateTime),
+            Column("url", long_text),
+            Column("region", String(100)),
+            Column("hit_words", Text),
+            Column("polarity", String(20)),
+            Column("classification", String(100)),
+            # Chinese channel names require quoting in PostgreSQL; force quoting universally.
+            quote=True,
+        )
+
+        table.create(bind=conn, checkfirst=True)
         log_success(logger, f"已创建表 {topic}.{table_name}（标准结构）", "Upload")
         return True
         
@@ -65,12 +80,10 @@ def table_exists(conn, table_name: str, topic: str) -> bool:
         bool: 表是否存在
     """
     try:
-        query = """
-        SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_schema = :schema AND table_name = :table
-        """
-        result = conn.execute(text(query), {"schema": topic, "table": table_name})
-        return (result.scalar() or 0) > 0
+        # Use SQLAlchemy inspector for cross-dialect compatibility.
+        # The engine is already connected to the target database, so we don't rely on schema=topic.
+        inspector = inspect(conn)
+        return bool(inspector.has_table(table_name))
     except Exception:
         return False
 

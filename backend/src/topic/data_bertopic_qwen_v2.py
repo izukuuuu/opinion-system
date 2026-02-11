@@ -372,6 +372,13 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> pd.DataFrame:
                     else:
                         log_skip(logger, f"文件 {file_path.name} 无内容字段", "TopicBertopic")
                         continue
+                
+                # 添加渠道字段
+                if 'channel' not in df.columns:
+                    # 从文件名推断渠道 (去除扩展名)
+                    channel_name = file_path.stem
+                    # 如果文件名包含日期等后缀，可能需要处理，这里简单处理
+                    df['channel'] = channel_name
 
                 all_data.append(df)
                 log_success(logger, f"读取: {file_path.name} - {len(df)}条", "TopicBertopic")
@@ -415,15 +422,24 @@ def _load_dict_file(file_path: Path, logger) -> set:
         return set()
 
 
-def _preprocess_text(texts: List[str], user_words: set, stop_words: set, logger) -> List[str]:
+import hashlib
+
+def _preprocess_text(texts: List[str], ids: List[str], channels: List[str], user_words: set, stop_words: set, logger) -> Tuple[List[str], List[str], List[str]]:
     """文本预处理和分词"""
     # 添加用户词典
     for word in user_words:
         jieba.add_word(word)
 
     processed_texts = []
-    for i, text in enumerate(texts):
-        if pd.isna(text) or not text.strip():
+    processed_ids = []
+    processed_channels = []
+    
+    # Handle case where channels might be shorter or None if logic failed, though zip handles shortest
+    if not channels:
+        channels = ["未知"] * len(texts)
+
+    for i, (text, doc_id, channel) in enumerate(zip(texts, ids, channels)):
+        if pd.isna(text) or not str(text).strip():
             continue
 
         # 清理文本
@@ -442,129 +458,21 @@ def _preprocess_text(texts: List[str], user_words: set, stop_words: set, logger)
 
         if words:
             processed_texts.append(' '.join(words))
+            processed_ids.append(str(doc_id))
+            processed_channels.append(str(channel))
 
         # 进度提示
         if (i + 1) % 1000 == 0:
             log_success(logger, f"已处理 {i + 1}/{len(texts)} 条文本", "TopicBertopic")
 
     log_success(logger, f"文本预处理完成，有效文本: {len(processed_texts)}", "TopicBertopic")
-    return processed_texts
-
-
-class _SafeFormatDict(dict):
-    def __missing__(self, key: str) -> str:
-        return "{" + key + "}"
-
-
-def _render_prompt_template(template: str, values: Dict[str, Any]) -> str:
-    """渲染提示词模板，优先兼容 format 风格，失败时回退到 replace。"""
-
-    text = str(template or "")
-    normalised_values = {k: str(v) for k, v in values.items()}
-    try:
-        return text.format_map(_SafeFormatDict(normalised_values))
-    except Exception:
-        rendered = text
-        for key, value in normalised_values.items():
-            rendered = rendered.replace("{" + key + "}", value)
-        return rendered
-
-
-def _extract_json_payload(text: str) -> Optional[Dict[str, Any]]:
-    """从模型输出中尽量提取 JSON 对象。"""
-
-    if not isinstance(text, str):
-        return None
-    cleaned = text.strip()
-    if not cleaned:
-        return None
-    if "```json" in cleaned:
-        cleaned = cleaned.split("```json", 1)[1].split("```", 1)[0].strip()
-    elif "```" in cleaned:
-        cleaned = cleaned.split("```", 1)[1].split("```", 1)[0].strip()
-
-    try:
-        parsed = json.loads(cleaned)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        pass
-
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if not match:
-        return None
-    try:
-        parsed = json.loads(match.group(0))
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        return None
-    return None
-
-
-def _parse_clusters(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """兼容解析 clusters 或旧版合并方案字段。"""
-
-    clusters = payload.get("clusters")
-    if isinstance(clusters, list):
-        normalised: List[Dict[str, Any]] = []
-        for idx, cluster in enumerate(clusters):
-            if not isinstance(cluster, dict):
-                continue
-            name = str(cluster.get("cluster_name") or cluster.get("name") or f"类别{idx + 1}").strip()
-            topics = cluster.get("topics")
-            if not isinstance(topics, list):
-                topics = []
-            topics = [str(item).strip() for item in topics if str(item or "").strip()]
-            description = str(cluster.get("description") or "").strip()
-            normalised.append(
-                {
-                    "cluster_name": name,
-                    "topics": topics,
-                    "description": description,
-                }
-            )
-        return normalised
-
-    merge_plan = payload.get("合并方案")
-    if not isinstance(merge_plan, list):
-        return []
-
-    converted: List[Dict[str, Any]] = []
-    for idx, item in enumerate(merge_plan):
-        if not isinstance(item, dict):
-            continue
-        name = str(
-            item.get("主题命名")
-            or item.get("新主题名称")
-            or item.get("cluster_name")
-            or f"类别{idx + 1}"
-        ).strip()
-        topics = item.get("原始主题集合")
-        if not isinstance(topics, list):
-            topics = item.get("topics")
-        if not isinstance(topics, list):
-            topics = []
-        description = str(item.get("主题描述") or item.get("description") or "").strip()
-        converted.append(
-            {
-                "cluster_name": name,
-                "topics": [str(v).strip() for v in topics if str(v or "").strip()],
-                "description": description,
-            }
-        )
-    return converted
-
-
-def _split_keywords(text: str) -> List[str]:
-    if not isinstance(text, str):
-        return []
-    raw = re.split(r"[,\n，、;；]+", text)
-    return [item.strip() for item in raw if item and item.strip()]
+    return processed_texts, processed_ids, processed_channels
 
 
 def _run_bertopic(
     texts: List[str],
+    ids: List[str],
+    channels: List[str],
     topic_name: str,
     start_date: str,
     end_date: str,
@@ -718,54 +626,24 @@ def _run_bertopic(
             json.dump(topic_keywords, f, ensure_ascii=False, indent=2)
 
         # 3. 保存文档2D坐标（用于可视化）
-        doc_coords: List[Dict[str, Any]] = []
-        try:
-            reduced_doc_embeddings = None
+        if hasattr(topic_model, 'topic_embeddings_') and topic_model.topic_embeddings_ is not None:
+            # 获取文档嵌入
+            doc_embeddings = topic_model.document_embeddings_
+            # 获取主题嵌入
+            topic_embeddings = topic_model.topic_embeddings_
 
-            # BERTopic 0.17.x 可稳定从 UMAP 模型读取降维结果；
-            # 一些版本不再暴露 document_embeddings_，因此这里优先读取 embedding_。
-            umap_embedding = getattr(getattr(topic_model, "umap_model", None), "embedding_", None)
-            if umap_embedding is not None:
-                reduced_doc_embeddings = np.asarray(umap_embedding)
-                log_success(logger, "使用 UMAP embedding_ 生成文档坐标", "TopicBertopic")
-            else:
-                doc_embedding_attr = getattr(topic_model, "document_embeddings_", None)
-                if doc_embedding_attr is not None:
-                    raw_doc_embeddings = np.asarray(doc_embedding_attr)
-                    if raw_doc_embeddings.ndim == 2 and raw_doc_embeddings.shape[1] >= 2:
-                        if raw_doc_embeddings.shape[1] == 2:
-                            reduced_doc_embeddings = raw_doc_embeddings
-                        else:
-                            reducer_2d = UMAP(
-                                n_neighbors=15,
-                                n_components=2,
-                                min_dist=0.0,
-                                metric="cosine",
-                                random_state=42,
-                                low_memory=True,
-                            )
-                            reduced_doc_embeddings = reducer_2d.fit_transform(raw_doc_embeddings)
-                        log_success(logger, "使用 document_embeddings_ 生成文档坐标", "TopicBertopic")
-
-            if (
-                reduced_doc_embeddings is not None
-                and len(reduced_doc_embeddings) == len(topics)
-                and reduced_doc_embeddings.ndim == 2
-                and reduced_doc_embeddings.shape[1] >= 2
-            ):
-                for i, (topic_id, embedding) in enumerate(zip(topics, reduced_doc_embeddings)):
-                    if topic_id != -1:  # 排除离群点
-                        doc_coords.append({
-                            "doc_id": i,
-                            "topic_id": int(topic_id),
-                            "x": float(embedding[0]),
-                            "y": float(embedding[1]),
-                        })
-            else:
-                log_skip(logger, "未获取到可用的文档2D坐标，跳过可视化坐标输出", "TopicBertopic")
-        except Exception as e:
-            log_error(logger, f"生成文档2D坐标失败，已跳过: {e}", "TopicBertopic")
+            # 保存文档坐标
             doc_coords = []
+            for i, (topic_id, embedding, doc_id, channel) in enumerate(zip(topics, doc_embeddings, ids, channels)):
+                if topic_id != -1:  # 排除离群点
+                    doc_coords.append({
+                        "doc_id": i,
+                        "post_id": str(doc_id),
+                        "channel": str(channel),
+                        "topic_id": int(topic_id),
+                        "x": float(embedding[0]),
+                        "y": float(embedding[1])
+                    })
 
         if doc_coords:
             with open(output_dir / "3文档2D坐标.json", 'w', encoding='utf-8') as f:
@@ -1076,8 +954,27 @@ def run_topic_bertopic(
             log_error(logger, "没有可用的数据", "TopicBertopic")
             return False
 
-        # 提取文本内容
-        texts = df['contents'].dropna().tolist()
+    # 提取文本内容
+        df_clean = df.dropna(subset=['contents'])
+        texts = df_clean['contents'].tolist()
+        
+        # 提取ID
+        if 'id' in df_clean.columns:
+            ids = df_clean['id'].tolist()
+        elif 'post_id' in df_clean.columns:
+            ids = df_clean['post_id'].tolist()
+        elif 'url' in df_clean.columns:
+            ids = df_clean['url'].tolist()
+        else:
+            log_error(logger, "未找到ID字段，使用内容哈希作为ID", "TopicBertopic")
+            ids = [hashlib.md5(str(t).encode('utf-8')).hexdigest() for t in texts]
+
+        # 提取渠道
+        if 'channel' in df_clean.columns:
+            channels = df_clean['channel'].tolist()
+        else:
+            channels = ["未知"] * len(texts)
+
         if not texts:
             log_error(logger, "没有有效的文本内容", "TopicBertopic")
             return False
@@ -1085,7 +982,7 @@ def run_topic_bertopic(
         log_success(logger, f"加载文本数据: {len(texts)}条", "TopicBertopic")
 
         # 文本预处理
-        processed_texts = _preprocess_text(texts, user_words, stop_words, logger)
+        processed_texts, processed_ids, processed_channels = _preprocess_text(texts, ids, channels, user_words, stop_words, logger)
         if not processed_texts:
             log_error(logger, "文本预处理后没有有效内容", "TopicBertopic")
             return False
@@ -1097,14 +994,16 @@ def run_topic_bertopic(
         # 运行BERTopic分析
         success = _run_bertopic(
             processed_texts,
+            processed_ids,
+            processed_channels,
             topic_label,
-            start_date,
-            end_date,
-            output_dir,
-            logger,
-            prompt_config=prompt_config,
-            run_params=run_params,
-        )
+        start_date,
+        end_date,
+        output_dir,
+        logger,
+        prompt_config=prompt_config,
+        run_params=run_params,
+    )
 
         if success:
             log_save_success(logger, f"主题分析结果已保存到: {output_dir}", "TopicBertopic")

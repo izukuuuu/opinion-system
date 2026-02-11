@@ -42,7 +42,12 @@ def get_driver():
 def get_session() -> Generator[Any, None, None]:
     """Context manager 返回 Neo4j 会话。"""
     driver = get_driver()
-    session = driver.session()
+    cfg = get_graph_config()
+    database = (cfg.get("database") or "").strip()
+    if database:
+        session = driver.session(database=database)
+    else:
+        session = driver.session()
     try:
         yield session
     finally:
