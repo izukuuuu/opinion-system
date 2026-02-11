@@ -21,19 +21,17 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 import pandas as pd
 import numpy as np
 import jieba
-import yaml
 from openai import OpenAI
 from bertopic import BERTopic
 from umap import UMAP
 from hdbscan import HDBSCAN
 from sklearn.feature_extraction.text import CountVectorizer
-from collections import defaultdict
 
 # 抑制jieba的日志输出
 jieba.setLogLevel(60)
 
 from ..utils.logging.logging import (
-    setup_logger, log_success, log_error, log_module_start, log_save_success
+    setup_logger, log_success, log_error, log_module_start, log_save_success, log_skip
 )
 from ..utils.setting.env_loader import get_api_key, load_env_file
 from ..utils.setting.paths import get_project_root, bucket
@@ -41,10 +39,196 @@ from ..utils.io.excel import read_jsonl, write_jsonl
 from ..utils.setting.settings import settings
 from ..project.manager import get_project_manager
 from ..fetch.data_fetch import get_topic_available_date_range
+from .prompt_config import (
+    DEFAULT_KEYWORDS_SYSTEM_PROMPT,
+    DEFAULT_KEYWORDS_USER_PROMPT,
+    DEFAULT_RECLUSTER_SYSTEM_PROMPT,
+    DEFAULT_RECLUSTER_USER_PROMPT,
+    DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS,
+    load_topic_bertopic_prompt_config,
+)
+from sentence_transformers import SentenceTransformer
+from .config import load_bertopic_config
 
 # 配置常量
-TARGET_TOPICS = 8  # 大模型合并后的目标主题数
+TARGET_TOPICS = DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS  # 大模型合并后的目标主题数
 LLM_MODEL_NAME = "qwen-plus"
+DEFAULT_RUN_PARAMS: Dict[str, Any] = {
+    "vectorizer": {
+        "ngram_min": 1,
+        "ngram_max": 2,
+        "min_df": 2,
+        "max_df": 0.8,
+    },
+    "umap": {
+        "n_neighbors": 15,
+        "n_components": 5,
+        "min_dist": 0.0,
+        "metric": "cosine",
+        "random_state": 42,
+    },
+    "hdbscan": {
+        "min_cluster_size": 10,
+        "min_samples": 5,
+        "metric": "euclidean",
+        "cluster_selection_method": "eom",
+    },
+    "bertopic": {
+        "top_n_words": 10,
+        "calculate_probabilities": False,
+        "verbose": True,
+    },
+}
+
+
+def _coerce_int(value: Any, default: int, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        parsed = int(default)
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
+
+
+def _coerce_float(value: Any, default: float, minimum: Optional[float] = None, maximum: Optional[float] = None) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = float(default)
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _coerce_df_threshold(value: Any, default: Any) -> Any:
+    """CountVectorizer min_df/max_df 支持 int 或 float(0,1]。"""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed <= 0:
+        return default
+    if parsed < 1:
+        return parsed
+    return int(parsed)
+
+
+def _resolve_run_params(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    params: Dict[str, Any] = json.loads(json.dumps(DEFAULT_RUN_PARAMS))
+    if not isinstance(raw, dict):
+        return params
+
+    vectorizer_raw = raw.get("vectorizer")
+    if isinstance(vectorizer_raw, dict):
+        ngram_min = _coerce_int(
+            vectorizer_raw.get("ngram_min"),
+            params["vectorizer"]["ngram_min"],
+            minimum=1,
+            maximum=5,
+        )
+        ngram_max = _coerce_int(
+            vectorizer_raw.get("ngram_max"),
+            params["vectorizer"]["ngram_max"],
+            minimum=1,
+            maximum=5,
+        )
+        if ngram_min > ngram_max:
+            ngram_min, ngram_max = ngram_max, ngram_min
+        params["vectorizer"]["ngram_min"] = ngram_min
+        params["vectorizer"]["ngram_max"] = ngram_max
+        params["vectorizer"]["min_df"] = _coerce_df_threshold(
+            vectorizer_raw.get("min_df"),
+            params["vectorizer"]["min_df"],
+        )
+        params["vectorizer"]["max_df"] = _coerce_df_threshold(
+            vectorizer_raw.get("max_df"),
+            params["vectorizer"]["max_df"],
+        )
+
+    umap_raw = raw.get("umap")
+    if isinstance(umap_raw, dict):
+        params["umap"]["n_neighbors"] = _coerce_int(
+            umap_raw.get("n_neighbors"),
+            params["umap"]["n_neighbors"],
+            minimum=2,
+            maximum=200,
+        )
+        params["umap"]["n_components"] = _coerce_int(
+            umap_raw.get("n_components"),
+            params["umap"]["n_components"],
+            minimum=2,
+            maximum=50,
+        )
+        params["umap"]["min_dist"] = _coerce_float(
+            umap_raw.get("min_dist"),
+            params["umap"]["min_dist"],
+            minimum=0.0,
+            maximum=0.99,
+        )
+        metric = str(umap_raw.get("metric") or "").strip()
+        params["umap"]["metric"] = metric or params["umap"]["metric"]
+        params["umap"]["random_state"] = _coerce_int(
+            umap_raw.get("random_state"),
+            params["umap"]["random_state"],
+        )
+
+    hdbscan_raw = raw.get("hdbscan")
+    if isinstance(hdbscan_raw, dict):
+        params["hdbscan"]["min_cluster_size"] = _coerce_int(
+            hdbscan_raw.get("min_cluster_size"),
+            params["hdbscan"]["min_cluster_size"],
+            minimum=2,
+            maximum=1000,
+        )
+        params["hdbscan"]["min_samples"] = _coerce_int(
+            hdbscan_raw.get("min_samples"),
+            params["hdbscan"]["min_samples"],
+            minimum=1,
+            maximum=1000,
+        )
+        h_metric = str(hdbscan_raw.get("metric") or "").strip()
+        params["hdbscan"]["metric"] = h_metric or params["hdbscan"]["metric"]
+        method = str(hdbscan_raw.get("cluster_selection_method") or "").strip().lower()
+        if method in {"eom", "leaf"}:
+            params["hdbscan"]["cluster_selection_method"] = method
+
+    bertopic_raw = raw.get("bertopic")
+    if isinstance(bertopic_raw, dict):
+        params["bertopic"]["top_n_words"] = _coerce_int(
+            bertopic_raw.get("top_n_words"),
+            params["bertopic"]["top_n_words"],
+            minimum=5,
+            maximum=50,
+        )
+        params["bertopic"]["calculate_probabilities"] = _coerce_bool(
+            bertopic_raw.get("calculate_probabilities"),
+            params["bertopic"]["calculate_probabilities"],
+        )
+        params["bertopic"]["verbose"] = _coerce_bool(
+            bertopic_raw.get("verbose"),
+            params["bertopic"]["verbose"],
+        )
+
+    return params
 
 
 def _default_paths(topic: str, start_date: str, end_date: str = None, bucket_topic: Optional[str] = None) -> Dict[str, Path]:
@@ -117,11 +301,11 @@ def _ensure_fetch_data(topic: str, start_date: str, end_date: str, logger, bucke
     success = fetch_range(storage_topic, start_date, end_date, output_date, logger, db_topic=db_name)
 
     if success:
-        log_success(logger, f"数据拉取完成", "TopicBertopic")
+        log_success(logger, f"数据拉取完成: {success}条", "TopicBertopic")
     else:
         log_error(logger, f"数据拉取失败", "TopicBertopic")
 
-    return success
+    return bool(success)
 
 
 def _load_and_merge_data(fetch_dir: Path, logger) -> pd.DataFrame:
@@ -267,47 +451,226 @@ def _preprocess_text(texts: List[str], user_words: set, stop_words: set, logger)
     return processed_texts
 
 
+class _SafeFormatDict(dict):
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def _render_prompt_template(template: str, values: Dict[str, Any]) -> str:
+    """渲染提示词模板，优先兼容 format 风格，失败时回退到 replace。"""
+
+    text = str(template or "")
+    normalised_values = {k: str(v) for k, v in values.items()}
+    try:
+        return text.format_map(_SafeFormatDict(normalised_values))
+    except Exception:
+        rendered = text
+        for key, value in normalised_values.items():
+            rendered = rendered.replace("{" + key + "}", value)
+        return rendered
+
+
+def _extract_json_payload(text: str) -> Optional[Dict[str, Any]]:
+    """从模型输出中尽量提取 JSON 对象。"""
+
+    if not isinstance(text, str):
+        return None
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+    if "```json" in cleaned:
+        cleaned = cleaned.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in cleaned:
+        cleaned = cleaned.split("```", 1)[1].split("```", 1)[0].strip()
+
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return None
+    return None
+
+
+def _parse_clusters(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """兼容解析 clusters 或旧版合并方案字段。"""
+
+    clusters = payload.get("clusters")
+    if isinstance(clusters, list):
+        normalised: List[Dict[str, Any]] = []
+        for idx, cluster in enumerate(clusters):
+            if not isinstance(cluster, dict):
+                continue
+            name = str(cluster.get("cluster_name") or cluster.get("name") or f"类别{idx + 1}").strip()
+            topics = cluster.get("topics")
+            if not isinstance(topics, list):
+                topics = []
+            topics = [str(item).strip() for item in topics if str(item or "").strip()]
+            description = str(cluster.get("description") or "").strip()
+            normalised.append(
+                {
+                    "cluster_name": name,
+                    "topics": topics,
+                    "description": description,
+                }
+            )
+        return normalised
+
+    merge_plan = payload.get("合并方案")
+    if not isinstance(merge_plan, list):
+        return []
+
+    converted: List[Dict[str, Any]] = []
+    for idx, item in enumerate(merge_plan):
+        if not isinstance(item, dict):
+            continue
+        name = str(
+            item.get("主题命名")
+            or item.get("新主题名称")
+            or item.get("cluster_name")
+            or f"类别{idx + 1}"
+        ).strip()
+        topics = item.get("原始主题集合")
+        if not isinstance(topics, list):
+            topics = item.get("topics")
+        if not isinstance(topics, list):
+            topics = []
+        description = str(item.get("主题描述") or item.get("description") or "").strip()
+        converted.append(
+            {
+                "cluster_name": name,
+                "topics": [str(v).strip() for v in topics if str(v or "").strip()],
+                "description": description,
+            }
+        )
+    return converted
+
+
+def _split_keywords(text: str) -> List[str]:
+    if not isinstance(text, str):
+        return []
+    raw = re.split(r"[,\n，、;；]+", text)
+    return [item.strip() for item in raw if item and item.strip()]
+
+
 def _run_bertopic(
     texts: List[str],
     topic_name: str,
     start_date: str,
     end_date: str,
     output_dir: Path,
-    logger
+    logger,
+    prompt_config: Optional[Dict[str, Any]] = None,
+    run_params: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """运行BERTopic主题分析"""
     try:
+        resolved_params = _resolve_run_params(run_params)
+        vectorizer_params = resolved_params["vectorizer"]
+        umap_params = resolved_params["umap"]
+        hdbscan_params = resolved_params["hdbscan"]
+        bertopic_params = resolved_params["bertopic"]
+
+        # 动态调整配置：根据数据量自动优化 min_cluster_size
+        # 用户反馈：数据量大时，默认的 10 太小，导致碎片化严重或运行失败
+        n_docs = len(texts)
+        if n_docs >= 2000:
+            current_min_cluster = int(hdbscan_params["min_cluster_size"])
+            # 仅在当前设置较小（默认值附近）时触发自动调整
+            if current_min_cluster <= 20:
+                # 启发式规则：
+                # 2k ~ 10k: 线性增加，约 n / 200 (例: 5000 -> 25)
+                # 10k+: 稍微平缓，上限 100 (例: 20000 -> 100)
+                if n_docs < 20000:
+                    suggested_size = int(n_docs / 200)
+                else:
+                    suggested_size = 100
+                
+                # 确保不低于原始值，且不低于 10
+                suggested_size = max(suggested_size, current_min_cluster, 10)
+                
+                if suggested_size > current_min_cluster:
+                    log_success(
+                        logger,
+                        f"检测到数据量较大({n_docs}条)，自动调整 min_cluster_size: {current_min_cluster} -> {suggested_size}",
+                        "TopicBertopic"
+                    )
+                    hdbscan_params["min_cluster_size"] = suggested_size
+
+        log_success(
+            logger,
+            (
+                "运行参数: "
+                f"vectorizer={vectorizer_params}, "
+                f"umap={umap_params}, "
+                f"hdbscan={hdbscan_params}, "
+                f"bertopic={bertopic_params}"
+            ),
+            "TopicBertopic",
+        )
+
         # 设置BERTopic参数
         vectorizer_model = CountVectorizer(
             stop_words=None,  # 已在前端处理停用词
-            ngram_range=(1, 2),
-            min_df=2,
-            max_df=0.8
+            ngram_range=(
+                int(vectorizer_params["ngram_min"]),
+                int(vectorizer_params["ngram_max"]),
+            ),
+            min_df=vectorizer_params["min_df"],
+            max_df=vectorizer_params["max_df"]
         )
 
         umap_model = UMAP(
-            n_neighbors=15,
-            n_components=5,
-            min_dist=0.0,
-            metric='cosine',
-            random_state=42
+            n_neighbors=int(umap_params["n_neighbors"]),
+            n_components=int(umap_params["n_components"]),
+            min_dist=float(umap_params["min_dist"]),
+            metric=str(umap_params["metric"]),
+            random_state=int(umap_params["random_state"]),
+            low_memory=True
         )
 
         hdbscan_model = HDBSCAN(
-            min_cluster_size=10,
-            min_samples=5,
-            metric='euclidean',
-            cluster_selection_method='eom'
+            min_cluster_size=int(hdbscan_params["min_cluster_size"]),
+            min_samples=int(hdbscan_params["min_samples"]),
+            metric=str(hdbscan_params["metric"]),
+            cluster_selection_method=str(hdbscan_params["cluster_selection_method"])
         )
+
+        # 加载嵌入模型配置
+        try:
+            config = load_bertopic_config()
+            embedding_config = config.get("embedding", {})
+            model_name = embedding_config.get("model_name", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+            device = embedding_config.get("device", "cpu")
+            if device and device.lower() == "auto":
+                device = None  # SentenceTransformer 默认 auto
+
+            log_success(logger, f"加载嵌入模型: {model_name} (device={device})", "TopicBertopic")
+            embedding_model = SentenceTransformer(model_name, device=device)
+        except Exception as e:
+            log_error(logger, f"加载嵌入模型失败，使用默认: {e}", "TopicBertopic")
+            embedding_model = None  # 让 BERTopic 使用其默认值
 
         # 初始化BERTopic
         topic_model = BERTopic(
+            embedding_model=embedding_model,
             vectorizer_model=vectorizer_model,
             umap_model=umap_model,
             hdbscan_model=hdbscan_model,
-            language="chinese",
-            calculate_probabilities=False,
-            verbose=True
+            language="chinese (simplified)",
+            top_n_words=int(bertopic_params["top_n_words"]),
+            calculate_probabilities=bool(bertopic_params["calculate_probabilities"]),
+            verbose=bool(bertopic_params["verbose"])
         )
 
         # 训练模型
@@ -321,11 +684,14 @@ def _run_bertopic(
         topic_stats = []
         for idx, row in topic_info.iterrows():
             if row['Topic'] != -1:  # 排除离群点
+                topic_words = topic_model.get_topic(int(row['Topic'])) or []
+                topic_keywords = [str(item[0]).strip() for item in topic_words[:10] if item and item[0]]
                 topic_stats.append({
                     "topic_id": int(row['Topic']),
                     "topic_name": str(row['Name']),
                     "count": int(row['Count']),
-                    "frequency": float(row['Count'] / len(texts))
+                    "frequency": float(row['Count'] / len(texts)),
+                    "keywords": topic_keywords,
                 })
 
         # 按频率排序
@@ -352,27 +718,65 @@ def _run_bertopic(
             json.dump(topic_keywords, f, ensure_ascii=False, indent=2)
 
         # 3. 保存文档2D坐标（用于可视化）
-        if hasattr(topic_model, 'topic_embeddings_') and topic_model.topic_embeddings_ is not None:
-            # 获取文档嵌入
-            doc_embeddings = topic_model.document_embeddings_
-            # 获取主题嵌入
-            topic_embeddings = topic_model.topic_embeddings_
+        doc_coords: List[Dict[str, Any]] = []
+        try:
+            reduced_doc_embeddings = None
 
-            # 保存文档坐标
+            # BERTopic 0.17.x 可稳定从 UMAP 模型读取降维结果；
+            # 一些版本不再暴露 document_embeddings_，因此这里优先读取 embedding_。
+            umap_embedding = getattr(getattr(topic_model, "umap_model", None), "embedding_", None)
+            if umap_embedding is not None:
+                reduced_doc_embeddings = np.asarray(umap_embedding)
+                log_success(logger, "使用 UMAP embedding_ 生成文档坐标", "TopicBertopic")
+            else:
+                doc_embedding_attr = getattr(topic_model, "document_embeddings_", None)
+                if doc_embedding_attr is not None:
+                    raw_doc_embeddings = np.asarray(doc_embedding_attr)
+                    if raw_doc_embeddings.ndim == 2 and raw_doc_embeddings.shape[1] >= 2:
+                        if raw_doc_embeddings.shape[1] == 2:
+                            reduced_doc_embeddings = raw_doc_embeddings
+                        else:
+                            reducer_2d = UMAP(
+                                n_neighbors=15,
+                                n_components=2,
+                                min_dist=0.0,
+                                metric="cosine",
+                                random_state=42,
+                                low_memory=True,
+                            )
+                            reduced_doc_embeddings = reducer_2d.fit_transform(raw_doc_embeddings)
+                        log_success(logger, "使用 document_embeddings_ 生成文档坐标", "TopicBertopic")
+
+            if (
+                reduced_doc_embeddings is not None
+                and len(reduced_doc_embeddings) == len(topics)
+                and reduced_doc_embeddings.ndim == 2
+                and reduced_doc_embeddings.shape[1] >= 2
+            ):
+                for i, (topic_id, embedding) in enumerate(zip(topics, reduced_doc_embeddings)):
+                    if topic_id != -1:  # 排除离群点
+                        doc_coords.append({
+                            "doc_id": i,
+                            "topic_id": int(topic_id),
+                            "x": float(embedding[0]),
+                            "y": float(embedding[1]),
+                        })
+            else:
+                log_skip(logger, "未获取到可用的文档2D坐标，跳过可视化坐标输出", "TopicBertopic")
+        except Exception as e:
+            log_error(logger, f"生成文档2D坐标失败，已跳过: {e}", "TopicBertopic")
             doc_coords = []
-            for i, (topic_id, embedding) in enumerate(zip(topics, doc_embeddings)):
-                if topic_id != -1:  # 排除离群点
-                    doc_coords.append({
-                        "doc_id": i,
-                        "topic_id": int(topic_id),
-                        "x": float(embedding[0]),
-                        "y": float(embedding[1])
-                    })
 
+        if doc_coords:
             with open(output_dir / "3文档2D坐标.json", 'w', encoding='utf-8') as f:
-                json.dump({
-                    "documents": doc_coords
-                }, f, ensure_ascii=False, indent=2)
+                json.dump(
+                    {
+                        "documents": doc_coords
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
         # 4-5. 使用大模型进行主题聚类和生成新关键词
         if topic_stats and len(topic_stats) > 0:
@@ -380,7 +784,8 @@ def _run_bertopic(
                 _generate_llm_clustering(
                     topic_stats[:min(20, len(topic_stats))],  # 最多取前20个主题
                     output_dir,
-                    logger
+                    logger,
+                    prompt_config=prompt_config,
                 )
             except Exception as e:
                 log_error(logger, f"大模型聚类失败: {e}", "TopicBertopic")
@@ -389,11 +794,17 @@ def _run_bertopic(
         return True
 
     except Exception as e:
-        log_error(logger, f"BERTopic运行失败: {e}", "TopicBertopic")
+        import traceback
+        log_error(logger, f"BERTopic运行失败: {e}\n{traceback.format_exc()}", "TopicBertopic")
         return False
 
 
-def _generate_llm_clustering(topic_stats: List[Dict], output_dir: Path, logger):
+def _generate_llm_clustering(
+    topic_stats: List[Dict],
+    output_dir: Path,
+    logger,
+    prompt_config: Optional[Dict[str, Any]] = None,
+):
     """使用大模型进行主题聚类"""
     # 获取API密钥
     load_env_file()
@@ -408,29 +819,54 @@ def _generate_llm_clustering(topic_stats: List[Dict], output_dir: Path, logger):
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
 
+        config = prompt_config or {}
+        try:
+            target_topics = int(config.get("target_topics", TARGET_TOPICS))
+        except (TypeError, ValueError):
+            target_topics = TARGET_TOPICS
+        target_topics = max(2, min(50, target_topics))
+
+        recluster_system_prompt = str(
+            config.get("recluster_system_prompt") or DEFAULT_RECLUSTER_SYSTEM_PROMPT
+        )
+        recluster_user_prompt = str(
+            config.get("recluster_user_prompt") or DEFAULT_RECLUSTER_USER_PROMPT
+        )
+        keyword_system_prompt = str(
+            config.get("keyword_system_prompt") or DEFAULT_KEYWORDS_SYSTEM_PROMPT
+        )
+        keyword_user_prompt = str(
+            config.get("keyword_user_prompt") or DEFAULT_KEYWORDS_USER_PROMPT
+        )
+
         # 准备主题描述
         topic_descriptions = []
         for i, topic in enumerate(topic_stats):
-            topic_descriptions.append(f"{i+1}. {topic['topic_name']} ({topic['count']}篇)")
+            keywords = topic.get("keywords")
+            if isinstance(keywords, list):
+                keyword_text = "、".join([str(item).strip() for item in keywords if str(item or "").strip()])
+            else:
+                keyword_text = ""
+            if keyword_text:
+                topic_descriptions.append(
+                    f"{i+1}. {topic.get('topic_name', '未知主题')} ({topic.get('count', 0)}篇) 关键词: {keyword_text}"
+                )
+            else:
+                topic_descriptions.append(
+                    f"{i+1}. {topic.get('topic_name', '未知主题')} ({topic.get('count', 0)}篇)"
+                )
 
-        # 构建提示词
-        prompt = f"""
-请将以下主题分析结果合并为{TARGET_TOPICS}个更大的主题类别：
-
-原始主题列表：
-{chr(10).join(topic_descriptions)}
-
-请按照以下格式输出JSON：
-{{
-    "clusters": [
-        {{
-            "cluster_name": "类别名称",
-            "topics": ["原始主题1", "原始主题2"],
-            "description": "类别描述"
-        }}
-    ]
-}}
-"""
+        prompt_payload = {
+            "topics": topic_stats,
+            "topic_list": topic_descriptions,
+        }
+        prompt_values = {
+            "TARGET_TOPICS": target_topics,
+            "input_data": json.dumps(prompt_payload, ensure_ascii=False, indent=2),
+            "topic_list": "\n".join(topic_descriptions),
+            "topic_stats_json": json.dumps(topic_stats, ensure_ascii=False, indent=2),
+        }
+        prompt = _render_prompt_template(recluster_user_prompt, prompt_values)
 
         log_success(logger, "调用大模型进行主题聚类...", "TopicBertopic")
 
@@ -438,65 +874,98 @@ def _generate_llm_clustering(topic_stats: List[Dict], output_dir: Path, logger):
         response = client.chat.completions.create(
             model=LLM_MODEL_NAME,
             messages=[
-                {"role": "system", "content": "你是一个专业的文本分析专家，擅长对主题进行分类和总结。"},
+                {"role": "system", "content": recluster_system_prompt},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3
         )
 
         # 解析结果
-        result_text = response.choices[0].message.content
-        # 提取JSON部分
-        json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group())
+        result_text = response.choices[0].message.content or ""
+        parsed_payload = _extract_json_payload(result_text)
+        if not parsed_payload:
+            log_error(logger, "大模型返回未解析出有效 JSON，跳过再聚类结果写入", "TopicBertopic")
+            return
 
-            # 保存4号文件：大模型再聚类结果
-            with open(output_dir / "4大模型再聚类结果.json", 'w', encoding='utf-8') as f:
-                json.dump(result, f, ensure_ascii=False, indent=2)
+        clusters = _parse_clusters(parsed_payload)
+        if not clusters:
+            log_error(logger, "大模型返回中未找到可用聚类字段(clusters/合并方案)", "TopicBertopic")
+            return
 
-            # 为每个聚类生成新的关键词
-            clusters = result.get('clusters', [])
-            cluster_keywords = {}
+        topic_count_map: Dict[str, int] = {}
+        for topic in topic_stats:
+            topic_name = str(topic.get("topic_name") or "").strip()
+            if not topic_name:
+                continue
+            try:
+                topic_count_map[topic_name] = int(topic.get("count") or 0)
+            except (TypeError, ValueError):
+                topic_count_map[topic_name] = 0
 
-            for cluster in clusters:
-                cluster_name = cluster['cluster_name']
-                topics = cluster['topics']
+        normalized_result: Dict[str, Dict[str, Any]] = {}
+        for idx, cluster in enumerate(clusters):
+            base_name = str(cluster.get("cluster_name") or "").strip() or f"新主题{idx + 1}"
+            cluster_name = base_name
+            dedupe_idx = 2
+            while cluster_name in normalized_result:
+                cluster_name = f"{base_name}_{dedupe_idx}"
+                dedupe_idx += 1
 
-                # 生成聚类关键词的提示词
-                keywords_prompt = f"""
-为以下主题类别生成5-8个核心关键词：
+            topics = cluster.get("topics")
+            if not isinstance(topics, list):
+                topics = []
+            clean_topics = [str(item).strip() for item in topics if str(item or "").strip()]
+            doc_count = sum(topic_count_map.get(name, 0) for name in clean_topics)
+            description = str(cluster.get("description") or "").strip()
 
-类别名称：{cluster_name}
-包含主题：{', '.join(topics)}
-描述：{cluster.get('description', '')}
+            normalized_result[cluster_name] = {
+                "主题命名": cluster_name,
+                "原始主题集合": clean_topics,
+                "主题描述": description,
+                "文档数": int(doc_count),
+            }
 
-请直接输出关键词列表，用逗号分隔：
-"""
+        with open(output_dir / "4大模型再聚类结果.json", 'w', encoding='utf-8') as f:
+            json.dump(normalized_result, f, ensure_ascii=False, indent=2)
 
-                try:
-                    keywords_response = client.chat.completions.create(
-                        model=LLM_MODEL_NAME,
-                        messages=[
-                            {"role": "system", "content": "你是一个专业的文本分析专家。"},
-                            {"role": "user", "content": keywords_prompt}
-                        ],
-                        temperature=0.3
-                    )
+        # 为每个聚类生成新的关键词
+        cluster_keywords: Dict[str, List[str]] = {}
+        for cluster_name, cluster_data in normalized_result.items():
+            topics = cluster_data.get("原始主题集合")
+            if not isinstance(topics, list):
+                topics = []
+            description = str(cluster_data.get("主题描述") or "").strip()
 
-                    keywords_text = keywords_response.choices[0].message.content
-                    keywords = [kw.strip() for kw in keywords_text.split(',') if kw.strip()]
-                    cluster_keywords[cluster_name] = keywords[:8]  # 最多8个关键词
+            keywords_values = {
+                "cluster_name": cluster_name,
+                "topics": "、".join([str(item).strip() for item in topics if str(item or "").strip()]),
+                "topics_csv": ", ".join([str(item).strip() for item in topics if str(item or "").strip()]),
+                "topics_json": json.dumps(topics, ensure_ascii=False),
+                "description": description,
+            }
+            keywords_prompt = _render_prompt_template(keyword_user_prompt, keywords_values)
 
-                except Exception as e:
-                    log_error(logger, f"生成聚类关键词失败: {e}", "TopicBertopic")
-                    cluster_keywords[cluster_name] = []
+            try:
+                keywords_response = client.chat.completions.create(
+                    model=LLM_MODEL_NAME,
+                    messages=[
+                        {"role": "system", "content": keyword_system_prompt},
+                        {"role": "user", "content": keywords_prompt}
+                    ],
+                    temperature=0.3
+                )
+                keywords_text = keywords_response.choices[0].message.content or ""
+                keywords = _split_keywords(keywords_text)
+                cluster_keywords[cluster_name] = keywords[:8]
+            except Exception as e:
+                log_error(logger, f"生成聚类关键词失败: {e}", "TopicBertopic")
+                cluster_keywords[cluster_name] = []
 
-            # 保存5号文件：大模型主题关键词
-            with open(output_dir / "5大模型主题关键词.json", 'w', encoding='utf-8') as f:
-                json.dump(cluster_keywords, f, ensure_ascii=False, indent=2)
+        # 保存5号文件：大模型主题关键词
+        with open(output_dir / "5大模型主题关键词.json", 'w', encoding='utf-8') as f:
+            json.dump(cluster_keywords, f, ensure_ascii=False, indent=2)
 
-            log_success(logger, "大模型聚类完成", "TopicBertopic")
+        log_success(logger, "大模型聚类完成", "TopicBertopic")
 
     except Exception as e:
         log_error(logger, f"大模型聚类失败: {e}", "TopicBertopic")
@@ -509,6 +978,7 @@ def run_topic_bertopic(
     fetch_dir: str = None,
     userdict: str = None,
     stopwords: str = None,
+    run_params: Optional[Dict[str, Any]] = None,
     bucket_topic: str = None,
     db_topic: str = None,
     display_topic: str = None,
@@ -531,8 +1001,34 @@ def run_topic_bertopic(
     db_name = db_topic or topic
     topic_label = display_topic or topic
 
-    logger = setup_logger("topic_bertopic")
+    # 确定日志使用的日期标识
+    log_date_str = f"{start_date}_{end_date}" if end_date else start_date
+    logger = setup_logger("topic_bertopic", log_date_str)
     log_module_start(logger, f"BERTopic主题分析: {topic_label} {start_date}~{end_date or start_date}")
+
+    try:
+        prompt_config = load_topic_bertopic_prompt_config(storage_topic)
+        if prompt_config.get("exists"):
+            log_success(
+                logger,
+                f"已加载提示词配置: {prompt_config.get('path', '')}",
+                "TopicBertopic",
+            )
+        else:
+            log_skip(
+                logger,
+                f"未找到专题提示词配置，使用默认模板: {prompt_config.get('path', '')}",
+                "TopicBertopic",
+            )
+    except Exception as exc:
+        log_error(logger, f"加载提示词配置失败，改用默认模板: {exc}", "TopicBertopic")
+        prompt_config = {
+            "target_topics": TARGET_TOPICS,
+            "recluster_system_prompt": DEFAULT_RECLUSTER_SYSTEM_PROMPT,
+            "recluster_user_prompt": DEFAULT_RECLUSTER_USER_PROMPT,
+            "keyword_system_prompt": DEFAULT_KEYWORDS_SYSTEM_PROMPT,
+            "keyword_user_prompt": DEFAULT_KEYWORDS_USER_PROMPT,
+        }
 
     try:
         # 处理参数
@@ -605,7 +1101,9 @@ def run_topic_bertopic(
             start_date,
             end_date,
             output_dir,
-            logger
+            logger,
+            prompt_config=prompt_config,
+            run_params=run_params,
         )
 
         if success:

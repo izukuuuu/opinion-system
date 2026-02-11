@@ -12,11 +12,7 @@
     </header>
 
     <div class="flex flex-col gap-6 pb-20 lg:flex-row lg:items-start lg:pb-0">
-      <CollapsibleSidebar
-        :items="tabsWithAria"
-        :active-key="activeTab"
-        @select="(tab) => setActiveTab(tab.key)"
-      />
+      <CollapsibleSidebar :items="tabsWithAria" :active-key="activeTab" @select="(tab) => setActiveTab(tab.key)" />
 
       <div class="flex-1 min-w-0 space-y-6">
         <section class="card-surface space-y-6 p-6">
@@ -28,33 +24,30 @@
                 <p class="text-sm text-slate-500">连接后端数据库，查看数据库的连接信息、库表结构与数据量。</p>
               </div>
             </div>
-            <div class="inline-flex items-center gap-2 rounded-full bg-accent-faint px-3 py-1 text-xs font-semibold text-brand-600" v-if="loading">
+            <div
+              class="inline-flex items-center gap-2 rounded-full bg-accent-faint px-3 py-1 text-xs font-semibold text-brand-600"
+              v-if="loading">
               <ArrowPathIcon class="h-4 w-4 animate-spin" />
               正在刷新最新数据…
             </div>
-            <div v-else-if="queriedAt" class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+            <div v-else-if="queriedAt"
+              class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
               <ServerStackIcon class="h-4 w-4" />
               最近刷新：{{ queriedAt }}
             </div>
           </div>
 
-          <section v-if="error" class="rounded-3xl border border-rose-200 bg-rose-50/70 p-6 text-sm text-rose-600" role="alert">
+          <section v-if="error" class="rounded-3xl border border-rose-200 bg-rose-50/70 p-6 text-sm text-rose-600"
+            role="alert">
             <p>{{ error }}</p>
             <p class="mt-2 text-rose-400">请检查后端服务与数据库配置，稍后再试。</p>
           </section>
         </section>
 
-        <section
-          v-if="activeTab === 'overview'"
-          class="space-y-6"
-          role="tabpanel"
-          id="database-panel-overview"
-          aria-labelledby="database-tab-overview"
-        >
-          <section
-            v-if="isInitialLoading"
-            class="flex flex-col items-center gap-2 rounded-3xl border border-slate-200 bg-white/80 p-10 text-sm text-slate-500"
-          >
+        <section v-if="activeTab === 'overview'" class="space-y-6" role="tabpanel" id="database-panel-overview"
+          aria-labelledby="database-tab-overview">
+          <section v-if="isInitialLoading"
+            class="flex flex-col items-center gap-2 rounded-3xl border border-slate-200 bg-white/80 p-10 text-sm text-slate-500">
             <ArrowPathIcon class="h-6 w-6 animate-spin text-brand" />
             正在刷新最新的数据库信息…
           </section>
@@ -66,7 +59,8 @@
                 <p class="text-sm text-slate-500">查看远程服务器连接配置</p>
               </header>
               <dl class="grid gap-3">
-                <div v-for="detail in connectionDetails" :key="detail.label" class="flex flex-col rounded-2xl bg-slate-50/80 px-4 py-3">
+                <div v-for="detail in connectionDetails" :key="detail.label"
+                  class="flex flex-col rounded-2xl bg-slate-50/80 px-4 py-3">
                   <dt class="text-xs uppercase tracking-widest text-slate-400">{{ detail.label }}</dt>
                   <dd class="text-sm font-medium text-slate-700">{{ detail.value }}</dd>
                 </div>
@@ -81,15 +75,18 @@
               <ul class="grid gap-4 sm:grid-cols-3">
                 <li class="rounded-2xl bg-brand-soft p-4 text-center">
                   <span class="text-xs uppercase tracking-widest text-brand">业务数据库</span>
-                  <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.databaseCount }}</strong>
+                  <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.databaseCount
+                    }}</strong>
                 </li>
                 <li class="rounded-2xl bg-brand-soft p-4 text-center">
                   <span class="text-xs uppercase tracking-widest text-brand">总表数</span>
-                  <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.tableCount }}</strong>
+                  <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.tableCount
+                    }}</strong>
                 </li>
                 <li class="rounded-2xl bg-brand-soft p-4 text-center">
                   <span class="text-xs uppercase tracking-widest text-brand">已统计行数</span>
-                  <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.rowCount }}</strong>
+                  <strong class="mt-2 block text-2xl font-semibold text-brand-strong">{{ summaryStats.rowCount
+                    }}</strong>
                 </li>
               </ul>
             </article>
@@ -100,24 +97,21 @@
             <div class="h-48 rounded-3xl bg-slate-200/70 animate-pulse"></div>
           </section>
 
-          <p v-if="!loading && !hasData && !error" class="rounded-3xl border border-slate-200 bg-white/80 p-8 text-center text-sm text-slate-500">
+          <p v-if="!loading && !hasData && !error"
+            class="rounded-3xl border border-slate-200 bg-white/80 p-8 text-center text-sm text-slate-500">
             未检索到业务数据库，请确认配置是否正确。
           </p>
         </section>
 
-        <section
-          v-else
-          class="card-surface space-y-4 p-6"
-          role="tabpanel"
-          id="database-panel-raw"
-          aria-labelledby="database-tab-raw"
-        >
+        <section v-else class="card-surface space-y-4 p-6" role="tabpanel" id="database-panel-raw"
+          aria-labelledby="database-tab-raw">
           <div v-if="hasPayload" class="space-y-4">
             <header class="space-y-1">
               <h2 class="text-lg font-semibold text-slate-900">原始响应数据</h2>
               <p class="text-sm text-slate-500">以下内容展示了后端返回的完整 JSON，便于对照排查。</p>
             </header>
-            <pre class="max-h-[480px] max-w-full overflow-x-auto rounded-2xl bg-slate-900/90 p-4 text-xs text-emerald-100">
+            <pre
+              class="max-h-[480px] max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-2xl bg-slate-900/90 p-4 text-xs text-emerald-100">
           {{ rawPayload }}
         </pre>
           </div>
@@ -128,17 +122,10 @@
       </div>
     </div>
 
-    <button
-      type="button"
+    <button type="button"
       class="fixed right-6 bottom-[5.5rem] z-40 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white shadow-lg transition focus-ring-accent hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-slate-300 lg:bottom-6"
-      @click="refresh"
-      :disabled="loading"
-      aria-label="刷新数据库数据"
-    >
-      <ArrowPathIcon
-        class="h-4 w-4"
-        :class="{ 'animate-spin text-white/80': loading }"
-      />
+      @click="refresh" :disabled="loading" aria-label="刷新数据库数据">
+      <ArrowPathIcon class="h-4 w-4" :class="{ 'animate-spin text-white/80': loading }" />
       <span class="hidden sm:inline">刷新数据</span>
     </button>
 

@@ -1,6 +1,7 @@
 """
 数据库连接和查询模块
 """
+import os
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -20,8 +21,12 @@ class DatabaseManager:
         Args:
             db_url (Optional[str]): 数据库连接URL，如果为None则从配置读取
         """
-        # 优先级：显式传入 > 环境变量 > databases.yaml > defaults.yaml
-        env_url = settings.get('env.DB_URL')
+        # 优先级：显式传入 > 环境变量 > databases.active > databases.db_url > defaults.yaml
+        env_url = (
+            settings.get('env.OPINION_DB_URL')
+            or os.environ.get('OPINION_DB_URL')
+            or os.environ.get('DB_URL')
+        )
         # 如果 env 中残留占位符（如 host/user），则忽略以免误连
         if isinstance(env_url, str) and env_url:
             lowered = env_url.lower()
@@ -55,6 +60,42 @@ class DatabaseManager:
 
         self.db_url = db_url or env_url or databases_url or settings.get('defaults.db_url')
         self.engine: Optional[Engine] = None
+
+    @staticmethod
+    def _build_engine_kwargs(url: str) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {"pool_pre_ping": True}
+        if not url:
+            return kwargs
+        try:
+            parsed = make_url(url)
+            dialect_name = parsed.get_backend_name()
+        except Exception:
+            return kwargs
+
+        if dialect_name == "mysql":
+            # 避免 MySQL 空闲连接断开后报 2013/2006
+            kwargs["pool_recycle"] = 1800
+            connect_args = {"connect_timeout": 10}
+            driver_name = parsed.get_driver_name() or ""
+            if "pymysql" in driver_name:
+                connect_args.update(
+                    {
+                        "charset": "utf8mb4",
+                    }
+                )
+            kwargs["connect_args"] = connect_args
+        elif dialect_name == "postgresql":
+            kwargs["connect_args"] = {
+                "connect_timeout": 10,
+                "application_name": "opinion-system",
+            }
+
+        return kwargs
+
+    def _create_engine(self, url, **overrides: Any) -> Engine:
+        effective = self._build_engine_kwargs(str(url))
+        effective.update(overrides)
+        return create_engine(url, **effective)
         
     def connect(self) -> Engine:
         """
@@ -64,7 +105,7 @@ class DatabaseManager:
             Engine: SQLAlchemy引擎
         """
         if self.engine is None:
-            self.engine = create_engine(self.db_url)
+            self.engine = self._create_engine(self.db_url)
         return self.engine
 
     def get_engine_for_database(self, database_name: str) -> Engine:
@@ -79,7 +120,7 @@ class DatabaseManager:
         """
         base_url = make_url(self.db_url)
         db_url = base_url.set(database=database_name)
-        return create_engine(db_url)
+        return self._create_engine(db_url)
 
     def ensure_database(self, database_name: str) -> bool:
         """
@@ -93,11 +134,16 @@ class DatabaseManager:
         """
         try:
             # Ensure we are connected to the server (no specific DB for creation)
-            base_url = make_url(self.db_url).set(database=None)
+            base_url = make_url(self.db_url)
+            dialect_name = base_url.get_backend_name()
+            if dialect_name == 'postgresql':
+                base_url = base_url.set(database=base_url.database or "postgres")
+            else:
+                base_url = base_url.set(database=None)
             
             # For creation, we usually need isolation_level="AUTOCOMMIT" 
             # especially for Postgres which cannot CREATE DATABASE in a transaction block
-            engine = create_engine(base_url, isolation_level="AUTOCOMMIT")
+            engine = self._create_engine(base_url, isolation_level="AUTOCOMMIT")
             
             database_name_sanitized = database_name.replace("`", "").replace('"', "")
             dialect_name = engine.dialect.name
@@ -150,8 +196,13 @@ class DatabaseManager:
         """
         try:
             # Connect to server (no specific DB)
-            base_url = make_url(self.db_url).set(database=None)
-            engine = create_engine(base_url, isolation_level="AUTOCOMMIT")
+            base_url = make_url(self.db_url)
+            dialect_name = base_url.get_backend_name()
+            if dialect_name == 'postgresql':
+                base_url = base_url.set(database=base_url.database or "postgres")
+            else:
+                base_url = base_url.set(database=None)
+            engine = self._create_engine(base_url, isolation_level="AUTOCOMMIT")
             
             database_name_sanitized = database_name.replace("`", "").replace('"', "")
             dialect_name = engine.dialect.name

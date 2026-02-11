@@ -15,6 +15,7 @@ from ..utils.logging.logging import (
     log_save_success,
 )
 from ..utils.setting.env_loader import get_api_key
+from ..utils.ai import call_langchain_chat
 
 
 def _get_date_folder(start_date: str, end_date: Optional[str]) -> str:
@@ -236,8 +237,8 @@ def _compose_llm_input(topic: str, date_folder: str, sections_text: str, tmpl: D
     }
 
 
-async def _llm_call_report(messages: Dict, logger, model: Optional[str] = None, timeout: float = 60.0, max_retries: int = 2) -> Optional[str]:
-    """通过 DashScope 兼容聊天接口调用大模型，返回文本。"""
+async def _llm_call_report_direct(messages: Dict, logger, model: Optional[str] = None, timeout: float = 60.0, max_retries: int = 2) -> Optional[str]:
+    """通过 DashScope 兼容聊天接口调用大模型，返回文本（回退路径）。"""
     import aiohttp  # type: ignore
     import random
 
@@ -294,6 +295,35 @@ async def _llm_call_report(messages: Dict, logger, model: Optional[str] = None, 
             else:
                 log_error(logger, f"LLM调用失败且达最大重试: {traceback.format_exc()}", "Report")
                 return None
+
+
+async def _llm_call_report(messages: Dict, logger, model: Optional[str] = None, timeout: float = 60.0, max_retries: int = 2) -> Optional[str]:
+    """
+    优先通过 LangChain 调用模型；失败时回退到原有 DashScope 兼容接口。
+    """
+    msg_list = messages.get("messages", []) if isinstance(messages, dict) else []
+    if isinstance(msg_list, list) and msg_list:
+        langchain_text = await call_langchain_chat(
+            msg_list,
+            task="report",
+            model=model,
+            temperature=0.3,
+            max_tokens=3000,
+            timeout=timeout,
+            max_retries=max_retries,
+        )
+        if isinstance(langchain_text, str) and langchain_text.strip():
+            log_success(logger, "LLM生成成功（LangChain）", "Report")
+            return langchain_text.strip()
+        log_error(logger, "LangChain 调用失败，回退到直连模式", "Report")
+
+    return await _llm_call_report_direct(
+        messages,
+        logger,
+        model=model,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
 
 
 def _add_inline_runs(p, text: str) -> None:
@@ -635,4 +665,3 @@ def run_report(topic: str, start_date: str, end_date: Optional[str] = None) -> b
     except Exception:
         log_error(logger, f"报告生成失败: {traceback.format_exc()}", "Report")
         return False
-

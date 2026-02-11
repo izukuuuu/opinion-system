@@ -33,84 +33,7 @@
           {{ statusMessage }}
         </div>
 
-        <!-- Embedding Configuration -->
-        <div v-if="activeTab === 'embedding'" class="space-y-6">
-          <h2 class="text-lg font-semibold text-primary">嵌入模型配置</h2>
 
-          <div class="grid gap-6 md:grid-cols-2">
-            <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted">模型名称</label>
-              <select
-                v-model="ragState.configForm.embedding.model_name"
-                class="input"
-              >
-                <option value="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2">
-                  multilingual-MiniLM-L12-v2 (推荐)
-                </option>
-                <option value="sentence-transformers/all-MiniLM-L6-v2">
-                  all-MiniLM-L6-v2 (快速)
-                </option>
-                <option value="sentence-transformers/all-mpnet-base-v2">
-                  all-mpnet-base-v2 (高精度)
-                </option>
-                <option value="shibing624/text2vec-base-chinese">
-                  text2vec-base-chinese (中文优化)
-                </option>
-              </select>
-              <p class="text-xs text-muted">选择适合您语言的嵌入模型</p>
-            </div>
-
-            <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted">批处理大小</label>
-              <input
-                v-model.number="ragState.configForm.embedding.batch_size"
-                type="number"
-                min="1"
-                max="128"
-                class="input"
-              />
-              <p class="text-xs text-muted">同时处理的文本数量，影响内存使用</p>
-            </div>
-
-            <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted">设备</label>
-              <select
-                v-model="ragState.configForm.embedding.device"
-                class="input"
-              >
-                <option value="auto">自动选择</option>
-                <option value="cpu">CPU</option>
-                <option value="cuda">GPU (CUDA)</option>
-              </select>
-              <p class="text-xs text-muted">模型运行设备</p>
-            </div>
-
-            <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted">模型类型</label>
-              <select
-                v-model="ragState.configForm.embedding.model_type"
-                class="input"
-                disabled
-              >
-                <option value="huggingface">HuggingFace</option>
-                <option value="openai">OpenAI (暂不支持)</option>
-              </select>
-              <p class="text-xs text-muted">嵌入模型提供商</p>
-            </div>
-          </div>
-
-          <div class="flex items-center">
-            <input
-              v-model="ragState.configForm.embedding.normalize"
-              type="checkbox"
-              id="normalize-embeddings"
-              class="checkbox-custom"
-            />
-            <label for="normalize-embeddings" class="ml-2 text-sm text-secondary">
-              标准化嵌入向量
-            </label>
-          </div>
-        </div>
 
         <!-- Chunking Configuration -->
         <div v-if="activeTab === 'chunking'" class="space-y-6">
@@ -728,7 +651,7 @@ const { ragTopicsState, loadRAGTopics } = useRAGTopics()
 const { callApi } = useApiBase()
 
 // State
-const activeTab = ref('embedding')
+const activeTab = ref('chunking')
 const isTesting = ref(false)
 const statusMessage = ref('')
 const statusType = ref('success')
@@ -739,7 +662,6 @@ const promptConfig = ref(null)
 const savingPrompts = ref(false)
 
 const tabs = [
-  { key: 'embedding', label: '嵌入模型' },
   { key: 'chunking', label: '文本分块' },
   { key: 'retrieval', label: '检索参数' },
   { key: 'storage', label: '存储配置' },

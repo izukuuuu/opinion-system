@@ -37,7 +37,8 @@ import {
   ServerStackIcon,
   SwatchIcon,
   DocumentMagnifyingGlassIcon,
-  BeakerIcon
+  BeakerIcon,
+  HashtagIcon
 } from '@heroicons/vue/24/outline'
 import CollapsibleSidebar from '../../components/navigation/CollapsibleSidebar.vue'
 
@@ -59,6 +60,12 @@ const navigationItems = [
     label: 'RAG 配置',
     to: { name: 'settings-rag' },
     icon: DocumentMagnifyingGlassIcon
+  },
+  {
+    key: 'settings-bertopic',
+    label: 'BERTopic 配置',
+    to: { name: 'settings-bertopic' },
+    icon: HashtagIcon
   },
   {
     key: 'settings-backend',

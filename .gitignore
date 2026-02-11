@@ -8,9 +8,6 @@ __pycache__/
 *.pyo
 *.pyd
 *.env
-.env
-.env.*
-.env.local
 
 # Node
 frontend/node_modules/
@@ -27,7 +24,6 @@ backend/src/filter/cache/
 
 # OS
 .DS_Store
-frontend/.env.local
 
 # Addon
 .claude
@@ -36,3 +32,10 @@ venv/
 # Workflow
 merge/frontend/.vite/
 frontend/.vite/
+merge/
+
+# Cache
+cache/
+
+# Scripts
+scripts/

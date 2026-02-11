@@ -2,9 +2,7 @@
   <section class="card-surface space-y-6 p-6">
     <header class="flex flex-wrap items-center justify-between gap-4">
       <div>
-        <p
-          class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400"
-        >
+        <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">
           数据库
         </p>
         <h2 class="text-xl font-semibold text-slate-900">数据库连接管理</h2>
@@ -12,44 +10,30 @@
           维护项目可用的数据库连接，并指定默认连接。
         </p>
       </div>
-      <button
-        type="button"
+      <button type="button"
         class="inline-flex items-center gap-2 rounded-full border border-soft px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
-        @click="openCreateDatabaseModal"
-      >
+        @click="openCreateDatabaseModal">
         新增连接
       </button>
     </header>
 
-    <p
-      v-if="databaseState.error"
-      class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600"
-    >
+    <p v-if="databaseState.error" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">
       {{ databaseState.error }}
     </p>
-    <p
-      v-if="databaseState.message"
-      class="rounded-2xl bg-emerald-100 px-4 py-3 text-sm text-emerald-600"
-    >
+    <p v-if="databaseState.message" class="rounded-2xl bg-emerald-100 px-4 py-3 text-sm text-emerald-600">
       {{ databaseState.message }}
     </p>
 
     <ul v-if="databaseState.connections.length" class="space-y-4">
-      <li
-        v-for="connection in databaseState.connections"
-        :key="connection.id"
-        class="rounded-3xl border border-soft bg-white p-5 action-card"
-      >
+      <li v-for="connection in databaseState.connections" :key="connection.id"
+        class="rounded-3xl border border-soft bg-white p-5 action-card">
         <div class="flex flex-col gap-2">
           <div class="flex flex-wrap items-center gap-2">
             <h3 class="text-base font-semibold text-slate-900">
               {{ connection.name }}
             </h3>
-            <span
-              v-if="databaseState.active === connection.id"
-              class="badge-soft bg-indigo-100 text-indigo-600"
-              >默认</span
-            >
+            <span v-if="databaseState.active === connection.id"
+              class="badge-soft bg-indigo-100 text-indigo-600">默认</span>
           </div>
           <p class="text-sm text-slate-500">
             {{ connection.engine }} · {{ connection.url }}
@@ -59,133 +43,141 @@
           </p>
         </div>
         <div class="mt-4 flex flex-wrap gap-2">
-          <button
-            v-if="databaseState.active !== connection.id"
-            type="button"
+          <button v-if="databaseState.active !== connection.id" type="button"
             class="rounded-full border border-soft px-4 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
-            @click="activateConnection(connection.id)"
-          >
+            @click="activateConnection(connection.id)">
             设为默认
           </button>
-          <button
-            type="button"
+          <button type="button"
             class="rounded-full border border-soft px-4 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
-            @click="editDatabaseConnection(connection)"
-          >
+            @click="editDatabaseConnection(connection)">
             编辑
           </button>
-          <button
-            type="button"
+          <button type="button"
             class="rounded-full border border-rose-200 px-4 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="databaseState.active === connection.id"
-            @click="deleteDatabaseConnection(connection.id)"
-          >
+            :disabled="databaseState.active === connection.id" @click="deleteDatabaseConnection(connection.id)">
             删除
           </button>
         </div>
       </li>
     </ul>
-    <p
-      v-else-if="!databaseState.loading"
-      class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500"
-    >
+    <p v-else-if="!databaseState.loading" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">
       尚未添加数据库连接。
     </p>
-    <p
-      v-if="databaseState.loading"
-      class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500"
-    >
+    <p v-if="databaseState.loading" class="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">
       加载中…
     </p>
 
-    <AppModal
-      v-model="databaseModalVisible"
-      eyebrow="数据库管理"
-      :title="
-        databaseModalMode === 'create' ? '新增数据库连接' : '编辑数据库连接'
-      "
-      :description="
-        databaseModalMode === 'create'
-          ? '为项目添加新的数据库连接，并可选择设为默认。'
-          : '更新数据库连接信息，保存后即时生效。'
-      "
-      cancel-text="取消"
-      :confirm-text="databaseModalMode === 'create' ? '新增连接' : '保存修改'"
-      confirm-loading-text="保存中…"
-      :confirm-loading="databaseFormState.saving"
-      :confirm-disabled="databaseModalConfirmDisabled"
-      :close-on-backdrop="!databaseFormState.saving"
-      :show-close="!databaseFormState.saving"
-      width="max-w-2xl"
-      @cancel="handleDatabaseModalCancel"
-      @confirm="handleDatabaseModalConfirm"
-    >
-      <p
-        v-if="databaseFormState.error"
-        class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600"
-      >
+    <AppModal v-model="databaseModalVisible" eyebrow="数据库管理" :title="databaseModalMode === 'create' ? '新增数据库连接' : '编辑数据库连接'
+      " :description="databaseModalMode === 'create'
+        ? '为项目添加新的数据库连接，并可选择设为默认。'
+        : '更新数据库连接信息，保存后即时生效。'
+        " cancel-text="取消" :confirm-text="databaseModalMode === 'create' ? '新增连接' : '保存修改'" confirm-loading-text="保存中…"
+      :confirm-loading="databaseFormState.saving" :confirm-disabled="databaseModalConfirmDisabled"
+      :close-on-backdrop="!databaseFormState.saving" :show-close="!databaseFormState.saving" width="max-w-2xl"
+      @cancel="handleDatabaseModalCancel" @confirm="handleDatabaseModalConfirm">
+      <p v-if="databaseFormState.error" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">
         {{ databaseFormState.error }}
       </p>
       <form class="space-y-4" @submit.prevent>
-        <div class="grid gap-4 md:grid-cols-2">
-          <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-            <span>连接标识</span>
-            <input
-              v-model.trim="databaseForm.id"
-              type="text"
-              :disabled="databaseModalMode === 'edit'"
-              placeholder="如：primary"
-              class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-400"
-            />
-          </label>
-          <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-            <span>显示名称</span>
-            <input
-              v-model.trim="databaseForm.name"
-              type="text"
-              placeholder="如：主库"
-              class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-            />
-          </label>
-          <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-            <span>数据库类型</span>
-            <input
-              v-model.trim="databaseForm.engine"
-              type="text"
-              placeholder="如：mysql"
-              class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-            />
-          </label>
-          <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
-            <span>连接 URL</span>
-            <input
-              v-model.trim="databaseForm.url"
-              type="text"
-              placeholder="如：mysql+pymysql://user:password@host:3306/db"
-              class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-            />
-          </label>
-          <label
-            class="md:col-span-2 flex flex-col gap-2 text-sm font-medium text-slate-600"
-          >
-            <span>描述</span>
-            <textarea
-              v-model.trim="databaseForm.description"
-              rows="3"
-              placeholder="用途说明（可选）"
-              class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-            ></textarea>
-          </label>
-          <label
-            class="flex items-center gap-2 text-sm font-medium text-slate-600 md:col-span-2"
-          >
-            <input
-              v-model="databaseForm.set_active"
-              type="checkbox"
-              class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-            />
-            <span>保存后设为默认连接</span>
-          </label>
+        <!-- Mode Toggle -->
+        <div class="flex justify-center pb-2">
+          <div class="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
+            <button type="button" class="rounded-xl px-4 py-1.5 text-sm font-medium transition-all" :class="databaseInputMode === 'structured'
+              ? 'bg-white text-indigo-600 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+              " @click="databaseInputMode = 'structured'">
+              配置模式
+            </button>
+            <button type="button" class="rounded-xl px-4 py-1.5 text-sm font-medium transition-all" :class="databaseInputMode === 'url'
+              ? 'bg-white text-indigo-600 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+              " @click="databaseInputMode = 'url'">
+              URL 模式
+            </button>
+          </div>
+        </div>
+
+        <div class="max-h-[60vh] overflow-y-auto px-1 py-1">
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+              <span>连接标识</span>
+              <input v-model.trim="databaseForm.id" type="text" :disabled="databaseModalMode === 'edit'"
+                placeholder="如：primary"
+                class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-400" />
+            </label>
+            <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+              <span>显示名称</span>
+              <input v-model.trim="databaseForm.name" type="text" placeholder="如：主库"
+                class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+            </label>
+
+            <label class="flex flex-col gap-2 text-sm font-medium text-slate-600 md:col-span-2">
+              <span>数据库类型</span>
+              <select v-model="databaseForm.engine"
+                class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                @change="handleEngineChange">
+                <option value="" disabled>选择数据库类型</option>
+                <option value="mysql">MySQL</option>
+                <option value="postgresql">PostgreSQL</option>
+              </select>
+            </label>
+
+            <!-- Structured Mode Inputs -->
+            <template v-if="databaseInputMode === 'structured'">
+              <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                <span>服务器地址 (Host)</span>
+                <input v-model.trim="databaseStructured.host" type="text" placeholder="localhost"
+                  class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+              </label>
+              <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                <span>端口 (Port)</span>
+                <input v-model.trim="databaseStructured.port" type="text" :placeholder="defaultPort"
+                  class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+              </label>
+              <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                <span>用户名 (Username)</span>
+                <input v-model.trim="databaseStructured.username" type="text" placeholder="root"
+                  class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+              </label>
+              <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                <span>密码 (Password)</span>
+                <input v-model.trim="databaseStructured.password" type="password" placeholder="password"
+                  class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+              </label>
+              <label class="md:col-span-2 flex flex-col gap-2 text-sm font-medium text-slate-600">
+                <span>数据库名 (Database)</span>
+                <input v-model.trim="databaseStructured.database" type="text" placeholder="db_name"
+                  class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+              </label>
+            </template>
+
+            <label v-if="databaseInputMode === 'url'"
+              class="md:col-span-2 flex flex-col gap-2 text-sm font-medium text-slate-600">
+              <span>连接 URL</span>
+              <input v-model.trim="databaseForm.url" type="text"
+                placeholder="如：mysql+pymysql://user:password@host:3306/db"
+                class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+            </label>
+
+            <!-- Readonly URL preview in structured mode -->
+            <div v-else
+              class="md:col-span-2 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-500 break-all border border-slate-100">
+              <span class="font-bold text-slate-400 mr-2">PREVIEW</span>
+              {{ databaseForm.url || '等待输入...' }}
+            </div>
+
+            <label class="md:col-span-2 flex flex-col gap-2 text-sm font-medium text-slate-600">
+              <span>描述</span>
+              <textarea v-model.trim="databaseForm.description" rows="3" placeholder="用途说明（可选）"
+                class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"></textarea>
+            </label>
+            <label class="flex items-center gap-2 text-sm font-medium text-slate-600 md:col-span-2">
+              <input v-model="databaseForm.set_active" type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+              <span>保存后设为默认连接</span>
+            </label>
+          </div>
         </div>
         <button type="submit" class="hidden" aria-hidden="true">
           隐藏提交按钮
@@ -216,6 +208,9 @@ const databaseState = reactive({
 
 const databaseModalVisible = ref(false);
 const databaseModalMode = ref("create");
+// 'url' | 'structured'
+const databaseInputMode = ref("structured");
+
 const databaseForm = reactive({
   id: "",
   name: "",
@@ -224,6 +219,64 @@ const databaseForm = reactive({
   description: "",
   set_active: false,
 });
+
+const databaseStructured = reactive({
+  host: "localhost",
+  port: "",
+  username: "",
+  password: "",
+  database: "",
+});
+
+const defaultPort = computed(() => {
+  if (databaseForm.engine === "mysql") return "3306";
+  if (databaseForm.engine === "postgresql") return "5432";
+  return "";
+});
+
+// Auto-build URL when in structured mode
+import { watch } from "vue";
+watch(
+  [
+    () => databaseInputMode.value,
+    () => databaseForm.engine,
+    databaseStructured,
+  ],
+  () => {
+    if (databaseInputMode.value !== "structured") return;
+
+    const { host, port, username, password, database } = databaseStructured;
+    const engine = databaseForm.engine;
+
+    // Only build if we have the basics
+    if (!engine) return;
+
+    let driver = "";
+    if (engine === "mysql") driver = "mysql+pymysql";
+    else if (engine === "postgresql") driver = "postgresql+psycopg2";
+    else driver = engine; // fallback
+
+    const p = port || defaultPort.value;
+    const auth = username ? (password ? `${username}:${password}` : username) : "";
+    const net = host ? (p ? `${host}:${p}` : host) : "";
+    const db = database ? `/${database}` : "";
+
+    if (auth && net) {
+      databaseForm.url = `${driver}://${auth}@${net}${db}`;
+    } else {
+      // Partial or empty, maybe don't wipe it out immediately or set to prefix
+      // databaseForm.url = `${driver}://...`; 
+    }
+  },
+  { deep: true }
+);
+
+const handleEngineChange = () => {
+  // If user switches engine, maybe reset port if it matches the old default
+  if (!databaseStructured.port) {
+    // placeholder handles it
+  }
+};
 
 const databaseFormState = reactive({
   saving: false,
@@ -237,6 +290,13 @@ const resetDatabaseForm = () => {
   databaseForm.url = "";
   databaseForm.description = "";
   databaseForm.set_active = false;
+
+  databaseInputMode.value = "structured";
+  databaseStructured.host = "localhost";
+  databaseStructured.port = "";
+  databaseStructured.username = "";
+  databaseStructured.password = "";
+  databaseStructured.database = "";
 };
 
 const databaseModalConfirmDisabled = computed(() => {
@@ -285,6 +345,7 @@ const openCreateDatabaseModal = () => {
 const editDatabaseConnection = (connection) => {
   if (!connection) return;
   databaseModalMode.value = "edit";
+  databaseInputMode.value = "url"; // Default to URL mode for editing to preserve exact string
   databaseFormState.error = "";
   databaseForm.id = connection.id || "";
   databaseForm.name = connection.name || "";
@@ -292,6 +353,14 @@ const editDatabaseConnection = (connection) => {
   databaseForm.url = connection.url || "";
   databaseForm.description = connection.description || "";
   databaseForm.set_active = databaseState.active === connection.id;
+
+  // Optionally try to parse, but for now leave structured fields empty or default
+  databaseStructured.host = "";
+  databaseStructured.port = "";
+  databaseStructured.username = "";
+  databaseStructured.password = "";
+  databaseStructured.database = "";
+
   databaseModalVisible.value = true;
 };
 
@@ -345,8 +414,8 @@ const handleDatabaseModalConfirm = async () => {
       databaseModalMode.value === "create"
         ? await buildApiUrl("/settings/databases")
         : await buildApiUrl(
-            `/settings/databases/${encodeURIComponent(trimmed.id)}`
-          );
+          `/settings/databases/${encodeURIComponent(trimmed.id)}`
+        );
     const method = databaseModalMode.value === "create" ? "POST" : "PUT";
     const response = await fetch(endpoint, {
       method,

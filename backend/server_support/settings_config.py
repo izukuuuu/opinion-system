@@ -295,6 +295,50 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
         persist_llm_config(config)
         return success({"data": embedding_llm})
 
+    @app.put("/api/settings/llm/langchain")
+    def update_llm_langchain():
+        payload = request.get_json(silent=True) or {}
+        config = load_llm_config()
+        langchain = config.get("langchain", {})
+        if not isinstance(langchain, dict):
+            langchain = {}
+
+        for field in ["provider", "model", "base_url", "report_model", "analyze_summary_model"]:
+            if field in payload:
+                langchain[field] = str(payload[field]).strip()
+
+        if "enabled" in payload:
+            value = payload.get("enabled")
+            if isinstance(value, bool):
+                langchain["enabled"] = value
+            elif isinstance(value, str):
+                langchain["enabled"] = value.strip().lower() in {"1", "true", "yes", "on"}
+            else:
+                langchain["enabled"] = bool(value)
+
+        if "temperature" in payload:
+            try:
+                langchain["temperature"] = float(payload["temperature"])
+            except (TypeError, ValueError):
+                return error("Field 'temperature' must be a number")
+
+        for field in ["max_tokens", "max_retries"]:
+            if field in payload:
+                try:
+                    langchain[field] = int(payload[field])
+                except (TypeError, ValueError):
+                    return error(f"Field '{field}' must be an integer")
+
+        if "timeout" in payload:
+            try:
+                langchain["timeout"] = float(payload["timeout"])
+            except (TypeError, ValueError):
+                return error("Field 'timeout' must be a number")
+
+        config["langchain"] = langchain
+        persist_llm_config(config)
+        return success({"data": langchain})
+
     @app.post("/api/settings/llm/presets")
     def create_llm_preset():
         payload = request.get_json(silent=True) or {}

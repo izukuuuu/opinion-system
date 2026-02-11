@@ -68,7 +68,8 @@
             <p class="database-meta">
               {{ database.table_count }} 张表 · {{ formatNumber(database.total_rows) }} 行
             </p>
-            <button class="btn-icon text-muted hover:text-danger" title="删除数据库" @click="confirmDeleteDatabase(database)">
+            <button class="btn-icon text-muted hover:text-danger" title="删除数据库"
+              @click="confirmDeleteDatabase(database)">
               <TrashIcon class="icon-sm" />
             </button>
           </header>
@@ -144,16 +145,9 @@
     </AppModal>
 
     <!-- Delete Confirmation Modal -->
-    <AppModal v-model="isDeleteModalOpen" 
-      eyebrow="删除数据库" 
-      title="确认删除此数据库？" 
-      cancel-text="取消" 
-      confirm-text="删除"
-      confirm-type="danger"
-      :loading="isDeleting"
-      description="此操作将永久删除该数据库及其所有数据，无法撤销。"
-      @cancel="closeDeleteModal" 
-      @confirm="deleteDatabase">
+    <AppModal v-model="isDeleteModalOpen" eyebrow="删除数据库" title="确认删除此数据库？" cancel-text="取消" confirm-text="删除"
+      confirm-tone="danger" :confirm-loading="isDeleting" description="此操作将永久删除该数据库及其所有数据，无法撤销。"
+      @cancel="closeDeleteModal" @confirm="deleteDatabase">
       <div v-if="databaseToDelete" class="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
         <div class="flex items-center gap-2 mb-2">
           <CircleStackIcon class="h-5 w-5 text-slate-500" />
@@ -338,13 +332,13 @@ const closeDeleteModal = () => {
 
 const deleteDatabase = async () => {
   if (!databaseToDelete.value) return
-  
+
   isDeleting.value = true
   try {
-    const response = await callApi(`/api/database/${databaseToDelete.value.name}`, { 
-      method: 'DELETE' 
+    const response = await callApi(`/api/database/${databaseToDelete.value.name}`, {
+      method: 'DELETE'
     })
-    
+
     if (response && response.status === 'ok') {
       closeDeleteModal()
       // Refresh list

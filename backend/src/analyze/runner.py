@@ -11,7 +11,7 @@ from ..utils.setting.paths import bucket
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_save_success, log_skip
 from ..utils.setting.settings import settings
 from ..utils.io.excel import read_jsonl
-from ..utils.ai import get_qwen_client
+from ..utils.ai import call_langchain_chat, get_qwen_client
 from .functions.volume import analyze_volume_overall, analyze_volume_by_channel
 from .functions.attitude import analyze_attitude_overall, analyze_attitude_by_channel
 from .functions.trends import analyze_trends_overall, analyze_trends_by_channel
@@ -123,8 +123,7 @@ def _write_text_snapshot(target_dir: Path, snapshot: str):
 
 
 def _generate_ai_summary(func_name: str, target: str, snapshot: str, logger) -> str:
-    client = _get_ai_client(logger)
-    if not client or not snapshot.strip():
+    if not snapshot.strip():
         return ""
     label = FUNCTION_LABELS.get(func_name, func_name)
     prompt = (
@@ -134,6 +133,25 @@ def _generate_ai_summary(func_name: str, target: str, snapshot: str, logger) -> 
         f"\n统计数据：\n{snapshot}"
         "\n请直接输出精炼结论。"
     )
+    try:
+        langchain_text = _safe_async_call(
+            call_langchain_chat(
+                [
+                    {"role": "system", "content": "你是一名资深舆情分析师。"},
+                    {"role": "user", "content": prompt},
+                ],
+                task="analyze_summary",
+                max_tokens=400,
+            )
+        )
+        if isinstance(langchain_text, str) and langchain_text.strip():
+            return langchain_text.strip()
+    except Exception as exc:  # pragma: no cover - 外部依赖
+        log_error(logger, f"LangChain 摘要生成失败：{exc}", "Analysis")
+
+    client = _get_ai_client(logger)
+    if not client:
+        return ""
     try:
         response = _safe_async_call(client.call(prompt, model="qwen-plus", max_tokens=400))
     except Exception as exc:  # pragma: no cover - 外部依赖
@@ -163,8 +181,7 @@ def _collect_main_finding_context(entries: Dict[str, Dict[str, Any]]) -> List[Di
 
 
 def _generate_main_finding_text(topic: str, start: str, end: Optional[str], contexts: List[Dict[str, str]], logger) -> str:
-    client = _get_ai_client(logger)
-    if not client or not contexts:
+    if not contexts:
         return ""
     time_range = f"{start}→{end or start}"
     topics_text = []
@@ -186,6 +203,25 @@ def _generate_main_finding_text(topic: str, start: str, end: Optional[str], cont
         "\n请直接输出主要发现的两到三句话。"
     ]
     prompt = "\n".join(prompt_parts)
+    try:
+        langchain_text = _safe_async_call(
+            call_langchain_chat(
+                [
+                    {"role": "system", "content": "你是一名资深舆情分析师。"},
+                    {"role": "user", "content": prompt},
+                ],
+                task="analyze_summary",
+                max_tokens=400,
+            )
+        )
+        if isinstance(langchain_text, str) and langchain_text.strip():
+            return langchain_text.strip()
+    except Exception as exc:  # pragma: no cover - 外部依赖
+        log_error(logger, f"LangChain 总体发现生成失败：{exc}", "Analysis")
+
+    client = _get_ai_client(logger)
+    if not client:
+        return ""
     try:
         response = _safe_async_call(client.call(prompt, model="qwen-plus", max_tokens=400))
     except Exception as exc:  # pragma: no cover - 外部依赖

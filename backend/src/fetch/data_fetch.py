@@ -4,17 +4,17 @@
 import logging
 import re
 from datetime import date, datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.engine.url import make_url
 
 from ..utils.setting.paths import ensure_bucket
 from ..utils.setting.settings import settings
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_skip
 from ..utils.io.excel import write_jsonl, read_jsonl
+from ..utils.io.db import DatabaseManager
 
 
 def fetch_range(
@@ -24,7 +24,7 @@ def fetch_range(
     output_date: str,
     logger=None,
     db_topic: Optional[str] = None,
-) -> bool:
+) -> Optional[int]:
     """
     从数据库提取指定时间范围的数据
     
@@ -36,7 +36,7 @@ def fetch_range(
         logger: 日志记录器
     
     Returns:
-        bool: 是否成功
+        Optional[int]: 成功返回提取条数，失败返回 None
     """
     
     # 1. 获取渠道配置
@@ -47,128 +47,108 @@ def fetch_range(
     folder_name = f"{start_date}_{end_date}"
     fetch_dir = ensure_bucket("fetch", topic, folder_name)
     
-    # 3. 获取数据库连接
-    db_config = settings.get('databases', {})
-    db_url = db_config.get('db_url')
-    if not db_url:
-        log_error(logger, "未找到数据库连接配置", "Fetch")
-        return False
-    
-    base_url = make_url(db_url)
     db_name = _normalise_db_topic(db_topic or topic)
-    db_url_with_db = base_url.set(database=db_name)
-    engine = create_engine(db_url_with_db)
+
+    # 3. 获取数据库连接（统一走 DatabaseManager，兼容 active MySQL/PostgreSQL）
+    engine = _create_topic_engine(db_name, logger=logger)
+    if engine is None:
+        return None
     
     all_data = []
     channel_files = {}
     
     try:
-        with engine.connect() as conn:
-            # 4. 提取各渠道数据
-            for channel in channels:
-                try:
-                    if not table_exists(conn, channel, db_name):
-                        log_skip(logger, f"表 {db_name}.{channel} 不存在，跳过", "Fetch")
-                        continue
-                    
-                    # 查询数据
-                    query = """
-                    SELECT * FROM {table_name}
-                    WHERE DATE(published_at) BETWEEN :start_date AND :end_date
-                    ORDER BY published_at DESC
-                    """.format(table_name=channel)
-                    
-                    result = conn.execute(text(query), {
-                        'start_date': start_date,
-                        'end_date': end_date
-                    })
-                    
-                    df = pd.DataFrame(result.fetchall(), columns=result.keys())
-                    
-                    if len(df) > 0:
-                        # 确保classification字段存在
-                        if 'classification' not in df.columns:
-                            df['classification'] = '未知'
-                        else:
-                            df['classification'] = df['classification'].fillna('未知')
-                        
-                        # 保存渠道数据
-                        channel_file = fetch_dir / f"{channel}.jsonl"
-                        write_jsonl(df, channel_file)
-                        channel_files[channel] = channel_file
-                        all_data.append(df)
-                        
-                        log_success(logger, f"成功提取: {channel} -- 共{len(df)}条", "Fetch")
+        # 4. 提取各渠道数据（每个渠道独立连接，降低长连接断开影响）
+        for channel in channels:
+            try:
+                df = _fetch_channel_dataframe(engine, db_name, channel, start_date, end_date, logger=logger)
+                if df is None:
+                    log_skip(logger, f"表 {db_name}.{channel} 不存在，跳过", "Fetch")
+                    continue
+
+                if len(df) > 0:
+                    # 确保classification字段存在
+                    if 'classification' not in df.columns:
+                        df['classification'] = '未知'
                     else:
-                        log_skip(logger, f"渠道 {channel} 无数据", "Fetch")
-                        
-                except Exception as e:
-                    log_error(logger, f"提取渠道 {channel} 失败: {e}", "Fetch")
-                    continue
-            
-            # 5. 合并渠道数据
-            merge_config = channels_config.get('merge_for_analysis', {})
-            files_to_remove = set()
-            
-            for merge_name, source_channels in merge_config.items():
-                try:
-                    merge_data = []
-                    for source_channel in source_channels:
-                        if source_channel in channel_files and channel_files[source_channel].exists():
-                            df = read_jsonl(channel_files[source_channel])
-                            if len(df) > 0:
-                                merge_data.append(df)
-                                files_to_remove.add(source_channel)
-                    
-                    if merge_data:
-                        merged_df = pd.concat(merge_data, ignore_index=True)
-                        merged_file = fetch_dir / f"{merge_name}.jsonl"
-                        write_jsonl(merged_df, merged_file)
-                        all_data.append(merged_df)
-                        log_success(logger, f"合并完成: {merge_name} -- {len(merged_df)}条)", "Fetch")
-                        
-                except Exception as e:
-                    log_error(logger, f"合并 {merge_name} 失败: {e}", "Fetch")
-                    continue
-            
-            # 6. 删除已合并的原始文件
-            for channel in files_to_remove:
-                if channel in channel_files and channel_files[channel].exists():
-                    try:
-                        channel_files[channel].unlink()
-                    except Exception as e:
-                        log_error(logger, f"删除文件 {channel}.jsonl 失败: {e}", "Fetch")
-            
-            # 7. 保存总体数据
-            if all_data:
-                # 重新收集未合并的数据
-                final_data = []
-                for channel in channels:
-                    if channel not in files_to_remove and channel in channel_files and channel_files[channel].exists():
-                        df = read_jsonl(channel_files[channel])
-                        if len(df) > 0:
-                            final_data.append(df)
-                
-                # 添加合并后的数据
-                for merge_name in merge_config.keys():
-                    merged_file = fetch_dir / f"{merge_name}.jsonl"
-                    if merged_file.exists():
-                        df = read_jsonl(merged_file)
-                        if len(df) > 0:
-                            final_data.append(df)
-                
-                if final_data:
-                    all_df = pd.concat(final_data, ignore_index=True)
-                    all_file = fetch_dir / "总体.jsonl"
-                    write_jsonl(all_df, all_file)
-                    return True
+                        df['classification'] = df['classification'].fillna('未知')
+
+                    # 保存渠道数据
+                    channel_file = fetch_dir / f"{channel}.jsonl"
+                    write_jsonl(df, channel_file)
+                    channel_files[channel] = channel_file
+                    all_data.append(df)
+
+                    log_success(logger, f"成功提取: {channel} -- 共{len(df)}条", "Fetch")
                 else:
-                    log_error(logger, "没有提取到任何数据", "Fetch")
-                    return False
+                    log_skip(logger, f"渠道 {channel} 无数据", "Fetch")
+            except Exception as e:
+                log_error(logger, f"提取渠道 {channel} 失败: {e}", "Fetch")
+                continue
+
+        # 5. 合并渠道数据
+        merge_config = channels_config.get('merge_for_analysis', {})
+        files_to_remove = set()
+
+        for merge_name, source_channels in merge_config.items():
+            try:
+                merge_data = []
+                for source_channel in source_channels:
+                    if source_channel in channel_files and channel_files[source_channel].exists():
+                        df = read_jsonl(channel_files[source_channel])
+                        if len(df) > 0:
+                            merge_data.append(df)
+                            files_to_remove.add(source_channel)
+
+                if merge_data:
+                    merged_df = pd.concat(merge_data, ignore_index=True)
+                    merged_file = fetch_dir / f"{merge_name}.jsonl"
+                    write_jsonl(merged_df, merged_file)
+                    all_data.append(merged_df)
+                    log_success(logger, f"合并完成: {merge_name} -- {len(merged_df)}条)", "Fetch")
+
+            except Exception as e:
+                log_error(logger, f"合并 {merge_name} 失败: {e}", "Fetch")
+                continue
+
+        # 6. 删除已合并的原始文件
+        for channel in files_to_remove:
+            if channel in channel_files and channel_files[channel].exists():
+                try:
+                    channel_files[channel].unlink()
+                except Exception as e:
+                    log_error(logger, f"删除文件 {channel}.jsonl 失败: {e}", "Fetch")
+
+        # 7. 保存总体数据
+        if all_data:
+            # 重新收集未合并的数据
+            final_data = []
+            for channel in channels:
+                if channel not in files_to_remove and channel in channel_files and channel_files[channel].exists():
+                    df = read_jsonl(channel_files[channel])
+                    if len(df) > 0:
+                        final_data.append(df)
+
+            # 添加合并后的数据
+            for merge_name in merge_config.keys():
+                merged_file = fetch_dir / f"{merge_name}.jsonl"
+                if merged_file.exists():
+                    df = read_jsonl(merged_file)
+                    if len(df) > 0:
+                        final_data.append(df)
+
+            if final_data:
+                all_df = pd.concat(final_data, ignore_index=True)
+                all_file = fetch_dir / "总体.jsonl"
+                write_jsonl(all_df, all_file)
+                return len(all_df)
             else:
                 log_error(logger, "没有提取到任何数据", "Fetch")
-                return False
-                
+                return None
+        else:
+            log_error(logger, "没有提取到任何数据", "Fetch")
+            return None
+
     finally:
         engine.dispose()
 
@@ -211,19 +191,55 @@ def _quote_identifier(conn, identifier: str) -> str:
     return f'"{safe}"'
 
 
-def _resolve_db_url(db_config: dict) -> Optional[str]:
+def _create_topic_engine(db_topic: str, logger=None):
+    """创建并返回指定专题数据库的引擎（兼容 active MySQL/PostgreSQL）。"""
+    try:
+        db_manager = DatabaseManager()
+        return db_manager.get_engine_for_database(db_topic)
+    except Exception as exc:
+        log_error(logger, f"创建数据库引擎失败({db_topic}): {exc}", "Fetch")
+        return None
+
+
+def _build_fetch_query(conn, table_name: str):
+    quoted_table = _quote_identifier(conn, table_name)
+    date_expr = "CAST(published_at AS DATE)" if conn.dialect.name == 'postgresql' else "DATE(published_at)"
+    query = f"""
+    SELECT * FROM {quoted_table}
+    WHERE {date_expr} BETWEEN :start_date AND :end_date
+    ORDER BY published_at DESC
     """
-    Resolve the database URL from configuration, respecting the 'active' connection.
-    """
-    active_id = db_config.get('active')
-    if active_id:
-        connections = db_config.get('connections', [])
-        for conn in connections:
-            if conn.get('id') == active_id:
-                return conn.get('url')
-    
-    # Fallback to legacy top-level db_url
-    return db_config.get('db_url')
+    return text(query)
+
+
+def _is_disconnect_error(exc: Exception) -> bool:
+    message = str(getattr(exc, "orig", exc)).lower()
+    markers = [
+        "lost connection",
+        "server has gone away",
+        "(2013",
+        "(2006",
+        "connection reset",
+    ]
+    return any(marker in message for marker in markers)
+
+
+def _fetch_channel_dataframe(engine, db_name: str, channel: str, start_date: str, end_date: str, logger=None):
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with engine.connect() as conn:
+                if not table_exists(conn, channel, db_name):
+                    return None
+                query = _build_fetch_query(conn, channel)
+                result = conn.execute(query, {"start_date": start_date, "end_date": end_date})
+                return pd.DataFrame(result.fetchall(), columns=result.keys())
+        except OperationalError as exc:
+            if attempt < max_attempts and _is_disconnect_error(exc):
+                log_skip(logger, f"渠道 {channel} 连接中断，正在重试({attempt}/{max_attempts})", "Fetch")
+                continue
+            raise
+    return None
 
 
 def _query_table_date_range(conn, table_name: str, topic: str, logger=None) -> Tuple[Optional[date], Optional[date]]:
@@ -337,16 +353,9 @@ def get_available_date_range(topic: str, table_name: str, logger=None):
     if logger is None:
         logger = logging.getLogger("fetch-availability")
     db_topic = _normalise_db_topic(topic)
-    db_config = settings.get('databases', {})
-    
-    db_url = _resolve_db_url(db_config)
-    if not db_url:
-        log_error(logger, "未找到数据库连接配置", "Fetch")
+    engine = _create_topic_engine(db_topic, logger=logger)
+    if engine is None:
         return None, None
-
-    base_url = make_url(db_url)
-    db_url_with_db = base_url.set(database=db_topic)
-    engine = create_engine(db_url_with_db)
 
     try:
         with engine.connect() as conn:
@@ -384,16 +393,9 @@ def get_topic_available_date_range(topic: str, logger=None):
     if logger is None:
         logger = logging.getLogger("fetch-availability")
     db_topic = _normalise_db_topic(topic)
-    db_config = settings.get('databases', {})
-    
-    db_url = _resolve_db_url(db_config)
-    if not db_url:
-        log_error(logger, "未找到数据库连接配置", "Fetch")
+    engine = _create_topic_engine(db_topic, logger=logger)
+    if engine is None:
         return {"start": None, "end": None, "channels": {}}
-
-    base_url = make_url(db_url)
-    db_url_with_db = base_url.set(database=db_topic)
-    engine = create_engine(db_url_with_db)
 
     table_ranges = {}
     min_date: Optional[date] = None
@@ -431,7 +433,7 @@ def get_topic_available_date_range(topic: str, logger=None):
     }
 
 
-def run_fetch(topic: str, start: str, end: str, logger=None) -> bool:
+def run_fetch(topic: str, start: str, end: str, logger=None, db_topic: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     运行数据提取
     
@@ -440,9 +442,10 @@ def run_fetch(topic: str, start: str, end: str, logger=None) -> bool:
         start (str): 开始日期
         end (str): 结束日期
         logger: 日志记录器
+        db_topic (Optional[str]): 远程数据库名称（可选），不传则使用 topic
     
     Returns:
-        bool: 是否成功
+        Optional[Dict[str, Any]]: 成功返回包含计数的结果字典，失败返回 None
     """
     if logger is None:
         logger = setup_logger(topic, start)
@@ -450,12 +453,12 @@ def run_fetch(topic: str, start: str, end: str, logger=None) -> bool:
     log_module_start(logger, "Fetch")
     
     try:
-        result = fetch_range(topic, start, end, start, logger)
-        if result:
-            return True
+        count = fetch_range(topic, start, end, start, logger, db_topic=db_topic)
+        if count is not None:
+            return {"count": count}
         else:
             log_error(logger, "模块执行失败", "Fetch")
-            return False
+            return None
     except Exception as e:
         log_error(logger, f"模块执行失败: {e}", "Fetch")
-        return False
+        return None

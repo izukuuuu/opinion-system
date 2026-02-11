@@ -1,111 +1,99 @@
 <template>
-  <div class="topic-dashboard space-y-8">
-    <header class="rounded-2xl border border-soft bg-surface p-6">
-      <div class="flex flex-col gap-2">
-        <p class="text-xs font-medium uppercase tracking-wide text-secondary">主题分析 · BERTopic</p>
-        <h1 class="text-2xl font-semibold text-primary">查看 BERTopic + Qwen 主题分析结果</h1>
-        <p class="text-sm text-secondary">
-          选择专题与时间区间，查看已生成的 BERTopic 分析结果，包括主题统计、关键词、降维坐标以及 LLM 再聚类结果。
-        </p>
+  <div class="topic-dashboard pb-8 space-y-6">
+    <!-- 存档选择 -->
+    <section class="card-surface p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-primary">选择分析存档</h2>
+        <button type="button"
+          class="inline-flex items-center gap-1 text-xs font-medium text-brand-600 disabled:cursor-default disabled:opacity-60"
+          :disabled="topicsState.loading" @click="loadTopics(true)">
+          <ArrowPathIcon class="h-3.5 w-3.5" :class="topicsState.loading ? 'animate-spin' : ''" />
+          <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
+        </button>
       </div>
-    </header>
 
-    <!-- 查询参数 -->
-    <section class="rounded-2xl border border-soft bg-surface p-6">
-      <h2 class="text-lg font-semibold text-primary mb-6">查询参数</h2>
-
-      <!-- 历史记录选择 -->
-      <div v-if="analysisHistory.length > 0" class="mb-6">
-        <label class="block text-sm font-medium text-primary mb-2">
-          <span class="text-xs font-semibold text-muted">历史记录</span>
-          <select v-model="selectedHistoryId" class="input mt-1"
-            @change="applyHistorySelection(selectedHistoryId, { shouldLoad: true })">
-            <option value="">选择历史分析记录...</option>
-            <option v-for="record in analysisHistory" :key="record.id" :value="record.id">
-              {{ formatTimestamp(record.start) }} - {{ formatTimestamp(record.end) }} ({{ record.topic }})
+      <div class="space-y-4">
+        <!-- 专题选择 -->
+        <label class="flex flex-col gap-2">
+          <span class="text-sm font-medium text-primary">专题 Topic</span>
+          <select v-model="viewSelection.topic" class="input"
+            :disabled="topicsState.loading || topicOptions.length === 0">
+            <option value="" disabled>请选择专题</option>
+            <option v-for="option in topicOptions" :key="option.bucket" :value="option.bucket">
+              {{ option.display_name || option.name }}
             </option>
           </select>
         </label>
-      </div>
 
-      <!-- 手动输入表单 -->
-      <form @submit.prevent="loadResultsFromManual" class="space-y-6">
-        <div class="grid gap-4 md:grid-cols-2">
-          <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-semibold text-muted">专题 Topic *</span>
-              <button type="button"
-                class="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-default disabled:opacity-60"
-                :disabled="topicsState.loading" @click="loadTopics(true)">
-                <ArrowPathIcon class="h-3 w-3"
-                  :class="topicsState.loading ? 'animate-spin text-brand-600' : 'text-brand-600'" />
-                <span>{{ topicsState.loading ? '刷新中…' : '刷新专题' }}</span>
-              </button>
-            </div>
-            <select v-model="viewManualForm.topic" class="input"
-              :disabled="topicsState.loading || topicOptions.length === 0">
-              <option value="" disabled>请选择专题</option>
-              <option v-for="option in topicOptions" :key="option.bucket" :value="option.bucket">
-                {{ option.display_name || option.name }}
+        <!-- 存档日期范围选择 -->
+        <div v-if="viewSelection.topic" class="space-y-2">
+          <label class="flex flex-col gap-2">
+            <span class="text-sm font-medium text-primary">存档日期范围</span>
+            <select v-model="selectedHistoryId" class="input"
+              :disabled="historyState.loading || analysisHistory.length === 0"
+              @change="applyHistorySelection(selectedHistoryId)">
+              <option value="">{{ historyState.loading ? '加载中…' : analysisHistory.length === 0 ? '暂无存档' : '请选择存档日期范围' }}
+              </option>
+              <option v-for="record in analysisHistory" :key="record.id" :value="record.id">
+                {{ record.start }} ~ {{ record.end }}
               </option>
             </select>
           </label>
 
-          <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            <span class="text-xs font-semibold text-muted">开始日期 Start *</span>
-            <input v-model.trim="viewManualForm.start" type="date" class="input" :disabled="loadState.loading" />
-          </label>
+          <!-- 无存档提示 -->
+          <p v-if="!historyState.loading && analysisHistory.length === 0"
+            class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+            <span class="inline-flex items-center gap-1.5 font-medium">
+              <ExclamationTriangleIcon class="h-4 w-4" />
+              暂无分析存档
+            </span><br />
+            <span class="text-xs">当前专题暂无 BERTopic 分析存档。请先在“运行分析”页面执行分析任务。</span>
+          </p>
 
-          <label class="flex flex-col gap-1 text-sm font-medium text-primary">
-            <span class="text-xs font-semibold text-muted">结束日期 End</span>
-            <input v-model.trim="viewManualForm.end" type="date" class="input" :disabled="loadState.loading"
-              :min="viewManualForm.start" />
-          </label>
+          <!-- 历史记录错误 -->
+          <p v-if="historyState.error" class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {{ historyState.error }}
+          </p>
         </div>
 
-        <!-- 数据可用性提示 -->
-        <div v-if="availableRange.start || availableRange.error" class="rounded-xl border p-3 text-sm"
-          :class="availableRange.error ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'">
-          <div class="flex items-start gap-2">
-            <span class="text-base">{{ availableRange.error ? '⚠️' : 'ℹ️' }}</span>
-            <div>
-              <p class="font-medium" :class="availableRange.error ? 'text-red-700' : 'text-blue-700'">
-                数据可用性
-              </p>
-              <p v-if="availableRange.error" class="text-red-600 text-xs mt-1">{{ availableRange.error }}</p>
-              <p v-else class="text-blue-600 text-xs mt-1">
-                数据范围：{{ availableRange.start }} ~ {{ availableRange.end }}
-              </p>
-            </div>
+        <!-- 当前选中的存档信息 -->
+        <div v-if="selectedRecord && !loadState.loading"
+          class="rounded-xl border border-soft bg-surface-muted p-4 space-y-1">
+          <p class="text-xs font-semibold text-muted uppercase tracking-wide">当前查看</p>
+          <p class="text-base font-bold text-primary">{{ selectedRecord.display_topic || selectedRecord.topic }}</p>
+          <p class="text-sm text-secondary">{{ selectedRecord.start }} ~ {{ selectedRecord.end }}</p>
+          <p v-if="lastLoaded" class="text-xs text-muted">最后加载: {{ lastLoaded }}</p>
+        </div>
+
+        <!-- 加载状态 -->
+        <div v-if="loadState.loading" class="rounded-xl border border-brand-200 bg-brand-50 p-4 text-sm text-brand-700">
+          <div class="flex items-center gap-2">
+            <ArrowPathIcon class="h-4 w-4 animate-spin" />
+            <span class="font-medium">正在加载分析结果...</span>
           </div>
         </div>
 
-        <div class="flex flex-wrap gap-3">
-          <button type="submit" class="btn btn-primary"
-            :disabled="!viewManualForm.topic || !viewManualForm.start || loadState.loading">
-            {{ loadState.loading ? '加载中…' : '加载结果' }}
-          </button>
-          <button type="button" class="btn btn-soft"
-            @click="viewManualForm.topic = viewSelection.topic; viewManualForm.start = viewSelection.start; viewManualForm.end = viewSelection.end"
-            :disabled="loadState.loading">
-            重置为当前选择
-          </button>
-        </div>
-      </form>
-
-      <p v-if="loadState.error" class="mt-4 rounded-xl border border-red-200 bg-red-50/70 p-4 text-sm text-red-700">
-        {{ loadState.error }}
-      </p>
+        <!-- 加载错误 -->
+        <p v-if="loadState.error" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {{ loadState.error }}
+        </p>
+      </div>
     </section>
 
     <section v-if="hasSummary" class="topic-dashboard__card space-y-6">
       <div class="dashboard-controls">
         <label>
-          <span>🔍 搜索主题</span>
+          <span class="inline-flex items-center gap-1.5">
+            <MagnifyingGlassIcon class="h-4 w-4" />
+            搜索主题
+          </span>
           <input v-model.trim="controls.search" type="text" placeholder="输入主题名称关键字…" />
         </label>
         <label>
-          <span>📊 排序方式</span>
+          <span class="inline-flex items-center gap-1.5">
+            <ArrowsUpDownIcon class="h-4 w-4" />
+            排序方式
+          </span>
           <select v-model="controls.sort">
             <option value="docCount-desc">文档数 ↓</option>
             <option value="docCount-asc">文档数 ↑</option>
@@ -114,9 +102,12 @@
           </select>
         </label>
         <label class="topic-dashboard__range">
-          <span>📈 显示数量 (Top-N)</span>
+          <span class="inline-flex items-center gap-1.5">
+            <ChartBarIcon class="h-4 w-4" />
+            显示数量 (Top-N)
+          </span>
           <div class="range-input">
-            <input :value="controls.topN" type="range" min="3" :max="Math.max(7, maxTopN)"
+            <input :value="controls.topN" type="range" min="1" :max="Math.max(7, maxTopN)"
               @input="updateTopN($event.target.value)" />
             <span>{{ controls.topN }}</span>
           </div>
@@ -125,16 +116,22 @@
 
       <div class="dashboard-overview">
         <div class="overview-header">
-          <h3 class="overview-header__title">📈 数据概览</h3>
+          <h3 class="overview-header__title inline-flex items-center gap-1.5">
+            <PresentationChartBarIcon class="h-5 w-5" />
+            数据概览
+          </h3>
           <div class="overview-actions">
             <button class="btn-export" @click="exportData" title="导出数据">
-              📥 导出数据
+              <ArrowDownTrayIcon class="inline h-4 w-4" />
+              导出数据
             </button>
           </div>
         </div>
         <div class="dashboard-stats">
           <div class="stat-card stat-card--primary">
-            <div class="stat-card__icon">📊</div>
+            <div class="stat-card__icon">
+              <ChartBarIcon class="h-6 w-6" />
+            </div>
             <div class="stat-card__content">
               <p class="stat-card__value">{{ llmStats.count }}</p>
               <p class="stat-card__label">新主题总数</p>
@@ -144,7 +141,9 @@
             </div>
           </div>
           <div class="stat-card stat-card--success">
-            <div class="stat-card__icon">📄</div>
+            <div class="stat-card__icon">
+              <DocumentTextIcon class="h-6 w-6" />
+            </div>
             <div class="stat-card__content">
               <p class="stat-card__value">{{ llmStats.totalDocs.toLocaleString() }}</p>
               <p class="stat-card__label">文档总数</p>
@@ -154,22 +153,14 @@
             </div>
           </div>
           <div class="stat-card stat-card--info">
-            <div class="stat-card__icon">📈</div>
+            <div class="stat-card__icon">
+              <ArrowTrendingUpIcon class="h-6 w-6" />
+            </div>
             <div class="stat-card__content">
               <p class="stat-card__value">{{ llmStats.maxDocs.toLocaleString() }}</p>
               <p class="stat-card__label">最大主题文档数</p>
               <p v-if="llmStats.totalDocs > 0" class="stat-card__subtext">
                 占比: {{ ((llmStats.maxDocs / llmStats.totalDocs) * 100).toFixed(1) }}%
-              </p>
-            </div>
-          </div>
-          <div class="stat-card stat-card--warning">
-            <div class="stat-card__icon">🎯</div>
-            <div class="stat-card__content">
-              <p class="stat-card__value">{{ docStats.topicCount }}</p>
-              <p class="stat-card__label">原始主题数</p>
-              <p v-if="llmStats.count > 0" class="stat-card__subtext">
-                合并率: {{ ((1 - llmStats.count / docStats.topicCount) * 100).toFixed(1) }}%
               </p>
             </div>
           </div>
@@ -180,15 +171,14 @@
     <section v-if="hasSummary" class="space-y-6">
       <div class="topic-dashboard__chart-grid">
         <PlotlyChartPanel :data="barPlotlyData" :layout="barPlotlyLayout" :config="barPlotlyConfig"
-          :has-data="barPlotlyHasData" title="📊 主题规模对比（横向条形）" description="支持搜索、排序与 Top-N 显示控制，便于定位关注主题。" />
+          :has-data="barPlotlyHasData" title="主题规模对比（横向条形）" description="支持搜索、排序与 Top-N 显示控制，便于定位关注主题。" />
         <PlotlyChartPanel :data="donutPlotlyData" :layout="donutPlotlyLayout" :config="donutPlotlyConfig"
-          :has-data="donutPlotlyHasData" title="🥧 主题占比（环形图）" description="基于文档数计算占比，直观呈现主题贡献度。" />
+          :has-data="donutPlotlyHasData" title="主题占比（环形图）" description="基于文档数计算占比，直观呈现主题贡献度。" />
       </div>
 
       <div v-if="sankeyPlotlyHasData" class="chart-panel--tall">
         <PlotlyChartPanel :data="sankeyPlotlyData" :layout="sankeyPlotlyLayout" :config="sankeyPlotlyConfig"
-          :has-data="sankeyPlotlyHasData" title="🌊 原始主题 → 新主题合并关系（桑基图）"
-          description="展示 BERTopic 原始主题与 LLM 新主题之间的合并关系。" />
+          :has-data="sankeyPlotlyHasData" title="原始主题 → 新主题合并关系（桑基图）" description="展示 BERTopic 原始主题与 LLM 新主题之间的合并关系。" />
       </div>
     </section>
 
@@ -221,7 +211,7 @@
     <!-- LLM 再聚类结果详细展示 -->
     <section v-if="llmClusters.length > 0" class="topic-dashboard__card">
       <div class="section-header">
-        <h2 class="section-header__title">🤖 LLM 再聚类结果</h2>
+        <h2 class="section-header__title">LLM 再聚类结果</h2>
         <p class="section-header__subtitle">大模型重新命名和聚类的主题详情</p>
       </div>
       <div class="llm-clusters-grid">
@@ -264,7 +254,18 @@
 
 <script setup>
 import { computed, reactive, watch, onMounted, nextTick, ref } from 'vue'
-import { ArrowPathIcon } from '@heroicons/vue/24/outline'
+import {
+  ArrowPathIcon,
+  MagnifyingGlassIcon,
+  ChartBarIcon,
+  ArrowsUpDownIcon,
+  PresentationChartBarIcon,
+  ArrowDownTrayIcon,
+  DocumentTextIcon,
+  ArrowTrendingUpIcon,
+  ChartPieIcon,
+  ExclamationTriangleIcon
+} from '@heroicons/vue/24/outline'
 import AnalysisChartPanel from '@/components/AnalysisChartPanel.vue'
 import PlotlyChartPanel from '@/components/PlotlyChartPanel.vue'
 import { useTopicBertopicView } from '@/composables/useTopicBertopicView'
@@ -275,7 +276,6 @@ const {
   topicsState,
   topicOptions,
   viewSelection,
-  viewManualForm,
   loadState,
   bertopicData,
   hasResults,
@@ -285,10 +285,10 @@ const {
   selectedRecord,
   availableRange,
   bertopicStats,
+  lastLoaded,
   loadTopics,
   loadHistory,
   loadResults,
-  loadResultsFromManual,
   refreshHistory,
   applyHistorySelection,
   formatTimestamp
@@ -326,7 +326,6 @@ watch(
       )
       if (matched) {
         viewSelection.topic = matched.bucket
-        viewManualForm.topic = matched.bucket
       }
     }
   },
@@ -637,8 +636,8 @@ const barPlotlyData = computed(() => {
   return [{
     y: sortedData.map(item => {
       if (llmClusters.value.length > 0) {
-        // LLM聚类模式
-        return `${item.name} - ${item.title}`
+        // LLM聚类模式 - 只显示title，不重复
+        return item.title || item.name
       } else {
         // 原始主题模式
         const llmInfo = originalTopicToLLMName.value[item.name]
@@ -675,7 +674,7 @@ const barPlotlyLayout = computed(() => ({
   title: { text: '主题文档数排名', font: { size: 14, color: '#2d3748' }, x: 0.5 },
   xaxis: { title: '文档数量', tickfont: { size: 11 }, titlefont: { size: 12 } },
   yaxis: { tickfont: { size: 10 }, autorange: 'reversed' },
-  margin: { l: 300, r: 50, t: 50, b: 50 },
+  margin: { l: 180, r: 50, t: 50, b: 50 },
   plot_bgcolor: 'rgba(255,255,255,.5)',
   paper_bgcolor: 'rgba(255,255,255,.7)',
   font: { family: 'Segoe UI, PingFang SC, Microsoft YaHei' }
@@ -704,11 +703,13 @@ const donutPlotlyData = computed(() => {
     values: docCounts,
     labels: dataSource.map(item => {
       if (llmClusters.value.length > 0) {
-        return `${item.name}\n${item.title}`
+        // LLM聚类模式 - 只显示title
+        return item.title || item.name
       } else {
+        // 原始主题模式
         const llmInfo = originalTopicToLLMName.value[item.name]
         const label = llmInfo?.title || item.name
-        return `${item.name}\n${label}`
+        return label
       }
     }),
     type: 'pie',
@@ -788,12 +789,14 @@ const sankeyPlotlyData = computed(() => {
   // 生成节点标签
   const getNodeLabel = (nodeName) => {
     if (nodeName.startsWith('主题') && !nodeName.startsWith('新主题')) {
+      // 原始主题：保留主题名 + 关键词
       const kw = getOriginalTopicKeywords(nodeName)
       return kw ? `${nodeName}\n${kw}` : nodeName
     }
+    // LLM聚类节点：只显示title，不重复
     const cluster = llmClusters.value.find(c => (c.name || c.title) === nodeName)
     if (cluster) {
-      return `${nodeName}\n${cluster.title || nodeName}`
+      return cluster.title || nodeName
     }
     return nodeName
   }
@@ -1387,7 +1390,6 @@ const updateTopN = (value) => {
   padding: 32px;
   background: linear-gradient(135deg, #9ab2cb 0%, #7f91a7 100%);
   color: white;
-  box-shadow: 0 10px 30px rgba(122, 146, 176, 0.35);
 }
 
 .topic-dashboard__hero h1 {
@@ -1415,7 +1417,6 @@ const updateTopN = (value) => {
   border: 1px solid var(--color-border-soft);
   background: var(--color-surface);
   padding: 24px;
-  box-shadow: 0 10px 25px rgba(22, 30, 52, 0.05);
 }
 
 .topic-dashboard__form {
@@ -1585,13 +1586,6 @@ const updateTopN = (value) => {
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-export:hover {
-  background: rgba(67, 97, 238, 0.1);
-  border-color: #4361ee;
-  color: #4361ee;
 }
 
 .dashboard-stats {
@@ -1604,18 +1598,11 @@ const updateTopN = (value) => {
   display: flex;
   align-items: flex-start;
   gap: 1rem;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(5px);
+  background: var(--color-surface);
   border-radius: 0.75rem;
   padding: 1.25rem;
   border-left: 4px solid #4361ee;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--color-border-soft);
 }
 
 .stat-card--primary {
@@ -1903,12 +1890,6 @@ const updateTopN = (value) => {
   color: white;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
-}
-
-.umap-control-row button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(67, 97, 238, 0.4);
 }
 
 .umap-selected-info {
@@ -1956,12 +1937,6 @@ const updateTopN = (value) => {
   background: rgba(67, 97, 238, 0.15);
   border-radius: 8px;
   border: 1px solid rgba(67, 97, 238, 0.3);
-  transition: all 0.2s ease;
-}
-
-.umap-topic-item:hover {
-  background: rgba(67, 97, 238, 0.25);
-  border-color: #4361ee;
 }
 
 .umap-topic-item input[type="checkbox"] {
@@ -2014,13 +1989,6 @@ const updateTopN = (value) => {
   font-size: 0.8125rem;
   color: var(--color-text-primary);
   border: 1px solid var(--color-border-soft);
-  transition: all 0.2s ease;
-}
-
-.keyword-chip:hover {
-  background: rgba(67, 97, 238, 0.1);
-  border-color: #4361ee;
-  transform: translateY(-1px);
 }
 
 .keyword-chip__weight {
@@ -2041,13 +2009,6 @@ const updateTopN = (value) => {
   border: 1px solid var(--color-border-soft);
   background: linear-gradient(135deg, rgba(67, 97, 238, 0.05) 0%, rgba(255, 255, 255, 0.9) 100%);
   padding: 1.25rem;
-  transition: all 0.3s ease;
-}
-
-.llm-cluster-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(67, 97, 238, 0.15);
-  border-color: #4361ee;
 }
 
 .llm-cluster-card__header {
@@ -2133,12 +2094,6 @@ const updateTopN = (value) => {
   padding: 0.25rem 0.625rem;
   border-radius: 0.375rem;
   border: 1px solid var(--color-border-soft);
-  transition: all 0.2s ease;
-}
-
-.llm-cluster-card__keyword-tag:hover {
-  background: rgba(67, 97, 238, 0.1);
-  border-color: #4361ee;
 }
 
 /* 统计表格 */
@@ -2175,14 +2130,6 @@ const updateTopN = (value) => {
 
 .stats-table th:last-child {
   border-top-right-radius: 0.75rem;
-}
-
-.stats-table__row {
-  transition: background 0.2s ease;
-}
-
-.stats-table__row:hover {
-  background: rgba(67, 97, 238, 0.05);
 }
 
 .stats-table__row td {

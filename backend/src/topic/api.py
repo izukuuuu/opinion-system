@@ -3,6 +3,14 @@ from server_support.ops import _execute_operation
 from server_support.responses import error, success
 from server_support import require_fields, resolve_topic_identifier
 from src.project import get_project_manager
+from src.topic.prompt_config import (
+    load_topic_bertopic_prompt_config,
+    persist_topic_bertopic_prompt_config,
+)
+from src.topic.config import (
+    load_bertopic_config,
+    save_bertopic_config,
+)
 
 PROJECT_MANAGER = get_project_manager()
 from src.utils.setting.paths import bucket, get_data_root
@@ -33,6 +41,17 @@ def _compose_analyze_folder(start: str, end: str = None) -> str:
     if end:
         return f"{start}_{end}"
     return start
+
+
+def _parse_topic_folder_range(folder_name: str) -> tuple[str, str]:
+    token = str(folder_name or "").strip()
+    if not token:
+        return "", ""
+    if "_" in token:
+        start, end = token.split("_", 1)
+    else:
+        start, end = token, token
+    return start.strip(), end.strip()
 
 def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     valid, error_response = require_fields(payload, "topic", "start_date")
@@ -85,9 +104,11 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
         LOGGER.warning("Failed to ensure project storage for BERTopic", exc_info=True)
 
     # 使用新的BERTopic实现，集成fetch流程
+    supports_run_params = False
     try:
         # 导入新的BERTopic模块
         from src.topic.data_bertopic_qwen_v2 import run_topic_bertopic
+        supports_run_params = True
 
         # 确保fetch数据可用性检查
         from src.fetch.data_fetch import get_topic_available_date_range
@@ -124,18 +145,27 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     stopwords = payload.get("stopwords")
     stopwords = str(stopwords).strip() if stopwords else None
+    run_params = payload.get("run_params")
+    if not isinstance(run_params, dict):
+        run_params = {}
 
     # 运行BERTopic分析
+    run_kwargs = {
+        "fetch_dir": fetch_dir,
+        "userdict": userdict,
+        "stopwords": stopwords,
+        "bucket_topic": bucket_topic,
+        "display_topic": topic_label,
+    }
+    if supports_run_params:
+        run_kwargs["db_topic"] = db_topic
+        run_kwargs["run_params"] = run_params
+
     result = run_topic_bertopic(
         bucket_topic,
         start_date,
         end_date,
-        fetch_dir=fetch_dir,
-        userdict=userdict,
-        stopwords=stopwords,
-        bucket_topic=bucket_topic,
-        db_topic=db_topic,
-        display_topic=topic_label,
+        **run_kwargs,
     )
 
     if result:
@@ -228,8 +258,13 @@ def check_topic_availability():
 
     from src.fetch.data_fetch import get_topic_available_date_range
 
-    # 获取数据可用日期范围
-    avail_start, avail_end = get_topic_available_date_range(db_topic)
+    # 获取数据可用日期范围（兼容 dict / tuple 返回）
+    availability = get_topic_available_date_range(db_topic)
+    if isinstance(availability, dict):
+        avail_start = availability.get("start")
+        avail_end = availability.get("end")
+    else:
+        avail_start, avail_end = availability
 
     # 检查本地缓存情况
     data_root = get_data_root() / "projects"
@@ -274,6 +309,85 @@ def check_topic_availability():
     }
 
     return success({"data": response})
+
+
+@topic_bp.route('/bertopic/prompt', methods=['GET'])
+def get_topic_bertopic_prompt():
+    """获取 BERTopic 提示词配置。"""
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+
+    if not any([topic, project, dataset_id]):
+        return error("Missing required field(s): topic/project/dataset_id")
+
+    payload = {
+        "topic": topic,
+        "project": project,
+        "dataset_id": dataset_id,
+    }
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError:
+        topic_identifier = (topic or project or dataset_id).strip()
+        if not topic_identifier:
+            return error("Missing required field(s): topic/project/dataset_id")
+        display_name = topic or project or topic_identifier
+
+    try:
+        data = load_topic_bertopic_prompt_config(topic_identifier)
+    except Exception as exc:
+        LOGGER.exception("Failed to load BERTopic prompt config")
+        return error(f"加载 BERTopic 提示词配置失败: {str(exc)}")
+
+    data["topic_identifier"] = topic_identifier
+    data["topic"] = display_name or topic_identifier
+    return success({"data": data})
+
+
+@topic_bp.route('/bertopic/prompt', methods=['POST'])
+def save_topic_bertopic_prompt():
+    """保存 BERTopic 提示词配置。"""
+    payload = request.get_json(silent=True) or {}
+    topic = str(payload.get("topic") or "").strip()
+    project = str(payload.get("project") or "").strip()
+    dataset_id = str(payload.get("dataset_id") or "").strip()
+
+    if not any([topic, project, dataset_id]):
+        return error("Missing required field(s): topic/project/dataset_id")
+
+    resolution_payload = {
+        "topic": topic,
+        "project": project,
+        "dataset_id": dataset_id,
+    }
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(
+            resolution_payload,
+            PROJECT_MANAGER,
+        )
+    except ValueError:
+        topic_identifier = (topic or project or dataset_id).strip()
+        if not topic_identifier:
+            return error("Missing required field(s): topic/project/dataset_id")
+        display_name = topic or project or topic_identifier
+
+    try:
+        data = persist_topic_bertopic_prompt_config(
+            topic_identifier,
+            payload.get("target_topics", payload.get("targetTopics")),
+            str(payload.get("recluster_system_prompt") or ""),
+            str(payload.get("recluster_user_prompt") or ""),
+            str(payload.get("keyword_system_prompt") or ""),
+            str(payload.get("keyword_user_prompt") or ""),
+        )
+    except Exception as exc:
+        LOGGER.exception("Failed to save BERTopic prompt config")
+        return error(f"保存 BERTopic 提示词配置失败: {str(exc)}")
+
+    data["topic_identifier"] = topic_identifier
+    data["topic"] = display_name or topic_identifier
+    return success({"data": data})
 
 
 @topic_bp.route('/bertopic/results', methods=['GET'])
@@ -345,6 +459,108 @@ def get_topic_bertopic_results():
     }
 
     return success({"data": response_payload})
+
+
+@topic_bp.route('/bertopic/history', methods=['GET'])
+def get_topic_bertopic_history():
+    """列出专题可用的 BERTopic 结果存档（按时间倒序）"""
+    raw_topic = str(request.args.get("topic") or "").strip()
+    raw_project = str(request.args.get("project") or "").strip()
+    raw_dataset_id = str(request.args.get("dataset_id") or "").strip()
+
+    if not any([raw_topic, raw_project, raw_dataset_id]):
+        return error("Missing required query parameters: topic/project/dataset_id")
+
+    payload = {
+        "topic": raw_topic,
+        "project": raw_project,
+        "dataset_id": raw_dataset_id,
+    }
+
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError:
+        topic_identifier = (raw_topic or raw_project or raw_dataset_id).strip()
+        if not topic_identifier:
+            return error("Missing required query parameters: topic/project/dataset_id")
+        display_name = raw_topic or raw_project or topic_identifier
+
+    topic_root = get_data_root() / "projects" / topic_identifier / "topic"
+    if not topic_root.exists() or not topic_root.is_dir():
+        return success(
+            {
+                "data": {
+                    "topic": display_name or topic_identifier,
+                    "topic_identifier": topic_identifier,
+                    "records": [],
+                }
+            }
+        )
+
+    file_map = {
+        "summary": "1主题统计结果.json",
+        "keywords": "2主题关键词.json",
+        "coords": "3文档2D坐标.json",
+        "llm_clusters": "4大模型再聚类结果.json",
+        "llm_keywords": "5大模型主题关键词.json",
+    }
+
+    records: List[Dict[str, Any]] = []
+    for entry in topic_root.iterdir():
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+
+        start, end = _parse_topic_folder_range(entry.name)
+        if not start:
+            continue
+
+        available_keys: List[str] = []
+        latest_mtime = entry.stat().st_mtime
+
+        for key, filename in file_map.items():
+            path = entry / filename
+            if not path.exists():
+                continue
+            available_keys.append(key)
+            try:
+                latest_mtime = max(latest_mtime, path.stat().st_mtime)
+            except OSError:
+                pass
+
+        if not available_keys:
+            continue
+
+        records.append(
+            {
+                "id": f"{topic_identifier}:{entry.name}",
+                "topic": topic_identifier,
+                "display_topic": display_name or topic_identifier,
+                "start": start,
+                "end": end or start,
+                "folder": entry.name,
+                "available_files": available_keys,
+                "updated_at": latest_mtime,
+            }
+        )
+
+    records.sort(
+        key=lambda item: (
+            str(item.get("start") or ""),
+            str(item.get("end") or ""),
+            float(item.get("updated_at") or 0),
+        ),
+        reverse=True,
+    )
+
+    return success(
+        {
+            "data": {
+                "topic": display_name or topic_identifier,
+                "topic_identifier": topic_identifier,
+                "records": records,
+            }
+        }
+    )
 
 
 @topic_bp.route('/bertopic/topics', methods=['GET'])
@@ -439,3 +655,24 @@ def list_topic_buckets():
     except Exception as exc:
         LOGGER.exception("Failed to list topic buckets")
         return error(f"获取专题列表失败: {str(exc)}")
+
+
+@topic_bp.route('/config', methods=['GET'])
+def get_bertopic_config():
+    """获取 BERTopic 全局配置"""
+    try:
+        config = load_bertopic_config()
+        return success({"data": config})
+    except Exception as exc:
+        return error(f"加载配置失败: {str(exc)}")
+
+
+@topic_bp.route('/config', methods=['POST'])
+def update_bertopic_config():
+    """更新 BERTopic 全局配置"""
+    try:
+        payload = request.get_json(silent=True) or {}
+        config = save_bertopic_config(payload)
+        return success({"data": config})
+    except Exception as exc:
+        return error(f"保存配置失败: {str(exc)}")
