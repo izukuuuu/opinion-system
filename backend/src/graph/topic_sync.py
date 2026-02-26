@@ -119,10 +119,10 @@ def sync_bertopic_results(
         LOG.error(f"Failed to read BERTopic result files: {e}")
         return False
 
-    with driver.session() as session:
+    with get_session() as session:
         # 0. 清理旧数据 (可选)
         if clear_existing:
-            LOG.info(f"Clearing existing topics for project: {project_topic}")
+            LOG.info(f"正在清理旧的 Topic 数据 (Clearing existing topics for project: {project_topic})")
             session.run(
                 """
                 MATCH (t:Topic {project: $project})
@@ -130,56 +130,12 @@ def sync_bertopic_results(
                 """, {"project": project_topic}
             )
 
-        # 1. 创建微观 Topic 节点
-        LOG.info(f"Syncing {len(topic_stats)} topics...")
-        topic_name_to_id = {} # Name -> Global ID mapping for clustering
-        
-        for t in topic_stats:
-            tid = t["topic_id"]
-            name = t["topic_name"]
-            count = t["count"]
-            freq = t["frequency"]
-            
-            global_id = _generate_topic_global_id(project_topic, tid)
-            topic_name_to_id[name] = global_id
-            
-            # 获取关键词
-            k_key = f"Topic_{tid}"
-            raw_kw = topic_keywords.get(k_key, [])
-            keywords_list = []
-            
-            # 提取纯文本关键词，扁平化处理以存入 Neo4j
-            target_list = raw_kw
-            if isinstance(raw_kw, dict):
-                target_list = raw_kw.get("关键词", [])
-            
-            if isinstance(target_list, list):
-                # 处理 [[word, score], ...] 或 [word, ...]
-                keywords_list = [str(x[0]) if isinstance(x, list) else str(x) for x in target_list]
-            
-            session.run(
-                """
-                MERGE (t:Topic {id: $id})
-                SET t.name = $name,
-                    t.count = $count,
-                    t.frequency = $freq,
-                    t.project = $project,
-                    t.source = 'BERTopic',
-                    t.level = 'micro',
-                    t.keywords = $keywords
-                """,
-                {
-                    "id": global_id,
-                    "name": name,
-                    "count": count,
-                    "freq": freq,
-                    "project": project_topic,
-                    "keywords": keywords_list
-                }
-            )
+        LOG.info("跳过微观话题节点创建，仅保留宏观话题 (Skipping micro topic nodes)...")
+        topic_id_to_name = {t["topic_id"]: t["topic_name"] for t in topic_stats}
+        micro_name_to_macro_id = {}
 
         # 2. 创建宏观 Topic 节点 (原 TopicCluster)
-        LOG.info(f"Syncing {len(clusters_data)} macro topics...")
+        LOG.info(f"正在同步 {len(clusters_data)} 个宏观话题 (Syncing macro topics)...")
         for c in clusters_data:
             c_id_key = c.get("cluster_name")
             c_name = c.get("name", c_id_key)
@@ -219,19 +175,9 @@ def sync_bertopic_results(
                 }
             )
             
-            # Link Micro Topics to Macro Topic (Hierarchy)
-            # 关系: (MicroTopic)-[:SUB_TOPIC_OF]->(MacroTopic)
             for sub_name in sub_topic_names:
-                if sub_name in topic_name_to_id:
-                    sub_id = topic_name_to_id[sub_name]
-                    session.run(
-                        """
-                        MATCH (sub:Topic {id: $sub_id})
-                        MATCH (parent:Topic {id: $parent_id})
-                        MERGE (sub)-[:SUB_TOPIC_OF]->(parent)
-                        """,
-                        {"sub_id": sub_id, "parent_id": cluster_id}
-                    )
+                if sub_name:
+                    micro_name_to_macro_id[sub_name] = cluster_id
 
         # 3. 建立 Post -> Topic 关系
         LOG.info(f"Syncing {len(doc_coords)} post-topic relationships...")
@@ -245,9 +191,11 @@ def sync_bertopic_results(
             topic_id_int = doc.get("topic_id")
             
             if post_raw_id and channel and topic_id_int is not None and topic_id_int != -1:
-                post_global_id = _generate_post_global_id(project_topic, channel, str(post_raw_id))
-                topic_global_id = _generate_topic_global_id(project_topic, topic_id_int)
-                batch.append({"pid": post_global_id, "tid": topic_global_id})
+                topic_name = topic_id_to_name.get(topic_id_int)
+                macro_id = micro_name_to_macro_id.get(topic_name)
+                if macro_id:
+                    post_global_id = _generate_post_global_id(project_topic, channel, str(post_raw_id))
+                    batch.append({"pid": post_global_id, "tid": macro_id})
             
             if len(batch) >= batch_size:
                 session.run(

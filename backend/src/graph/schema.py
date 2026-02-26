@@ -7,6 +7,8 @@ from __future__ import annotations
 import logging
 from typing import Any, List, Optional
 
+from .neo4j_client import get_session
+
 LOG = logging.getLogger(__name__)
 
 # 默认 8 个渠道（平台），与文档一致；可在 neo4j.yaml 中覆盖
@@ -15,8 +17,8 @@ DEFAULT_PLATFORMS = [
 ]
 
 
-def _run(driver: Any, queries: List[str], description: str = "") -> None:
-    with driver.session() as session:
+def _run(queries: List[str], description: str = "") -> None:
+    with get_session() as session:
         for q in queries:
             try:
                 session.run(q)
@@ -27,7 +29,7 @@ def _run(driver: Any, queries: List[str], description: str = "") -> None:
                     LOG.warning("Schema statement failed (%s): %s", description, e)
 
 
-def init_schema(driver: Any, seed_platforms: Optional[List[str]] = None) -> None:
+def init_schema(seed_platforms: Optional[List[str]] = None) -> None:
     """
     初始化图结构：约束、索引；可选预置 Platform 节点。
     seed_platforms: 若提供则 MERGE 这些平台名称；None 则使用 DEFAULT_PLATFORMS。
@@ -41,7 +43,7 @@ def init_schema(driver: Any, seed_platforms: Optional[List[str]] = None) -> None
         "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE",
         "CREATE CONSTRAINT topic_id IF NOT EXISTS FOR (t:Topic) REQUIRE t.id IS UNIQUE",
     ]
-    _run(driver, constraints, "constraints")
+    _run(constraints, "constraints")
 
     # 索引（若无唯一约束的查询字段）
     indexes = [
@@ -52,11 +54,11 @@ def init_schema(driver: Any, seed_platforms: Optional[List[str]] = None) -> None
         "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",
         "CREATE INDEX entity_type IF NOT EXISTS FOR (e:Entity) ON (e.type)",
     ]
-    _run(driver, indexes, "indexes")
+    _run(indexes, "indexes")
 
     # 预置 Platform 节点
     platforms = seed_platforms if seed_platforms is not None else DEFAULT_PLATFORMS
-    with driver.session() as session:
+    with get_session() as session:
         for name in platforms:
             if not (name and str(name).strip()):
                 continue
