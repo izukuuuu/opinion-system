@@ -30,6 +30,8 @@ backend/src/filter/cache/
 venv/
 
 # Workflow
+merge/frontend/.vite/
+frontend/.vite/
 merge/
 
 # Cache
@@ -37,3 +39,6 @@ cache/
 
 # Scripts
 scripts/
+
+# Local models (do not commit)
+backend/models/

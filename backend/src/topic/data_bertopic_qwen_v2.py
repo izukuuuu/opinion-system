@@ -6,9 +6,13 @@ BERTopic + Qwen 主题分析数据处理模块 (V2)
 """
 import re
 import json
+import os
 import warnings
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Iterable, Any
+
+# 设置 Hugging Face 镜像
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 # 严格抑制所有警告
 warnings.filterwarnings("ignore")
@@ -48,7 +52,48 @@ from .prompt_config import (
     load_topic_bertopic_prompt_config,
 )
 from sentence_transformers import SentenceTransformer
+from huggingface_hub import snapshot_download
 from .config import load_bertopic_config
+
+def load_embedding_model(model_name: str, logger):
+    """加载嵌入模型，优先尝试本地，失败则尝试下载"""
+    # 尝试从本地加载
+    # 假设 models 目录在项目根目录下
+    project_root = get_project_root()
+    models_dir = project_root / "models"
+    
+    models_dir.mkdir(exist_ok=True)
+    
+    local_model_name = model_name.split('/')[-1]
+    local_path = models_dir / local_model_name
+    
+    # 检查本地路径是否存在
+    if local_path.exists():
+        # 简单检查是否有关键文件，避免空目录
+        if (local_path / "config.json").exists() or (local_path / "pytorch_model.bin").exists():
+            log_success(logger, f"从本地加载模型: {local_path}", "TopicBertopic")
+            return SentenceTransformer(str(local_path))
+        
+    # 尝试在线加载 (由于设置了 HF_ENDPOINT，应该走镜像)
+    try:
+        log_success(logger, f"未找到本地模型 {local_path}，尝试在线加载: {model_name} (镜像: {os.environ.get('HF_ENDPOINT', '默认')})", "TopicBertopic")
+        # 直接使用 SentenceTransformer 加载，它会利用 huggingface_hub 的缓存
+        # 但如果我们想显式下载到指定目录，可以使用 snapshot_download
+        
+        # 为了稳定性，我们先尝试 snapshot_download 到我们的 models 目录
+        log_success(logger, f"正在下载模型到: {local_path} ...", "TopicBertopic")
+        snapshot_download(repo_id=model_name, local_dir=local_path, local_dir_use_symlinks=False)
+        
+        log_success(logger, "下载完成，加载模型...", "TopicBertopic")
+        return SentenceTransformer(str(local_path))
+        
+    except Exception as e:
+        log_error(logger, f"模型加载/下载失败: {e}", "TopicBertopic")
+        # 最后尝试直接加载（可能在缓存里）
+        try:
+            return SentenceTransformer(model_name)
+        except Exception as e2:
+            raise RuntimeError(f"无法加载模型 {model_name}: {e2}") from e2
 
 # 配置常量
 TARGET_TOPICS = DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS  # 大模型合并后的目标主题数
@@ -321,7 +366,15 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> pd.DataFrame:
     overall_file = fetch_dir / "总体.jsonl"
     if overall_file.exists():
         try:
-            df = read_jsonl(overall_file)
+            df = read_jsonl(
+                overall_file,
+                dtype={
+                    "id": str,
+                    "post_id": str,
+                    "channel": str,
+                    "platform": str,
+                },
+            )
             if not df.empty:
                 log_success(logger, f"读取总体数据: {len(df)}条", "TopicBertopic")
                 # 确保有content字段
@@ -336,6 +389,11 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> pd.DataFrame:
                     else:
                         log_error(logger, "未找到内容字段", "TopicBertopic")
                         return pd.DataFrame()
+
+                if 'id' not in df.columns and 'post_id' in df.columns:
+                    df['id'] = df['post_id']
+                if 'channel' not in df.columns and 'platform' in df.columns:
+                    df['channel'] = df['platform']
 
                 # 去重
                 before_count = len(df)
@@ -359,7 +417,15 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> pd.DataFrame:
     all_data = []
     for file_path in jsonl_files:
         try:
-            df = read_jsonl(file_path)
+            df = read_jsonl(
+                file_path,
+                dtype={
+                    "id": str,
+                    "post_id": str,
+                    "channel": str,
+                    "platform": str,
+                },
+            )
             if not df.empty:
                 # 确保有contents字段
                 if 'content' in df.columns:
@@ -372,6 +438,11 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> pd.DataFrame:
                     else:
                         log_skip(logger, f"文件 {file_path.name} 无内容字段", "TopicBertopic")
                         continue
+
+                if 'id' not in df.columns and 'post_id' in df.columns:
+                    df['id'] = df['post_id']
+                if 'channel' not in df.columns:
+                    df['channel'] = file_path.stem
 
                 all_data.append(df)
                 log_success(logger, f"读取: {file_path.name} - {len(df)}条", "TopicBertopic")
@@ -415,15 +486,17 @@ def _load_dict_file(file_path: Path, logger) -> set:
         return set()
 
 
-def _preprocess_text(texts: List[str], user_words: set, stop_words: set, logger) -> List[str]:
-    """文本预处理和分词"""
+def _preprocess_text(texts: List[str], user_words: set, stop_words: set, logger) -> Tuple[List[str], List[int]]:
+    """文本预处理和分词，返回 (处理后的文本列表, 对应的原始索引列表)"""
     # 添加用户词典
     for word in user_words:
         jieba.add_word(word)
 
     processed_texts = []
+    valid_indices = []
+    
     for i, text in enumerate(texts):
-        if pd.isna(text) or not text.strip():
+        if pd.isna(text) or not str(text).strip():
             continue
 
         # 清理文本
@@ -442,13 +515,14 @@ def _preprocess_text(texts: List[str], user_words: set, stop_words: set, logger)
 
         if words:
             processed_texts.append(' '.join(words))
+            valid_indices.append(i)
 
         # 进度提示
         if (i + 1) % 1000 == 0:
             log_success(logger, f"已处理 {i + 1}/{len(texts)} 条文本", "TopicBertopic")
 
     log_success(logger, f"文本预处理完成，有效文本: {len(processed_texts)}", "TopicBertopic")
-    return processed_texts
+    return processed_texts, valid_indices
 
 
 class _SafeFormatDict(dict):
@@ -570,6 +644,7 @@ def _run_bertopic(
     end_date: str,
     output_dir: Path,
     logger,
+    metadata: List[Dict[str, Any]] = None, # 新增 metadata 参数
     prompt_config: Optional[Dict[str, Any]] = None,
     run_params: Optional[Dict[str, Any]] = None,
 ) -> bool:
@@ -650,7 +725,33 @@ def _run_bertopic(
         try:
             config = load_bertopic_config()
             embedding_config = config.get("embedding", {})
-            model_name = embedding_config.get("model_name", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+            
+            # 优先检查本地模型路径 (基于当前文件定位，不依赖 cwd)
+            # data_bertopic_qwen_v2.py 在 src/topic/
+            # 模型在 backend/models/ (即 src/topic/../../models/)
+            current_file_path = Path(__file__).resolve()
+            project_root = current_file_path.parent.parent.parent # backend/
+            local_model_path = project_root / "models" / "paraphrase-multilingual-MiniLM-L12-v2"
+            
+            if local_model_path.exists():
+                model_name = str(local_model_path)
+                log_success(logger, f"发现本地模型: {model_name}", "TopicBertopic")
+            else:
+                # 尝试另一种常见结构 (cwd/backend/models)
+                cwd_model_path = Path(os.getcwd()) / "backend" / "models" / "paraphrase-multilingual-MiniLM-L12-v2"
+                if cwd_model_path.exists():
+                     model_name = str(cwd_model_path)
+                     log_success(logger, f"发现本地模型(cwd): {model_name}", "TopicBertopic")
+                else:
+                    # 再尝试直接在 cwd/models 下找 (如果已经在 backend 目录)
+                    cwd_direct_path = Path(os.getcwd()) / "models" / "paraphrase-multilingual-MiniLM-L12-v2"
+                    if cwd_direct_path.exists():
+                        model_name = str(cwd_direct_path)
+                        log_success(logger, f"发现本地模型(cwd_direct): {model_name}", "TopicBertopic")
+                    else:
+                        model_name = embedding_config.get("model_name", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+                        log_success(logger, f"未找到本地模型，尝试在线加载: {model_name}", "TopicBertopic")
+            
             device = embedding_config.get("device", "cpu")
             if device and device.lower() == "auto":
                 device = None  # SentenceTransformer 默认 auto
@@ -755,12 +856,17 @@ def _run_bertopic(
             ):
                 for i, (topic_id, embedding) in enumerate(zip(topics, reduced_doc_embeddings)):
                     if topic_id != -1:  # 排除离群点
-                        doc_coords.append({
+                        doc_item = {
                             "doc_id": i,
                             "topic_id": int(topic_id),
                             "x": float(embedding[0]),
                             "y": float(embedding[1]),
-                        })
+                        }
+                        # 添加元数据 (post_id, channel)
+                        if metadata and i < len(metadata):
+                            doc_item.update(metadata[i])
+                            
+                        doc_coords.append(doc_item)
             else:
                 log_skip(logger, "未获取到可用的文档2D坐标，跳过可视化坐标输出", "TopicBertopic")
         except Exception as e:
@@ -1076,8 +1182,39 @@ def run_topic_bertopic(
             log_error(logger, "没有可用的数据", "TopicBertopic")
             return False
 
-        # 提取文本内容
-        texts = df['contents'].dropna().tolist()
+        # 提取文本内容和元数据
+        # 确保 id 和 channel 列存在，如果不存在给默认值
+        if 'id' not in df.columns:
+            if 'post_id' in df.columns:
+                df['id'] = df['post_id']
+            else:
+                df['id'] = range(len(df))
+        if 'channel' not in df.columns:
+            if 'platform' in df.columns:
+                df['channel'] = df['platform']
+            else:
+                df['channel'] = 'unknown'
+            
+        # 同时提取 contents, id, channel，并过滤空内容
+        raw_data = df[['contents', 'id', 'channel']].dropna(subset=['contents'])
+        
+        # 修复 id 列：如果是 float，转为 int 再转 str；如果是字符串，直接使用
+        def clean_id(val):
+            if isinstance(val, (int, float)):
+                try:
+                    return str(int(val))
+                except:
+                    return str(val)
+            return str(val).strip()
+                
+        raw_data['id'] = raw_data['id'].apply(clean_id)
+        
+        texts = raw_data['contents'].tolist()
+        ids = raw_data['id'].tolist()
+        channels = raw_data['channel'].tolist()
+        
+        raw_metadata = [{"post_id": pid, "channel": ch} for pid, ch in zip(ids, channels)]
+
         if not texts:
             log_error(logger, "没有有效的文本内容", "TopicBertopic")
             return False
@@ -1085,10 +1222,14 @@ def run_topic_bertopic(
         log_success(logger, f"加载文本数据: {len(texts)}条", "TopicBertopic")
 
         # 文本预处理
-        processed_texts = _preprocess_text(texts, user_words, stop_words, logger)
+        processed_texts, valid_indices = _preprocess_text(texts, user_words, stop_words, logger)
+        
         if not processed_texts:
             log_error(logger, "文本预处理后没有有效内容", "TopicBertopic")
             return False
+            
+        # 根据预处理结果筛选 metadata
+        final_metadata = [raw_metadata[i] for i in valid_indices]
 
         # 确保输出目录存在
         output_dir = paths["out_analyze"]
@@ -1102,6 +1243,7 @@ def run_topic_bertopic(
             end_date,
             output_dir,
             logger,
+            metadata=final_metadata, # 传入 metadata
             prompt_config=prompt_config,
             run_params=run_params,
         )
