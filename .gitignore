@@ -39,3 +39,6 @@ cache/
 
 # Scripts
 scripts/
+
+# Local models (do not commit)
+backend/models/

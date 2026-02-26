@@ -42,7 +42,12 @@ def get_graph_config() -> Dict[str, Any]:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 file_cfg = yaml.safe_load(f) or {}
-            cfg.update(file_cfg)
+            
+            # Handle nested 'neo4j' key if present
+            if "neo4j" in file_cfg and isinstance(file_cfg["neo4j"], dict):
+                cfg.update(file_cfg["neo4j"])
+            else:
+                cfg.update(file_cfg)
         except Exception:
             pass
     if not cfg.get("password") and os.environ.get("NEO4J_PASSWORD"):

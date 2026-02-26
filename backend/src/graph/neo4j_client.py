@@ -26,7 +26,7 @@ def get_driver():
         cfg = get_graph_config()
         uri = cfg.get("uri", "bolt://localhost:7687")
         user = cfg.get("user", "neo4j")
-        password = cfg.get("password", "")
+        password = str(cfg.get("password", ""))
         _driver = GraphDatabase.driver(uri, auth=(user, password))
         try:
             _driver.verify_connectivity()
@@ -42,7 +42,12 @@ def get_driver():
 def get_session() -> Generator[Any, None, None]:
     """Context manager 返回 Neo4j 会话。"""
     driver = get_driver()
-    session = driver.session()
+    cfg = get_graph_config()
+    db_name = cfg.get("database")
+    if db_name:
+        session = driver.session(database=db_name)
+    else:
+        session = driver.session()
     try:
         yield session
     finally:

@@ -8,10 +8,14 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..rag.core.chunker import ChunkConfig, TextChunker
-from .neo4j_client import get_driver
-from .sync_mysql_to_neo4j import _post_global_id
+from .neo4j_client import get_driver, get_session
 
 LOG = logging.getLogger(__name__)
+
+
+def _post_global_id(topic: str, channel: str, row_id: str) -> str:
+    """Duplicate of sync_mysql_to_neo4j._post_global_id to avoid circular import."""
+    return f"{topic}_{channel}_{row_id}"
 
 
 def _chunk_text(text: str, chunk_size: int = 512, chunk_overlap: int = 50) -> List[Tuple[str, int]]:
@@ -24,13 +28,12 @@ def _chunk_text(text: str, chunk_size: int = 512, chunk_overlap: int = 50) -> Li
 
 
 def write_chunks_for_post(
-    driver: Any,
     topic: str,
     channel: str,
     post_id_raw: str,
     contents: str,
     *,
-    chunk_size: int = 512,
+    chunk_size: int = 300,
     chunk_overlap: int = 50,
 ) -> int:
     """
@@ -41,28 +44,28 @@ def write_chunks_for_post(
     chunks = _chunk_text(contents, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     if not chunks:
         return 0
-    with driver.session() as session:
-        for chunk_text, chunk_index in chunks:
-            chunk_id = f"{post_global_id}_chunk_{chunk_index}"
-            session.run(
-                """
-                MERGE (c:Chunk {id: $id})
-                SET c.post_id = $post_id, c.chunk_index = $chunk_index, c.text = $text
-                """,
-                {"id": chunk_id, "post_id": post_global_id, "chunk_index": chunk_index, "text": chunk_text},
-            )
-            session.run(
-                """
-                MATCH (p:Post {id: $pid}), (c:Chunk {id: $cid})
-                MERGE (p)-[:HAS_CHUNK]->(c)
-                """,
-                {"pid": post_global_id, "cid": chunk_id},
-            )
+    with get_session() as session:
+        with session.begin_transaction() as tx:
+            for chunk_text, chunk_index in chunks:
+                chunk_id = f"{post_global_id}_chunk_{chunk_index}"
+                tx.run(
+                    """
+                    MERGE (c:Chunk {id: $id})
+                    SET c.post_id = $post_id, c.chunk_index = $chunk_index, c.text = $text
+                    """,
+                    {"id": chunk_id, "post_id": post_global_id, "chunk_index": chunk_index, "text": chunk_text},
+                )
+                tx.run(
+                    """
+                    MATCH (p:Post {id: $pid}), (c:Chunk {id: $cid})
+                    MERGE (p)-[:HAS_CHUNK]->(c)
+                    """,
+                    {"pid": post_global_id, "cid": chunk_id},
+                )
     return len(chunks)
 
 
 def run_chunk_embedding_for_sync(
-    driver: Any,
     topic: str,
     channel: str,
     rows: List[Dict[str, Any]],
@@ -81,7 +84,7 @@ def run_chunk_embedding_for_sync(
         if post_id is None or not str(post_id).strip():
             continue
         n = write_chunks_for_post(
-            driver, topic, channel, str(post_id), contents,
+            topic, channel, str(post_id), contents,
             chunk_size=chunk_size, chunk_overlap=chunk_overlap,
         )
         total += n

@@ -24,41 +24,78 @@ class TextChunker:
         self.config = config or ChunkConfig()
 
     def chunk_by_size(self, text: str) -> List[Tuple[str, int]]:
-        """Chunk text by character count with overlap."""
+        """
+        Chunk text by character count with overlap, optimized for Chinese.
+        Returns [(chunk_text, chunk_index), ...]
+        """
+        if not text:
+            return []
+
+        text = text.strip()
         if not text:
             return []
 
         chunks = []
         start = 0
         chunk_id = 1
+        n = len(text)
+        
+        # Punctuation marks to split on (Chinese & English)
+        separators = ["\n\n", "\n", "。", "！", "？", ".", "!", "?"]
 
-        while start < len(text):
-            # Calculate end position
-            end = min(start + self.config.chunk_size, len(text))
+        while start < n:
+            # Target end position
+            end = min(start + self.config.chunk_size, n)
+            
+            # If we reached the end of text, just take it
+            if end == n:
+                chunk_text = text[start:end]
+                chunks.append((chunk_text, chunk_id))
+                break
 
-            # If not the last chunk, try to find a good break point
-            if end < len(text):
-                # Look for sentence boundary
-                if self.config.respect_sentence_boundary:
-                    sentence_end = text.rfind('.', start, end)
-                    if sentence_end > start + self.config.min_chunk_size:
-                        end = sentence_end + 1
-                    else:
-                        # Try paragraph break
-                        para_end = text.rfind(self.config.separator, start, end)
-                        if para_end > start + self.config.min_chunk_size:
-                            end = para_end + len(self.config.separator)
+            # Try to find a separator to break cleanly
+            best_split = -1
+            
+            # Look for separators in reverse order from end
+            # Search buffer: from (end - overlap) to end
+            search_start = max(start + self.config.min_chunk_size, end - 50) 
+            
+            if search_start < end:
+                sub_text = text[search_start:end]
+                for sep in separators:
+                    pos = sub_text.rfind(sep)
+                    if pos != -1:
+                        # Found a separator, split after it
+                        best_split = search_start + pos + len(sep)
+                        break
+            
+            if best_split != -1:
+                end = best_split
+            else:
+                # No separator found, force split at chunk_size
+                pass
 
-            chunk = text[start:end]
-            if self.config.strip_whitespace:
-                chunk = chunk.strip()
-
-            if chunk:
-                chunks.append((chunk, chunk_id))
+            chunk_text = text[start:end].strip()
+            if chunk_text:
+                chunks.append((chunk_text, chunk_id))
                 chunk_id += 1
-
-            # Calculate next start position with overlap
-            start = max(start + 1, end - self.config.chunk_overlap)
+            
+            # Calculate next start
+            # If we found a separator, next start is strictly after it (no overlap needed if semantic split?)
+            # But usually we want some overlap to keep context.
+            # Let's enforce overlap: move start to (end - overlap)
+            
+            next_start = end - self.config.chunk_overlap
+            
+            # Prevent infinite loop or backward movement
+            if next_start <= start:
+                next_start = start + max(1, len(chunk_text) // 2) # Force forward
+            
+            start = next_start
+            
+            # Correction: if next_start is beyond current end (shouldn't happen with correct overlap)
+            if start >= n:
+                break
 
         return chunks
 
