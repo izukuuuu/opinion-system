@@ -29,6 +29,12 @@
     border-color: var(--color-border-soft);
   }
 
+  .mute-card-surface {
+    @apply rounded-3xl border backdrop-blur overflow-hidden;
+    background-color: var(--color-surface-muted);
+    border-color: var(--color-border-soft);
+  }
+
   .btn-base {
     @apply inline-flex items-center justify-center rounded-full border border-transparent text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2;
   }

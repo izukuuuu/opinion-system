@@ -48,7 +48,7 @@ def _ordered_functions() -> List[Tuple[str, str]]:
         ("geography", "地域"),
         ("keywords", "关键词"),
         ("contentanalyze", "内容分析"),
-        ("topic", "主题分析"),
+        ("bertopic", "主题分析"),
     ]
 
 

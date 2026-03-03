@@ -1,205 +1,200 @@
 <template>
-  <div class="space-y-8">
-    <header class="flex flex-wrap items-center justify-between gap-3">
+  <div class="space-y-6">
+    <header class="flex flex-wrap items-center justify-between gap-4">
       <div class="space-y-1">
-        <h1 class="text-2xl font-semibold text-primary">数据入库</h1>
-        <p class="text-sm text-secondary">
-          将本地筛选后的数据集上传到远程数据库。
-        </p>
+        <h1 class="text-xl font-bold tracking-tight text-primary">数据入库</h1>
+        <p class="text-sm text-secondary">将本地筛选后的数据集上传到远程数据库。</p>
       </div>
-      <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
+      <div
+        class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
         <ArrowTrendingUpIcon class="h-4 w-4" />
-        <span>步骤 4 · 入库</span>
+        <span>Ingest</span>
       </div>
     </header>
 
-    <section class="card-surface space-y-6 p-6">
-      <header class="space-y-2">
-        <h2 class="text-xl font-semibold text-primary">准备入库参数</h2>
+    <!-- Configuration Section -->
+    <section class="card-surface p-8 space-y-8">
+      <header class="space-y-1">
+        <h2 class="text-lg font-bold text-primary">入库配置</h2>
+        <p class="text-xs text-secondary">
+          配置目标项目与数据集信息，系统将自动识别待入库的筛选存档。
+        </p>
       </header>
 
-      <label class="space-y-2 text-sm">
-        <span class="font-medium text-secondary">选择项目</span>
-        <div class="flex flex-wrap items-center gap-3">
-          <select
-            v-if="projectOptions.length"
-            v-model="selectedProjectName"
-            class="inline-flex min-w-[220px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-            :disabled="projectsLoading"
-          >
-            <option disabled value="">请选择项目</option>
-            <option v-for="option in projectOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-          <span v-else class="text-xs text-muted">
-            暂无项目，请先在“项目数据”模块创建。
-          </span>
-          <button
-            type="button"
-            class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="projectsLoading"
-            @click.prevent="refreshProjects"
-          >
-            {{ projectsLoading ? '加载中…' : '刷新项目' }}
-          </button>
-        </div>
-        <p v-if="projectsError" class="mt-2 rounded-2xl bg-rose-50 px-3 py-1 text-xs text-rose-600">
-          {{ projectsError }}
-        </p>
-      </label>
-
-      <div class="grid gap-6 md:grid-cols-2">
-        <label class="space-y-2 text-sm">
-          <span class="font-medium text-secondary">数据集名称</span>
-          <input
-            v-model.trim="datasetNameInput"
-            type="text"
-            class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-            placeholder="例如：校园安全专项-筛选结果"
-          />
-          <p class="text-xs text-muted">上传到远程数据库的数据集将使用此字段命名。</p>
-        </label>
-        <label class="space-y-2 text-sm">
-          <span class="font-medium text-secondary">数据存储标识</span>
-          <div class="rounded-2xl border border-dashed border-soft bg-surface-muted px-4 py-2 text-sm">
-            {{ bucketName || '请选择一个项目后自动填充' }}
-          </div>
-          <p class="text-xs text-muted">自动与当前项目的后台目录（数据存储标识）保持一致，不可手动修改。</p>
-        </label>
-      </div>
-
-      <label class="space-y-2 text-sm">
-        <span class="font-medium text-secondary">筛选完成日期</span>
-        <template v-if="availableDates.length">
-          <select
-            v-model="processingDate"
-            class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-          >
-            <option
-              v-for="date in availableDates"
-              :key="date"
-              :value="date"
-            >
-              {{ date }}
-            </option>
-          </select>
-          <p class="text-xs text-muted">
-            选项来自项目筛选记录，默认选中最近一次筛选。
-          </p>
-        </template>
-        <template v-else>
-          <div class="flex flex-wrap items-center gap-2">
-            <input
-              v-model="processingDate"
-              type="date"
-              class="flex-1 rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-            />
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-              @click="resetToToday"
-            >
-              使用今天
+      <div class="grid gap-8 md:grid-cols-2">
+        <!-- 1. Project Selection -->
+        <label class="space-y-2 block">
+          <span class="text-xs font-bold text-primary ml-1">选择项目</span>
+          <div class="flex gap-2">
+            <div class="relative flex-1">
+              <select v-if="projectOptions.length" v-model="selectedProjectName"
+                class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60"
+                :disabled="projectsLoading">
+                <option disabled value="">请选择项目</option>
+                <option v-for="option in projectOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
+                <ChevronDownIcon class="w-4 h-4" />
+              </div>
+            </div>
+            <button type="button"
+              class="shrink-0 rounded-2xl bg-brand-50/30 px-4 text-secondary hover:text-brand-600 hover:bg-brand-50 transition-colors"
+              :disabled="projectsLoading" @click.prevent="refreshProjects" title="刷新项目">
+              <ArrowPathIcon class="h-5 w-5" :class="{ 'animate-spin': projectsLoading }" />
             </button>
           </div>
-        </template>
-      </label>
+          <p v-if="projectsError" class="text-xs text-rose-600 pl-1">{{ projectsError }}</p>
+        </label>
 
-      <div
-        class="rounded-3xl border border-dashed border-brand-soft bg-brand-soft-muted px-5 py-4 text-xs leading-relaxed text-secondary"
-      >
-        <p class="font-semibold text-brand-700">
-          待入库本地目录：
-          <code class="rounded bg-white/70 px-2 py-0.5 text-[11px] text-brand-700">
-            {{ inferredFilterPath || 'backend/data/projects/<topic>/filter/<date>' }}
-          </code>
-        </p>
+        <!-- 2. Processing Date -->
+        <label class="space-y-2 block">
+          <span class="text-xs font-bold text-primary ml-1">筛选筛选完成日期</span>
+          <div class="relative">
+            <template v-if="availableDates.length">
+              <select v-model="processingDate"
+                class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20">
+                <option v-for="date in availableDates" :key="date" :value="date">{{ date }}</option>
+              </select>
+              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
+                <ChevronDownIcon class="w-4 h-4" />
+              </div>
+            </template>
+            <template v-else>
+              <div class="flex items-center gap-2">
+                <input v-model="processingDate" type="date"
+                  class="flex-1 rounded-2xl border-0 bg-base-soft px-4 py-4 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20" />
+                <button type="button"
+                  class="shrink-0 rounded-2xl bg-brand-50 px-4 py-4 text-xs font-bold text-brand-600 border border-brand-100/50 hover:bg-brand-100 transition-colors"
+                  @click="resetToToday">
+                  今天
+                </button>
+              </div>
+            </template>
+          </div>
+          <p class="text-[10px] text-muted pl-1 opacity-70">系统已自动关联最近一次成功的筛选记录。</p>
+        </label>
       </div>
-      <div class="space-y-4">
-        <button
-          type="button"
-          class="btn-base btn-tone-primary w-full justify-center px-5 py-2 text-sm sm:w-auto"
-          :disabled="uploadState.running"
-          @click="runUpload"
-        >
-          {{ uploadState.running ? '执行中…' : '入库' }}
+
+      <div class="grid gap-8 md:grid-cols-2">
+        <!-- 3. Dataset Name -->
+        <label class="space-y-2 block">
+          <span class="text-xs font-bold text-primary ml-1">正式数据集名称</span>
+          <input v-model.trim="datasetNameInput" type="text"
+            class="w-full rounded-2xl border-0 bg-base-soft px-4 py-4 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+            placeholder="例如：控烟政策-12月第1周" />
+        </label>
+
+        <!-- 4. Storage ID (Read-only) -->
+        <div class="space-y-2">
+          <span class="text-xs font-bold text-primary ml-1">云端存储路径 (Storage Identifier)</span>
+          <div
+            class="w-full rounded-2xl border border-dashed border-black/10 bg-brand-50/10 px-4 py-4 text-xs text-secondary font-mono flex items-center gap-2">
+            <ArchiveBoxIcon class="h-4 w-4 opacity-50" />
+            {{ bucketName || '项目未加载...' }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Path Info -->
+      <transition name="fade">
+        <div v-if="inferredFilterPath" class="rounded-[1.5rem] bg-brand-50/50 p-6 border border-brand-100/30">
+          <div class="flex items-start gap-4">
+            <div
+              class="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-brand-600 border border-brand-100/30">
+              <FolderIcon class="h-5 w-5" />
+            </div>
+            <div class="space-y-2">
+              <p class="text-xs font-black text-brand-800 tracking-wider">PREVIEW SOURCE PATH</p>
+              <code class="block text-[11px] font-mono text-brand-600/80 break-all leading-relaxed">{{
+                inferredFilterPath }}</code>
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-4">
+        <button type="button"
+          class="inline-flex items-center gap-3 rounded-full bg-brand-600 px-10 py-3 text-sm font-bold text-white transition-all hover:bg-brand-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="uploadState.running" @click="runUpload">
+          <ArrowTrendingUpIcon class="h-5 w-5" />
+          <span>{{ uploadState.running ? '任务传输中...' : '启动数据入库' }}</span>
         </button>
-
-        <p
-          v-if="parameterError"
-          class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600"
-        >
-          {{ parameterError }}
-        </p>
-
-        <p
-          v-if="uploadState.message"
-          :class="[
-            'rounded-2xl px-4 py-2 text-sm',
-            uploadState.success ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'
-          ]"
-        >
-          {{ uploadState.message }}
-        </p>
+        <transition name="fade">
+          <div v-if="uploadState.message || parameterError" class="flex items-center gap-2 px-6 py-3 rounded-2xl border"
+            :class="(uploadState.success && !parameterError) ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'">
+            <component :is="uploadState.success ? CheckIcon : ExclamationCircleIcon" class="h-4 w-4" />
+            <span class="text-xs font-bold">{{ parameterError || uploadState.message }}</span>
+          </div>
+        </transition>
       </div>
     </section>
 
-    <section class="card-surface space-y-6 p-6">
-      <header class="space-y-2">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-xl font-semibold text-primary">运行记录</h2>
-          <span class="text-xs text-muted">
-            {{ runHistory.length ? `保留最近 ${runHistory.length} 次` : '暂无记录' }}
-          </span>
+    <!-- History -->
+    <section class="mute-card-surface p-8 space-y-8">
+      <header class="flex flex-wrap items-center justify-between gap-6">
+        <div class="space-y-1">
+          <h2 class="text-lg font-bold text-primary">传输历史记录</h2>
+          <p class="text-xs text-secondary font-medium">最近完成的数据入库任务流水。</p>
+        </div>
+        <div class="flex items-center gap-2 bg-white px-4 py-2 rounded-full border border-black/5">
+          <div class="w-1.5 h-1.5 rounded-full bg-brand-500"></div>
+          <span class="text-[10px] font-bold text-secondary tracking-widest uppercase">History Logs</span>
         </div>
       </header>
 
-      <div
-        v-if="!runHistory.length"
-        class="rounded-3xl border border-dashed border-soft bg-surface-muted/60 px-5 py-4 text-sm text-muted"
-      >
-        目前没有历史执行，配置参数后点击“执行入库”即可在此查看结果。
+      <div v-if="!runHistory.length"
+        class="flex flex-col items-center justify-center py-20 rounded-[2rem] border-2 border-dashed border-black/5 bg-white/50 text-secondary">
+        <ArchiveBoxIcon class="h-12 w-12 text-black/10 mb-4" />
+        <span class="text-xs font-bold opacity-40">暂无入库运行记录</span>
       </div>
-      <ul v-else class="space-y-3 text-sm">
-        <li
-          v-for="entry in runHistory"
-          :key="entry.timestamp"
-          class="rounded-3xl border border-soft bg-white px-5 py-4 shadow-sm"
-        >
-          <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div class="flex flex-wrap items-center gap-2 text-secondary">
-              <span
-                :class="[
-                  'rounded-full px-2 py-0.5 font-semibold',
-                  entry.success ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-                ]"
-              >
-                {{ entry.success ? '成功' : '失败' }}
-              </span>
-              <span class="text-muted">{{ formatHistoryTimestamp(entry.timestamp) }}</span>
+
+      <div v-else class="grid gap-4">
+        <transition-group name="list">
+          <article v-for="entry in runHistory" :key="entry.timestamp"
+            class="relative overflow-hidden rounded-[1.5rem] bg-white p-6 border border-black/5 transition hover:border-brand-200 group">
+            <div class="flex flex-wrap items-start justify-between gap-6">
+              <div class="space-y-3">
+                <div class="flex items-center gap-3">
+                  <div class="h-8 w-8 rounded-lg flex items-center justify-center border border-black/5"
+                    :class="entry.success ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'">
+                    <CheckIcon v-if="entry.success" class="h-4 w-4" />
+                    <XMarkIcon v-else class="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-black text-primary group-hover:text-brand-600 transition-colors">{{
+                      entry.topic_label || '未命名数据集' }}</h3>
+                  </div>
+                </div>
+                <div
+                  class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-bold text-secondary opacity-60 pl-11">
+                  <span class="flex items-center gap-1.5">
+                    <RectangleStackIcon class="h-3.5 w-3.5" /> {{ entry.project }}
+                  </span>
+                  <span class="flex items-center gap-1.5">
+                    <CalendarDaysIcon class="h-3.5 w-3.5" /> {{ entry.date }}
+                  </span>
+                  <span class="flex items-center gap-1.5">
+                    <ClockIcon class="h-3.5 w-3.5" /> {{ formatHistoryTimestamp(entry.timestamp).split(' ')[1] }}
+                  </span>
+                </div>
+              </div>
+              <div class="flex flex-col items-end gap-2 text-right">
+                <span class="text-[10px] font-black tracking-wider text-muted uppercase">{{
+                  formatHistoryTimestamp(entry.timestamp).split(' ')[0] }}</span>
+                <p class="text-xs font-bold text-secondary/80 max-w-sm leading-relaxed">
+                  {{ entry.message }}
+                </p>
+              </div>
             </div>
-            <div class="text-right text-xs text-secondary">
-              <code class="block rounded bg-surface-muted px-2 py-0.5 text-[11px]">
-                数据库：{{ entry.topic }}
-              </code>
-              <span class="mt-1 block text-muted">日期：{{ entry.date }}</span>
+            <!-- Decorative corner accent -->
+            <div
+              class="absolute -bottom-2 -right-2 h-10 w-10 bg-brand-50 group-hover:bg-brand-100 transition-colors rotate-45">
             </div>
-          </div>
-          <p v-if="entry.topic_label || entry.project" class="mt-2 text-xs text-secondary">
-            专题：{{ entry.topic_label || entry.project }}
-            <span
-              v-if="entry.topic_label && entry.project && entry.topic_label !== entry.project"
-              class="ml-2 text-muted"
-            >
-              （项目：{{ entry.project }}）
-            </span>
-          </p>
-          <p class="mt-2 text-sm text-primary">
-            {{ entry.message }}
-          </p>
-        </li>
-      </ul>
+          </article>
+        </transition-group>
+      </div>
     </section>
   </div>
 </template>
@@ -207,7 +202,17 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
-  ArrowTrendingUpIcon
+  ArrowTrendingUpIcon,
+  ArrowPathIcon,
+  ChevronDownIcon,
+  ArchiveBoxIcon,
+  CheckIcon,
+  ExclamationCircleIcon,
+  FolderIcon,
+  CalendarDaysIcon,
+  ClockIcon,
+  RectangleStackIcon,
+  XMarkIcon
 } from '@heroicons/vue/24/outline'
 import { useApiBase } from '../../composables/useApiBase'
 import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
@@ -217,7 +222,7 @@ const buildApiUrl = async (path) => {
   const baseUrl = await ensureApiBase()
   return `${baseUrl}${path}`
 }
-const HISTORY_LIMIT = 6
+const HISTORY_LIMIT = 8
 
 const {
   projectOptions,
@@ -300,19 +305,6 @@ const inferredFilterBase = computed(() => {
 const inferredFilterPath = computed(() => {
   if (!inferredFilterBase.value || !processingDate.value) return ''
   return `${inferredFilterBase.value}/filter/${processingDate.value}`
-})
-const cliCommand = computed(() => {
-  const topic = bucketName.value || '<topic>'
-  const date = processingDate.value || '<YYYY-MM-DD>'
-  return `python backend/main.py Upload --topic ${topic} --date ${date}`
-})
-const formattedResponse = computed(() => {
-  if (!uploadState.lastResponse) return ''
-  try {
-    return JSON.stringify(uploadState.lastResponse, null, 2)
-  } catch (error) {
-    return String(uploadState.lastResponse)
-  }
 })
 
 onMounted(() => {
@@ -473,3 +465,27 @@ const runUpload = async () => {
   }
 }
 </script>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
+}
+
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.5s ease;
+}
+
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+</style>

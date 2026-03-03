@@ -1,445 +1,370 @@
 <template>
-  <div class="space-y-8">
-    <header class="flex flex-wrap items-center justify-between gap-3">
+  <div class="space-y-6">
+    <header class="flex flex-wrap items-center justify-between gap-4">
       <div class="space-y-1">
-        <h1 class="text-2xl font-semibold text-primary">筛选数据</h1>
+        <h1 class="text-xl font-bold tracking-tight text-primary">筛选数据</h1>
         <p class="text-sm text-secondary">配置提示词模板并独立执行 Filter，输出与专题高度相关的内容。</p>
       </div>
-      <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
+      <div
+        class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
         <AdjustmentsHorizontalIcon class="h-4 w-4" />
-        <span>步骤 3 · 筛选</span>
+        <span>Filter</span>
       </div>
     </header>
 
-    <section class="card-surface space-y-6 p-6">
-      <header class="space-y-2">
-        <h2 class="text-xl font-semibold text-primary">提示词模板</h2>
-        <p class="text-sm text-secondary">
-          筛选依赖专题专属的 YAML 模板，请填写舆情主题与分类标签，保存后可随时调整。
+    <!-- Template Configuration -->
+    <section class="card-surface p-8 space-y-8">
+      <header class="space-y-1">
+        <h2 class="text-lg font-bold text-primary">提示词模板</h2>
+        <p class="text-xs text-secondary">
+          筛选依赖专题专属的 YAML 模板，请填写舆情主题与分类标签。
         </p>
       </header>
 
-      <div class="grid gap-6 lg:grid-cols-2">
-        <div class="space-y-4">
-          <label class="space-y-1 text-sm">
-            <span class="font-medium text-secondary">舆情主题</span>
-            <input
-              v-model.trim="templateState.theme"
-              type="text"
-              class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              placeholder="例如：控烟政策、校园安全等"
-            />
+      <div class="grid gap-8 lg:grid-cols-2">
+        <div class="space-y-6">
+          <label class="space-y-2 block">
+            <span class="text-xs font-bold text-primary ml-1">舆情主题</span>
+            <input v-model.trim="templateState.theme" type="text"
+              class="w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+              placeholder="例如：控烟政策、校园安全等" />
           </label>
 
-          <div class="space-y-2 text-sm">
-            <span class="font-medium text-secondary">需要的分类</span>
-            <div class="flex flex-wrap items-center gap-3">
-              <input
-                v-model.trim="templateState.categoryInput"
-                type="text"
-                class="flex-1 min-w-[180px] rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                placeholder="输入分类后点击添加"
-                @keyup.enter.prevent="addCategory"
-              />
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 rounded-full border border-brand-soft px-3 py-1.5 text-xs font-semibold text-brand-600 transition hover:bg-brand-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-                :disabled="!templateState.categoryInput"
-                @click="addCategory"
-              >
-                <PlusIcon class="h-4 w-4" />
-                添加分类
-              </button>
+          <div class="space-y-3">
+            <span class="text-xs font-bold text-primary ml-1">需要提取的分类</span>
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="relative flex-1 min-w-[200px]">
+                <input v-model.trim="templateState.categoryInput" type="text"
+                  class="w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+                  placeholder="输入分类后回车添加" @keyup.enter.prevent="addCategory" />
+                <button type="button"
+                  class="absolute right-2 top-2 rounded-xl bg-white px-3 py-1 text-xs font-bold text-brand-600 border border-black/5 transition hover:bg-brand-50 disabled:opacity-50"
+                  :disabled="!templateState.categoryInput" @click="addCategory">
+                  添加
+                </button>
+              </div>
             </div>
-            <div
-              v-if="templateState.categories.length"
-              class="flex flex-wrap gap-2 rounded-3xl border border-dashed border-brand-soft bg-surface-muted px-4 py-3 text-xs text-secondary"
-            >
-              <span
-                v-for="(category, index) in templateState.categories"
-                :key="`${category}-${index}`"
-                class="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-secondary shadow-sm"
-              >
-                <span class="font-medium text-primary">{{ category }}</span>
-                <button
-                  type="button"
-                  class="rounded-full p-0.5 text-muted transition hover:text-rose-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-rose-400"
-                  @click="removeCategory(index)"
-                >
-                  <XMarkIcon class="h-3.5 w-3.5" />
+
+            <div v-if="templateState.categories.length"
+              class="flex flex-wrap gap-2 rounded-2xl border border-dashed border-black/10 bg-brand-50/20 p-4">
+              <span v-for="(category, index) in templateState.categories" :key="`${category}-${index}`"
+                class="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-medium text-secondary border border-black/5">
+                <span>{{ category }}</span>
+                <button type="button"
+                  class="rounded-full p-0.5 text-muted hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                  @click="removeCategory(index)">
+                  <XMarkIcon class="h-3 w-3" />
                 </button>
               </span>
             </div>
-            <p v-else class="text-xs text-muted">请至少添加一个分类，筛选结果会根据列表进行归类。</p>
+            <p v-else class="text-[10px] text-muted pl-1">请至少添加一个分类，筛选结果会根据列表进行归类。</p>
           </div>
         </div>
 
         <div class="space-y-3">
-          <div class="flex items-center justify-between text-sm">
-            <span class="font-medium text-secondary">模板预览</span>
-            <span v-if="templateState.exists" class="text-xs text-muted">
-              已保存于 <code class="rounded bg-surface-muted px-1 py-0.5 text-[11px] text-secondary">configs/prompt/filter</code>
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-primary ml-1">模板预览</span>
+            <span v-if="templateState.exists"
+              class="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+              <CheckIcon class="h-3 w-3" /> 已保存
             </span>
           </div>
-          <div class="rounded-3xl border border-dashed border-soft bg-surface-muted/70 p-4">
-            <pre class="max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-secondary">
-{{ templatePreview }}</pre>
+          <!-- Refined Preview Widget -->
+          <div class="rounded-3xl border border-black/5 bg-[#1e1e1e] p-5 relative overflow-hidden group">
+            <div
+              class="absolute top-0 left-0 right-0 h-8 bg-white/5 border-b border-white/5 flex items-center px-4 gap-1.5">
+              <div class="w-2.5 h-2.5 rounded-full bg-rose-500/50"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-amber-500/50"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-emerald-500/50"></div>
+            </div>
+            <pre
+              class="mt-6 max-h-52 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-blue-200/90 font-mono scrollbar-dark">{{ templatePreview }}</pre>
           </div>
-          <p
-            v-if="templateState.metadataMissing && storedTemplate"
-            class="text-xs text-muted"
-          >
-            当前模板缺少元数据，请完善主题与分类后保存，新模板会覆盖已有内容。
+          <p v-if="templateState.metadataMissing && storedTemplate" class="text-[10px] text-rose-500 pl-1">
+            当前模板缺少元数据，请完善主题与分类后保存。
           </p>
         </div>
       </div>
 
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          type="button"
-          class="btn-base btn-tone-primary inline-flex items-center gap-2 px-6 py-2"
-          :disabled="!canSaveTemplate || templateState.saving"
-          @click="saveTemplate"
-        >
-          <span v-if="templateState.saving">保存中…</span>
-          <span v-else>保存模板</span>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-2">
+        <button type="button"
+          class="inline-flex items-center gap-2 rounded-full bg-brand-600 px-8 py-3 text-sm font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-60"
+          :disabled="!canSaveTemplate || templateState.saving" @click="saveTemplate">
+          <span v-if="templateState.saving">保存中...</span>
+          <span v-else>更新模板配置</span>
         </button>
-        <p
-          v-if="templateState.success || templateState.error"
-          :class="[
-            'text-sm rounded-2xl px-3 py-1.5',
-            templateState.error ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'
-          ]"
-        >
-          {{ templateState.error || templateState.success }}
-        </p>
+        <transition name="fade">
+          <p v-if="templateState.success || templateState.error" class="text-xs font-medium px-4 py-2 rounded-xl"
+            :class="templateState.error ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'">
+            {{ templateState.error || templateState.success }}
+          </p>
+        </transition>
       </div>
     </section>
 
-    <section class="card-surface space-y-6 p-6">
-      <header class="space-y-2">
-        <h2 class="text-xl font-semibold text-primary">执行筛选</h2>
-        <p class="text-sm text-secondary">
-          选择数据集与处理日期后启动筛选。筛选过程会调用大模型，结果与进度可在下方实时查看。
+    <!-- Execution Section -->
+    <section class="card-surface p-8 space-y-8">
+      <header class="space-y-1">
+        <h2 class="text-lg font-bold text-primary">执行筛选</h2>
+        <p class="text-xs text-secondary">
+          选择数据集与处理日期后启动筛选。
         </p>
       </header>
 
-      <p class="rounded-2xl bg-surface-muted px-4 py-2 text-xs font-medium text-secondary">
-        <span class="text-muted">当前 AI 配置：</span>
-        <span class="text-primary">{{ aiConfigLine }}</span>
-      </p>
+      <div v-if="aiConfigLine"
+        class="rounded-2xl bg-brand-50/50 px-5 py-3 text-xs font-medium text-brand-700 flex items-center gap-3 border border-brand-100/50">
+        <div class="p-2 rounded-xl bg-white/50">
+          <SparklesIcon class="h-4 w-4 text-brand-600" />
+        </div>
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[10px] opacity-60 uppercase tracking-wider font-bold">Current AI Engine</span>
+          <span>{{ aiConfigLine }}</span>
+        </div>
+      </div>
 
-      <form class="space-y-4">
-        <label class="space-y-1 text-sm">
-          <span class="font-medium text-secondary">选择项目</span>
-          <div class="flex flex-wrap items-center gap-3">
-            <select
-              v-if="projectOptions.length"
-              v-model="selectedProjectName"
-              class="inline-flex min-w-[220px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              :disabled="projectsLoading"
-            >
-              <option disabled value="">请选择项目</option>
-              <option v-for="option in projectOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-            <span v-else class="text-xs text-muted">
-              暂无项目，请先在“项目数据”模块创建。
-            </span>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="projectsLoading"
-              @click.prevent="refreshProjects"
-            >
-              {{ projectsLoading ? '加载中…' : '刷新项目' }}
-            </button>
-          </div>
-          <p v-if="projectsError" class="mt-2 rounded-2xl bg-rose-50 px-3 py-1 text-xs text-rose-600">
-            {{ projectsError }}
-          </p>
-        </label>
-        <label class="space-y-1 text-sm">
-          <span class="font-medium text-secondary">选择数据集</span>
-          <div class="flex flex-wrap items-center gap-3">
-            <select
-              v-if="datasetOptions.length"
-              v-model="selectedDatasetId"
-              class="inline-flex min-w-[220px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              :disabled="datasetsLoading"
-            >
-              <option v-for="option in datasetOptions" :key="option.id" :value="option.id">
-                {{ option.label }}
-              </option>
-            </select>
-            <span v-else class="text-xs text-muted">
-              当前项目暂无可用数据集，请先在“项目数据”页面完成上传。
-            </span>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="datasetsLoading"
-              @click.prevent="refreshDatasets"
-            >
-              {{ datasetsLoading ? '加载中…' : '刷新数据集' }}
-            </button>
-          </div>
-          <p v-if="datasetsError" class="mt-2 rounded-2xl bg-rose-50 px-3 py-1 text-xs text-rose-600">
-            {{ datasetsError }}
-          </p>
-        </label>
-        <div class="space-y-2 text-sm">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <span class="font-medium text-secondary">选择 Clean 存档</span>
-              <p class="text-xs text-muted">请选择要执行筛选的 Clean 输出日期。</p>
+      <form class="space-y-6">
+        <div class="grid gap-6 md:grid-cols-2">
+          <label class="space-y-2 block">
+            <span class="text-xs font-bold text-primary ml-1">选择项目</span>
+            <div class="flex gap-2">
+              <div class="relative flex-1">
+                <select v-if="projectOptions.length" v-model="selectedProjectName"
+                  class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60"
+                  :disabled="projectsLoading">
+                  <option disabled value="">请选择项目</option>
+                  <option v-for="option in projectOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
+                  <ChevronDownIcon class="w-4 h-4" />
+                </div>
+              </div>
+              <button type="button"
+                class="shrink-0 rounded-2xl bg-brand-50/30 px-4 text-secondary hover:text-brand-600 hover:bg-brand-50 transition-colors"
+                :disabled="projectsLoading" @click.prevent="refreshProjects" title="刷新项目">
+                <ArrowPathIcon class="h-5 w-5" :class="{ 'animate-spin': projectsLoading }" />
+              </button>
             </div>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="cleanArchivesState.loading"
-              @click.prevent="fetchCleanArchives({ force: true })"
-            >
-              {{ cleanArchivesState.loading ? '刷新中…' : '刷新存档' }}
+            <p v-if="projectsError" class="text-xs text-rose-600 pl-1">{{ projectsError }}</p>
+          </label>
+
+          <label class="space-y-2 block">
+            <span class="text-xs font-bold text-primary ml-1">选择待处理数据集</span>
+            <div class="flex gap-2">
+              <div class="relative flex-1">
+                <select v-if="datasetOptions.length" v-model="selectedDatasetId"
+                  class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60"
+                  :disabled="datasetsLoading">
+                  <option v-for="option in datasetOptions" :key="option.id" :value="option.id">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
+                  <ChevronDownIcon class="w-4 h-4" />
+                </div>
+              </div>
+              <button type="button"
+                class="shrink-0 rounded-2xl bg-brand-50/30 px-4 text-secondary hover:text-brand-600 hover:bg-brand-50 transition-colors"
+                :disabled="datasetsLoading" @click.prevent="refreshDatasets" title="刷新数据集">
+                <ArrowPathIcon class="h-5 w-5" :class="{ 'animate-spin': datasetsLoading }" />
+              </button>
+            </div>
+            <p v-if="datasetsError" class="text-xs text-rose-600 pl-1">{{ datasetsError }}</p>
+          </label>
+        </div>
+
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-primary ml-1">选择数据清洗存档 (Clean Archive)</span>
+            <button type="button"
+              class="text-[10px] font-bold text-brand-600 hover:text-brand-700 disabled:opacity-50 transition-colors"
+              :disabled="cleanArchivesState.loading" @click.prevent="fetchCleanArchives({ force: true })">
+              {{ cleanArchivesState.loading ? '加载中...' : '刷新列表' }}
             </button>
           </div>
-          <p v-if="cleanArchivesState.error" class="rounded-2xl bg-rose-100 px-3 py-1 text-xs text-rose-600">
-            {{ cleanArchivesState.error }}
-          </p>
-          <div v-if="cleanArchivesState.loading" class="rounded-2xl bg-surface-muted px-3 py-2 text-xs text-muted">
-            存档加载中…
+
+          <div v-if="cleanArchivesState.loading"
+            class="rounded-2xl border-0 bg-brand-50/30 p-8 text-center text-xs text-secondary animate-pulse">
+            正在查找相关存档...
           </div>
-          <p v-else-if="!cleanArchivesState.data.length" class="rounded-2xl bg-surface-muted px-3 py-2 text-xs text-muted">
-            暂未找到 Clean 存档，请确认已完成清洗。
-          </p>
-          <div
-            v-else
-            class="flex flex-wrap gap-2"
-            role="radiogroup"
-            aria-label="Clean 存档"
-          >
-            <button
-              v-for="archive in cleanArchivesState.data"
-              :key="archive.date"
-              type="button"
-              role="radio"
-              class="inline-flex flex-col gap-1 rounded-2xl border px-3 py-2 text-left text-xs transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          <div v-else-if="!cleanArchivesState.data.length"
+            class="rounded-2xl border border-dashed border-black/10 bg-brand-50/10 p-8 text-center text-xs text-secondary">
+            暂无 Clean 存档，处理前请确保该日期已完成数据清洗步骤。
+          </div>
+          <div v-else class="flex flex-wrap gap-3" role="radiogroup">
+            <button v-for="archive in cleanArchivesState.data" :key="archive.date" type="button" role="radio"
+              class="group relative inline-flex flex-col gap-1 rounded-[1.25rem] border px-5 py-3 text-left transition-all"
               :class="selectedCleanDate === archive.date
-                ? 'border-brand-soft bg-brand-soft/70 text-brand-700 shadow-sm'
-                : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:text-brand-600'"
-              :aria-checked="selectedCleanDate === archive.date"
-              @click="selectCleanArchive(archive.date)"
-            >
-              <span class="text-sm font-semibold text-primary">{{ archive.date }}</span>
-              <span class="text-[11px] text-muted">
-                {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
+                ? 'bg-brand-600 border-brand-600 text-white'
+                : 'bg-white border-black/5 text-secondary hover:border-brand-200 hover:bg-brand-50/30'"
+              :aria-checked="selectedCleanDate === archive.date" @click="selectCleanArchive(archive.date)">
+              <span class="text-sm font-bold">{{ archive.date }}</span>
+              <span class="text-[10px] opacity-70"
+                :class="selectedCleanDate === archive.date ? 'text-brand-100' : 'text-muted'">
+                {{ archive.channels?.length || 0 }} 渠道数据集
               </span>
-              <span
-                v-if="archive.matches_dataset"
-                class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-              >
-                匹配当前数据集
+              <span v-if="archive.matches_dataset"
+                class="absolute -top-1.5 -right-1.5 block h-4 w-4 rounded-full bg-emerald-500 border-2 border-white ring- emerald-100"
+                title="数据集匹配">
+                <CheckIcon class="p-0.5 text-white" />
               </span>
             </button>
           </div>
+          <p v-if="cleanArchivesState.error" class="text-xs text-rose-600 pl-1">{{ cleanArchivesState.error }}</p>
         </div>
       </form>
 
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 rounded-full border border-brand-soft px-5 py-2 text-sm font-semibold text-brand-600 transition hover:bg-brand-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="triggerState.requesting"
-          @click="runFilter"
-        >
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-4">
+        <button type="button"
+          class="inline-flex items-center gap-2 rounded-full bg-brand-600 px-10 py-3 text-sm font-bold text-white transition-all hover:bg-brand-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="triggerState.requesting" @click="runFilter">
           <SparklesIcon class="h-4 w-4" />
-          <span>{{ triggerState.requesting ? '启动中…' : '开始筛选' }}</span>
+          <span>{{ triggerState.requesting ? '正在启动...' : '开始执行数据筛选' }}</span>
         </button>
-        <p
-          v-if="triggerState.message"
-          :class="[
-            'text-sm rounded-2xl px-3 py-1.5',
-            triggerState.success ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-          ]"
-        >
-          {{ triggerState.message }}
-        </p>
+        <transition name="fade">
+          <p v-if="triggerState.message" class="text-xs font-bold px-5 py-2.5 rounded-xl border"
+            :class="triggerState.success ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'">
+            {{ triggerState.message }}
+          </p>
+        </transition>
       </div>
     </section>
 
-    <section class="card-surface space-y-6 p-6">
-      <header class="space-y-2">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-xl font-semibold text-primary">运行进度</h2>
-          <span class="text-xs text-muted">
-            最近更新：{{ summaryUpdatedAt || '—' }}
-          </span>
+    <!-- Run Progress & Results -->
+    <section class="rounded-3xl bg-surface p-8 border border-black/5 space-y-8">
+      <header class="flex flex-wrap items-center justify-between gap-3">
+        <div class="space-y-1">
+          <h2 class="text-lg font-bold text-primary">运行进度 & 结果</h2>
+          <p class="text-xs text-secondary">
+            实时查看筛选进度与结果摘要。
+          </p>
         </div>
-        <p class="text-sm text-secondary">
-          筛选过程中会持续更新进度与记录，最多保留最近 {{ recentLimit }} 条。列表可滚动查看。
-        </p>
+        <div class="text-[10px] font-bold text-secondary bg-brand-50 px-3 py-1.5 rounded-full border border-brand-100">
+          最后更新: {{ summaryUpdatedAt || '等待同步' }}
+        </div>
       </header>
 
-      <div class="space-y-3 rounded-3xl border border-dashed border-soft bg-white/80 p-5">
-        <div class="flex items-center justify-between text-xs text-secondary">
-          <span>总体进度</span>
-          <span>{{ progressPercent }}%</span>
+      <!-- Premium Progress Widget -->
+      <div class="group space-y-6 rounded-3xl bg-brand-50/20 p-6 border border-brand-100/50">
+        <div class="space-y-3">
+          <div class="flex items-center justify-between text-xs font-bold">
+            <span class="text-primary flex items-center gap-2">
+              <div class="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse"></div>
+              总体完成进度
+            </span>
+            <span class="text-brand-600">{{ progressPercent }}%</span>
+          </div>
+          <div class="h-3 rounded-full bg-white border border-black/5 p-0.5 overflow-hidden">
+            <div
+              class="h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-600 transition-all duration-700 ease-out"
+              :style="{ width: `${progressPercent}%` }"></div>
+          </div>
         </div>
-        <div class="h-2 rounded-full bg-surface-muted">
-          <div
-            class="h-full rounded-full bg-brand transition-all"
-            :style="{ width: `${progressPercent}%` }"
-          ></div>
+
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div class="rounded-2xl bg-white p-4 border border-black/5 transition-colors group-hover:bg-brand-50/50">
+            <div class="text-[10px] text-muted font-bold uppercase tracking-wider mb-1">Total Items</div>
+            <div class="text-lg font-bold text-primary">{{ statusState.progress.total }}</div>
+          </div>
+          <div class="rounded-2xl bg-white p-4 border border-black/5 transition-colors group-hover:bg-brand-50/50">
+            <div class="text-[10px] text-muted font-bold uppercase tracking-wider mb-1">Processed</div>
+            <div class="text-lg font-bold text-primary">{{ statusState.progress.completed }}</div>
+          </div>
+          <div class="rounded-2xl bg-white p-4 border border-black/5 transition-colors group-hover:bg-brand-50/50">
+            <div class="text-[10px] text-muted font-bold uppercase tracking-wider mb-1">Kept (Passed)</div>
+            <div class="text-xl font-bold text-brand-600">{{ statusState.progress.kept }}</div>
+          </div>
+          <div class="rounded-2xl bg-white p-4 border border-black/5 transition-colors group-hover:bg-brand-50/50">
+            <div class="text-[10px] text-muted font-bold uppercase tracking-wider mb-1">Tokens Usage</div>
+            <div class="text-xl font-bold text-secondary">{{ tokenUsageDisplay }}</div>
+          </div>
         </div>
-        <dl class="grid gap-3 text-xs text-secondary sm:grid-cols-4">
-          <div class="rounded-2xl bg-surface-muted px-4 py-3">
-            <dt class="text-[11px] uppercase tracking-widest text-muted">总任务</dt>
-            <dd class="mt-1 text-base font-semibold text-primary">{{ statusState.progress.total }}</dd>
-          </div>
-          <div class="rounded-2xl bg-surface-muted px-4 py-3">
-            <dt class="text-[11px] uppercase tracking-widest text-muted">已完成</dt>
-            <dd class="mt-1 text-base font-semibold text-primary">{{ statusState.progress.completed }}</dd>
-          </div>
-          <div class="rounded-2xl bg-surface-muted px-4 py-3">
-            <dt class="text-[11px] uppercase tracking-widest text-muted">保留</dt>
-            <dd class="mt-1 text-base font-semibold text-primary">{{ statusState.progress.kept }}</dd>
-          </div>
-          <div class="rounded-2xl bg-surface-muted px-4 py-3">
-            <dt class="text-[11px] uppercase tracking-widest text-muted">Token 消耗</dt>
-            <dd class="mt-1 text-base font-semibold text-primary">
-              {{ tokenUsageDisplay }}
-              <span class="ml-1 text-xs text-muted">token</span>
-            </dd>
-          </div>
-        </dl>
       </div>
 
+      <!-- Live Logs -->
       <div class="space-y-3">
-        <div class="flex items-center justify-between text-sm">
-          <span class="font-medium text-secondary">当前处理状态</span>
-          <span class="text-xs text-muted">
-            {{ statusState.recentRecords.length ? `展示最近 ${statusState.recentRecords.length} 条` : '暂无记录' }}
-          </span>
+        <div class="flex items-center justify-between px-1">
+          <span class="text-xs font-bold text-primary">实时处理动态</span>
+          <span class="text-[10px] text-muted font-medium">Auto-scrolling · Recent {{ recentLimit }}</span>
         </div>
-        <div class="max-h-72 overflow-y-auto rounded-3xl border border-dashed border-soft bg-surface-muted/60 p-4">
-          <p v-if="!statusState.recentRecords.length" class="text-xs text-muted">
-            筛选尚未开始或记录已清理，启动任务后可在此处查看实时进度。
-          </p>
-          <ul v-else class="space-y-3 text-sm">
-            <li
-              v-for="(record, index) in statusState.recentRecords"
+        <div
+          class="max-h-80 overflow-y-auto rounded-3xl bg-brand-50/10 p-3 space-y-2 border border-black/5 sidebar-scroll">
+          <div v-if="!statusState.recentRecords.length"
+            class="flex flex-col items-center justify-center py-12 text-muted">
+            <ClockIcon class="mb-3 h-8 w-8 opacity-20" />
+            <span class="text-xs font-medium">任务暂未启动，正在等待后端数据包...</span>
+          </div>
+          <transition-group name="list" tag="div" class="space-y-2">
+            <div v-for="(record, index) in statusState.recentRecords"
               :key="`${index}-${record.channel}-${record.index}`"
-              class="rounded-2xl border border-soft bg-white px-4 py-3 shadow-sm"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div class="flex flex-wrap items-center gap-2 text-secondary">
-                  <span class="rounded-full bg-brand-soft/60 px-2 py-0.5 font-semibold text-brand-600">
-                    {{ record.channel || 'unknown' }}
-                  </span>
+              class="rounded-2xl bg-white p-4 border border-black/5 transition hover:border-brand-200">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-3">
                   <span
-                    :class="[
-                      'rounded-full px-2 py-0.5 font-semibold',
-                      record.status === 'kept'
-                        ? 'bg-emerald-100 text-emerald-600'
-                        : 'bg-rose-100 text-rose-600'
-                    ]"
-                  >
-                    {{ record.status === 'kept' ? '保留' : '过滤' }}
+                    class="rounded-lg px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-brand-50 text-brand-700 border border-brand-100/50">
+                    {{ record.channel }}
                   </span>
-                  <span class="text-muted">{{ formatTimestamp(record.updated_at) }}</span>
+                  <span class="text-[10px] text-muted font-medium">{{ formatTimestamp(record.updated_at).split(' ')[1]
+                    }}</span>
                 </div>
-                <span v-if="record.classification" class="text-muted">
-                  分类：{{ record.classification }}
+                <span class="rounded-full px-3 py-0.5 text-[10px] font-bold"
+                  :class="record.status === 'kept' ? 'bg-emerald-500 text-white' : 'bg-rose-50 text-rose-600 border border-rose-100'">
+                  {{ record.status === 'kept' ? '✓ 保留' : '✕ 过滤' }}
                 </span>
               </div>
-              <div class="mt-2 space-y-1">
-                <p v-if="record.title" class="text-sm font-medium text-primary">{{ record.title }}</p>
-                <p class="text-sm leading-relaxed text-secondary">
-                  {{ record.preview || '（无内容预览）' }}
-                </p>
+              <p class="text-[13px] leading-relaxed text-primary line-clamp-2">{{ record.preview || '（内容解析中...）' }}</p>
+              <div v-if="record.classification" class="mt-2 flex flex-wrap gap-1">
+                <span
+                  class="inline-flex items-center rounded-md bg-brand-50 px-2 py-1 text-[10px] font-bold text-brand-700">
+                  <HashtagIcon class="mr-1 h-3 w-3" />
+                  {{ record.classification }}
+                </span>
               </div>
-            </li>
-          </ul>
+            </div>
+          </transition-group>
         </div>
       </div>
 
-      <p
-        v-if="statusState.message"
-        class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600"
-      >
+      <p v-if="statusState.message"
+        class="rounded-2xl bg-rose-50 border border-rose-100 px-5 py-3 text-xs font-bold text-rose-600">
         {{ statusState.message }}
       </p>
-    </section>
 
-    <section class="card-surface space-y-6 p-6">
-      <header class="space-y-2">
-        <h2 class="text-xl font-semibold text-primary">筛选结果摘要</h2>
-        <p class="text-sm text-secondary">
-          筛选前共有 {{ statusState.summary.total_rows }} 行，筛选后保留 {{ statusState.summary.kept_rows }} 行，
-          剔除 {{ filteredOutCount }} 行。
-        </p>
-      </header>
-
-      <dl class="grid gap-3 text-sm text-secondary sm:grid-cols-3">
-        <div class="rounded-2xl bg-surface-muted px-4 py-3">
-          <dt class="text-[11px] uppercase tracking-widest text-muted">筛选前</dt>
-          <dd class="mt-1 text-lg font-semibold text-primary">{{ statusState.summary.total_rows }}</dd>
-        </div>
-        <div class="rounded-2xl bg-surface-muted px-4 py-3">
-          <dt class="text-[11px] uppercase tracking-widest text-muted">筛选后</dt>
-          <dd class="mt-1 text-lg font-semibold text-primary">{{ statusState.summary.kept_rows }}</dd>
-        </div>
-        <div class="rounded-2xl bg-surface-muted px-4 py-3">
-          <dt class="text-[11px] uppercase tracking-widest text-muted">剔除</dt>
-          <dd class="mt-1 text-lg font-semibold text-primary">{{ filteredOutCount }}</dd>
-        </div>
-      </dl>
-
-      <div class="space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 class="text-sm font-medium text-secondary">样本摘要预览</h3>
-            <p class="text-xs text-muted">切换查看被保留与被剔除的代表性内容。</p>
+      <!-- Final Summary -->
+      <div v-if="statusState.summary.completed || statusState.summary.total_rows > 0"
+        class="pt-6 border-t border-black/5">
+        <header class="flex flex-wrap items-center justify-between gap-4 mb-6 px-1">
+          <div class="flex items-center gap-2">
+            <div class="w-1.5 h-6 bg-brand-600 rounded-full"></div>
+            <h3 class="text-base font-bold text-primary">典型样本分析</h3>
           </div>
-          <div class="inline-flex items-center gap-1 rounded-full bg-surface-muted p-1 text-xs font-semibold">
-            <button
-              v-for="tab in summaryTabOptions"
-              :key="tab.value"
-              type="button"
-              class="rounded-full px-3 py-1.5 transition"
-              :class="[
-                summaryTab === tab.value
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-muted hover:text-primary'
-              ]"
-              @click="summaryTab = tab.value"
-            >
+          <div class="flex bg-brand-50/50 p-1 rounded-2xl border border-black/5">
+            <button v-for="tab in summaryTabOptions" :key="tab.value" type="button"
+              class="px-5 py-2 text-[11px] font-bold rounded-xl transition-all"
+              :class="summaryTab === tab.value ? 'bg-white text-brand-600 border border-black/5' : 'text-secondary hover:text-primary'"
+              @click="summaryTab = tab.value">
               {{ tab.label }}
             </button>
           </div>
-        </div>
+        </header>
 
-        <div class="grid gap-3 md:grid-cols-2">
-          <p
-            v-if="!currentSummarySamples.length"
-            class="rounded-2xl border border-dashed border-soft bg-surface-muted px-4 py-3 text-xs text-muted"
-          >
+        <div class="grid gap-4 md:grid-cols-2">
+          <div v-if="!currentSummarySamples.length"
+            class="col-span-full rounded-3xl bg-brand-50/10 p-10 text-center text-xs text-secondary border border-dashed border-black/10">
             {{ summaryEmptyMessage }}
-          </p>
-          <article
-            v-for="(item, index) in currentSummarySamples"
-            :key="`${summaryTab}-${item.channel}-${index}`"
-            class="flex flex-col gap-2 rounded-2xl border border-soft bg-white px-4 py-3 text-sm text-secondary shadow-sm"
-          >
-            <div class="flex items-center justify-between text-xs text-muted">
-              <span class="rounded-full bg-surface-muted px-2 py-0.5 font-semibold text-secondary">
-                {{ item.channel || 'unknown' }}
-              </span>
-              <span>#{{ item.index }}</span>
+          </div>
+          <article v-for="(item, index) in currentSummarySamples" :key="`${summaryTab}-${item.channel}-${index}`"
+            class="rounded-2xl bg-white p-5 border border-black/5 transition hover:border-brand-200 group">
+            <div class="flex items-center justify-between mb-3">
+              <span
+                class="rounded-md bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700 border border-brand-100/50">{{
+                  item.channel }}</span>
+              <span class="text-[10px] text-muted font-bold">#{{ item.index }}</span>
             </div>
-            <p class="font-medium text-primary">{{ item.title || '（未提供标题）' }}</p>
-            <p class="leading-relaxed">{{ item.preview || '（无摘要）' }}</p>
+            <h4 class="text-sm font-bold text-primary mb-2 line-clamp-1 group-hover:text-brand-600 transition-colors">{{
+              item.title || '无标题记录' }}</h4>
+            <p class="text-[12px] leading-[1.6] text-secondary line-clamp-4">{{ item.preview }}</p>
           </article>
         </div>
       </div>
@@ -453,7 +378,12 @@ import {
   AdjustmentsHorizontalIcon,
   SparklesIcon,
   PlusIcon,
-  XMarkIcon
+  XMarkIcon,
+  CheckIcon,
+  ArrowPathIcon,
+  ClockIcon,
+  HashtagIcon,
+  ChevronDownIcon
 } from '@heroicons/vue/24/outline'
 import { useApiBase } from '../../composables/useApiBase'
 import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
@@ -879,6 +809,17 @@ function refreshDatasets() {
   fetchProjectDatasets(projectName, { force: true })
 }
 
+/**
+ * FIX: resetDatasetState was missing, causing ReferenceError when switching projects.
+ */
+function resetDatasetState() {
+  datasets.value = []
+  datasetsLoading.value = false
+  datasetsError.value = ''
+  selectedDatasetId.value = ''
+  lastFetchedProjectName.value = ''
+}
+
 function selectCleanArchive(date, { force = false } = {}) {
   const nextValue = typeof date === 'string' ? date.trim() : ''
   if (!force && nextValue === selectedCleanDate.value) {
@@ -894,20 +835,7 @@ function resetArchivesState() {
   cleanArchivesState.latest = ''
   cleanArchivesState.lastProject = ''
   cleanArchivesState.lastDataset = ''
-  selectCleanArchive('', { force: true })
-}
-
-function syncCleanArchiveSelection() {
-  const archives = Array.isArray(cleanArchivesState.data) ? cleanArchivesState.data : []
-  if (!archives.length) {
-    selectCleanArchive('', { force: true })
-    return
-  }
-  if (!selectedCleanDate.value || !archives.some((item) => item.date === selectedCleanDate.value)) {
-    const preferred = archives.find((item) => item.matches_dataset)
-    const fallback = (preferred && preferred.date) || cleanArchivesState.latest || archives[0]?.date || ''
-    selectCleanArchive(fallback, { force: true })
-  }
+  selectedCleanDate.value = ''
 }
 
 async function fetchCleanArchives({ force = false } = {}) {
@@ -916,195 +844,155 @@ async function fetchCleanArchives({ force = false } = {}) {
     resetArchivesState()
     return
   }
-  const datasetId = (selectedDatasetId.value || '').trim()
-  if (
-    !force &&
-    cleanArchivesState.lastProject === projectName &&
-    cleanArchivesState.lastDataset === datasetId &&
-    cleanArchivesState.data.length
-  ) {
+  if (!force && cleanArchivesState.lastProject === projectName && cleanArchivesState.data.length) {
     return
   }
 
   cleanArchivesState.loading = true
   cleanArchivesState.error = ''
   try {
-    const params = new URLSearchParams({ layers: 'clean' })
-    if (datasetId) {
-      params.append('dataset_id', datasetId)
-    }
-    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(projectName)}/archives?${params.toString()}`)
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(projectName)}/archives?layers=clean`)
     const response = await fetch(endpoint)
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
-      throw new Error(result.message || '无法获取 Clean 存档')
+      throw new Error(result.message || '无法加载 Clean 存档')
     }
-    const archives = result.archives || {}
-    cleanArchivesState.data = Array.isArray(archives.clean) ? archives.clean : []
-    cleanArchivesState.latest = result.latest?.clean || ''
+    const data = result.data || {}
+    cleanArchivesState.data = Array.isArray(data.clean) ? data.clean : []
+    cleanArchivesState.latest = data.latest?.clean || ''
     cleanArchivesState.lastProject = projectName
-    cleanArchivesState.lastDataset = datasetId
-    syncCleanArchiveSelection()
+    cleanArchivesState.lastDataset = selectedDatasetId.value
+
+    // Auto select latest if not set or invalid
+    if (cleanArchivesState.data.length) {
+      const hasCurrent = cleanArchivesState.data.some(d => d.date === selectedCleanDate.value)
+      if (!selectedCleanDate.value || !hasCurrent) {
+        // Prefer "matches_dataset" if available
+        const match = cleanArchivesState.data.find(d => d.matches_dataset)
+        selectedCleanDate.value = match ? match.date : cleanArchivesState.data[0].date
+      }
+    } else {
+      selectedCleanDate.value = ''
+    }
   } catch (err) {
-    cleanArchivesState.error = err instanceof Error ? err.message : '无法获取 Clean 存档'
+    cleanArchivesState.error = err instanceof Error ? err.message : '无法加载存档'
     cleanArchivesState.data = []
-    cleanArchivesState.latest = ''
-    cleanArchivesState.lastProject = ''
-    cleanArchivesState.lastDataset = ''
-    selectCleanArchive('', { force: true })
   } finally {
     cleanArchivesState.loading = false
   }
 }
 
+function addCategory() {
+  const val = templateState.categoryInput.trim()
+  if (!val) return
+  if (!templateState.categories.includes(val)) {
+    templateState.categories.push(val)
+  }
+  templateState.categoryInput = ''
+}
+
+function removeCategory(index) {
+  templateState.categories.splice(index, 1)
+}
+
+function resetStatusState() {
+  statusState.loading = false
+  statusState.running = false
+  statusState.progress = { total: 0, completed: 0, kept: 0, failed: 0, percentage: 0, tokens: 0 }
+  statusState.recentRecords = []
+  statusState.summary = { total_rows: 0, kept_rows: 0, discarded_rows: 0, completed: false, updated_at: '', token_usage: 0 }
+  statusState.relevantSamples = []
+  statusState.irrelevantSamples = []
+  statusState.message = ''
+}
+
 async function loadTemplate(projectName) {
   templateState.loading = true
-  templateState.error = ''
-  templateState.success = ''
+  templateState.exists = false
+  templateState.metadataMissing = false
+  storedTemplate.value = ''
+
   try {
-    const params = new URLSearchParams({ project: projectName })
-    const endpoint = await buildApiUrl(`/filter/template?${params.toString()}`)
+    const endpoint = await buildApiUrl(`/filter/template?project_name=${encodeURIComponent(projectName)}`)
     const response = await fetch(endpoint)
     const result = await response.json()
-    if (!response.ok || result.status !== 'ok') {
-      throw new Error(result.message || '无法加载模板')
+    if (response.ok && result.status === 'ok') {
+      templateState.exists = true
+      const data = result.data || {}
+      templateState.theme = data.theme || ''
+      templateState.categories = Array.isArray(data.categories) ? data.categories : []
+      if (!data.theme && (!data.categories || !data.categories.length)) {
+        templateState.metadataMissing = true
+        storedTemplate.value = data.raw_content || ''
+      }
+      // Update baseline
+      templateBaseline.theme = templateState.theme
+      templateBaseline.categories = [...templateState.categories]
+    } else {
+      // Not found or error, just reset
+      templateState.theme = ''
+      templateState.categories = []
     }
-    const data = result.data || {}
-    templateState.exists = Boolean(data.exists)
-    templateState.theme = data.topic_theme || ''
-    templateState.categories = Array.isArray(data.categories) ? data.categories.slice() : []
-    templateState.metadataMissing =
-      Boolean(data.exists) && !templateState.theme && !templateState.categories.length
-    templateBaseline.theme = templateState.theme
-    templateBaseline.categories = templateState.categories.slice()
-    templateState.categoryInput = ''
-    storedTemplate.value = data.template || ''
-  } catch (err) {
-    templateState.error = err instanceof Error ? err.message : '无法加载模板'
+  } catch {
+    // Ignore error
   } finally {
     templateState.loading = false
   }
 }
 
 async function saveTemplate() {
-  if (!currentProjectName.value) {
-    templateState.error = '请先选择项目'
-    return
-  }
-  if (!templateState.theme.trim()) {
-    templateState.error = '请填写舆情主题'
-    return
-  }
-  if (!templateState.categories.length) {
-    templateState.error = '请至少添加一个分类'
-    return
-  }
-
+  if (templateState.saving) return
   templateState.saving = true
-  templateState.error = ''
   templateState.success = ''
+  templateState.error = ''
 
   try {
     const payload = {
-      project: currentProjectName.value.trim(),
-      topic_theme: templateState.theme.trim(),
-      categories: templateState.categories.slice()
+      project_name: currentProjectName.value,
+      theme: templateState.theme,
+      categories: templateState.categories
     }
     const endpoint = await buildApiUrl('/filter/template')
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
     const result = await response.json()
-    if (!response.ok || result.status !== 'ok') {
-      throw new Error(result.message || '模板保存失败')
+    if (response.ok && result.status === 'ok') {
+      templateState.success = '模板配置已保存'
+      templateState.exists = true
+      templateState.metadataMissing = false
+      templateBaseline.theme = templateState.theme
+      templateBaseline.categories = [...templateState.categories]
+    } else {
+      throw new Error(result.message || '保存失败')
     }
-    const data = result.data || {}
-    templateState.exists = true
-    templateState.metadataMissing = false
-    storedTemplate.value = data.template || composeTemplate(templateState.theme, templateState.categories)
-    templateBaseline.theme = templateState.theme
-    templateBaseline.categories = templateState.categories.slice()
-    templateState.success = '模板已更新'
   } catch (err) {
-    templateState.error = err instanceof Error ? err.message : '模板保存失败'
+    templateState.error = err instanceof Error ? err.message : '保存失败'
   } finally {
     templateState.saving = false
   }
 }
 
 async function loadFilterStatus({ silent = false } = {}) {
-  const projectName = (currentProjectName.value || '').trim()
-  const dateValue = (selectedCleanDate.value || '').trim()
-  if (!projectName || !dateValue) {
-    resetStatusState()
-    return
-  }
-  if (!silent) {
-    statusLoading.value = true
-    statusState.message = ''
-  }
+  const project = currentProjectName.value
+  const date = selectedCleanDate.value
+  if (!project || !date) return
 
+  if (!silent) statusLoading.value = true
   try {
-    const params = new URLSearchParams({
-      project: projectName,
-      date: dateValue
-    })
-    const endpoint = await buildApiUrl(`/filter/status?${params.toString()}`)
+    const endpoint = await buildApiUrl(`/filter/status?project_name=${encodeURIComponent(project)}&date=${date}`)
     const response = await fetch(endpoint)
     const result = await response.json()
-    if (!response.ok || result.status !== 'ok') {
-      throw new Error(result.message || '无法获取筛选状态')
+    if (response.ok && result.status === 'ok') {
+      applyStatusPayload(result.data)
     }
-    applyStatusPayload(result.data)
-    statusState.message = ''
-  } catch (err) {
-    if (!silent) {
-      statusState.message = err instanceof Error ? err.message : '无法获取筛选状态'
-    }
-    statusState.running = false
+  } catch {
+    // ignore
   } finally {
-    if (!silent) {
-      statusLoading.value = false
-    }
+    if (!silent) statusLoading.value = false
   }
-}
-
-function resetDatasetState() {
-  datasets.value = []
-  datasetsError.value = ''
-  datasetsLoading.value = false
-  selectedDatasetId.value = ''
-  lastFetchedProjectName.value = ''
-  resetArchivesState()
-}
-
-function resetStatusState() {
-  statusState.progress = {
-    total: 0,
-    completed: 0,
-    kept: 0,
-    failed: 0,
-    percentage: 0,
-    tokens: 0
-  }
-  statusState.recentRecords = []
-  statusState.summary = {
-    total_rows: 0,
-    kept_rows: 0,
-    discarded_rows: 0,
-    token_usage: 0,
-    completed: false,
-    updated_at: ''
-  }
-  statusState.relevantSamples = []
-  statusState.irrelevantSamples = []
-  statusState.message = ''
-  statusState.running = false
-  summaryTab.value = summaryTabOptions[0].value
 }
 
 function startPolling() {
@@ -1121,20 +1009,34 @@ function stopPolling() {
   }
 }
 
-function disablePollingFallback() {
-  if (!usingPollingFallback.value) {
-    stopPolling()
+async function openStatusStream() {
+  if (!supportsEventSource) {
+    usingPollingFallback.value = true
     return
   }
-  usingPollingFallback.value = false
-  stopPolling()
-}
 
-function enablePollingFallback() {
-  if (usingPollingFallback.value) return
-  usingPollingFallback.value = true
-  if (statusState.running) {
-    startPolling()
+  closeStatusStream()
+  const project = currentProjectName.value
+  const date = selectedCleanDate.value
+  if (!project || !date) return
+
+  const endpoint = await buildApiUrl(`/filter/stream?project_name=${encodeURIComponent(project)}&date=${date}`)
+  const es = new EventSource(endpoint)
+  statusStream.value = es
+
+  es.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      applyStatusPayload(data)
+    } catch {
+      // ignore parse error
+    }
+  }
+  es.onerror = () => {
+    // If stream fails, fallback to polling might be better, or just retry
+    es.close()
+    // For now we don't automatically fallback to polling to avoid flapping, 
+    // unless strictly needed. The user can refresh page.
   }
 }
 
@@ -1145,126 +1047,74 @@ function closeStatusStream() {
   }
 }
 
-async function openStatusStream() {
-  if (!supportsEventSource) {
-    enablePollingFallback()
-    return
-  }
-  const projectName = (currentProjectName.value || '').trim()
-  const dateValue = (selectedCleanDate.value || '').trim()
-  if (!projectName || !dateValue) {
-    closeStatusStream()
-    return
-  }
-  disablePollingFallback()
-  const params = new URLSearchParams({
-    project: projectName,
-    date: dateValue
-  })
-  closeStatusStream()
-  const endpoint = await buildApiUrl(`/filter/status/stream?${params.toString()}`)
-  const source = new EventSource(endpoint)
-  statusStream.value = source
-  source.onmessage = (event) => {
-    if (!event.data) return
-    try {
-      const payload = JSON.parse(event.data)
-      if (payload && payload.data) {
-        applyStatusPayload(payload.data)
-        statusState.message = ''
-      }
-    } catch {
-      // ignore malformed chunks
-    }
-  }
-  source.addEventListener('done', () => {
-    closeStatusStream()
-  })
-  source.addEventListener('error', () => {
-    closeStatusStream()
-    enablePollingFallback()
-    loadFilterStatus({ silent: true })
-  })
-}
-
-function ensureParameters() {
-  if (!currentProjectName.value.trim()) {
-    triggerState.success = false
-    triggerState.message = '请先选择项目'
-    return false
-  }
-  if (datasetOptions.value.length && !selectedDatasetId.value) {
-    triggerState.success = false
-    triggerState.message = '请选择需要筛选的数据集'
-    return false
-  }
-  if (!templateState.exists) {
-    triggerState.success = false
-    triggerState.message = '请先保存提示词模板'
-    return false
-  }
-  if (!selectedCleanDate.value) {
-    triggerState.success = false
-    triggerState.message = '请选择需要筛选的 Clean 存档'
-    return false
-  }
-  triggerState.message = ''
-  triggerState.success = null
-  return true
-}
-
 async function runFilter() {
-  if (!ensureParameters()) return
+  if (triggerState.requesting) return
+  if (!currentProjectName.value || !selectedCleanDate.value) {
+    triggerState.error = '请先选择项目与 Clean 存档'
+    return
+  }
   triggerState.requesting = true
-  triggerState.message = ''
   triggerState.success = null
+  triggerState.message = ''
 
   try {
     const payload = {
-      topic: currentProjectName.value.trim(),
-      project: currentProjectName.value.trim(),
-      date: selectedCleanDate.value
+      project_name: currentProjectName.value,
+      date: selectedCleanDate.value,
+      dataset_ids: selectedDatasetId.value ? [selectedDatasetId.value] : []
     }
-    if (selectedDatasetId.value) {
-      payload.dataset_id = selectedDatasetId.value
-    }
-    const endpoint = await buildApiUrl('/filter')
+    const endpoint = await buildApiUrl('/filter/run')
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
     const result = await response.json()
-    const ok = response.ok && result.status !== 'error'
-    triggerState.success = ok
-    triggerState.message = ok
-      ? '筛选任务已启动，请稍候查看进度。'
-      : result.message || '筛选执行失败'
-    if (ok) {
-      statusState.running = true
+    if (response.ok && result.status === 'ok') {
+      triggerState.success = true
+      triggerState.message = '筛选任务已提交'
       loadFilterStatus()
-      openStatusStream()
+      if (usingPollingFallback.value) {
+        startPolling()
+      }
+    } else {
+      throw new Error(result.message || '提交失败')
     }
   } catch (err) {
     triggerState.success = false
-    triggerState.message = err instanceof Error ? err.message : '筛选执行失败'
+    triggerState.message = err instanceof Error ? err.message : '请求失败'
   } finally {
     triggerState.requesting = false
   }
 }
-
-function addCategory() {
-  const value = (templateState.categoryInput || '').trim()
-  if (!value) return
-  if (!templateState.categories.includes(value)) {
-    templateState.categories.push(value)
-  }
-  templateState.categoryInput = ''
-}
-
-function removeCategory(index) {
-  templateState.categories.splice(index, 1)
-}
 </script>
+
+<style scoped>
+.scrollbar-dark::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-dark::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-dark::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.scrollbar-dark::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.5s ease;
+}
+
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+</style>

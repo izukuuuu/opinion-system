@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 from ...utils.logging.logging import setup_logger, log_success, log_error
 from ...utils.setting.paths import bucket, get_project_root
 from types import SimpleNamespace
-from ...utils.rag.tagrag.tag_retrieve_data import tag_retrieve
+from ...utils.rag.tagrag.tag_retrieve_data import retrieve_documents as retrieve_tagrag_documents
 from ...utils.rag.ragrouter.router_retrieve_data import AdvancedRAGSearcher, SearchParams
 from ...utils.setting.paths import get_configs_root
 from ...utils.setting.env_loader import get_api_key
@@ -43,10 +43,25 @@ class ExplainBase:
         self.topic = topic
         self.logger = logger or setup_logger("Explain", "default")
         self._tagrag_cache = {}  # 缓存TagRAG结果
+        self._project_data_root = self._resolve_project_data_root()
+        topic_db_name = self.topic if str(self.topic).endswith("数据库") else f"{self.topic}数据库"
+        self._tagrag_db_path = self._project_data_root / "rag" / "tagrag" / "vector_db"
+        self._routerrag_base_path = self._project_data_root / "rag" / "routerrag" / topic_db_name
         
         # 加载LLM配置
         self.llm_config = self._load_llm_config()
         # 移除并发控制，所有阶段顺序执行
+
+    def _resolve_project_data_root(self) -> Path:
+        """
+        解析专题对应的项目数据根目录（backend/data/projects/<topic>）。
+
+        说明：
+            - 通过bucket路径反推项目目录，保持与现有项目目录解析逻辑一致。
+            - 不依赖旧版 src/utils/rag 下的本地数据库路径。
+        """
+        probe_bucket = bucket("fetch", self.topic, "__path_probe__")
+        return probe_bucket.parents[1]
         
         
     def _load_llm_config(self) -> Dict[str, Any]:
@@ -310,7 +325,7 @@ class ExplainBase:
             log_error(self.logger, f"加载提示词失败: {e}", "Explain")
             return None
     
-    async def get_tagrag_context(self, func_name: str, top_k: int = 3) -> str:
+    async def get_tagrag_context(self, func_name: str, top_k: int = 1) -> str:
         """
         获取TagRAG上下文
         
@@ -328,37 +343,34 @@ class ExplainBase:
         try:
             # 使用功能名映射获取中文名
             chinese_name = self.FUNCTION_MAPPING.get(func_name, func_name)
-            
-            result = tag_retrieve(
-                query=chinese_name,
-                topic_name=self.topic,
-                search_column='tag_vec',
-                top_k=1,  # 固定召回1条结果
-                return_columns=None  # 不限制返回列，避免字段缺失问题
-            )
-            
-            if result['status'] == 'success' and result['results']:
-                context_texts = []
-                for item in result['results']:
-                    # 检查item的结构，可能是{'data': {'text': '...'}} 或直接 {'text': '...'}
-                    if 'data' in item and isinstance(item['data'], dict) and 'text' in item['data']:
-                        context_texts.append(item['data']['text'])
-                    elif 'text' in item:
-                        context_texts.append(item['text'])
-                    else:
-                        log_error(self.logger, f"TagRAG结果缺少text字段: {item}", "Explain")
-                
-                if context_texts:
-                    context = "\n\n".join(context_texts)
-                    # 缓存结果
-                    self._tagrag_cache[func_name] = context
-                    return context
-                else:
-                    log_error(self.logger, "TagRAG检索结果中没有有效的text字段", "Explain")
-                    return ""
-            else:
-                log_error(self.logger, f"TagRAG检索失败: {result.get('error', '未知错误')}", "Explain")
+
+            if not self._tagrag_db_path.exists():
+                log_error(self.logger, f"TagRAG向量库不存在: {self._tagrag_db_path}", "Explain")
                 return ""
+
+            result = retrieve_tagrag_documents(
+                query=chinese_name,
+                topic=self.topic,
+                top_k=max(1, int(top_k)),
+                threshold=0.0,
+                search_column="tag_vec",
+                db_path=str(self._tagrag_db_path),
+            )
+
+            context_texts = []
+            for item in result:
+                text = str(item.get("text", "")).strip()
+                if text:
+                    context_texts.append(text)
+
+            if context_texts:
+                context = "\n\n".join(context_texts)
+                # 缓存结果
+                self._tagrag_cache[func_name] = context
+                return context
+
+            log_error(self.logger, "TagRAG检索未返回有效文本", "Explain")
+            return ""
                 
         except Exception as e:
             log_error(self.logger, f"TagRAG检索异常: {e}", "Explain")
@@ -699,7 +711,8 @@ class ExplainBase:
                     qwen_client=qwen_stub,
                     llm_model=llm_model,
                     embedding_model=embedding_model,
-                    prompts_file=prompts_file
+                    prompts_file=prompts_file,
+                    db_base_path=self._routerrag_base_path,
                 )
                 
                 # 设置检索参数

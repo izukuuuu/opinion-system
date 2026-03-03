@@ -1,452 +1,420 @@
 <template>
-  <div class="space-y-8">
-    <header class="flex flex-wrap items-center justify-between gap-3">
+  <div class="space-y-6">
+    <header class="flex flex-wrap items-center justify-between gap-4">
       <div class="space-y-1">
-        <h1 class="text-2xl font-semibold text-primary">数据预处理</h1>
-        <p class="text-sm text-secondary">按日期依次执行 Merge、Clean，生成标准化结果。</p>
+        <h1 class="text-xl font-bold tracking-tight text-primary">数据预处理</h1>
+        <p class="text-sm text-secondary">按日期依次执行 Merge 与 Clean，生成标准化分析结果。</p>
       </div>
-      <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
+      <div
+        class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
         <FunnelIcon class="h-4 w-4" />
-        <span>步骤 2 · 预处理</span>
+        <span>Preprocess</span>
       </div>
     </header>
 
-<section class="card-surface space-y-6 p-6">
-  <header class="space-y-2">
-    <h2 class="text-xl font-semibold text-primary">选择数据集</h2>
-    <p class="text-sm text-secondary">
-      请选择需要预处理的数据集，系统会自动使用当前项目名称与处理日期执行任务。
-    </p>
-  </header>
-  <form class="space-y-4">
-    <label class="space-y-1 text-sm">
-      <span class="font-medium text-secondary">选择项目</span>
-      <div class="flex flex-wrap items-center gap-3">
-        <select
-          v-if="projectOptions.length"
-          v-model="selectedProjectName"
-          class="inline-flex min-w-[220px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-          :disabled="projectsLoading"
-        >
-          <option disabled value="">请选择项目</option>
-          <option v-for="option in projectOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-        <span v-else class="text-xs text-muted">
-          暂无项目，请先在“项目数据”模块创建。
-        </span>
-        <button
-          type="button"
-          class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="projectsLoading"
-          @click.prevent="refreshProjects"
-        >
-          {{ projectsLoading ? '加载中…' : '刷新项目' }}
-        </button>
-      </div>
-      <p v-if="projectsError" class="mt-2 rounded-2xl bg-rose-50 px-3 py-1 text-xs text-rose-600">
-        {{ projectsError }}
-      </p>
-    </label>
-    <label class="space-y-1 text-sm">
-      <span class="font-medium text-secondary">选择数据集</span>
-      <div class="flex flex-col gap-2">
-        <div class="flex flex-wrap items-center gap-3">
-          <select
-            v-if="datasetOptions.length"
-            v-model="selectedDatasetIds"
-            multiple
-            class="inline-flex min-w-[260px] max-w-md items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-            :size="Math.min(datasetOptions.length, 6)"
-            :disabled="datasetsLoading"
-          >
-            <option v-for="option in datasetOptions" :key="option.id" :value="option.id">
-              {{ option.label }}
-            </option>
-          </select>
-          <span v-else class="text-xs text-muted">
-            当前项目暂无可用数据集，请先在“项目数据”页面完成上传。
-          </span>
-          <button
-            type="button"
-            class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="datasetsLoading"
-            @click="refreshDatasets"
-          >
-            {{ datasetsLoading ? '加载中…' : '刷新数据集' }}
-          </button>
-        </div>
-        <p v-if="datasetOptions.length" class="text-xs text-muted">
-          可多选数据集，系统会按所选顺序依次执行 Merge / Clean。建议确保这些数据集字段一致。
+    <!-- Configuration Section -->
+    <section class="card-surface p-8 space-y-8">
+      <header class="space-y-1">
+        <h2 class="text-lg font-bold text-primary">基础配置</h2>
+        <p class="text-xs text-secondary">
+          配置当前任务的数据来源与存档日期。
         </p>
-      </div>
-      <p v-if="datasetsError" class="mt-2 rounded-2xl bg-rose-50 px-3 py-1 text-xs text-rose-600">
-        {{ datasetsError }}
-      </p>
-    </label>
-    <label class="space-y-1 text-sm">
-      <span class="font-medium text-secondary">选择 Merge 存档日期</span>
-      <div class="flex flex-col gap-2">
-        <div class="flex flex-wrap items-center gap-3">
-          <select
-            v-if="rawArchiveOptions.length"
-            v-model="archiveSelection.mergeDate"
-            class="inline-flex min-w-[260px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-            :disabled="archivesState.loading"
-          >
-            <option disabled value="">请选择原始存档</option>
-            <option v-for="option in rawArchiveOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-          <template v-else>
-            <input
-              v-model="archiveSelection.mergeDate"
-              type="text"
-              inputmode="numeric"
-              class="inline-flex min-w-[220px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              placeholder="例如 20251202"
-            />
-            <button
-              v-if="mergeDateSuggestion"
-              type="button"
-              class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-              @click="useMergeDateSuggestion"
-            >
-              使用 {{ mergeDateSuggestion }} 日期
-            </button>
-          </template>
-          <button
-            type="button"
-            class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="archivesState.loading || !currentProjectName"
-            @click="fetchProjectArchives({ force: true })"
-          >
-            {{ archivesState.loading ? '刷新中…' : '刷新存档' }}
-          </button>
-        </div>
-        <p class="text-xs text-muted">
-          <template v-if="rawArchiveOptions.length">
-            请选择需要 Merge 的历史 RAW 存档日期，系统会沿用该批次的原始文件。
-          </template>
-          <template v-else>
-            未找到 RAW 存档，可直接输入本次 Merge 的处理日期，系统会按该日期创建新的原始目录。
-            <span v-if="mergeDateSuggestion" class="ml-1">建议使用最近上传日期 {{ mergeDateSuggestion }}。</span>
-          </template>
-        </p>
-      </div>
-    </label>
-    <label class="space-y-1 text-sm">
-      <span class="font-medium text-secondary">选择 Clean 存档来源</span>
-      <div class="flex flex-wrap items-center gap-3">
-        <select
-          v-if="mergeArchiveOptions.length"
-          v-model="archiveSelection.cleanDate"
-          class="inline-flex min-w-[260px] items-center rounded-2xl border border-soft bg-white px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-          :disabled="archivesState.loading"
-        >
-          <option disabled value="">请选择 Merge 存档</option>
-          <option v-for="option in mergeArchiveOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-        <span v-else class="text-xs text-muted">
-          {{ archivesState.loading ? '存档加载中…' : '未找到 Merge 存档，请先执行 Merge。' }}
-        </span>
-      </div>
-    </label>
-  </form>
-  <p v-if="parameterError" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">{{ parameterError }}</p>
-</section>
+      </header>
 
-    <section class="card-surface space-y-5 p-6">
-      <header class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-xl font-semibold text-primary">存档管理</h2>
-          <p class="text-sm text-secondary">系统会列出 Raw、Merge、Clean 三个阶段的历史存档，供后续步骤复用。</p>
+      <div class="grid gap-8 lg:grid-cols-2">
+        <!-- 1. Project & Dataset Selection -->
+        <div class="space-y-6">
+          <div class="space-y-2">
+            <label class="text-xs font-bold text-primary ml-1">选择项目</label>
+            <div class="relative">
+              <select v-if="projectOptions.length" v-model="selectedProjectName"
+                class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted disabled:opacity-60"
+                :disabled="projectsLoading">
+                <option disabled value="">请选择项目</option>
+                <option v-for="option in projectOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
+                <ChevronDownIcon class="w-4 h-4" />
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold text-primary ml-1">选择数据集 <span
+                  class="text-[10px] font-normal text-secondary ml-1">(多选)</span></label>
+              <button type="button"
+                class="text-[10px] font-bold text-brand-600 hover:text-brand-700 disabled:opacity-50 transition-colors"
+                :disabled="datasetsLoading" @click="refreshDatasets">
+                {{ datasetsLoading ? '正在加载...' : '刷新列表' }}
+              </button>
+            </div>
+
+            <div v-if="!currentProjectName"
+              class="rounded-[1.5rem] border border-dashed border-black/10 bg-brand-50/10 p-10 text-center text-xs text-secondary">
+              请先选择项目
+            </div>
+            <div v-else-if="datasetsLoading"
+              class="rounded-[1.5rem] bg-brand-50/20 p-10 text-center text-xs text-secondary animate-pulse">
+              正在加载数据集...
+            </div>
+            <div v-else-if="!datasetOptions.length"
+              class="rounded-[1.5rem] bg-brand-50/10 p-10 text-center text-xs text-secondary">
+              暂无数据集，请前往“项目数据”页面上传。
+            </div>
+            <div v-else class="flex flex-wrap gap-2.5 p-1">
+              <button v-for="option in datasetOptions" :key="option.id" type="button"
+                class="group relative inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium transition-all"
+                :class="selectedDatasetIds.includes(option.id)
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white border border-black/5 text-secondary hover:bg-brand-50 hover:border-brand-100'"
+                @click="toggleDatasetSelection(option.id)">
+                <span v-if="selectedDatasetIds.includes(option.id)"
+                  class="flex h-1.5 w-1.5 rounded-full bg-white"></span>
+                <span>{{ option.raw.display_name || option.id }}</span>
+              </button>
+            </div>
+            <p v-if="datasetsError" class="text-xs text-rose-600 font-medium pl-1">{{ datasetsError }}</p>
+          </div>
         </div>
-        <button
-          type="button"
-          class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="archivesState.loading"
-          @click="fetchProjectArchives({ force: true })"
-        >
-          {{ archivesState.loading ? '刷新中…' : '刷新存档' }}
+
+        <!-- 2. Date Selection -->
+        <div class="space-y-6">
+          <div class="space-y-3">
+            <label class="text-xs font-bold text-primary ml-1">Merge 存档日期</label>
+            <div class="space-y-3">
+              <input v-model="archiveSelection.mergeDate" type="text" inputmode="numeric"
+                class="w-full rounded-2xl border-0 bg-base-soft px-4 py-4 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+                placeholder="例如 20251202" />
+
+              <div v-if="rawArchiveOptions.length" class="space-y-2">
+                <p class="text-[10px] font-bold uppercase tracking-wider text-muted ml-1 flex items-center gap-1.5">
+                  <ClockIcon class="h-3 w-3" /> 历史存档快速选择
+                </p>
+                <div class="flex flex-wrap gap-2">
+                  <button v-for="option in rawArchiveOptions.slice(0, 5)" :key="option.value" type="button"
+                    class="group inline-flex items-center rounded-lg border border-transparent px-3 py-1.5 text-[11px] font-bold transition-all"
+                    :class="archiveSelection.mergeDate === option.value
+                      ? 'bg-brand-100 text-brand-700 border-brand-200'
+                      : 'bg-white border-black/5 text-secondary hover:bg-brand-50'"
+                    @click="archiveSelection.mergeDate = option.value">
+                    {{ option.value }}
+                  </button>
+                </div>
+              </div>
+              <div v-else-if="mergeDateSuggestion" class="flex items-center gap-3 pl-1">
+                <span class="text-xs text-secondary">建议日期:</span>
+                <button type="button"
+                  class="rounded-full bg-brand-50 border border-brand-100 px-3 py-1 text-xs font-bold text-brand-600 hover:bg-brand-100 transition-colors"
+                  @click="useMergeDateSuggestion">
+                  {{ mergeDateSuggestion }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <label class="text-xs font-bold text-primary ml-1">Clean 存档来源</label>
+            <div class="relative w-full">
+              <select v-if="mergeArchiveOptions.length" v-model="archiveSelection.cleanDate"
+                class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60">
+                <option disabled value="">请选择 Merge 存档</option>
+                <option v-for="option in mergeArchiveOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+              <div v-else
+                class="flex w-full items-center justify-center rounded-2xl bg-brand-50/20 py-4 px-4 text-xs text-secondary italic">
+                {{ archivesState.loading ? '正在同步存档...' : '需执行 Merge 后方可见有效存档' }}
+              </div>
+
+              <div v-if="mergeArchiveOptions.length"
+                class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
+                <ChevronDownIcon class="h-4 w-4" />
+              </div>
+            </div>
+            <p class="text-[10px] text-muted pl-1 opacity-70">系统通常会自动关联最新的 Merge 结果参与清洗。</p>
+          </div>
+        </div>
+      </div>
+
+      <transition name="fade">
+        <div v-if="parameterError"
+          class="rounded-xl bg-rose-50 border border-rose-100 px-5 py-3 text-xs font-bold text-rose-600 flex items-center gap-3">
+          <ExclamationCircleIcon class="h-4 w-4" />
+          {{ parameterError }}
+        </div>
+      </transition>
+    </section>
+
+    <!-- Archive Management -->
+    <section class="mute-card-surface p-8 space-y-6">
+      <header class="flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+          <div
+            class="flex h-12 w-12 items-center justify-center rounded-[1.25rem] bg-white text-brand-600 ring-1 ring-black/5">
+            <ArchiveBoxIcon class="h-6 w-6" />
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-primary">存档管理</h2>
+            <p class="text-xs text-secondary">溯源历史生成的各阶段处理快照。</p>
+          </div>
+        </div>
+        <button type="button"
+          class="group flex items-center gap-2 rounded-full bg-white px-5 py-2 text-xs font-bold text-secondary transition hover:bg-white hover:text-brand-600 border border-black/5 active:scale-95"
+          :disabled="archivesState.loading" @click="fetchProjectArchives({ force: true })">
+          <ArrowPathIcon class="h-4 w-4 transition-transform group-hover:rotate-180"
+            :class="{ 'animate-spin': archivesState.loading }" />
+          <span>刷新数据</span>
         </button>
       </header>
-      <p v-if="archivesState.error" class="rounded-2xl bg-rose-100 px-4 py-2 text-sm text-rose-600">
-        {{ archivesState.error }}
-      </p>
-      <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <!-- RAW 原始数据存档 -->
-        <article class="card-surface flex flex-col space-y-4 p-5 shadow-sm transition hover:shadow-md">
-          <header class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1 space-y-1.5">
-              <p class="text-xs uppercase tracking-[0.2em] text-muted">RAW</p>
-              <h3 class="text-base font-semibold leading-tight text-primary">原始数据存档</h3>
-              <p class="text-xs leading-relaxed text-secondary">请选择需要执行 Merge 的日期。</p>
+
+      <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <!-- RAW Archive List -->
+        <article
+          class="flex flex-col rounded-3xl bg-white p-3 border border-black/5 hover:border-brand-100 transition-colors group">
+          <header class="flex items-center justify-between px-3 py-3 border-b border-black/5 mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-1.5 h-4 bg-blue-500 rounded-full"></div>
+              <span class="text-xs font-bold text-secondary tracking-widest uppercase">Raw Items</span>
             </div>
-            <span class="flex-shrink-0 whitespace-nowrap text-xs font-medium text-muted">
-              {{ archivesState.data.raw.length ? `共 ${archivesState.data.raw.length} 份` : '暂无' }}
-            </span>
+            <span class="rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-bold text-blue-600">{{
+              archivesState.data.raw.length || 0 }}</span>
           </header>
-          <div class="flex-1">
-            <div v-if="archivesState.loading" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs text-muted">
-              存档加载中…
+
+          <div class="flex-1 overflow-hidden">
+            <div v-if="!archivesState.data.raw.length"
+              class="flex flex-col items-center justify-center py-16 text-muted opacity-40">
+              <InboxIcon class="mb-3 h-10 w-10" />
+              <span class="text-xs font-bold">暂无原始存档</span>
             </div>
-            <p v-else-if="!archivesState.data.raw.length" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs leading-relaxed text-muted">
-              暂未找到原始数据存档，请先上传或刷新后重试。
-            </p>
-            <div v-else class="flex flex-wrap gap-2">
-              <div
-                v-for="archive in archivesState.data.raw"
-                :key="archive.date"
-                class="group relative inline-flex min-w-0 flex-1 flex-col gap-1.5 rounded-xl border p-0"
-                :class="archiveSelection.mergeDate === archive.date
-                  ? 'border-brand bg-brand-soft/50 text-brand-700'
-                  : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:bg-brand-soft/30'"
-              >
-                <button
-                  type="button"
-                  class="flex-1 rounded-xl px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                  @click="archiveSelection.mergeDate = archive.date"
-                >
-                  <span class="break-words text-sm font-semibold text-primary">{{ archive.date }}</span>
-                  <span class="text-xs leading-snug text-muted">
-                    {{ archive.file_count || 0 }} 文件 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
-                  </span>
-                  <span
-                    v-if="archive.matches_dataset"
-                    class="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
-                  >
-                    匹配当前数据集
-                  </span>
-                </button>
-                <div class="flex border-t border-soft">
-                  <button
-                    type="button"
-                    class="flex-1 rounded-bl-xl px-3 py-1.5 text-xs text-red-600 transition hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                    :disabled="deleteArchiveState.deleting"
-                    @click="confirmDeleteArchive('raw', archive.date)"
-                  >
-                    {{ deleteArchiveState.deleting ? '删除中…' : '删除' }}
-                  </button>
+            <ul v-else class="max-h-[220px] space-y-2 overflow-y-auto pr-1 sidebar-scroll">
+              <li v-for="archive in archivesState.data.raw" :key="archive.date"
+                class="group/item relative flex cursor-pointer flex-col gap-1 rounded-2xl p-4 transition-all"
+                :class="archiveSelection.mergeDate === archive.date ? 'bg-blue-50 ring-1 ring-blue-100' : 'hover:bg-brand-50/30'"
+                @click="archiveSelection.mergeDate = archive.date">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-[13px] font-bold"
+                      :class="archiveSelection.mergeDate === archive.date ? 'text-blue-700' : 'text-primary'">{{
+                        archive.date }}</span>
+                  </div>
+                  <span v-if="archive.matches_dataset"
+                    class="rounded-md bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">ACTIVE</span>
                 </div>
-              </div>
-            </div>
+                <div class="flex items-center gap-3 text-[11px] font-bold opacity-60">
+                  <span class="text-primary">{{ archive.file_count || 0 }} Files</span>
+                  <span class="text-secondary">{{ archive.updated_at?.slice(5, 10).replace('-', '/') }} Update</span>
+                </div>
+                <button type="button"
+                  class="absolute right-3 top-4 rounded-xl bg-white/80 p-1.5 text-muted opacity-0 transition-all hover:bg-rose-50 hover:text-rose-600 group-hover/item:opacity-100"
+                  @click.stop="confirmDeleteArchive('raw', archive.date)">
+                  <TrashIcon class="h-4 w-4" />
+                </button>
+              </li>
+            </ul>
           </div>
         </article>
 
-        <!-- MERGE 输出存档 -->
-        <article class="card-surface flex flex-col space-y-4 p-5 shadow-sm transition hover:shadow-md">
-          <header class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1 space-y-1.5">
-              <p class="text-xs uppercase tracking-[0.2em] text-muted">MERGE</p>
-              <h3 class="text-base font-semibold leading-tight text-primary">Merge 输出存档</h3>
-              <p class="text-xs leading-relaxed text-secondary">选择需要进行 Clean 的 Merge 存档。</p>
+        <!-- MERGE Archive List -->
+        <article
+          class="flex flex-col rounded-3xl bg-white p-3 border border-black/5 hover:border-purple-100 transition-colors">
+          <header class="flex items-center justify-between px-3 py-3 border-b border-black/5 mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-1.5 h-4 bg-purple-500 rounded-full"></div>
+              <span class="text-xs font-bold text-secondary tracking-widest uppercase">Merge Res</span>
             </div>
-            <span class="flex-shrink-0 whitespace-nowrap text-xs font-medium text-muted">
-              {{ archivesState.data.merge.length ? `共 ${archivesState.data.merge.length} 份` : '暂无' }}
-            </span>
+            <span class="rounded-full bg-purple-50 px-2.5 py-0.5 text-[10px] font-bold text-purple-600">{{
+              archivesState.data.merge.length || 0 }}</span>
           </header>
-          <div class="flex-1">
-            <div v-if="archivesState.loading" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs text-muted">
-              存档加载中…
+
+          <div class="flex-1 overflow-hidden">
+            <div v-if="!archivesState.data.merge.length"
+              class="flex flex-col items-center justify-center py-16 text-muted opacity-40">
+              <InboxIcon class="mb-3 h-10 w-10" />
+              <span class="text-xs font-bold">暂无合并存档</span>
             </div>
-            <p v-else-if="!archivesState.data.merge.length" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs leading-relaxed text-muted">
-              暂未找到 Merge 存档，请先执行 Merge。
-            </p>
-            <div v-else class="flex flex-wrap gap-2">
-              <div
-                v-for="archive in archivesState.data.merge"
-                :key="archive.date"
-                class="group relative inline-flex min-w-0 flex-1 flex-col gap-1.5 rounded-xl border p-0"
-                :class="archiveSelection.cleanDate === archive.date
-                  ? 'border-brand bg-brand-soft/50 text-brand-700'
-                  : 'border-soft bg-surface text-secondary hover:border-brand-soft hover:bg-brand-soft/30'"
-              >
-                <button
-                  type="button"
-                  class="flex-1 rounded-xl px-3 py-2.5 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                  @click="archiveSelection.cleanDate = archive.date"
-                >
-                  <span class="break-words text-sm font-semibold text-primary">{{ archive.date }}</span>
-                  <span class="text-xs leading-snug text-muted">
-                    {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
-                  </span>
-                </button>
-                <div class="flex border-t border-soft">
-                  <button
-                    type="button"
-                    class="flex-1 rounded-bl-xl px-3 py-1.5 text-xs text-red-600 transition hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                    :disabled="deleteArchiveState.deleting"
-                    @click="confirmDeleteArchive('merge', archive.date)"
-                  >
-                    {{ deleteArchiveState.deleting ? '删除中…' : '删除' }}
-                  </button>
+            <ul v-else class="max-h-[220px] space-y-2 overflow-y-auto pr-1 sidebar-scroll">
+              <li v-for="archive in archivesState.data.merge" :key="archive.date"
+                class="group/item relative flex cursor-pointer flex-col gap-1 rounded-2xl p-4 transition-all"
+                :class="archiveSelection.cleanDate === archive.date ? 'bg-purple-50 ring-1 ring-purple-100' : 'hover:bg-purple-50/20'"
+                @click="archiveSelection.cleanDate = archive.date">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[13px] font-bold"
+                    :class="archiveSelection.cleanDate === archive.date ? 'text-purple-700' : 'text-primary'">{{
+                      archive.date }}</span>
                 </div>
-              </div>
-            </div>
+                <div class="flex items-center gap-3 text-[11px] font-bold opacity-60">
+                  <span class="text-primary">{{ archive.channels?.length || 0 }} Chans</span>
+                  <span class="text-secondary">{{ archive.updated_at?.slice(5, 10).replace('-', '/') }} Update</span>
+                </div>
+                <button type="button"
+                  class="absolute right-3 top-4 rounded-xl bg-white/80 p-1.5 text-muted opacity-0 transition-all hover:bg-rose-50 hover:text-rose-600 group-hover/item:opacity-100"
+                  @click.stop="confirmDeleteArchive('merge', archive.date)">
+                  <TrashIcon class="h-4 w-4" />
+                </button>
+              </li>
+            </ul>
           </div>
         </article>
 
-        <!-- CLEAN 输出存档 -->
-        <article class="card-surface flex flex-col space-y-4 p-5 shadow-sm transition hover:shadow-md">
-          <header class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1 space-y-1.5">
-              <p class="text-xs uppercase tracking-[0.2em] text-muted">CLEAN</p>
-              <h3 class="text-base font-semibold leading-tight text-primary">Clean 输出存档</h3>
-              <p class="text-xs leading-relaxed text-secondary">供筛选步骤使用，当前页面仅展示概览。</p>
+        <!-- CLEAN Archive List -->
+        <article
+          class="flex flex-col rounded-3xl bg-white p-3 border border-black/5 hover:border-emerald-100 transition-colors">
+          <header class="flex items-center justify-between px-3 py-3 border-b border-black/5 mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-1.5 h-4 bg-emerald-500 rounded-full"></div>
+              <span class="text-xs font-bold text-secondary tracking-widest uppercase">Clean Data</span>
             </div>
-            <span class="flex-shrink-0 whitespace-nowrap text-xs font-medium text-muted">
-              {{ archivesState.data.clean.length ? `共 ${archivesState.data.clean.length} 份` : '暂无' }}
-            </span>
+            <span class="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-600">{{
+              archivesState.data.clean.length || 0 }}</span>
           </header>
-          <div class="flex-1">
-            <div v-if="archivesState.loading" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs text-muted">
-              存档加载中…
+
+          <div class="flex-1 overflow-hidden">
+            <div v-if="!archivesState.data.clean.length"
+              class="flex flex-col items-center justify-center py-16 text-muted opacity-40">
+              <InboxIcon class="mb-3 h-10 w-10" />
+              <span class="text-xs font-bold">暂无清洗完成数据</span>
             </div>
-            <p v-else-if="!archivesState.data.clean.length" class="flex items-center justify-center rounded-xl bg-surface-muted px-4 py-8 text-xs leading-relaxed text-muted">
-              暂未找到 Clean 存档。
-            </p>
-            <div v-else class="flex flex-wrap gap-2">
-              <div
-                v-for="archive in archivesState.data.clean"
-                :key="`clean-${archive.date}`"
-                class="group relative inline-flex min-w-0 flex-1 flex-col gap-1.5 rounded-xl border p-0 border-soft bg-surface hover:border-brand-soft hover:bg-brand-soft/20"
-              >
-                <div class="rounded-xl px-3 py-2.5">
-                  <p class="break-words text-sm font-semibold text-primary">{{ archive.date }}</p>
-                  <p class="mt-1 text-xs leading-snug text-muted">
-                    {{ archive.channels?.length || 0 }} 渠道 · 更新于 {{ archive.updated_at?.slice(0, 19) || '—' }}
-                  </p>
+            <ul v-else class="max-h-[220px] space-y-2 overflow-y-auto pr-1 sidebar-scroll">
+              <li v-for="archive in archivesState.data.clean" :key="`clean-${archive.date}`"
+                class="group/item relative flex flex-col gap-1 rounded-2xl p-4 transition-all hover:bg-brand-50/20">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[13px] font-bold text-primary">{{ archive.date }}</span>
                 </div>
-                <div class="flex border-t border-soft">
-                  <button
-                    type="button"
-                    class="flex-1 rounded-bl-xl px-3 py-1.5 text-xs text-red-600 transition hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                    :disabled="deleteArchiveState.deleting"
-                    @click="confirmDeleteArchive('clean', archive.date)"
-                  >
-                    {{ deleteArchiveState.deleting ? '删除中…' : '删除' }}
-                  </button>
+                <div class="flex items-center gap-3 text-[11px] font-bold opacity-60">
+                  <span class="text-primary">{{ archive.channels?.length || 0 }} Chans</span>
+                  <span class="text-secondary">{{ archive.updated_at?.slice(5, 10).replace('-', '/') }} Update</span>
                 </div>
-              </div>
-            </div>
+                <button type="button"
+                  class="absolute right-3 top-4 rounded-xl bg-white/80 p-1.5 text-muted opacity-0 transition-all hover:bg-rose-50 hover:text-rose-600 group-hover/item:opacity-100"
+                  @click.stop="confirmDeleteArchive('clean', archive.date)">
+                  <TrashIcon class="h-4 w-4" />
+                </button>
+              </li>
+            </ul>
           </div>
         </article>
       </div>
     </section>
 
-    <section class="space-y-5">
-      <div class="card-surface flex flex-wrap items-center justify-between gap-3 p-6">
+    <!-- Pipeline Execution -->
+    <section class="card-surface p-8 space-y-8">
+      <div class="flex flex-wrap items-center justify-between gap-6">
         <div class="space-y-1">
-          <h2 class="text-xl font-semibold text-primary">预处理执行</h2>
-          <p class="text-sm text-secondary">可单独运行每个步骤，或使用一键执行快速完成 Merge 与 Clean。</p>
+          <h2 class="text-lg font-bold text-primary">数据预处理</h2>
+          <p class="text-xs text-secondary">执行合并与清洗流程，生成标准化数据集。</p>
         </div>
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 rounded-full border border-brand-soft px-4 py-2 text-sm font-semibold text-brand-600 transition hover:bg-brand-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="pipeline.running"
-          @click="runPipeline"
-        >
-          <SparklesIcon class="h-4 w-4" />
-          <span>{{ pipeline.running ? '执行中…' : '一键执行' }}</span>
+        <button type="button"
+          class="group relative inline-flex items-center gap-3 rounded-full bg-brand-600 px-10 py-4 text-sm font-bold text-white transition-all hover:bg-brand-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 overflow-hidden"
+          :disabled="pipeline.running" @click="runPipeline">
+          <div v-if="pipeline.running" class="absolute inset-0 bg-brand-500 animate-pulse"></div>
+          <SparklesIcon class="h-5 w-5 relative z-10" />
+          <span class="relative z-10">{{ pipeline.running ? '预处理执行中...' : '一键执行预处理' }}</span>
         </button>
       </div>
 
-      <div class="space-y-5">
-        <article
-          v-for="operation in operations"
-          :key="operation.key"
-          class="card-surface space-y-4 p-6"
-        >
-          <header class="flex items-center gap-3">
-            <span class="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-soft text-brand-600">
-              <component :is="operation.icon" class="h-5 w-5" />
-            </span>
-            <div>
-              <p class="text-xs uppercase tracking-[0.2em] text-muted">{{ operation.subtitle }}</p>
-              <h3 class="text-base font-semibold text-primary">{{ operation.title }}</h3>
-            </div>
-          </header>
-          <p class="text-sm leading-relaxed text-secondary">
-            {{ operation.description }}
-          </p>
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <button
-              type="button"
-              class="btn-base btn-tone-primary px-4 py-1.5"
-              :disabled="statuses[operation.key].running"
-              @click="runOperation(operation.key)"
-            >
-              <span v-if="statuses[operation.key].running">执行中…</span>
-              <span v-else>执行 {{ operation.label }}</span>
-            </button>
-            <p
-              v-if="statuses[operation.key].message"
-              :class="[
-                'text-sm rounded-2xl px-3 py-1.5',
-                statuses[operation.key].success ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-              ]"
-            >
-              {{ statuses[operation.key].message }}
-            </p>
+      <!-- Pipeline Message Widget -->
+      <transition name="fade">
+        <div v-if="pipeline.message" class="rounded-[1.25rem] p-6 border flex items-center gap-4 transition-all" :class="[
+          pipeline.success === true ? 'bg-emerald-50 border-emerald-100 text-emerald-800' :
+            pipeline.success === false ? 'bg-rose-50 border-rose-100 text-rose-800' : 'bg-brand-50/50 border-brand-100/50 text-brand-800'
+        ]">
+          <div class="flex h-10 w-10 items-center justify-center rounded-full bg-white ring-1 ring-black/5">
+            <component
+              :is="pipeline.success ? CheckIcon : pipeline.success === false ? ExclamationCircleIcon : ArrowPathRoundedSquareIcon"
+              class="h-5 w-5" :class="{ 'animate-spin opacity-50': pipeline.running && !pipeline.success }" />
           </div>
-        </article>
-      </div>
+          <span class="text-xs font-bold leading-relaxed">{{ pipeline.message }}</span>
+        </div>
+      </transition>
 
-      <p v-if="pipeline.message" :class="[
-        'rounded-2xl px-4 py-2 text-sm',
-          pipeline.success ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-      ]">
-        {{ pipeline.message }}
-      </p>
+      <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div v-for="(operation, index) in operations" :key="operation.key"
+          class="relative flex flex-col justify-between rounded-[2rem] p-6 transition-all border border-black/5"
+          :class="operation.key === 'merge' ? 'bg-brand-50/10 hover:border-brand-200' : 'bg-accent-50/10 hover:border-accent-200'">
+          <div class="space-y-6">
+            <header class="flex items-center justify-between">
+              <div class="flex items-center gap-4">
+                <div class="flex h-12 w-12 items-center justify-center rounded-[1.25rem] bg-white border border-black/5"
+                  :class="operation.key === 'merge' ? 'text-brand-600' : 'text-accent-600'">
+                  <component :is="operation.icon" class="h-6 w-6" />
+                </div>
+                <div>
+                  <span class="text-[10px] font-bold tracking-[0.2em] opacity-30 uppercase block leading-none mb-1">{{
+                    operation.subtitle }}</span>
+                  <h3 class="text-lg font-bold text-primary leading-none">{{ operation.title }}</h3>
+                </div>
+              </div>
+              <transition name="fade">
+                <div v-if="statuses[operation.key].message"
+                  class="rounded-full bg-white px-3 py-1 text-[10px] font-bold border border-black/5"
+                  :class="statuses[operation.key].success ? 'text-emerald-600 border-emerald-100' : 'text-rose-600 border-rose-100'">
+                  {{ statuses[operation.key].message }}
+                </div>
+              </transition>
+            </header>
+
+            <p class="text-[13px] text-secondary leading-relaxed font-medium">{{ operation.description }}</p>
+          </div>
+
+          <div class="mt-8">
+            <button type="button"
+              class="flex w-full items-center justify-center gap-2.5 rounded-[1.25rem] bg-white border border-black/5 py-3 text-xs font-bold transition-all hover:bg-brand-50 active:scale-95 disabled:opacity-50"
+              :class="operation.key === 'merge' ? 'text-brand-700' : 'text-accent-700'"
+              :disabled="statuses[operation.key].running" @click="runOperation(operation.key)">
+              <component
+                :is="operation.key === 'merge' && statuses[operation.key].running ? ArrowPathIcon : operation.icon"
+                class="h-4 w-4"
+                :class="{ 'animate-spin': statuses[operation.key].running && operation.key === 'merge' }" />
+              <span>{{ statuses[operation.key].running ? '正在处理...' : `独立启动 ${operation.label}` }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <!-- 删除确认对话框 -->
-    <div
-      v-if="deleteArchiveState.deleteConfirm.show"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      @click.self="closeDeleteConfirm"
-    >
-      <div class="mx-4 max-w-md rounded-xl bg-white p-6 shadow-xl">
-        <div class="mb-4">
-          <h3 class="text-lg font-semibold text-red-600">确认删除存档</h3>
-          <p class="mt-2 text-sm text-secondary">
-            您确定要删除 <span class="font-mono font-semibold">{{ deleteArchiveState.deleteConfirm.layer.toUpperCase() }}</span>
-            存档 <span class="font-mono font-semibold">{{ deleteArchiveState.deleteConfirm.date }}</span> 吗？
-          </p>
-          <p v-if="deleteArchiveState.deleteConfirm.error" class="mt-3 text-sm text-red-600">
-            {{ deleteArchiveState.deleteConfirm.error }}
-          </p>
+    <!-- Delete Confirmation -->
+    <div v-if="deleteArchiveState.deleteConfirm.show"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4"
+      @click.self="closeDeleteConfirm">
+      <div class="w-full max-w-sm rounded-[2.5rem] bg-white p-8 space-y-6">
+        <div class="space-y-4 text-center">
+          <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-[1.5rem] bg-rose-50 text-rose-500">
+            <TrashIcon class="h-8 w-8" />
+          </div>
+          <div class="space-y-2">
+            <h3 class="text-lg font-bold text-primary">彻底清理存档?</h3>
+            <p class="text-xs text-secondary font-medium leading-relaxed">
+              您正在从系统中永久移除 <span class="text-rose-600 font-bold">{{ deleteArchiveState.deleteConfirm.layer.toUpperCase()
+                }}</span> 存档
+              <br>
+              <span class="font-mono bg-surface-muted px-2 py-1 rounded-md text-[13px] mt-1 inline-block">{{
+                deleteArchiveState.deleteConfirm.date }}</span>
+            </p>
+          </div>
+          <div class="rounded-2xl bg-rose-50/50 p-4 text-[11px] font-bold text-rose-700 border border-rose-100/50">
+            这是一次破坏性操作，对应的物理文件与数据库引用都将被抹除。
+          </div>
         </div>
 
-        <div class="mb-4 rounded-lg bg-amber-50 p-3">
-          <p class="text-sm text-amber-800">
-            <strong>警告：</strong>此操作不可撤销，删除后将无法恢复。
-          </p>
-        </div>
-
-        <div class="flex justify-end gap-3">
-          <button
-            type="button"
-            class="rounded-lg border border-soft px-4 py-2 text-sm font-medium text-secondary transition hover:bg-surface disabled:opacity-60"
-            :disabled="deleteArchiveState.deleting"
-            @click="closeDeleteConfirm"
-          >
-            取消
+        <div class="grid grid-cols-2 gap-3">
+          <button type="button"
+            class="rounded-full bg-surface-muted py-4 text-sm font-bold text-secondary transition hover:bg-gray-200 active:scale-95"
+            :disabled="deleteArchiveState.deleting" @click="closeDeleteConfirm">
+            返回
           </button>
-          <button
-            type="button"
-            class="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-60"
-            :disabled="deleteArchiveState.deleting"
-            @click="executeDeleteArchive"
-          >
-            {{ deleteArchiveState.deleting ? '删除中…' : '确认删除' }}
+          <button type="button"
+            class="rounded-full bg-rose-600 py-4 text-sm font-bold text-white transition hover:bg-rose-700 active:scale-95"
+            :disabled="deleteArchiveState.deleting" @click="executeDeleteArchive">
+            {{ deleteArchiveState.deleting ? '清理中' : '执行删除' }}
           </button>
         </div>
+        <p v-if="deleteArchiveState.deleteConfirm.error" class="text-center text-[11px] text-rose-600 font-bold">
+          {{ deleteArchiveState.deleteConfirm.error }}
+        </p>
       </div>
     </div>
   </div>
@@ -457,9 +425,18 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useApiBase } from '../../composables/useApiBase'
 import {
   FunnelIcon,
-  ArrowPathRoundedSquareIcon,
+  ArrowPathIcon,
+  ArchiveBoxIcon,
+  DocumentDuplicateIcon,
+  QueueListIcon,
+  SparklesIcon,
   TrashIcon,
-  SparklesIcon
+  ExclamationCircleIcon,
+  CheckIcon,
+  InboxIcon,
+  ArrowPathRoundedSquareIcon,
+  ChevronDownIcon,
+  ClockIcon
 } from '@heroicons/vue/24/outline'
 import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
 
@@ -497,18 +474,18 @@ const operations = [
   {
     key: 'merge',
     label: 'Merge',
-    title: '合并 Merge',
+    title: '合并整合 Merge',
     subtitle: 'Step 01',
-    description: '整合 TRS 导出的多份原始 Excel，生成标准化的主题数据表。',
+    description: '整合多份原始 Excel，统一字段标准，生成完整主题数据集。',
     path: '/merge',
     icon: ArrowPathRoundedSquareIcon
   },
   {
     key: 'clean',
     label: 'Clean',
-    title: '清洗 Clean',
+    title: '数据清洗 Clean',
     subtitle: 'Step 02',
-    description: '执行数据清洗，补齐字段与格式，移除重复与异常值，为下一步筛选做好准备。',
+    description: '补齐元数据，标准化字段格式，剔除重复与空值项。',
     path: '/clean',
     icon: TrashIcon
   }
@@ -593,15 +570,6 @@ const rawArchiveOptions = computed(() => {
       const date = typeof archive.date === 'string' ? archive.date : ''
       if (!date) return null
       const parts = [date]
-      const fileCount = typeof archive.file_count === 'number' ? archive.file_count : null
-      const updated = typeof archive.updated_at === 'string' ? archive.updated_at.slice(0, 16) : ''
-      const meta = []
-      if (fileCount) meta.push(`${fileCount} 文件`)
-      if (archive.matches_dataset) meta.push('匹配当前数据集')
-      if (updated) meta.push(`更新于 ${updated}`)
-      if (meta.length) {
-        parts.push(meta.join(' · '))
-      }
       return {
         value: date,
         label: parts.join(' · ')
@@ -618,13 +586,7 @@ const mergeArchiveOptions = computed(() => {
       if (!date) return null
       const parts = [date]
       const channelCount = Array.isArray(archive.channels) ? archive.channels.length : null
-      const updated = typeof archive.updated_at === 'string' ? archive.updated_at.slice(0, 16) : ''
-      const meta = []
-      if (channelCount) meta.push(`${channelCount} 渠道`)
-      if (updated) meta.push(`更新于 ${updated}`)
-      if (meta.length) {
-        parts.push(meta.join(' · '))
-      }
+      if (channelCount) parts.push(`${channelCount} 渠道`)
       return {
         value: date,
         label: parts.join(' · ')
@@ -633,11 +595,6 @@ const mergeArchiveOptions = computed(() => {
     .filter(Boolean)
 })
 
-const describeDataset = (datasetId) => {
-  if (!datasetId) return '未指定'
-  const found = datasets.value.find((item) => item.id === datasetId)
-  return found?.display_name || datasetId
-}
 const formatDateKey = (value) => {
   if (!value) return ''
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -669,6 +626,15 @@ const formatTimestamp = (value) => {
     return datasetTimestampFormatter.format(dateObj)
   } catch (error) {
     return value
+  }
+}
+
+const toggleDatasetSelection = (id) => {
+  const index = selectedDatasetIds.value.indexOf(id)
+  if (index === -1) {
+    selectedDatasetIds.value.push(id)
+  } else {
+    selectedDatasetIds.value.splice(index, 1)
   }
 }
 
@@ -738,16 +704,8 @@ const refreshDatasets = () => {
 const resetArchivesState = () => {
   archivesState.loading = false
   archivesState.error = ''
-  archivesState.data = {
-    raw: [],
-    merge: [],
-    clean: []
-  }
-  archivesState.latest = {
-    raw: '',
-    merge: '',
-    clean: ''
-  }
+  archivesState.data = { raw: [], merge: [], clean: [] }
+  archivesState.latest = { raw: '', merge: '', clean: '' }
   archivesState.lastProject = ''
   archivesState.lastDataset = ''
   archiveSelection.mergeDate = ''
@@ -757,7 +715,7 @@ const resetArchivesState = () => {
 const syncArchiveSelection = () => {
   const rawArchives = Array.isArray(archivesState.data.raw) ? archivesState.data.raw : []
   if (!rawArchives.length) {
-    // 没有历史 RAW 存档时保留用户手动输入的日期
+    // skip
   } else if (!rawArchives.some((item) => item.date === archiveSelection.mergeDate)) {
     const match = rawArchives.find((item) => item.matches_dataset)
     archiveSelection.mergeDate = (match && match.date) || rawArchives[0]?.date || ''
@@ -798,49 +756,173 @@ const fetchProjectArchives = async ({ force = false } = {}) => {
     const response = await fetch(endpoint)
     const result = await response.json()
     if (!response.ok || result.status !== 'ok') {
-      throw new Error(result.message || '无法获取存档信息')
+      throw new Error(result.message || '无法加载存档列表')
     }
-    const records = result.archives || {}
+    const { data } = result
     archivesState.data = {
-      raw: Array.isArray(records.raw) ? records.raw : [],
-      merge: Array.isArray(records.merge) ? records.merge : [],
-      clean: Array.isArray(records.clean) ? records.clean : []
+      raw: Array.isArray(data.raw) ? data.raw : [],
+      merge: Array.isArray(data.merge) ? data.merge : [],
+      clean: Array.isArray(data.clean) ? data.clean : []
     }
-    const latest = result.latest || {}
     archivesState.latest = {
-      raw: latest.raw || '',
-      merge: latest.merge || '',
-      clean: latest.clean || ''
+      raw: data.latest?.raw || '',
+      merge: data.latest?.merge || '',
+      clean: data.latest?.clean || ''
     }
     archivesState.lastProject = projectName
     archivesState.lastDataset = datasetId
     syncArchiveSelection()
   } catch (err) {
-    archivesState.error = err instanceof Error ? err.message : '无法获取存档信息'
-    archivesState.data = {
-      raw: [],
-      merge: [],
-      clean: []
-    }
-    archivesState.latest = {
-      raw: '',
-      merge: '',
-      clean: ''
-    }
-    archivesState.lastProject = ''
-    archivesState.lastDataset = ''
-    archiveSelection.mergeDate = ''
-    archiveSelection.cleanDate = ''
+    archivesState.error = err instanceof Error ? err.message : '无法加载存档列表'
+    archivesState.data = { raw: [], merge: [], clean: [] }
+    archivesState.latest = { raw: '', merge: '', clean: '' }
   } finally {
     archivesState.loading = false
+  }
+}
+
+const runOperation = async (operationKey) => {
+  if (statuses[operationKey].running || pipeline.running) return
+  if (!currentProjectName.value) {
+    parameterError.value = '请先选择项目'
+    return
+  }
+  if (!archiveSelection.mergeDate) {
+    parameterError.value = '请指定 Merge 存档日期'
+    return
+  }
+  parameterError.value = ''
+
+  statuses[operationKey].running = true
+  statuses[operationKey].success = null
+  statuses[operationKey].message = ''
+
+  const operation = operations.find((op) => op.key === operationKey)
+  if (!operation) return
+
+  try {
+    const payload = {
+      project_name: currentProjectName.value,
+      merge_date: archiveSelection.mergeDate,
+      clean_date: archiveSelection.cleanDate || undefined,
+      dataset_ids: selectedDatasetIds.value
+    }
+
+    const endpoint = await buildApiUrl(operation.path)
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    const result = await response.json()
+    const ok = response.ok && result.status === 'ok'
+
+    statuses[operationKey].success = ok
+    statuses[operationKey].message = ok ? '任务已下达' : result.message || '操作失败'
+    if (ok) {
+      fetchProjectArchives({ force: true })
+    }
+  } catch (err) {
+    statuses[operationKey].success = false
+    statuses[operationKey].message = err instanceof Error ? err.message : '网络请求失败'
+  } finally {
+    statuses[operationKey].running = false
+  }
+}
+
+const runPipeline = async () => {
+  if (pipeline.running) return
+  if (!currentProjectName.value) {
+    parameterError.value = '请先选择项目'
+    return
+  }
+  if (!archiveSelection.mergeDate) {
+    parameterError.value = '请指定 Merge 存档日期'
+    return
+  }
+  parameterError.value = ''
+  pipeline.running = true
+  pipeline.success = null
+  pipeline.message = '数据工厂管道初始化中...'
+
+  for (const opKey of Object.keys(statuses)) {
+    statuses[opKey].running = false
+    statuses[opKey].success = null
+    statuses[opKey].message = ''
+  }
+
+  try {
+    pipeline.message = '正在执行合并 (Merge) 步骤...'
+    statuses.merge.running = true
+    await runOperation('merge')
+    if (!statuses.merge.success) {
+      throw new Error(`Merge 失败: ${statuses.merge.message}`)
+    }
+
+    await new Promise(r => setTimeout(r, 1000))
+
+    pipeline.message = '正在执行清洗 (Clean) 步骤...'
+    statuses.clean.running = true
+    await runOperation('clean')
+    if (!statuses.clean.success) {
+      throw new Error(`Clean 失败: ${statuses.clean.message}`)
+    }
+
+    pipeline.success = true
+    pipeline.message = '预处理全链路执行完毕'
+  } catch (err) {
+    pipeline.success = false
+    pipeline.message = err instanceof Error ? err.message : '执行过程发生未知中断'
+  } finally {
+    pipeline.running = false
+    statuses.merge.running = false
+    statuses.clean.running = false
   }
 }
 
 const useMergeDateSuggestion = () => {
   if (mergeDateSuggestion.value) {
     archiveSelection.mergeDate = mergeDateSuggestion.value
-  } else if (!archiveSelection.mergeDate) {
-    archiveSelection.mergeDate = formatDateKey(new Date())
+  }
+}
+
+const confirmDeleteArchive = (layer, date) => {
+  if (!layer || !date) return
+  deleteArchiveState.deleteConfirm = {
+    show: true,
+    layer,
+    date,
+    error: ''
+  }
+}
+
+const closeDeleteConfirm = () => {
+  deleteArchiveState.deleteConfirm = { show: false, layer: '', date: '', error: '' }
+}
+
+const executeDeleteArchive = async () => {
+  const { layer, date } = deleteArchiveState.deleteConfirm
+  const projectName = currentProjectName.value
+  if (!layer || !date || !projectName) return
+
+  deleteArchiveState.deleting = true
+  deleteArchiveState.deleteConfirm.error = ''
+
+  try {
+    const endpoint = await buildApiUrl(`/archives/${encodeURIComponent(projectName)}/${layer}/${date}`)
+    const response = await fetch(endpoint, {
+      method: 'DELETE'
+    })
+    const result = await response.json()
+    if (!response.ok || result.status !== 'ok') {
+      throw new Error(result.message || '删除请求被拒绝')
+    }
+    closeDeleteConfirm()
+    fetchProjectArchives({ force: true })
+  } catch (err) {
+    deleteArchiveState.deleteConfirm.error = err instanceof Error ? err.message : '连接异常'
+  } finally {
+    deleteArchiveState.deleting = false
   }
 }
 
@@ -848,300 +930,41 @@ onMounted(() => {
   loadProjects()
 })
 
-watch(
-  currentProjectName,
-  (projectName) => {
+watch(selectedProjectName, (newVal) => {
+  if (newVal) {
+    fetchProjectDatasets(newVal)
+  } else {
     resetDatasetState()
-    if (!projectName) return
-    fetchProjectDatasets(projectName, { force: true })
-  },
-  { immediate: true }
-)
-
-watch(
-  archiveDatasetId,
-  () => {
-    fetchProjectArchives({ force: true })
-  },
-  { immediate: false }
-)
-
-watch(
-  () => mergeDateSuggestion.value,
-  (suggestion) => {
-    if (!rawArchiveOptions.value.length && suggestion && !archiveSelection.mergeDate) {
-      archiveSelection.mergeDate = suggestion
-    }
   }
-)
-
-const ensureParameters = (stageKey) => {
-  const projectName = currentProjectName.value ? currentProjectName.value.trim() : ''
-  if (!projectName) {
-    parameterError.value = '请先选择项目'
-    return false
-  }
-  if (datasetOptions.value.length && !selectedDatasetIds.value.length) {
-    parameterError.value = '请选择需要处理的数据集'
-    return false
-  }
-  if ((stageKey === 'merge' || stageKey === 'pipeline') && !archiveSelection.mergeDate) {
-    parameterError.value = '请填写需要 Merge 的处理日期'
-    return false
-  }
-  if (stageKey === 'clean' && !archiveSelection.cleanDate) {
-    parameterError.value = '请选择需要 Clean 的 Merge 存档日期'
-    return false
-  }
-  parameterError.value = ''
-  return true
-}
-
-const resolveOperationDate = (key) => {
-  if (key === 'clean') {
-    return archiveSelection.cleanDate
-  }
-  return archiveSelection.mergeDate
-}
-
-const runOperation = async (key) => {
-  if (!ensureParameters(key)) return
-  const operation = operations.find((item) => item.key === key)
-  if (!operation) return
-
-  const state = statuses[key]
-  state.running = true
-  state.message = ''
-  state.success = null
-
-  try {
-    const projectName = currentProjectName.value ? currentProjectName.value.trim() : ''
-    const operationDate = resolveOperationDate(key)
-    const datasetBatch = selectedDatasetIds.value.length ? [...selectedDatasetIds.value] : [null]
-    const failures = []
-    let successCount = 0
-
-    for (const datasetId of datasetBatch) {
-      const payload = {
-        topic: projectName,
-        date: operationDate
-      }
-      if (projectName) {
-        payload.project = projectName
-      }
-      if (datasetId) {
-        payload.dataset_id = datasetId
-      }
-      const endpoint = await buildApiUrl(operation.path)
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      })
-      const result = await response.json()
-      const ok = response.ok && result.status !== 'error'
-      if (ok) {
-        successCount += 1
-      } else {
-        failures.push({
-          datasetId,
-          message: result.message || `${operation.label} 执行失败`
-        })
-      }
-    }
-
-    if (!failures.length) {
-      state.success = true
-      state.message =
-        datasetBatch.length > 1
-          ? `${operation.label} 已完成 ${datasetBatch.length} 个数据集`
-          : `${operation.label} 执行成功`
-      fetchProjectArchives({ force: true })
-    } else {
-      state.success = false
-      const failedNames = failures.map((failure) => describeDataset(failure.datasetId)).join('、')
-      const errorReason = failures[0]?.message || `${operation.label} 执行失败`
-      state.message =
-        successCount > 0
-          ? `${operation.label} 已完成 ${successCount}/${datasetBatch.length}，失败：${errorReason}（${failedNames}）`
-          : `${operation.label} 执行失败：${errorReason}（${failedNames}）`
-    }
-  } catch (err) {
-    state.success = false
-    state.message = err instanceof Error ? err.message : `${operation.label} 执行失败`
-  } finally {
-    state.running = false
-  }
-}
-
-const runPipeline = async () => {
-  if (!ensureParameters('pipeline')) return
-  pipeline.running = true
-  pipeline.message = ''
-  pipeline.success = null
-
-  try {
-    const projectName = currentProjectName.value ? currentProjectName.value.trim() : ''
-    const operationDate = archiveSelection.mergeDate
-    const datasetBatch = selectedDatasetIds.value.length ? [...selectedDatasetIds.value] : [null]
-    const failures = []
-    let successCount = 0
-
-    for (const datasetId of datasetBatch) {
-      const payload = {
-        topic: projectName,
-        date: operationDate
-      }
-      if (projectName) {
-        payload.project = projectName
-      }
-      if (datasetId) {
-        payload.dataset_id = datasetId
-      }
-      const endpoint = await buildApiUrl('/pipeline')
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      })
-      const result = await response.json()
-      const ok = response.ok && result.status !== 'error'
-      if (ok) {
-        successCount += 1
-      } else {
-        failures.push({
-          datasetId,
-          message: result.message || 'Pipeline 执行失败'
-        })
-      }
-    }
-
-    if (!failures.length) {
-      pipeline.success = true
-      pipeline.message =
-        datasetBatch.length > 1
-          ? `Pipeline 已完成 ${datasetBatch.length} 个数据集`
-          : 'Pipeline 执行成功，Merge 与 Clean 均已完成。'
-      fetchProjectArchives({ force: true })
-    } else {
-      pipeline.success = false
-      const failedNames = failures.map((failure) => describeDataset(failure.datasetId)).join('、')
-      const errorReason = failures[0]?.message || 'Pipeline 执行失败'
-      pipeline.message =
-        successCount > 0
-          ? `Pipeline 已完成 ${successCount}/${datasetBatch.length}，失败：${errorReason}（${failedNames}）`
-          : `${errorReason}（${failedNames}）`
-    }
-  } catch (err) {
-    pipeline.success = false
-    pipeline.message = err instanceof Error ? err.message : 'Pipeline 执行失败'
-  } finally {
-    pipeline.running = false
-  }
-}
-
-// 删除存档相关方法
-const confirmDeleteArchive = (layer, date) => {
-  deleteArchiveState.deleteConfirm.show = true
-  deleteArchiveState.deleteConfirm.layer = layer
-  deleteArchiveState.deleteConfirm.date = date
-  deleteArchiveState.deleteConfirm.error = ''
-}
-
-const closeDeleteConfirm = () => {
-  deleteArchiveState.deleteConfirm.show = false
-  deleteArchiveState.deleteConfirm.layer = ''
-  deleteArchiveState.deleteConfirm.date = ''
-  deleteArchiveState.deleteConfirm.error = ''
-}
-
-const executeDeleteArchive = async () => {
-  if (!currentProjectName.value) {
-    deleteArchiveState.deleteConfirm.error = '项目名称未设置'
-    return
-  }
-
-  const { layer, date } = deleteArchiveState.deleteConfirm
-  deleteArchiveState.deleting = true
-  deleteArchiveState.deleteConfirm.error = ''
-
-  try {
-    const projectName = currentProjectName.value.trim()
-    const baseUrl = await ensureApiBase()
-
-    // 构建删除URL
-    let url = `${baseUrl}/projects/${encodeURIComponent(projectName)}/archives/${layer}/${date}`
-
-    // 如果选择了数��集，添加dataset_id参数
-    if (archiveDatasetId.value) {
-      url += `?dataset_id=${encodeURIComponent(archiveDatasetId.value)}`
-    }
-
-    const response = await fetch(url, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    })
-
-    const result = await response.json()
-
-    if (response.ok && result.status === 'ok') {
-      // 删除成功
-      closeDeleteConfirm()
-
-      // 清空相关选择
-      if (layer === 'raw' && archiveSelection.mergeDate === date) {
-        archiveSelection.mergeDate = ''
-      } else if (layer === 'merge' && archiveSelection.cleanDate === date) {
-        archiveSelection.cleanDate = ''
-      }
-
-      // 刷新存档列表
-      await fetchProjectArchives({ force: true })
-
-      // 显示成功消息
-      const deletedCount = result.deleted_count || 0
-      const deletedSize = result.deleted_size || 0
-      const sizeText = deletedSize > 0 ? ` (${formatFileSize(deletedSize)})` : ''
-
-      // 临时显示成功消息
-      parameterError.value = `成功删除 ${layer.toUpperCase()} 存档 (${date})，共 ${deletedCount} 个文件${sizeText}`
-      setTimeout(() => {
-        parameterError.value = ''
-      }, 3000)
-
-    } else {
-      // 删除失败
-      let errorMessage = result.message || `删除 ${layer.toUpperCase()} 存档失败`
-
-      // 处理依赖关系错误
-      if (result.dependent_layers && result.dependent_layers.length > 0) {
-        const dependencies = result.dependent_layers.map((dep) =>
-          `${dep.layer.toUpperCase()}(${dep.date})`
-        ).join(', ')
-        errorMessage += `。依赖关系：${dependencies}`
-      }
-
-      deleteArchiveState.deleteConfirm.error = errorMessage
-    }
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : '删除存档时发生未知错误'
-    deleteArchiveState.deleteConfirm.error = errorMessage
-  } finally {
-    deleteArchiveState.deleting = false
-  }
-}
-
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
-}
+})
 </script>
+
+<style scoped>
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 10px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
+}
+</style>

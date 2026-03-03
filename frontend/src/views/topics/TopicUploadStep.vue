@@ -1,408 +1,243 @@
 <template>
   <div class="space-y-10">
-    <header class="flex flex-wrap items-center justify-between gap-3">
+    <header class="flex flex-wrap items-center justify-between gap-4">
       <div class="space-y-1">
-        <h1 class="text-2xl font-semibold text-primary">上传原始数据</h1>
-        <p class="text-sm text-secondary">创建专题并上传 Excel/CSV 文件，生成标准化存档。</p>
+        <h1 class="text-xl font-bold tracking-tight text-primary">上传原始数据</h1>
+        <p class="text-sm text-secondary">创建专题并上传 Excel/CSV 文件，系统将自动生成标准化存档。</p>
       </div>
-      <div class="flex items-center gap-2 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600">
-        <CloudArrowUpIcon class="h-4 w-4" />
-        <span>步骤 1 · 上传</span>
+      <div
+        class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-4 py-1.5 text-sm font-semibold text-brand-700 ring-1 ring-brand-200/50">
+        <CloudArrowUpIcon class="h-5 w-5" />
+        <span>Step 1 · Upload</span>
       </div>
     </header>
 
-    <section class="card-surface space-y-6 p-6 lg:mx-auto lg:max-w-5xl xl:mx-0 xl:max-w-none">
-      <header class="space-y-2">
-        <h2 class="text-xl font-semibold text-primary">创建专题</h2>
-        <p class="text-sm text-secondary">填写专题名称后创建记录，系统将用于跟踪后续流程。</p>
-      </header>
-      <form
-        class="grid gap-4 sm:grid-cols-[minmax(0,320px)] lg:grid-cols-[minmax(0,420px),minmax(0,340px)] xl:grid-cols-[minmax(0,3fr),minmax(0,2fr)]"
-        @submit.prevent="createTopic"
-      >
-        <div class="space-y-4">
-          <label class="space-y-1 text-sm">
-            <span class="font-medium text-secondary">专题名称</span>
-            <input
-              v-model.trim="topicName"
-              type="text"
-              required
-              class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              placeholder="例如：2024-两会舆情"
-            />
-          </label>
-          <label class="space-y-1 text-sm">
-            <span class="font-medium text-secondary">专题说明（可选）</span>
-            <textarea
-              v-model.trim="topicDescription"
-              rows="3"
-              class="w-full rounded-2xl border border-soft px-4 py-2 text-sm shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200 resize-none"
-              :placeholder="selectedTags.length ? '补充专题背景、抓取渠道等信息，将自动附加在标签前缀之后。' : '补充专题背景、抓取渠道等信息。'"
-            ></textarea>
-          </label>
-          <div class="space-y-2 rounded-xl border border-dashed border-soft bg-surface px-3.5 py-3 text-xs text-secondary">
-            <div class="flex items-center gap-2 text-[13px] font-medium text-secondary">
-              <TagIcon class="h-4 w-4 text-brand-500" />
-              推荐标签
+    <div class="grid gap-8 xl:grid-cols-[1fr,minmax(320px,1fr)]">
+      <!-- Left Column: Create Topic Form -->
+      <section class="card-surface p-8 flex flex-col gap-6">
+        <header class="space-y-2">
+          <h2 class="text-lg font-bold text-primary">创建专题</h2>
+          <p class="text-xs text-secondary">
+            填写专题信息以建立档案，后续数据将自动归档至此专题下。
+          </p>
+        </header>
+
+        <form @submit.prevent="createTopic" class="flex flex-col gap-6 flex-1">
+          <div class="space-y-5">
+            <div class="space-y-2">
+              <label class="text-sm font-bold text-primary ml-1">专题名称</label>
+              <input v-model.trim="topicName" type="text" required
+                class="w-full rounded-2xl border-0 bg-base-soft px-5 py-4 text-sm ring-1 ring-inset ring-black/5 transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+                placeholder="例如：2024-两会舆情专项" />
             </div>
-            <p class="text-xs text-muted">点击快速补充专题说明，可多选。</p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="tag in suggestedTags"
-                :key="tag"
-                type="button"
-                class="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-brand-200"
-                :class="selectedTags.includes(tag)
-                  ? 'border-brand bg-brand-soft text-brand-700 shadow-sm'
-                  : 'border-soft bg-white text-secondary hover:border-brand-soft hover:text-brand-600'"
-                @click="toggleTag(tag)"
-              >
-                <span>{{ tag }}</span>
-              </button>
+
+            <div class="space-y-2">
+              <label class="text-sm font-bold text-primary ml-1">专题说明</label>
+              <textarea v-model.trim="topicDescription" rows="4"
+                class="w-full resize-none rounded-2xl border-0 bg-base-soft px-5 py-4 text-sm ring-1 ring-inset ring-black/5 transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+                :placeholder="selectedTags.length ? '补充更多背景信息...' : '简要描述专题背景、抓取渠道等信息...'"></textarea>
             </div>
-            <div v-if="selectedTags.length" class="space-y-1 rounded-xl bg-surface px-3 py-2 text-xs text-secondary">
-              <p class="font-semibold text-primary">已选标签</p>
-              <p class="text-muted">{{ selectedTags.join(' · ') }}</p>
+
+            <div class="space-y-3 rounded-3xl bg-surface-variant/50 p-5">
+              <div class="flex items-center gap-2 text-sm font-bold text-primary">
+                <TagIcon class="h-4 w-4 text-brand-500" />
+                <span>快速标签</span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button v-for="tag in suggestedTags" :key="tag" type="button"
+                  class="inline-flex items-center rounded-full px-4 py-1.5 text-xs font-medium transition-all active:scale-95"
+                  :class="selectedTags.includes(tag)
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-white text-secondary ring-1 ring-black/5 hover:bg-gray-50'" @click="toggleTag(tag)">
+                  {{ tag }}
+                </button>
+              </div>
+              <div v-if="selectedTags.length" class="pt-2 text-xs text-secondary pl-1">
+                已选：<span class="font-medium text-primary">{{ selectedTags.join(' · ') }}</span>
+              </div>
             </div>
           </div>
-          <div class="flex items-center justify-end pt-2">
-            <button
-              type="submit"
-              class="btn-base btn-tone-primary inline-flex items-center gap-2 px-5 py-2"
-              :disabled="creating || !topicName"
-            >
-              <span v-if="creating">创建中…</span>
+
+          <div class="mt-auto flex items-center justify-end pt-4">
+            <div class="mr-auto text-xs text-rose-500 font-medium" v-if="createError">{{ createError }}</div>
+            <div class="mr-auto text-xs text-emerald-600 font-medium" v-if="createSuccess">{{ createSuccess }}</div>
+            <button type="submit"
+              class="inline-flex items-center gap-2 rounded-full bg-brand-600 px-8 py-3 text-sm font-bold text-white transition-all hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="creating || !topicName">
+              <span v-if="creating"
+                class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></span>
               <span v-else>创建专题</span>
             </button>
           </div>
-        </div>
-        <aside
-          class="rounded-xl border border-soft bg-surface px-4 py-3 text-xs leading-relaxed text-secondary lg:max-w-sm xl:max-w-none"
-        >
-          <h3 class="mb-2 text-xs font-medium text-secondary">填写说明</h3>
-          <ul class="list-disc list-inside space-y-1.5 text-xs text-muted">
-            <li>专题名称将作为后续 API 调用的参数，建议使用字母、数字与短横线组合。</li>
-            <li>可先创建专题再上传数据，也可直接上传，系统会在需要时自动创建专题。</li>
-            <li>描述信息用于团队协作记录，可随时在设置中更新。</li>
-          </ul>
-        </aside>
-      </form>
-      <p
-        v-if="createError"
-        class="mt-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-600"
-      >
-        {{ createError }}
-      </p>
-      <p
-        v-if="createSuccess"
-        class="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2 text-xs text-emerald-600"
-      >
-        {{ createSuccess }}
-      </p>
-    </section>
+        </form>
+      </section>
 
-    <section class="card-surface space-y-6 p-6">
-      <header class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-xl font-semibold text-primary">上传原始表格</h2>
-          <p class="text-sm text-secondary">
-            支持 .xlsx、.xls、.csv 文件。
-          </p>
-        </div>
-        <span v-if="topicName" class="badge-soft rounded-full px-3 py-1 text-xs font-semibold text-secondary">
-          当前专题：{{ topicName }}
-        </span>
-      </header>
-
-      <template v-if="canUpload">
-        <form class="space-y-5" @submit.prevent="uploadDataset">
-          <div
-            class="flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-brand-soft bg-surface-muted px-6 text-center text-sm text-secondary transition hover:border-brand hover:bg-brand-soft hover:text-brand-600"
-            :class="{ 'border-brand bg-surface text-brand-600 shadow-inner': uploadFiles.length || dragActive }"
-            @dragenter.prevent="handleDragEnter"
-            @dragover.prevent="handleDragOver"
-            @dragleave.prevent="handleDragLeave"
-            @drop.prevent="handleDrop"
-          >
-            <input
-              ref="fileInput"
-              type="file"
-              class="hidden"
-              accept=".xlsx,.xls,.csv,.jsonl"
-              multiple
-              @change="handleFileChange"
-            />
-            <button type="button" class="flex flex-col items-center gap-2 text-sm" @click="fileInput?.click()">
-              <DocumentArrowUpIcon class="h-10 w-10 text-slate-300" />
-              <span class="font-medium">
-                {{ uploadFiles.length ? selectedFileSummary : '点击或拖拽文件到此处' }}
-              </span>
-              <span class="text-xs text-slate-400">
-                {{ uploadFiles.length ? `已选择 ${uploadFiles.length} 个文件` : '最大 50MB/单文件 · 支持拖拽、批量选择' }}
-              </span>
-            </button>
+      <!-- Right Column: Upload Area -->
+      <section class="card-surface p-8 flex flex-col gap-6">
+        <header class="flex items-center justify-between">
+          <div class="space-y-1">
+            <h2 class="text-lg font-bold text-primary">上传文件</h2>
+            <p class="text-xs text-secondary">
+              支持 .xlsx, .xls, .csv
+            </p>
           </div>
-          <div
-            v-if="uploadFiles.length"
-            class="space-y-2 rounded-2xl border border-soft bg-white/80 px-4 py-3 text-xs text-secondary shadow-sm"
-          >
-            <div class="flex items-center justify-between">
-              <span class="font-semibold text-primary">待上传文件</span>
-              <button
-                type="button"
-                class="text-rose-600 transition hover:text-rose-500"
-                @click="clearSelectedFiles()"
-              >
-                清空
+          <div v-if="topicName"
+            class="hidden sm:inline-flex items-center rounded-full bg-base-soft px-3 py-1 text-xs font-medium text-secondary">
+            当前：{{ topicName }}
+          </div>
+        </header>
+
+        <template v-if="canUpload">
+          <form class="flex-1 flex flex-col gap-6" @submit.prevent="uploadDataset">
+            <!-- Drop Zone -->
+            <div
+              class="relative flex min-h-[240px] cursor-pointer flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed transition-all duration-300"
+              :class="[
+                uploadFiles.length || dragActive
+                  ? 'border-brand-400 bg-brand-50/50'
+                  : 'border-gray-200 bg-base-soft/50 hover:border-brand-300 hover:bg-base-soft'
+              ]" @dragenter.prevent="handleDragEnter" @dragover.prevent="handleDragOver"
+              @dragleave.prevent="handleDragLeave" @drop.prevent="handleDrop" @click="fileInput?.click()">
+              <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.xls,.csv,.jsonl" multiple
+                @change="handleFileChange" />
+
+              <div class="rounded-full bg-white p-4 ring-1 ring-black/5 transition-transform duration-300"
+                :class="{ 'scale-110': dragActive }">
+                <DocumentArrowUpIcon class="h-8 w-8 text-brand-500" />
+              </div>
+
+              <div class="text-center space-y-1">
+                <p class="text-sm font-semibold text-primary">
+                  {{ uploadFiles.length ? `已选择 ${uploadFiles.length} 个文件` : '点击选择或拖拽上传' }}
+                </p>
+                <p class="text-[11px] text-muted">
+                  {{ uploadFiles.length ? '再次点击可继续添加' : '单文件最大 50MB · 支持批量上传' }}
+                </p>
+              </div>
+            </div>
+
+            <!-- File List Pills -->
+            <div v-if="uploadFiles.length" class="flex flex-wrap gap-2">
+              <div v-for="(file, index) in uploadFiles" :key="`${file.name}-${index}`"
+                class="inline-flex items-center gap-2 rounded-full border border-gray-100 bg-white pl-4 pr-2 py-1.5 text-sm transition hover:scale-105">
+                <span class="max-w-[150px] truncate text-secondary font-medium">{{ file.name }}</span>
+                <button type="button"
+                  class="rounded-full p-1 text-muted hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                  @click.stop="removeSelectedFile(index)">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+                    <path
+                      d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                  </svg>
+                </button>
+              </div>
+              <button v-if="uploadFiles.length > 0" type="button"
+                class="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 transition-colors"
+                @click.stop="clearSelectedFiles">
+                清空全部
               </button>
             </div>
-            <ul class="space-y-1 text-sm text-primary">
-              <li
-                v-for="(file, index) in uploadFiles"
-                :key="`${file.name}-${file.lastModified}-${index}`"
-                class="flex items-center justify-between gap-2 rounded-xl bg-surface-muted px-3 py-2 text-xs text-secondary"
-              >
-                <span class="truncate text-sm text-primary">{{ file.name }}</span>
-                <button
-                  type="button"
-                  class="text-rose-600 transition hover:text-rose-500"
-                  @click="removeSelectedFile(index)"
-                >
-                  移除
-                </button>
-              </li>
-            </ul>
-          </div>
-          <div
-            v-if="uploadStatuses.length"
-            class="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-white/80 px-4 py-3 text-xs text-secondary shadow-sm"
-          >
-            <div class="flex items-center justify-between text-[13px] font-semibold text-primary">
-              <span>批量上传进度</span>
-              <span>{{ uploadProgress.completed }}/{{ uploadProgress.total }} · {{ uploadProgress.percent }}%</span>
+
+            <!-- Upload Progress -->
+            <div v-if="uploadStatuses.length" class="space-y-3 rounded-2xl bg-surface-variant/30 p-4">
+              <div class="flex justify-between items-center text-xs font-bold text-secondary uppercase tracking-wider">
+                <span>Batch Progress</span>
+                <span>{{ uploadProgress.percent }}%</span>
+              </div>
+              <div class="h-3 w-full overflow-hidden rounded-full bg-base-soft">
+                <div class="h-full rounded-full bg-brand-500 transition-all duration-500 ease-out"
+                  :style="{ width: `${uploadProgress.percent}%` }"></div>
+              </div>
+              <div class="space-y-1 max-h-32 overflow-y-auto pr-2 sidebar-scroll">
+                <div v-for="status in uploadStatuses" :key="status.key"
+                  class="flex items-center justify-between text-xs py-1">
+                  <span class="truncate text-secondary max-w-[70%]">{{ status.name }}</span>
+                  <span class="px-2 py-0.5 rounded-full font-medium"
+                    :class="status.status === 'success' ? 'bg-emerald-100 text-emerald-700' : status.status === 'error' ? 'bg-rose-100 text-rose-700' : 'text-muted'">
+                    {{ status.message }}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div class="h-2 w-full rounded-full bg-slate-200">
-              <div
-                class="h-full rounded-full bg-brand transition-all"
-                :style="{ width: `${Math.max(uploadProgress.percent, uploadProgress.completed ? 10 : 0)}%` }"
-              ></div>
-            </div>
-            <ul class="space-y-1 text-sm text-primary">
-              <li
-                v-for="status in uploadStatuses"
-                :key="status.key"
-                class="flex items-center justify-between gap-2 rounded-xl bg-surface-muted px-3 py-2 text-xs text-secondary"
-              >
-                <span class="truncate text-sm text-primary">{{ status.name }}</span>
-                <span
-                  class="font-semibold"
-                  :class="status.status === 'success'
-                    ? 'text-emerald-600'
-                    : status.status === 'error'
-                      ? 'text-rose-600'
-                      : 'text-slate-500'"
-                >
-                  {{ status.message }}
-                </span>
-              </li>
-            </ul>
-          </div>
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <button type="submit" class="btn-base btn-tone-primary px-6 py-2" :disabled="uploading">
-              {{ uploading ? '上传中…' : '上传并生成存档' }}
+
+            <!-- Action Button -->
+            <button type="submit"
+              class="mt-auto w-full rounded-full bg-primary-900 py-4 text-sm font-bold text-white transition-all hover:bg-primary-800 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="uploading">
+              {{ uploading ? '正在上传...' : '上传并生成存档' }}
             </button>
-            <div class="space-y-1 text-sm">
-              <p v-if="uploadHelper && !uploadError && !uploadSuccess" class="text-secondary">
-                {{ uploadHelper }}
-              </p>
-              <p v-if="uploadError" class="text-rose-600">{{ uploadError }}</p>
-              <p v-if="uploadSuccess" class="text-emerald-600">{{ uploadSuccess }}</p>
-            </div>
+          </form>
+
+          <!-- Success Card -->
+          <transition name="fade" mode="out-in">
+            <article v-if="latestDataset" key="dataset-success"
+              class="mt-6 rounded-3xl bg-emerald-50/80 p-6 border border-emerald-100">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1">SUCCESS</p>
+                  <h3 class="text-lg font-bold text-emerald-900">{{ latestDataset.display_name }}</h3>
+                  <div class="mt-2 flex flex-wrap gap-2 text-xs">
+                    <span class="rounded-full bg-emerald-100/50 px-2 py-0.5 text-emerald-800 font-medium">{{
+                      formatFileSize(latestDataset.file_size) }}</span>
+                    <span class="rounded-full bg-emerald-100/50 px-2 py-0.5 text-emerald-800 font-medium">{{
+                      latestDataset.rows }} 行</span>
+                  </div>
+                </div>
+                <div class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+                    <path fill-rule="evenodd"
+                      d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"
+                      clip-rule="evenodd" />
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Mapping Section -->
+              <div class="mt-6 border-t border-emerald-200/50 pt-4">
+                <h4 class="text-sm font-bold text-emerald-900 mb-2">字段映射</h4>
+                <div class="grid grid-cols-2 gap-3">
+                  <select v-model="columnMappingForm.date"
+                    class="rounded-xl border-0 bg-white/60 py-2 pl-3 pr-8 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/50 focus:ring-2 focus:ring-emerald-500">
+                    <option value="">日期列 (未指定)</option>
+                    <option v-for="col in datasetColumns" :key="col" :value="col">{{ col }}</option>
+                  </select>
+                  <select v-model="columnMappingForm.title"
+                    class="rounded-xl border-0 bg-white/60 py-2 pl-3 pr-8 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/50 focus:ring-2 focus:ring-emerald-500">
+                    <option value="">标题列 (未指定)</option>
+                    <option v-for="col in datasetColumns" :key="col" :value="col">{{ col }}</option>
+                  </select>
+                  <select v-model="columnMappingForm.content"
+                    class="rounded-xl border-0 bg-white/60 py-2 pl-3 pr-8 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/50 focus:ring-2 focus:ring-emerald-500">
+                    <option value="">正文列 (未指定)</option>
+                    <option v-for="col in datasetColumns" :key="col" :value="col">{{ col }}</option>
+                  </select>
+                  <select v-model="columnMappingForm.author"
+                    class="rounded-xl border-0 bg-white/60 py-2 pl-3 pr-8 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/50 focus:ring-2 focus:ring-emerald-500">
+                    <option value="">作者列 (未指定)</option>
+                    <option v-for="col in datasetColumns" :key="col" :value="col">{{ col }}</option>
+                  </select>
+                </div>
+                <div class="mt-4 flex justify-end">
+                  <button type="button"
+                    class="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                    @click="saveColumnMapping" :disabled="mappingSaving">
+                    {{ mappingSaving ? '保存中' : '保存映射' }}
+                  </button>
+                </div>
+              </div>
+            </article>
+          </transition>
+        </template>
+
+        <div v-else
+          class="flex-1 flex flex-col items-center justify-center rounded-[2rem] border-2 border-dashed border-gray-200 bg-base-soft/30 p-8 text-center">
+          <div class="rounded-full bg-gray-50 p-4 mb-4">
+            <CloudArrowUpIcon class="h-8 w-8 text-gray-300" />
           </div>
-        </form>
-        <transition name="fade" mode="out-in">
-          <article
-            v-if="latestDataset"
-            key="dataset-card"
-            class="rounded-3xl border border-brand-soft bg-white/90 p-6 shadow-inner"
-          >
-            <header class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="text-xs uppercase tracking-widest text-muted">最新上传</p>
-                <h3 class="text-lg font-semibold text-primary">{{ latestDataset.display_name }}</h3>
-                <p class="text-xs text-secondary">
-                  数据集 ID：{{ latestDataset.id }} · 行列：{{ latestDataset.rows }} 行 × {{ latestDataset.column_count }} 列
-                </p>
-              </div>
-              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">上传成功</span>
-            </header>
-            <div
-              v-if="hasMultipleDatasets"
-              class="mt-4 space-y-2 rounded-2xl bg-amber-50/80 px-4 py-3 text-xs leading-relaxed text-amber-800"
-            >
-              <p>
-                本次上传共包含 {{ uploadedDatasets.length }} 个数据集，字段映射将一次性同步到所有数据集。
-                为了确保 Merge / Clean 等后续流程顺利，请保证这些数据集来源一致、字段命名完全相同。
-              </p>
-              <ul class="flex flex-wrap gap-2 text-[11px] text-amber-700">
-                <li
-                  v-for="dataset in uploadedDatasets"
-                  :key="`dataset-chip-${dataset.id}`"
-                  class="rounded-full bg-white/70 px-3 py-1 font-semibold"
-                >
-                  {{ dataset.display_name || dataset.id }}
-                </li>
-              </ul>
-            </div>
-            <dl class="mt-4 grid gap-3 text-sm text-secondary sm:grid-cols-2 lg:grid-cols-3">
-              <div class="rounded-2xl bg-surface-muted px-4 py-3">
-                <dt class="text-[11px] uppercase tracking-widest text-muted">文件大小</dt>
-                <dd class="mt-1 font-semibold text-primary">{{ formatFileSize(latestDataset.file_size) }}</dd>
-              </div>
-              <div class="rounded-2xl bg-surface-muted px-4 py-3">
-                <dt class="text-[11px] uppercase tracking-widest text-muted">生成 JSONL</dt>
-                <dd class="mt-1 truncate text-primary" :title="latestDataset.jsonl_file">
-                  {{ latestDataset.jsonl_file }}
-                </dd>
-              </div>
-              <div class="rounded-2xl bg-surface-muted px-4 py-3">
-                <dt class="text-[11px] uppercase tracking-widest text-muted">生成 PKL</dt>
-                <dd class="mt-1 truncate text-primary" :title="latestDataset.pkl_file">
-                  {{ latestDataset.pkl_file }}
-                </dd>
-              </div>
-              <div class="rounded-2xl bg-surface-muted px-4 py-3">
-                <dt class="text-[11px] uppercase tracking-widest text-muted">Meta 清单</dt>
-                <dd class="mt-1 truncate text-primary" :title="latestDataset.json_file">
-                  {{ latestDataset.json_file }}
-                </dd>
-              </div>
-              <div class="rounded-2xl bg-surface-muted px-4 py-3">
-                <dt class="text-[11px] uppercase tracking-widest text-muted">专题名称</dt>
-                <dd class="mt-1 text-primary">{{ latestDataset.project }}</dd>
-              </div>
-              <div class="rounded-2xl bg-surface-muted px-4 py-3">
-                <dt class="text-[11px] uppercase tracking-widest text-muted">专题标识</dt>
-                <dd class="mt-1 text-primary">{{ latestDataset.topic_label || '未设置' }}</dd>
-              </div>
-              <div class="rounded-2xl bg-surface-muted px-4 py-3">
-                <dt class="text-[11px] uppercase tracking-widest text-muted">更新于</dt>
-                <dd class="mt-1 text-primary">{{ formatTimestamp(latestDataset.stored_at) }}</dd>
-              </div>
-            </dl>
-            <footer class="mt-4 flex flex-wrap items-center gap-3 text-xs text-secondary">
-              <span
-                v-if="Array.isArray(latestDataset.columns) && latestDataset.columns.length"
-                class="rounded-full bg-surface-muted px-3 py-1"
-              >
-                字段：{{ latestDataset.columns.join(', ') }}
-              </span>
-              <span
-                v-if="latestDataset.topic_label"
-                class="rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-600"
-              >
-                专题标识：{{ latestDataset.topic_label }}
-              </span>
-              <RouterLink
-                class="inline-flex items-center gap-1 rounded-full bg-brand px-4 py-1 text-xs font-semibold text-white shadow transition hover:bg-brand-600"
-                :to="{ name: 'project-data', query: { project: latestDataset.project } }"
-              >
-                前往数据管理
-              </RouterLink>
-            </footer>
-            <section v-if="latestDataset" class="mt-6 space-y-4">
-              <header class="space-y-1">
-                <h4 class="text-sm font-semibold text-primary">字段映射</h4>
-                <p class="text-xs text-secondary">
-                  指定专题标识、日期、标题、正文与作者列，系统将在预处理与后续流程中使用这些字段。
-                </p>
-                <p v-if="hasMultipleDatasets" class="rounded-2xl bg-amber-50/80 px-3 py-2 text-[11px] text-amber-700">
-                  当前选项仅展示所有数据集中共同存在的列。若列表为空，请检查各数据集字段是否对齐，或在数据管理页面统一列名后重试。
-                </p>
-                <p v-if="!datasetColumns.length" class="text-xs text-muted">当前尚未识别到字段列表，可先保存专题标识。</p>
-              </header>
-              <div class="grid gap-4 sm:grid-cols-2">
-                <label class="space-y-1 text-xs sm:col-span-2">
-                  <span class="font-medium text-secondary">专题标识（可选）</span>
-                  <input
-                    v-model="columnMappingForm.topic"
-                    type="text"
-                    class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                    placeholder="为该数据集设置自定义专题名称"
-                  />
-                </label>
-                <label class="space-y-1 text-xs">
-                  <span class="font-medium text-secondary">日期列</span>
-                  <select
-                    v-model="columnMappingForm.date"
-                    class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                  >
-                    <option value="">未指定</option>
-                    <option v-for="column in datasetColumns" :key="`date-${column}`" :value="column">
-                      {{ column }}
-                    </option>
-                  </select>
-                </label>
-                <label class="space-y-1 text-xs">
-                  <span class="font-medium text-secondary">标题列</span>
-                  <select
-                    v-model="columnMappingForm.title"
-                    class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                  >
-                    <option value="">未指定</option>
-                    <option v-for="column in datasetColumns" :key="`title-${column}`" :value="column">
-                      {{ column }}
-                    </option>
-                  </select>
-                </label>
-                <label class="space-y-1 text-xs">
-                  <span class="font-medium text-secondary">正文列</span>
-                  <select
-                    v-model="columnMappingForm.content"
-                    class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                  >
-                    <option value="">未指定</option>
-                    <option v-for="column in datasetColumns" :key="`content-${column}`" :value="column">
-                      {{ column }}
-                    </option>
-                  </select>
-                </label>
-                <label class="space-y-1 text-xs">
-                  <span class="font-medium text-secondary">作者列</span>
-                  <select
-                    v-model="columnMappingForm.author"
-                    class="w-full rounded-2xl border border-soft px-3 py-2 text-sm text-secondary shadow-sm transition focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-                  >
-                    <option value="">未指定</option>
-                    <option v-for="column in datasetColumns" :key="`author-${column}`" :value="column">
-                      {{ column }}
-                    </option>
-                  </select>
-                </label>
-              </div>
-              <div class="flex flex-wrap items-center gap-3 text-xs">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-full border border-brand-soft px-4 py-1.5 text-xs font-semibold text-brand-600 transition hover:bg-brand-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
-                  :disabled="mappingSaving"
-                  @click="saveColumnMapping"
-                >
-                  {{ mappingSaving ? '保存中…' : '保存字段映射' }}
-                </button>
-                <p v-if="mappingError" class="text-rose-600">{{ mappingError }}</p>
-                <p v-else-if="mappingSuccess" class="text-emerald-600">{{ mappingSuccess }}</p>
-              </div>
-            </section>
-          </article>
-        </transition>
-      </template>
-      <div
-        v-else
-        class="rounded-3xl border border-dashed border-brand-soft bg-surface-muted px-6 py-8 text-center text-sm text-secondary"
-      >
-        请先创建标题后再操作。
-      </div>
-    </section>
+          <p class="text-secondary font-medium">等待创建专题</p>
+          <p class="text-xs text-muted mt-1">请先在左侧完成专题信息填写</p>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 

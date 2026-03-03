@@ -165,11 +165,13 @@ def _submit_filter_job(
 from src.fluid.api import fluid_bp
 from src.analyze.api import analyze_bp
 from src.topic.api import topic_bp
+from src.report.api import report_bp
 
 app = Flask(__name__)
 app.register_blueprint(fluid_bp, url_prefix='/api/fluid')
 app.register_blueprint(analyze_bp, url_prefix='/api/analyze')
 app.register_blueprint(topic_bp, url_prefix='/api/topic')
+app.register_blueprint(report_bp, url_prefix='/api/report')
 CORS(app)
 
 CONFIG = load_config()
@@ -1572,6 +1574,9 @@ def root():
         "/api/query",
         "/api/fetch",
         "/api/analyze",
+        "/api/report",
+        "/api/report/history",
+        "/api/report/regenerate",
         "/api/projects",
         "/api/projects/<name>",
         "/api/projects/<name>/datasets",
