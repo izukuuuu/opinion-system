@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from itertools import islice
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -32,6 +32,9 @@ _REPO_ROOT = _BACKEND_ROOT.parent
 _DATA_ROOT = _BACKEND_ROOT / "data" / "projects"
 _MANIFEST_FILENAME = "manifest.json"
 _ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".jsonl"}
+_STREAM_CHUNK_SIZE = 20_000
+_MAPPING_SAMPLE_ROWS = 50_000
+_JSONL_WRITE_CHUNK_SIZE = 20_000
 
 
 def _normalise_project_name(name: str) -> str:
@@ -94,6 +97,98 @@ def _load_dataframe(path: Path, extension: str) -> pd.DataFrame:
     if extension == ".jsonl":
         return read_jsonl(path)
     raise ValueError(f"不支持的文件类型：{extension}")
+
+
+def _write_dataframe_jsonl_chunked(
+    dataframe: pd.DataFrame,
+    jsonl_path: Path,
+    chunk_size: int = _JSONL_WRITE_CHUNK_SIZE,
+) -> None:
+    """Write a DataFrame to JSONL in chunks to avoid large one-shot serialization."""
+    total_rows = int(dataframe.shape[0])
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+    if total_rows <= 0:
+        jsonl_path.write_text("", encoding="utf-8")
+        return
+
+    mode = "w"
+    for start in range(0, total_rows, max(int(chunk_size or 1), 1)):
+        chunk = dataframe.iloc[start : start + chunk_size]
+        if chunk.empty:
+            continue
+        write_jsonl(chunk, jsonl_path, mode=mode)
+        mode = "a"
+
+
+def _stream_source_to_jsonl(
+    source_path: Path,
+    extension: str,
+    jsonl_path: Path,
+    *,
+    chunk_size: int = _STREAM_CHUNK_SIZE,
+    sample_rows: int = _MAPPING_SAMPLE_ROWS,
+) -> Tuple[int, List[str], pd.DataFrame]:
+    """
+    Stream CSV/JSONL source files into a normalized JSONL file.
+
+    Returns:
+        Tuple[row_count, columns, sample_dataframe]
+    """
+    if extension not in {".csv", ".jsonl"}:
+        raise ValueError(f"不支持流式处理的文件类型：{extension}")
+
+    rows = 0
+    columns: List[str] = []
+    sample_chunks: List[pd.DataFrame] = []
+    sampled_rows = 0
+    chunk_size = max(int(chunk_size or 1), 1)
+    sample_rows = max(int(sample_rows or 0), 0)
+
+    if jsonl_path.exists():
+        jsonl_path.unlink()
+
+    if extension == ".csv":
+        reader = pd.read_csv(source_path, chunksize=chunk_size)
+    else:
+        reader = pd.read_json(source_path, lines=True, chunksize=chunk_size)
+
+    for chunk in reader:
+        if chunk is None:
+            continue
+        if not columns:
+            columns = [str(column) for column in chunk.columns]
+        if chunk.empty:
+            continue
+
+        write_jsonl(chunk, jsonl_path, mode="a" if rows else "w")
+        rows += int(chunk.shape[0])
+
+        if sampled_rows < sample_rows:
+            take = min(sample_rows - sampled_rows, int(chunk.shape[0]))
+            if take > 0:
+                sample_chunks.append(chunk.head(take).copy())
+                sampled_rows += take
+
+    if not columns:
+        try:
+            if extension == ".csv":
+                header_df = pd.read_csv(source_path, nrows=0)
+            else:
+                header_df = pd.read_json(source_path, lines=True, nrows=1)
+            columns = [str(column) for column in header_df.columns]
+        except Exception:
+            columns = []
+
+    if rows <= 0:
+        jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+        jsonl_path.touch(exist_ok=True)
+
+    sample_df = (
+        pd.concat(sample_chunks, ignore_index=True)
+        if sample_chunks
+        else pd.DataFrame(columns=columns)
+    )
+    return rows, columns, sample_df
 
 
 def _manifest_path(project_slug: str) -> Path:
@@ -457,6 +552,75 @@ def _latest_dataset_metadata(project: str) -> Dict[str, Any]:
     return datasets[0]
 
 
+def _resolve_jsonl_path_from_metadata(metadata: Dict[str, Any]) -> Path:
+    jsonl_path = metadata.get("jsonl_file")
+    if not jsonl_path:
+        raise LookupError("数据集缺少 JSONL 存储路径")
+    file_path = (_REPO_ROOT / str(jsonl_path)).resolve()
+    if not file_path.exists():
+        raise FileNotFoundError(f"未找到数据集 JSONL 文件：{file_path}")
+    return file_path
+
+
+def _summarise_dates_from_jsonl(
+    jsonl_path: Path,
+    *,
+    preferred_column: str = "",
+    known_columns: Optional[List[str]] = None,
+) -> Tuple[str, str, List[str]]:
+    selected_column = str(preferred_column or "").strip()
+    known_columns = [str(column) for column in (known_columns or [])]
+    candidates_from_keywords = [
+        column
+        for column in known_columns
+        if any(keyword in _normalise_column_name(column) for keyword in _DATE_KEYWORDS)
+    ]
+    candidate_columns = candidates_from_keywords or known_columns
+    unique_dates: set[date] = set()
+
+    reader = pd.read_json(jsonl_path, lines=True, chunksize=_STREAM_CHUNK_SIZE)
+    for chunk in reader:
+        if chunk is None or chunk.empty:
+            continue
+
+        if not selected_column:
+            search_columns = [column for column in candidate_columns if column in chunk.columns]
+            if not search_columns:
+                search_columns = [str(column) for column in chunk.columns]
+
+            best_column = ""
+            best_series: Optional[pd.Series] = None
+            best_valid = 0
+            for column in search_columns:
+                series = _coerce_datetime_series(chunk[column])
+                valid_count = int(series.shape[0])
+                if valid_count > best_valid:
+                    best_valid = valid_count
+                    best_column = column
+                    best_series = series
+
+            if best_column:
+                selected_column = best_column
+                if best_series is not None and not best_series.empty:
+                    normalised = best_series.dt.normalize()
+                    unique_dates.update(value.date() for value in normalised.dropna())
+                continue
+
+        if selected_column in chunk.columns:
+            series = _coerce_datetime_series(chunk[selected_column])
+            if not series.empty:
+                normalised = series.dt.normalize()
+                unique_dates.update(value.date() for value in normalised.dropna())
+
+    if not selected_column:
+        raise ValueError("数据集中未找到可识别的日期列")
+    if not unique_dates:
+        raise ValueError("日期列不包含有效数据")
+
+    formatted = sorted(value.isoformat() for value in unique_dates)
+    return selected_column, formatted[0], formatted[-1], formatted
+
+
 def get_dataset_date_summary(project: str, dataset_id: Optional[str] = None) -> Dict[str, Any]:
     """Analyse a stored dataset and return recognised date options."""
 
@@ -465,35 +629,45 @@ def get_dataset_date_summary(project: str, dataset_id: Optional[str] = None) -> 
 
     metadata = _resolve_dataset_metadata(project, dataset_id) if dataset_id else _latest_dataset_metadata(project)
 
-    pkl_path_str = metadata.get("pkl_file")
-    if not pkl_path_str:
-        raise LookupError("数据集缺少缓存文件")
-    pkl_path = (_REPO_ROOT / pkl_path_str).resolve()
-    if not pkl_path.exists():
-        raise FileNotFoundError(f"未找到数据集缓存文件：{pkl_path}")
-
-    dataframe = pd.read_pickle(pkl_path)
-    if dataframe is None or dataframe.empty:
-        raise ValueError("数据集为空，无法提取日期范围")
-
     column_mapping = metadata.get("column_mapping") if isinstance(metadata.get("column_mapping"), dict) else {}
-    sanitized_mapping = _sanitize_column_mapping(column_mapping, [str(column) for column in dataframe.columns])
+    declared_columns = [str(column) for column in metadata.get("columns", [])]
+    dataframe: Optional[pd.DataFrame] = None
 
-    preferred_column = sanitized_mapping.get("date")
-    if preferred_column:
-        preferred_series = _coerce_datetime_series(dataframe[preferred_column])
-        if not preferred_series.empty:
-            column = preferred_column
-            series = preferred_series
+    pkl_path_str = metadata.get("pkl_file")
+    if isinstance(pkl_path_str, str) and pkl_path_str.strip():
+        pkl_path = (_REPO_ROOT / pkl_path_str).resolve()
+        if pkl_path.exists():
+            try:
+                dataframe = pd.read_pickle(pkl_path)
+            except Exception:
+                dataframe = None
+
+    if dataframe is not None and not dataframe.empty:
+        sanitized_mapping = _sanitize_column_mapping(column_mapping, [str(column) for column in dataframe.columns])
+        preferred_column = sanitized_mapping.get("date")
+        if preferred_column:
+            preferred_series = _coerce_datetime_series(dataframe[preferred_column])
+            if not preferred_series.empty:
+                column = preferred_column
+                series = preferred_series
+            else:
+                candidates = _candidate_datetime_columns(dataframe)
+                column, series = _select_best_datetime_column(candidates)
         else:
             candidates = _candidate_datetime_columns(dataframe)
             column, series = _select_best_datetime_column(candidates)
+        min_date, max_date, formatted = _summarise_dates(series)
     else:
-        candidates = _candidate_datetime_columns(dataframe)
-        column, series = _select_best_datetime_column(candidates)
+        sanitized_mapping = _sanitize_column_mapping(column_mapping, declared_columns)
+        preferred_column = sanitized_mapping.get("date", "")
+        jsonl_path = _resolve_jsonl_path_from_metadata(metadata)
+        column, min_date, max_date, formatted = _summarise_dates_from_jsonl(
+            jsonl_path,
+            preferred_column=preferred_column,
+            known_columns=declared_columns,
+        )
 
     sanitized_mapping["date"] = column
-    min_date, max_date, formatted = _summarise_dates(series)
 
     limited_values = formatted[-_DATE_OPTION_LIMIT:] if _DATE_OPTION_LIMIT else formatted
     return {
@@ -684,19 +858,31 @@ def store_uploaded_dataset(
     store_path = original_dir / stored_filename
     file_storage.save(store_path)
 
-    dataframe = _load_dataframe(store_path, extension)
-    rows = int(dataframe.shape[0])
-    columns = [str(column) for column in dataframe.columns]
-    inferred_mapping = _infer_column_mapping(dataframe, hints=column_mapping)
     topic_value = (topic_label or "").strip()
-
-    # 缓存为 pickle，供后端快速载入
-    pkl_path = cache_dir / f"{dataset_id}.pkl"
-    dataframe.to_pickle(pkl_path)
 
     # 统一产出 JSONL 版本
     jsonl_path = jsonl_dir / f"{dataset_id}.jsonl"
-    write_jsonl(dataframe, jsonl_path)
+    pkl_path = cache_dir / f"{dataset_id}.pkl"
+    pkl_relative_path: Optional[str] = None
+
+    if extension in {".csv", ".jsonl"}:
+        rows, columns, sample_df = _stream_source_to_jsonl(
+            store_path,
+            extension,
+            jsonl_path,
+        )
+        inferred_mapping = _infer_column_mapping(sample_df, hints=column_mapping)
+    else:
+        dataframe = _load_dataframe(store_path, extension)
+        rows = int(dataframe.shape[0])
+        columns = [str(column) for column in dataframe.columns]
+        inferred_mapping = _infer_column_mapping(dataframe, hints=column_mapping)
+
+        # 缓存为 pickle，供后端快速载入
+        dataframe.to_pickle(pkl_path)
+        pkl_relative_path = str(pkl_path.relative_to(_REPO_ROOT))
+
+        _write_dataframe_jsonl_chunked(dataframe, jsonl_path)
 
     metadata = {
         "id": dataset_id,
@@ -712,7 +898,7 @@ def store_uploaded_dataset(
         "topic_label": topic_value,
         "file_size": store_path.stat().st_size,
         "source_file": str(store_path.relative_to(_REPO_ROOT)),
-        "pkl_file": str(pkl_path.relative_to(_REPO_ROOT)),
+        "pkl_file": pkl_relative_path,
         "jsonl_file": str(jsonl_path.relative_to(_REPO_ROOT)),
     }
 
