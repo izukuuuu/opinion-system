@@ -31,6 +31,17 @@ FUNCTION_LABELS = {
     'classification': '话题分类',
 }
 
+ANALYZE_FILE_MAP = {
+    "volume": "volume.json",
+    "attitude": "attitude.json",
+    "trends": "trends.json",
+    "geography": "geography.json",
+    "publishers": "publishers.json",
+    "keywords": "keywords.json",
+    "classification": "classification.json",
+}
+
+DEFAULT_ANALYZE_FILENAME = "result.json"
 SUMMARY_FILENAME = "summary.txt"
 AI_SUMMARY_FILENAME = "ai_summary.json"
 MAX_SNAPSHOT_ROWS = 5
@@ -120,6 +131,29 @@ def _write_text_snapshot(target_dir: Path, snapshot: str):
     except Exception:
         # 文本快照写入失败不影响主流程
         pass
+
+
+def _compose_analyze_folder(date: str, end_date: Optional[str]) -> str:
+    date_text = str(date or "").strip()
+    end_text = str(end_date or "").strip()
+    if not date_text:
+        return ""
+    if end_text:
+        return f"{date_text}_{end_text}"
+    return date_text
+
+
+def _resolve_analyze_filename(func_name: str) -> str:
+    return ANALYZE_FILE_MAP.get(str(func_name or "").strip(), DEFAULT_ANALYZE_FILENAME)
+
+
+def _load_json_result_file(file_path: Path) -> Any:
+    with open(file_path, 'r', encoding='utf-8') as fh:
+        try:
+            return json.load(fh)
+        except json.JSONDecodeError:
+            fh.seek(0)
+            return fh.read()
 
 
 def _generate_ai_summary(func_name: str, target: str, snapshot: str, logger) -> str:
@@ -332,6 +366,70 @@ def _post_process_result(func_name: str, target: str, target_dir: Path, result: 
     if _update_ai_summary_entry(ai_entries, func_name, target, snapshot, ai_text):
         ai_state['dirty'] = True
 
+
+def _supplement_ai_summary_from_analyze(
+    topic: str,
+    date: str,
+    logger=None,
+    only_function: str = None,
+    end_date: str = None,
+) -> bool:
+    if logger is None:
+        logger = setup_logger(topic, date)
+
+    folder_name = _compose_analyze_folder(date, end_date)
+    if not folder_name:
+        return False
+    analyze_root = bucket("analyze", topic, folder_name)
+    if not analyze_root.exists() or not analyze_root.is_dir():
+        return False
+
+    function_dirs = [child for child in analyze_root.iterdir() if child.is_dir()]
+    if only_function:
+        alias = only_function.strip().lower()
+        function_dirs = [child for child in function_dirs if child.name.strip().lower() == alias]
+        if not function_dirs:
+            return False
+
+    ai_summary_file = analyze_root / AI_SUMMARY_FILENAME
+    ai_summary_entries, previous_main_finding = _load_existing_ai_summary(ai_summary_file)
+    ai_state = {"dirty": False}
+    processed_count = 0
+
+    for func_dir in sorted(function_dirs, key=lambda path: path.name):
+        func_name = func_dir.name
+        for target_dir in sorted([child for child in func_dir.iterdir() if child.is_dir()], key=lambda path: path.name):
+            output_file = target_dir / _resolve_analyze_filename(func_name)
+            if not output_file.exists():
+                json_candidates = sorted(target_dir.glob("*.json"))
+                if json_candidates:
+                    output_file = json_candidates[0]
+                else:
+                    continue
+            try:
+                result = _load_json_result_file(output_file)
+            except Exception as exc:
+                log_error(logger, f"读取分析产物失败: {output_file} ({exc})", "Analysis")
+                continue
+            _post_process_result(func_name, target_dir.name, target_dir, result, ai_summary_entries, ai_state, logger)
+            processed_count += 1
+
+    if processed_count == 0:
+        return False
+
+    main_finding = _build_main_finding(ai_summary_entries, previous_main_finding, topic, date, end_date, logger)
+    if main_finding and main_finding is not previous_main_finding:
+        ai_state['dirty'] = True
+
+    if ai_state.get('dirty'):
+        _save_ai_summary_file(ai_summary_file, topic, date, end_date, ai_summary_entries, main_finding)
+        log_save_success(logger, str(ai_summary_file), "Analysis")
+    else:
+        log_skip(logger, "AI摘要无变化，跳过写入", "Analysis")
+
+    return True
+
+
 def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, end_date: str = None) -> bool:
     """
     运行分析任务
@@ -359,17 +457,25 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
         return False
     
     # 读取数据：总体.jsonl 与各渠道 *.jsonl（排除 总体.jsonl）
-    # 如果提供了结束日期，使用日期范围格式，否则使用单个日期
-    if end_date:
-        folder_name = f"{date}_{end_date}"
-    else:
-        folder_name = date
+    folder_name = _compose_analyze_folder(date, end_date)
+    if not folder_name:
+        log_error(logger, "无效日期参数，无法定位分析目录", "Analysis")
+        return False
+
     fetch_dir = bucket("fetch", topic, folder_name)
     if not fetch_dir.exists():
+        log_skip(logger, f"未找到 fetch 目录，尝试基于已有 analyze 结果补充AI摘要: {fetch_dir}", "Analysis")
+        if _supplement_ai_summary_from_analyze(topic, date, logger, only_function=only_function, end_date=end_date):
+            log_success(logger, "已基于历史 analyze 结果补充AI摘要", "Analyze")
+            return True
         log_error(logger, f"未找到数据目录: {fetch_dir}", "Analysis")
         return False
     overall_file = fetch_dir / "总体.jsonl"
     if not overall_file.exists():
+        log_skip(logger, f"未找到总体数据文件，尝试基于已有 analyze 结果补充AI摘要: {overall_file}", "Analysis")
+        if _supplement_ai_summary_from_analyze(topic, date, logger, only_function=only_function, end_date=end_date):
+            log_success(logger, "已基于历史 analyze 结果补充AI摘要", "Analyze")
+            return True
         log_error(logger, f"未找到总体数据文件: {overall_file}", "Analysis")
         return False
     try:
@@ -386,11 +492,6 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
         channel_files[channel_name] = jsonl_path
     
     # 创建输出目录（按功能/渠道分层）
-    # 使用与fetch模块相同的日期范围格式
-    if end_date:
-        folder_name = f"{date}_{end_date}"
-    else:
-        folder_name = date
     analyze_root = bucket("analyze", topic, folder_name)
     analyze_root.mkdir(parents=True, exist_ok=True)
 
@@ -405,7 +506,6 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
     if only_function:
         alias = only_function.strip()
         alias_norm = alias.lower()
-        before = len(functions)
         functions = [f for f in functions if (f.get('name','').strip().lower() == alias_norm)]
         if not functions:
             log_error(logger, f"--func 未匹配到任何分析项：{only_function}", "Analysis")
@@ -439,23 +539,7 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
                 # 保存总体
                 func_dir = analyze_root / func_name / '总体'
                 func_dir.mkdir(parents=True, exist_ok=True)
-                # attitude函数保存为attitude.json，geography函数保存为geography.json，keywords函数保存为keywords.json，publishers函数保存为publishers.json，trends函数保存为trends.json，volume函数保存为volume.json，classification函数保存为classification.json，其他函数保存为result.json
-                if func_name == 'attitude':
-                    filename = 'attitude.json'
-                elif func_name == 'geography':
-                    filename = 'geography.json'
-                elif func_name == 'keywords':
-                    filename = 'keywords.json'
-                elif func_name == 'publishers':
-                    filename = 'publishers.json'
-                elif func_name == 'trends':
-                    filename = 'trends.json'
-                elif func_name == 'volume':
-                    filename = 'volume.json'
-                elif func_name == 'classification':
-                    filename = 'classification.json'
-                else:
-                    filename = 'result.json'
+                filename = _resolve_analyze_filename(func_name)
                 output_file = func_dir / filename
                 with open(output_file, 'w', encoding='utf-8') as f:
                     json.dump(result or {}, f, ensure_ascii=False, indent=2, default=str)
@@ -492,23 +576,7 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
 
                     func_dir = analyze_root / func_name / channel_name
                     func_dir.mkdir(parents=True, exist_ok=True)
-                    # attitude函数保存为attitude.json，geography函数保存为geography.json，keywords函数保存为keywords.json，publishers函数保存为publishers.json，trends函数保存为trends.json，volume函数保存为volume.json，classification函数保存为classification.json，其他函数保存为result.json
-                    if func_name == 'attitude':
-                        filename = 'attitude.json'
-                    elif func_name == 'geography':
-                        filename = 'geography.json'
-                    elif func_name == 'keywords':
-                        filename = 'keywords.json'
-                    elif func_name == 'publishers':
-                        filename = 'publishers.json'
-                    elif func_name == 'trends':
-                        filename = 'trends.json'
-                    elif func_name == 'volume':
-                        filename = 'volume.json'
-                    elif func_name == 'classification':
-                        filename = 'classification.json'
-                    else:
-                        filename = 'result.json'
+                    filename = _resolve_analyze_filename(func_name)
                     output_file = func_dir / filename
                     with open(output_file, 'w', encoding='utf-8') as f:
                         json.dump(result or {}, f, ensure_ascii=False, indent=2, default=str)

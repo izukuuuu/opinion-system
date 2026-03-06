@@ -3,21 +3,229 @@
 """
 from __future__ import annotations
 
+import json
 import pandas as pd
 import re
 from typing import Any, Dict, List, Optional
 
-from ..utils.setting.paths import bucket
+from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_skip
-from ..utils.io.excel import read_jsonl, sanitize_dataframe, get_standard_table_schema
+from ..utils.io.excel import read_jsonl, write_jsonl, sanitize_dataframe, get_standard_table_schema
 from ..utils.io.db import db_manager
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
 try:  # Optional dependency; PyMySQL is used by default
     from pymysql.err import IntegrityError as PyMysqlIntegrityError
 except Exception:  # pragma: no cover - fallback when driver missing
     PyMysqlIntegrityError = None
+
+
+STANDARD_SCHEMA = get_standard_table_schema()
+STANDARD_COLUMNS = list(STANDARD_SCHEMA.keys())
+DIRECT_INGEST_CLASSIFICATION = "未筛选"
+
+
+def _date_variants(date: str) -> List[str]:
+    """
+    生成日期目录的兼容候选：
+    - 原始值
+    - 8位 YYYYMMDD
+    - 连字符 YYYY-MM-DD
+    """
+    raw = str(date or "").strip()
+    variants: List[str] = []
+
+    def _append(value: str) -> None:
+        cleaned = str(value or "").strip()
+        if cleaned and cleaned not in variants:
+            variants.append(cleaned)
+
+    _append(raw)
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) == 8:
+        _append(digits)
+        _append(f"{digits[:4]}-{digits[4:6]}-{digits[6:]}")
+    return variants
+
+
+def _resolve_layer_jsonl_files(layer: str, topic: str, date: str) -> tuple[str, Any, List[Any]]:
+    """
+    在同义日期目录里查找首个可用 JSONL 文件集合。
+    """
+    first_existing_date = ""
+    first_existing_dir = None
+    for candidate_date in _date_variants(date):
+        layer_dir = bucket(layer, topic, candidate_date)
+        if layer_dir.exists() and first_existing_dir is None:
+            first_existing_dir = layer_dir
+            first_existing_date = candidate_date
+        files = sorted(layer_dir.glob("*.jsonl"))
+        if files:
+            return candidate_date, layer_dir, files
+
+    if first_existing_dir is not None:
+        return first_existing_date, first_existing_dir, []
+
+    fallback_dir = bucket(layer, topic, str(date or "").strip())
+    return str(date or "").strip(), fallback_dir, []
+
+
+def _normalise_upload_dataframe(
+    df: pd.DataFrame,
+    *,
+    classification_default: str = "未知",
+) -> pd.DataFrame:
+    """
+    将任意输入数据规整到标准入库字段，避免因额外列导致写库失败。
+
+    Args:
+        df: 原始数据
+        classification_default: 缺失分类时的默认值
+
+    Returns:
+        pd.DataFrame: 仅包含标准字段的数据
+    """
+    source_has_classification = "classification" in df.columns
+    normalised = sanitize_dataframe(df.copy())
+
+    defaults: Dict[str, Any] = {
+        "id": "",
+        "title": "未知",
+        "contents": "未知",
+        "platform": "未知",
+        "author": "未知",
+        "published_at": pd.NaT,
+        "url": "未知",
+        "region": "未知",
+        "hit_words": "未知",
+        "polarity": "未知",
+        "classification": classification_default or "未知",
+    }
+    for col in STANDARD_COLUMNS:
+        if col not in normalised.columns:
+            normalised[col] = defaults[col]
+
+    normalised["id"] = normalised["id"].fillna("").astype(str).str.strip()
+    normalised = normalised[normalised["id"] != ""]
+    if normalised.empty:
+        return normalised[STANDARD_COLUMNS]
+
+    normalised["published_at"] = pd.to_datetime(normalised["published_at"], errors="coerce")
+    classification_fill = classification_default or "未知"
+    if not source_has_classification:
+        normalised["classification"] = classification_fill
+    else:
+        normalised["classification"] = (
+            normalised["classification"].fillna(classification_fill).astype(str).str.strip()
+        )
+        normalised.loc[
+            normalised["classification"].isin(["", "nan", "None", "null"]),
+            "classification",
+        ] = classification_fill
+
+    return normalised[STANDARD_COLUMNS]
+
+
+def _write_direct_ingest_summary(
+    topic: str,
+    date: str,
+    filter_dir,
+    *,
+    total_rows: int,
+) -> None:
+    """
+    写入直入模式生成的筛选汇总文件，兼容前端状态读取。
+    """
+    summary_path = filter_dir / "_summary.json"
+    summary_payload = {
+        "topic": topic,
+        "date": date,
+        "total_rows": total_rows,
+        "kept_rows": total_rows,
+        "discarded_rows": 0,
+        "completed": True,
+        "source": "clean-direct-ingest",
+        "token_usage": 0,
+        "relevant_samples": [],
+        "irrelevant_samples": [],
+    }
+    with summary_path.open("w", encoding="utf-8") as fh:
+        json.dump(summary_payload, fh, ensure_ascii=False, indent=2)
+
+
+def _prepare_intermediate_from_clean(topic: str, date: str, logger=None) -> Dict[str, Any]:
+    """
+    当 filter 层不存在产物时，从 clean 层生成可入库的中间 JSONL。
+    """
+    resolved_clean_date, clean_dir, clean_files = _resolve_layer_jsonl_files("clean", topic, date)
+    filter_dir = ensure_bucket("filter", topic, date)
+    result: Dict[str, Any] = {
+        "status": "error",
+        "topic": topic,
+        "date": date,
+        "resolved_clean_date": resolved_clean_date,
+        "source_dir": str(clean_dir),
+        "target_dir": str(filter_dir),
+        "generated": [],
+        "skipped": [],
+        "failed": [],
+        "rows": 0,
+    }
+
+    if not clean_files:
+        result["message"] = (
+            f"未找到可用的 Clean 产物，无法生成中间数据。"
+            f"（已尝试日期: {', '.join(_date_variants(date)) or '空'}）"
+        )
+        return result
+
+    total_rows = 0
+    for file_path in clean_files:
+        channel = file_path.stem
+        try:
+            source_df = read_jsonl(file_path)
+            if source_df is None or len(source_df) == 0:
+                result["skipped"].append(
+                    {"channel": channel, "file": file_path.name, "reason": "清洗文件无数据"}
+                )
+                log_skip(logger, f"{file_path.name} 无数据，跳过中间数据生成", "Upload")
+                continue
+
+            prepared_df = _normalise_upload_dataframe(
+                source_df,
+                classification_default=DIRECT_INGEST_CLASSIFICATION,
+            )
+            if prepared_df.empty:
+                result["skipped"].append(
+                    {"channel": channel, "file": file_path.name, "reason": "无有效ID，无法入库"}
+                )
+                log_skip(logger, f"{file_path.name} 缺少有效ID，跳过中间数据生成", "Upload")
+                continue
+
+            output_file = filter_dir / file_path.name
+            write_jsonl(prepared_df, output_file)
+            total_rows += len(prepared_df)
+            result["generated"].append(
+                {"channel": channel, "file": output_file.name, "rows": len(prepared_df)}
+            )
+            log_success(logger, f"已生成中间数据: {output_file.name} ({len(prepared_df)} 条)", "Upload")
+        except Exception as exc:
+            detail = str(exc)
+            result["failed"].append(
+                {"channel": channel, "file": file_path.name, "reason": "生成失败", "detail": detail}
+            )
+            log_error(logger, f"生成中间数据失败: {file_path.name} - {detail}", "Upload")
+
+    result["rows"] = total_rows
+    if result["generated"]:
+        _write_direct_ingest_summary(topic, date, filter_dir, total_rows=total_rows)
+        result["status"] = "ok"
+        result["message"] = f"已从 Clean 层生成 {len(result['generated'])} 个中间文件。"
+        return result
+
+    result["message"] = "未能从 Clean 层生成可入库中间文件。"
+    return result
 
 
 def create_table_with_standard_schema(conn, table_name: str, topic: str, logger) -> bool:
@@ -34,14 +242,36 @@ def create_table_with_standard_schema(conn, table_name: str, topic: str, logger)
         bool: 是否成功
     """
     try:
-        schema = get_standard_table_schema()
-        column_defs = [f"`{col}` {mysql_type}" for col, mysql_type in schema.items()]
-        
-        create_sql = f"""
-        CREATE TABLE IF NOT EXISTS `{table_name}` (
-            {', '.join(column_defs)}
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
+        dialect = (getattr(conn, "dialect", None) and conn.dialect.name) or ""
+
+        if dialect == "postgresql":
+            quoted_table = '"' + table_name.replace('"', '""') + '"'
+            column_defs = [
+                '"id" VARCHAR(64) PRIMARY KEY',
+                '"title" TEXT',
+                '"contents" TEXT',
+                '"platform" VARCHAR(50)',
+                '"author" TEXT',
+                '"published_at" TIMESTAMP',
+                '"url" TEXT',
+                '"region" VARCHAR(100)',
+                '"hit_words" TEXT',
+                '"polarity" VARCHAR(20)',
+                '"classification" VARCHAR(100)',
+            ]
+            create_sql = f"""
+            CREATE TABLE IF NOT EXISTS {quoted_table} (
+                {', '.join(column_defs)}
+            )
+            """
+        else:
+            schema = get_standard_table_schema()
+            column_defs = [f"`{col}` {mysql_type}" for col, mysql_type in schema.items()]
+            create_sql = f"""
+            CREATE TABLE IF NOT EXISTS `{table_name}` (
+                {', '.join(column_defs)}
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
         
         conn.execute(text(create_sql))
         log_success(logger, f"已创建表 {topic}.{table_name}（标准结构）", "Upload")
@@ -65,12 +295,8 @@ def table_exists(conn, table_name: str, topic: str) -> bool:
         bool: 表是否存在
     """
     try:
-        query = """
-        SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_schema = :schema AND table_name = :table
-        """
-        result = conn.execute(text(query), {"schema": topic, "table": table_name})
-        return (result.scalar() or 0) > 0
+        inspector = inspect(conn)
+        return inspector.has_table(table_name)
     except Exception:
         return False
 
@@ -100,7 +326,14 @@ def _summarise_upload_exception(channel: str, exc: Exception) -> Dict[str, str]:
     return {"reason": reason, "detail": detail}
 
 
-def upload_filtered_excels(topic: str, date: str, logger=None, dataset_name: Optional[str] = None) -> Dict[str, Any]:
+def upload_filtered_excels(
+    topic: str,
+    date: str,
+    logger=None,
+    dataset_name: Optional[str] = None,
+    *,
+    prepare_intermediate_from_clean: bool = False,
+) -> Dict[str, Any]:
     """
     上传筛选后的JSONL文件到数据库
     使用锁死的标准表结构，按最大容量设计
@@ -115,8 +348,7 @@ def upload_filtered_excels(topic: str, date: str, logger=None, dataset_name: Opt
     """
 
     # 1. 定位文件
-    filter_dir = bucket("filter", topic, date)
-    jsonl_files = list(filter_dir.glob("*.jsonl"))
+    resolved_filter_date, filter_dir, jsonl_files = _resolve_layer_jsonl_files("filter", topic, date)
 
     target_database = (dataset_name or topic).strip()
     if not target_database:
@@ -125,14 +357,47 @@ def upload_filtered_excels(topic: str, date: str, logger=None, dataset_name: Opt
         "filter_dir": str(filter_dir),
         "topic": topic,
         "date": date,
+        "resolved_filter_date": resolved_filter_date,
         "uploaded": [],
         "skipped": [],
         "failed": [],
         "database": target_database,
+        "source_layer": "filter",
+        "prepare_intermediate_from_clean": bool(prepare_intermediate_from_clean),
     }
 
+    if prepare_intermediate_from_clean:
+        intermediate = _prepare_intermediate_from_clean(topic, date, logger)
+        response["intermediate"] = intermediate
+        if intermediate.get("status") == "ok":
+            generated_files = intermediate.get("generated")
+            resolved_files: List[Any] = []
+            if isinstance(generated_files, list):
+                for item in generated_files:
+                    if not isinstance(item, dict):
+                        continue
+                    file_name = item.get("file")
+                    if not isinstance(file_name, str) or not file_name.strip():
+                        continue
+                    candidate = filter_dir / file_name.strip()
+                    if candidate.exists():
+                        resolved_files.append(candidate)
+            jsonl_files = sorted(resolved_files)
+            response["source_layer"] = "clean->filter"
+        else:
+            message = str(intermediate.get("message") or "生成中间数据失败")
+            log_error(logger, message, "Upload")
+            return {
+                **response,
+                "status": "error",
+                "message": message,
+            }
+
     if not jsonl_files:
-        message = "未找到筛选产物，请先完成 Filter 步骤或检查目录。"
+        if prepare_intermediate_from_clean:
+            message = "中间数据已生成流程未产出可入库文件，请检查 clean 层数据。"
+        else:
+            message = "未找到筛选产物，请先完成 Filter 步骤或检查目录。"
         log_error(logger, message, "Upload")
         return {
             **response,
@@ -170,7 +435,7 @@ def upload_filtered_excels(topic: str, date: str, logger=None, dataset_name: Opt
             for file_path in jsonl_files:
                 table_name = file_path.stem
 
-                if not table_exists(conn, table_name, topic):
+                if not table_exists(conn, table_name, target_database):
                     if not create_table_with_standard_schema(conn, table_name, topic, logger):
                         response["failed"].append(
                             {"channel": table_name, "file": file_path.name, "reason": "建表失败"}
@@ -192,7 +457,13 @@ def upload_filtered_excels(topic: str, date: str, logger=None, dataset_name: Opt
                         continue
 
                     # 清理数据
-                    df = sanitize_dataframe(df)
+                    df = _normalise_upload_dataframe(df)
+                    if df.empty:
+                        log_skip(logger, f"{file_path.name} 无有效入库数据，跳过", "Upload")
+                        response["skipped"].append(
+                            {"channel": table_name, "file": file_path.name, "reason": "无有效入库数据"}
+                        )
+                        continue
 
                     # 去重（基于id字段）
                     if "id" in df.columns:
@@ -253,7 +524,14 @@ def upload_filtered_excels(topic: str, date: str, logger=None, dataset_name: Opt
     }
 
 
-def run_update(topic: str, date: str, logger=None, dataset_name: Optional[str] = None) -> Dict[str, Any]:
+def run_update(
+    topic: str,
+    date: str,
+    logger=None,
+    dataset_name: Optional[str] = None,
+    *,
+    prepare_intermediate_from_clean: bool = False,
+) -> Dict[str, Any]:
     """
     运行数据更新
     
@@ -271,7 +549,13 @@ def run_update(topic: str, date: str, logger=None, dataset_name: Optional[str] =
     log_module_start(logger, "Update")
 
     try:
-        result = upload_filtered_excels(topic, date, logger, dataset_name=dataset_name)
+        result = upload_filtered_excels(
+            topic,
+            date,
+            logger,
+            dataset_name=dataset_name,
+            prepare_intermediate_from_clean=prepare_intermediate_from_clean,
+        )
         if isinstance(result, dict):
             if result.get("status") != "error":
                 return result

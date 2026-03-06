@@ -3,7 +3,7 @@
     <header class="flex flex-wrap items-center justify-between gap-4">
       <div class="space-y-1">
         <h1 class="text-xl font-bold tracking-tight text-primary">数据入库</h1>
-        <p class="text-sm text-secondary">将本地筛选后的数据集上传到远程数据库。</p>
+        <p class="text-sm text-secondary">将筛选结果入库，或直接基于清洗数据生成中间数据后入库。</p>
       </div>
       <div
         class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
@@ -17,7 +17,7 @@
       <header class="space-y-1">
         <h2 class="text-lg font-bold text-primary">入库配置</h2>
         <p class="text-xs text-secondary">
-          配置目标项目与数据集信息，系统将自动识别待入库的筛选存档。
+          配置目标项目与数据集信息，系统将自动识别待入库的处理存档。
         </p>
       </header>
 
@@ -50,7 +50,7 @@
 
         <!-- 2. Processing Date -->
         <label class="space-y-2 block">
-          <span class="text-xs font-bold text-primary ml-1">筛选筛选完成日期</span>
+          <span class="text-xs font-bold text-primary ml-1">处理日期</span>
           <div class="relative">
             <template v-if="availableDates.length">
               <select v-model="processingDate"
@@ -73,7 +73,7 @@
               </div>
             </template>
           </div>
-          <p class="text-[10px] text-muted pl-1 opacity-70">系统已自动关联最近一次成功的筛选记录。</p>
+          <p class="text-[10px] text-muted pl-1 opacity-70">优先使用筛选日期，也可用于从清洗层直接入库。</p>
         </label>
       </div>
 
@@ -114,13 +114,24 @@
         </div>
       </transition>
 
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-4">
-        <button type="button"
-          class="inline-flex items-center gap-3 rounded-full bg-brand-600 px-10 py-3 text-sm font-bold text-white transition-all hover:bg-brand-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="uploadState.running" @click="runUpload">
-          <ArrowTrendingUpIcon class="h-5 w-5" />
-          <span>{{ uploadState.running ? '任务传输中...' : '启动数据入库' }}</span>
-        </button>
+      <div class="space-y-3 pt-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex flex-wrap items-center gap-3">
+            <button type="button"
+              class="inline-flex items-center gap-3 rounded-full bg-brand-600 px-8 py-3 text-sm font-bold text-white transition-all hover:bg-brand-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="uploadState.running" @click="runUpload()">
+              <ArrowTrendingUpIcon class="h-5 w-5" />
+              <span>{{ uploadState.running ? '任务传输中...' : '按筛选结果入库' }}</span>
+            </button>
+            <button type="button"
+              class="inline-flex items-center gap-3 rounded-full border border-brand-200 bg-white px-8 py-3 text-sm font-bold text-brand-700 transition-all hover:bg-brand-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="uploadState.running" @click="runUpload({ prepareIntermediateFromClean: true })">
+              <ArrowPathIcon class="h-5 w-5" />
+              <span>{{ uploadState.running ? '任务传输中...' : '跳过筛选直接入库' }}</span>
+            </button>
+          </div>
+        </div>
+        <p class="text-[10px] text-muted pl-1 opacity-70">跳过筛选时，会先自动从 clean 层生成 filter 中间数据。</p>
         <transition name="fade">
           <div v-if="uploadState.message || parameterError" class="flex items-center gap-2 px-6 py-3 rounded-2xl border"
             :class="(uploadState.success && !parameterError) ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'">
@@ -177,6 +188,9 @@
                   </span>
                   <span class="flex items-center gap-1.5">
                     <ClockIcon class="h-3.5 w-3.5" /> {{ formatHistoryTimestamp(entry.timestamp).split(' ')[1] }}
+                  </span>
+                  <span class="rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-secondary/80">
+                    {{ entry.mode === 'direct' ? '跳过筛选' : '筛选入库' }}
                   </span>
                 </div>
               </div>
@@ -382,7 +396,7 @@ const ensureParameters = () => {
     return null
   }
   if (!processingDate.value) {
-    parameterError.value = '请选择筛选对应的日期。'
+    parameterError.value = '请选择处理日期。'
     return null
   }
   if (!datasetNameInput.value.trim()) {
@@ -401,19 +415,21 @@ const ensureParameters = () => {
   }
 }
 
-const pushHistoryEntry = (payload, success, message) => {
+const pushHistoryEntry = (payload, success, message, mode = 'filter') => {
   const entry = {
     ...payload,
     success,
     message,
+    mode,
     timestamp: new Date().toISOString()
   }
   runHistory.value = [entry, ...runHistory.value].slice(0, HISTORY_LIMIT)
 }
 
-const runUpload = async () => {
+const runUpload = async (options = {}) => {
   const params = ensureParameters()
   if (!params) return
+  const prepareIntermediateFromClean = Boolean(options.prepareIntermediateFromClean)
 
   const payload = {
     topic: params.topic,
@@ -424,6 +440,9 @@ const runUpload = async () => {
   }
   if (params.topic_label) {
     payload.topic_label = params.topic_label
+  }
+  if (prepareIntermediateFromClean) {
+    payload.prepare_intermediate_from_clean = true
   }
 
   uploadState.running = true
@@ -449,17 +468,21 @@ const runUpload = async () => {
     }
     const ok = response.ok && result.status !== 'error'
     uploadState.success = ok
-    uploadState.message = ok ? '筛选结果已成功写入数据库。' : result.message || '入库失败，请查看后端日志。'
+    uploadState.message = ok
+      ? (prepareIntermediateFromClean
+        ? '已从清洗层生成中间数据并完成入库。'
+        : '筛选结果已成功写入数据库。')
+      : result.message || '入库失败，请查看后端日志。'
     uploadState.details = result.data ?? null
     uploadState.lastResponse = result
-    pushHistoryEntry(params, ok, uploadState.message)
+    pushHistoryEntry(params, ok, uploadState.message, prepareIntermediateFromClean ? 'direct' : 'filter')
   } catch (error) {
     uploadState.success = false
     uploadState.message =
       error instanceof Error ? error.message : '入库失败，请检查网络或服务器状态。'
     uploadState.details = null
     uploadState.lastResponse = null
-    pushHistoryEntry(params, false, uploadState.message)
+    pushHistoryEntry(params, false, uploadState.message, prepareIntermediateFromClean ? 'direct' : 'filter')
   } finally {
     uploadState.running = false
   }

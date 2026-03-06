@@ -710,6 +710,20 @@ def upload_endpoint():
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
+    prepare_intermediate_value = payload.get("prepare_intermediate_from_clean")
+    if prepare_intermediate_value is None:
+        prepare_intermediate_value = payload.get("prepare_intermediate")
+    if prepare_intermediate_value is None:
+        prepare_intermediate_value = payload.get("skip_filter")
+
+    prepare_intermediate_from_clean = False
+    if isinstance(prepare_intermediate_value, bool):
+        prepare_intermediate_from_clean = prepare_intermediate_value
+    elif isinstance(prepare_intermediate_value, str):
+        prepare_intermediate_from_clean = (
+            prepare_intermediate_value.strip().lower() in {"1", "true", "yes", "on"}
+        )
+
     from src.update import run_update  # type: ignore
 
     response, code = _execute_operation(
@@ -718,6 +732,7 @@ def upload_endpoint():
         topic_identifier,
         date,
         dataset_name=display_name,
+        prepare_intermediate_from_clean=prepare_intermediate_from_clean,
         log_context={
             "project": log_project,
             "params": {
@@ -725,6 +740,7 @@ def upload_endpoint():
                 "source": "api",
                 "topic": display_name,
                 "bucket": topic_identifier,
+                "prepare_intermediate_from_clean": prepare_intermediate_from_clean,
             },
         },
     )
