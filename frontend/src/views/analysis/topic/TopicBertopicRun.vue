@@ -19,7 +19,7 @@
             <label class="text-xs font-bold text-muted uppercase tracking-wider">专题 Topic *</label>
             <div class="relative">
               <select v-model="form.topic" class="input w-full appearance-none pr-10"
-                :disabled="topicsState.loading || topicOptions.length === 0" required @change="handleTopicChange">
+                :disabled="topicsState.loading || topicOptions.length === 0" required>
                 <option value="" disabled>请选择分析专题</option>
                 <option v-for="option in topicOptions" :key="option.bucket" :value="option.bucket">
                   {{ option.display_name || option.name }}
@@ -87,31 +87,193 @@
         </div>
       </section>
 
+      <!-- Custom Filters -->
+      <section class="card-surface p-6 space-y-5">
+        <div class="space-y-1">
+          <h3 class="text-sm font-bold text-primary flex items-center gap-2">
+            <FunnelIcon class="h-4 w-4 text-muted" />
+            <span>自定义筛选规则</span>
+          </h3>
+          <p class="text-xs text-secondary">
+            设置排除规则，分析时将自动过滤匹配的主题类别（如明星八卦、广告推广等无关内容）。
+          </p>
+        </div>
+
+        <!-- Filter list -->
+        <div v-if="bertopicPromptState.customFilters.length > 0"
+          class="rounded-2xl border border-soft bg-surface-muted/20 divide-y divide-soft overflow-hidden">
+          <div v-for="(filter, index) in bertopicPromptState.customFilters" :key="index"
+            class="flex items-center gap-3 px-4 py-3 group transition-colors">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+              <XCircleIcon class="h-4 w-4" />
+            </div>
+            <div class="flex-1 min-w-0 space-y-0.5">
+              <p class="text-sm font-semibold text-primary truncate">{{ filter.category || '未命名类别' }}</p>
+              <p v-if="filter.description" class="text-xs text-secondary truncate">{{ filter.description }}</p>
+            </div>
+            <button type="button"
+              class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-xl text-muted hover:text-red-500 hover:bg-red-50"
+              @click="removeFilter(index)" title="移除此规则">
+              <TrashIcon class="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div v-else
+          class="rounded-2xl border border-dashed border-soft bg-surface-muted/10 p-8 text-center space-y-2">
+          <FunnelIcon class="h-8 w-8 mx-auto text-muted/40" />
+          <p class="text-sm text-muted">尚未添加筛选规则</p>
+          <p class="text-xs text-muted/60">添加规则后，分析时将自动排除匹配的主题</p>
+        </div>
+
+        <!-- Add filter form -->
+        <div class="flex items-end gap-3">
+          <div class="flex-1 space-y-1.5">
+            <label class="text-xs font-bold text-muted uppercase tracking-wider">类别名称 *</label>
+            <input v-model.trim="newFilterCategory" type="text"
+              class="input w-full"
+              placeholder="如：明星八卦、广告推广" />
+          </div>
+          <div class="flex-[2] space-y-1.5">
+            <label class="text-xs font-bold text-muted uppercase tracking-wider">主题描述 *</label>
+            <input v-model.trim="newFilterDescription" type="text"
+              class="input w-full"
+              placeholder="如：包含明星、校庆、修图等娱乐生活类内容"
+              @keyup.enter="addFilter" />
+          </div>
+          <button type="button" class="btn btn-primary shrink-0 h-[42px] px-5"
+            :disabled="!newFilterCategory"
+            @click="addFilter">
+            <PlusIcon class="h-4 w-4 mr-1" />
+            添加
+          </button>
+        </div>
+      </section>
+
+      <section class="card-surface p-6 space-y-5">
+        <div class="flex items-start justify-between gap-3">
+          <div class="space-y-1">
+            <h3 class="text-sm font-bold text-primary flex items-center gap-2">
+              <ChatBubbleLeftRightIcon class="h-4 w-4 text-muted" />
+              <span>LLM 再聚类与 Drop 提示词</span>
+            </h3>
+            <p class="text-xs text-secondary">
+              这里可以快速补充再聚类与 drop 判定信息；系统会自动注入到最终提示词并随专题保存。
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button type="button" class="btn btn-ghost btn-sm whitespace-nowrap"
+              :disabled="bertopicPromptState.loading" @click="loadBertopicPrompt(form.topic)">
+              {{ bertopicPromptState.loading ? '加载中…' : '重载配置' }}
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" :disabled="!canSavePrompt"
+              @click="handleSavePrompt">
+              {{ bertopicPromptState.saving ? '保存中…' : '保存修改' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-soft bg-surface-muted/20 px-3 py-2 text-xs text-secondary">
+          <p>
+            配置文件位置：
+            <span class="font-mono text-primary">{{ bertopicPromptState.path || '选择专题后自动生成' }}</span>
+          </p>
+          <p class="mt-1 text-muted">
+            每个专题（项目）独立保存，后端会读取该文件参与后续 BERTopic 重分类。
+          </p>
+        </div>
+
+        <label class="block">
+          <span class="text-xs font-bold text-muted uppercase tracking-wider">最大主题数 Max Topics</span>
+          <input v-model.number="bertopicPromptState.maxTopics" type="number" min="3" max="50"
+            class="input w-full mt-1.5" />
+          <span class="text-[11px] text-muted mt-1 block">AI 会自动推断合理的主题数量（最少 3 个），此值为上限约束</span>
+        </label>
+
+        <div class="grid gap-4 xl:grid-cols-2">
+          <article class="rounded-xl border border-soft bg-surface p-4 space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-sm font-semibold text-primary">LLM 再聚类 User Prompt 主体</p>
+            </div>
+            <p class="text-xs text-secondary">
+              提供给模型的再聚类具体指令和输入数据（JSON）。您可以规定特定主题必须保留，或自定义主题分类的偏好。
+            </p>
+            <textarea
+              v-model="bertopicPromptState.reclusterUserPrompt"
+              rows="8"
+              class="input w-full resize-y font-mono text-xs leading-relaxed"
+              placeholder="再聚类 User Prompt 主体（包含 {input_data} 等变量）"
+            />
+            <label class="block mt-4">
+              <span class="text-[11px] font-bold text-muted uppercase tracking-wider">System Prompt (可选)</span>
+              <textarea
+                v-model="bertopicPromptState.reclusterSystemPrompt"
+                rows="2"
+                class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed"
+                placeholder="系统级预设，如：你是一个专业的数据归类助手"
+              />
+            </label>
+          </article>
+
+          <article class="rounded-xl border border-soft bg-surface p-4 space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-sm font-semibold text-primary">无关主题 Drop 规则</p>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="text-xs text-brand-600 hover:text-brand-700"
+                  :disabled="bertopicPromptState.loading || bertopicPromptState.saving"
+                  @click="restoreDefaultDropRulePrompt"
+                >
+                  恢复通用模板
+                </button>
+              </div>
+            </div>
+            <p class="text-xs text-secondary mb-1">
+              定义哪些内容应被丢弃。这将被注入到模型的判定环节，请务必保留对 <code class="font-mono">drop</code> 参数的约束说明。
+            </p>
+            <textarea
+              v-model="bertopicPromptState.dropRulePrompt"
+              rows="10"
+              class="input w-full resize-y font-mono text-xs leading-relaxed"
+              placeholder="输入无关主题丢弃判定规则参数及说明"
+            />
+            <p class="text-[11px] text-muted -mt-1">
+              可用变量：<span class="font-mono">{FOCUS_TOPIC}</span>
+            </p>
+          </article>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="text-xs font-bold text-muted uppercase tracking-wider">关键词 System Prompt</span>
+            <textarea v-model="bertopicPromptState.keywordSystemPrompt" rows="3"
+              class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+          </label>
+          <label class="block">
+            <span class="text-xs font-bold text-muted uppercase tracking-wider">关键词 User Prompt</span>
+            <textarea v-model="bertopicPromptState.keywordUserPrompt" rows="3"
+              class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+          </label>
+        </div>
+
+        <div class="bg-surface-muted/30 rounded-lg p-3 text-xs text-secondary space-y-1">
+          <p class="font-semibold">再聚类模板变量：</p>
+          <p class="font-mono opacity-80">{TARGET_TOPICS}, {input_data}, {topic_list}, {topic_stats_json}, {FOCUS_TOPIC}</p>
+          <p class="font-semibold mt-2">关键词模板变量：</p>
+          <p class="font-mono opacity-80">{cluster_name}, {topics}, {topics_csv}, {topics_json}, {description}</p>
+        </div>
+
+        <div v-if="bertopicPromptState.error || bertopicPromptState.message"
+          class="rounded-xl border px-4 py-3 text-xs"
+          :class="bertopicPromptState.error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'">
+          {{ bertopicPromptState.error || bertopicPromptState.message }}
+        </div>
+      </section>
+
       <!-- Advanced Configuration (Collapsible) -->
       <div v-show="showAdvancedSettings" class="space-y-6 animate-in slide-in-from-top-2 duration-200">
-
-        <!-- Optional Paths -->
-        <section class="card-surface p-6">
-          <h3 class="text-sm font-bold text-primary mb-4 flex items-center gap-2">
-            <FolderOpenIcon class="h-4 w-4 text-muted" />
-            <span>路径配置 (可选)</span>
-          </h3>
-          <div class="grid gap-6 md:grid-cols-3">
-            <div class="space-y-2">
-              <label class="text-xs font-bold text-muted uppercase tracking-wider">Fetch 目录</label>
-              <input v-model.trim="form.fetchDir" type="text" placeholder="默认自动推断" class="input w-full" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-xs font-bold text-muted uppercase tracking-wider">自定义 Userdict</label>
-              <input v-model.trim="form.userdict" type="text" placeholder="configs/userdict.txt" class="input w-full" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-xs font-bold text-muted uppercase tracking-wider">自定义 Stopwords</label>
-              <input v-model.trim="form.stopwords" type="text" placeholder="configs/stopwords.txt"
-                class="input w-full" />
-            </div>
-          </div>
-        </section>
 
         <!-- Runtime Parameters -->
         <section class="card-surface p-6">
@@ -264,80 +426,6 @@
           </div>
         </section>
 
-        <!-- Prompt Configuration -->
-        <section class="card-surface p-6">
-          <div class="flex items-start justify-between gap-3 mb-6">
-            <div class="space-y-1">
-              <h3 class="text-sm font-bold text-primary flex items-center gap-2">
-                <ChatBubbleLeftRightIcon class="h-4 w-4 text-muted" />
-                <span>LLM 提示词配置</span>
-              </h3>
-              <p class="text-xs text-secondary">
-                配置大模型重聚类（Re-clustering）与命名生成逻辑。
-              </p>
-            </div>
-            <div class="flex items-center gap-2 shrink-0">
-              <button type="button" class="btn btn-ghost btn-sm whitespace-nowrap"
-                :disabled="bertopicPromptState.loading" @click="loadBertopicPrompt(form.topic)">
-                {{ bertopicPromptState.loading ? '加载中…' : '重载配置' }}
-              </button>
-              <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" :disabled="!canSavePrompt"
-                @click="handleSavePrompt">
-                {{ bertopicPromptState.saving ? '保存中…' : '保存修改' }}
-              </button>
-            </div>
-          </div>
-
-          <div class="space-y-4">
-            <label class="block">
-              <span class="text-xs font-bold text-muted uppercase tracking-wider">目标主题数 Target Topics</span>
-              <input v-model.number="bertopicPromptState.targetTopics" type="number" min="2" max="50"
-                class="input w-full mt-1.5" />
-            </label>
-
-            <div class="grid gap-4 md:grid-cols-2">
-              <label class="block">
-                <span class="text-xs font-bold text-muted uppercase tracking-wider">再聚类 System Prompt</span>
-                <textarea v-model="bertopicPromptState.reclusterSystemPrompt" rows="4"
-                  class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
-              </label>
-              <label class="block">
-                <span class="text-xs font-bold text-muted uppercase tracking-wider">再聚类 User Prompt</span>
-                <textarea v-model="bertopicPromptState.reclusterUserPrompt" rows="4"
-                  class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
-              </label>
-            </div>
-
-            <div class="bg-surface-muted/30 rounded-lg p-3 text-xs text-secondary space-y-1">
-              <p class="font-semibold">可用变量：</p>
-              <p class="font-mono opacity-80">{TARGET_TOPICS}, {input_data}, {topic_list}, {topic_stats_json}</p>
-            </div>
-
-            <div class="grid gap-4 md:grid-cols-2">
-              <label class="block">
-                <span class="text-xs font-bold text-muted uppercase tracking-wider">关键词 System Prompt</span>
-                <textarea v-model="bertopicPromptState.keywordSystemPrompt" rows="3"
-                  class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
-              </label>
-              <label class="block">
-                <span class="text-xs font-bold text-muted uppercase tracking-wider">关键词 User Prompt</span>
-                <textarea v-model="bertopicPromptState.keywordUserPrompt" rows="3"
-                  class="input w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
-              </label>
-            </div>
-
-            <div class="bg-surface-muted/30 rounded-lg p-3 text-xs text-secondary space-y-1">
-              <p class="font-semibold">关键词模板变量：</p>
-              <p class="font-mono opacity-80">{cluster_name}, {topics}, {topics_csv}, {topics_json}, {description}</p>
-            </div>
-
-            <div v-if="bertopicPromptState.error || bertopicPromptState.message"
-              class="rounded-xl border px-4 py-3 text-xs"
-              :class="bertopicPromptState.error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'">
-              {{ bertopicPromptState.error || bertopicPromptState.message }}
-            </div>
-          </div>
-        </section>
       </div>
 
       <!-- Logs -->
@@ -387,17 +475,18 @@ import { computed, watch, onMounted, ref } from 'vue'
 import {
   ArrowPathIcon,
   ChevronUpDownIcon,
-  ChevronDownIcon,
   CheckBadgeIcon,
   InformationCircleIcon,
   ExclamationTriangleIcon,
   ExclamationCircleIcon,
-  FolderOpenIcon,
-  SparklesIcon,
   AdjustmentsHorizontalIcon,
   ArrowRightIcon,
   CpuChipIcon,
-  ChatBubbleLeftRightIcon
+  ChatBubbleLeftRightIcon,
+  FunnelIcon,
+  XCircleIcon,
+  TrashIcon,
+  PlusIcon
 } from '@heroicons/vue/24/outline'
 import { useTopicBertopicAnalysis } from '@/composables/useTopicBertopicAnalysis'
 import { useActiveProject } from '@/composables/useActiveProject'
@@ -412,20 +501,36 @@ const {
   availableRange,
   runState,
   lastResult,
-  lastPayload,
   logs,
   loadTopics,
   loadBertopicPrompt,
   saveBertopicPrompt,
   resetState,
   runBertopicAnalysis,
-  resetOptionalFields,
   resetRunParams
 } = useTopicBertopicAnalysis()
 
 const { activeProjectName } = useActiveProject()
 const showAdvancedSettings = ref(false)
-const showAdvancedPrompt = ref(false)
+const newFilterCategory = ref('')
+const newFilterDescription = ref('')
+
+const addFilter = () => {
+  const cat = (newFilterCategory.value || '').trim()
+  if (!cat) return
+  bertopicPromptState.customFilters.push({
+    category: cat,
+    description: (newFilterDescription.value || '').trim()
+  })
+  newFilterCategory.value = ''
+  newFilterDescription.value = ''
+}
+
+const removeFilter = (index) => {
+  bertopicPromptState.customFilters.splice(index, 1)
+}
+
+
 
 onMounted(() => {
   loadTopics(true)
@@ -475,7 +580,6 @@ const canSubmit = computed(() => {
 const resetAll = () => {
   form.startDate = ''
   form.endDate = ''
-  resetOptionalFields()
   resetState()
 }
 
@@ -488,18 +592,11 @@ const handleRun = async () => {
     await runBertopicAnalysis({
       topic: form.topic,
       startDate: form.startDate,
-      endDate: form.endDate,
-      fetchDir: form.fetchDir,
-      userdict: form.userdict,
-      stopwords: form.stopwords
+      endDate: form.endDate
     })
   } catch {
     // 错误处理已在日志组件体现
   }
-}
-
-const handleTopicChange = () => {
-  resetOptionalFields()
 }
 
 const handleSavePrompt = async () => {
@@ -508,6 +605,12 @@ const handleSavePrompt = async () => {
   } catch {
     // 错误提示由状态区域显示
   }
+}
+
+const restoreDefaultDropRulePrompt = () => {
+  bertopicPromptState.dropRulePrompt = String(
+    bertopicPromptState.defaultDropRulePrompt || ''
+  ).trim()
 }
 </script>
 

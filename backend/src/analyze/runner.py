@@ -143,6 +143,18 @@ def _compose_analyze_folder(date: str, end_date: Optional[str]) -> str:
     return date_text
 
 
+def _split_analyze_folder(folder: str) -> Tuple[str, str]:
+    folder_text = str(folder or "").strip()
+    if not folder_text:
+        return "", ""
+    if "_" in folder_text:
+        start, end = folder_text.split("_", 1)
+        start_text = str(start or "").strip()
+        end_text = str(end or "").strip() or start_text
+        return start_text, end_text
+    return folder_text, folder_text
+
+
 def _resolve_analyze_filename(func_name: str) -> str:
     return ANALYZE_FILE_MAP.get(str(func_name or "").strip(), DEFAULT_ANALYZE_FILENAME)
 
@@ -374,10 +386,26 @@ def _supplement_ai_summary_from_analyze(
     only_function: str = None,
     end_date: str = None,
 ) -> bool:
-    if logger is None:
-        logger = setup_logger(topic, date)
-
     folder_name = _compose_analyze_folder(date, end_date)
+    return rebuild_ai_summary_from_analyze_folder(
+        topic,
+        folder_name,
+        logger=logger,
+        only_function=only_function,
+    )
+
+
+def rebuild_ai_summary_from_analyze_folder(
+    topic: str,
+    folder_name: str,
+    logger=None,
+    only_function: str = None,
+) -> bool:
+    if logger is None:
+        log_date, _ = _split_analyze_folder(folder_name)
+        logger = setup_logger(topic, log_date or str(folder_name or "").strip() or "analyze")
+
+    folder_name = str(folder_name or "").strip()
     if not folder_name:
         return False
     analyze_root = bucket("analyze", topic, folder_name)
@@ -417,12 +445,30 @@ def _supplement_ai_summary_from_analyze(
     if processed_count == 0:
         return False
 
-    main_finding = _build_main_finding(ai_summary_entries, previous_main_finding, topic, date, end_date, logger)
+    start_date, end_date = _split_analyze_folder(folder_name)
+    start_for_save = start_date or folder_name
+    end_for_save = end_date or start_for_save
+
+    main_finding = _build_main_finding(
+        ai_summary_entries,
+        previous_main_finding,
+        topic,
+        start_for_save,
+        end_for_save,
+        logger,
+    )
     if main_finding and main_finding is not previous_main_finding:
         ai_state['dirty'] = True
 
     if ai_state.get('dirty'):
-        _save_ai_summary_file(ai_summary_file, topic, date, end_date, ai_summary_entries, main_finding)
+        _save_ai_summary_file(
+            ai_summary_file,
+            topic,
+            start_for_save,
+            end_for_save,
+            ai_summary_entries,
+            main_finding,
+        )
         log_save_success(logger, str(ai_summary_file), "Analysis")
     else:
         log_skip(logger, "AI摘要无变化，跳过写入", "Analysis")

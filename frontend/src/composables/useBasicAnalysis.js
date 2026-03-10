@@ -1,6 +1,12 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useApiBase } from './useApiBase'
 import {
+  normaliseArchiveRecords,
+  normaliseRecord,
+  splitFolderRange,
+  normalizeArchiveResponse
+} from './useArchiveHistory'
+import {
   buildChartOption,
   buildRawText,
   extractRows,
@@ -517,74 +523,34 @@ const recordAnalysisRun = ({ topic, start, end }) => {
 const fetchHistoryViaAnalyzeApi = async (topic) => {
   const params = new URLSearchParams({ topic })
   const response = await callApi(`/api/analyze/history?${params.toString()}`, { method: 'GET' })
-  const records = response?.records || response?.data?.records || response?.data || []
-  const defaults = {
-    topic: response?.topic || topic,
-    topic_identifier: response?.topic_identifier || topic
-  }
-  return normaliseHistoryRecords(records, defaults)
+  const { records, defaults } = normalizeArchiveResponse(response, 'analyze', topic)
+  return normaliseArchiveRecords(records, defaults)
 }
 
 const fetchHistoryViaArchives = async (topic) => {
   const encodedTopic = encodeURIComponent(topic)
   const response = await callApi(`/api/projects/${encodedTopic}/archives?layers=analyze`, { method: 'GET' })
-  const entries = response?.archives?.analyze || []
-  const defaults = {
-    topic: response?.display_name || response?.project || topic,
-    topic_identifier: response?.topic || topic
-  }
-  return normaliseHistoryRecords(entries, defaults, { folderKey: 'date' })
+  const { records, defaults, folderKey } = normalizeArchiveResponse(response, 'analyze', topic)
+  return normaliseArchiveRecords(records, defaults, folderKey ? { folderKey } : {})
 }
 
-const normaliseHistoryRecords = (records, defaults = {}, options = {}) => {
-  if (!Array.isArray(records) || !records.length) return []
-  const folderKey = options.folderKey || 'folder'
-  return records
-    .map((record) => normaliseSingleHistoryRecord(record, defaults, folderKey))
-    .filter((entry) => entry && entry.start)
-    .slice(0, MAX_HISTORY)
-}
-
-const normaliseSingleHistoryRecord = (record, defaults = {}, folderKey = 'folder') => {
-  if (!record) return null
-  const topic = String(record.topic || defaults.topic || '').trim()
-  const topicIdentifier = String(record.topic_identifier || defaults.topic_identifier || topic).trim()
-  const folderRaw = String(record[folderKey] || record.folder || record.date || '').trim()
-  const startRaw = String(record.start || '').trim()
-  const endRaw = String(record.end || '').trim()
-  const { start, end } = deriveRangeFromFolder(folderRaw, startRaw, endRaw)
-  if (!topic || !start) return null
-  const folder = folderRaw || (start === end ? start : `${start}_${end}`)
-  const id = record.id || `${topicIdentifier || topic}:${folder}`
-  return {
-    id,
-    topic,
-    topic_identifier: topicIdentifier || topic,
-    start,
-    end,
-    folder,
-    updated_at: record.updated_at || record.lastRun || record.last_run || ''
-  }
-}
-
+// normaliseHistoryRecords and friends have been moved to useArchiveHistory.js
+// These thin wrappers preserve the internal call sites above.
+const normaliseHistoryRecords = normaliseArchiveRecords
+const normaliseSingleHistoryRecord = normaliseRecord
 const deriveRangeFromFolder = (folderValue, startValue, endValue) => {
   let rangeStart = (startValue || '').trim()
   let rangeEnd = (endValue || '').trim()
   const folder = (folderValue || '').trim()
   if (!rangeStart && folder) {
-    if (folder.includes('_')) {
-      const [first, second] = folder.split('_', 2)
-      rangeStart = first.trim()
-      rangeEnd = (second || first).trim()
-    } else {
-      rangeStart = folder
-    }
+    const result = splitFolderRange(folder)
+    rangeStart = result.start
+    rangeEnd = result.end
   }
-  if (!rangeEnd) {
-    rangeEnd = rangeStart
-  }
+  if (!rangeEnd) rangeEnd = rangeStart
   return { start: rangeStart, end: rangeEnd }
 }
+
 
 const runFetch = async (rangeOverride = null, options = {}) => {
   const range = normalizeRange(rangeOverride || fetchForm)

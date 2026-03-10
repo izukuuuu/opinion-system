@@ -91,10 +91,19 @@
             type="button"
             class="btn-primary inline-flex items-center gap-2"
             :disabled="reportState.loading || reportState.regenerating"
-            @click="regenerateReport"
+            @click="handleGenerateAction"
           >
-            <SparklesIcon class="h-4 w-4" :class="reportState.regenerating ? 'animate-pulse' : ''" />
-            {{ reportState.regenerating ? '生成中…' : '重新生成' }}
+            <SparklesIcon class="h-4 w-4" :class="isPrimaryActionRunning ? 'animate-pulse' : ''" />
+            {{ primaryActionText }}
+          </button>
+          <button
+            type="button"
+            class="btn-secondary inline-flex items-center gap-2"
+            :disabled="exporting || !report"
+            @click="exportHtmlReport"
+          >
+            <ArrowDownTrayIcon class="h-4 w-4" />
+            {{ exporting ? '导出中…' : '导出报告 HTML' }}
           </button>
         </div>
       </div>
@@ -166,26 +175,81 @@
             </li>
           </ul>
           <p v-else class="text-sm text-muted">暂无阶段说明。</p>
+        </article>
+      </section>
 
-          <div class="border-t border-soft pt-3">
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">BERTopic 时间节点（AI再分类）</p>
-            <ul v-if="bertopicTimeNodes.length" class="mt-2 space-y-2 text-sm text-secondary">
+      <section class="card-surface space-y-4 p-6">
+        <header class="space-y-4">
+          <div class="border-b border-soft pb-3">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">BERTopic 主题演化</p>
+              <h3 class="mt-1 text-lg font-semibold text-primary">核心关注点随时间的变化</h3>
+            </div>
+          </div>
+          
+          <p class="text-sm text-secondary">
+            {{ bertopicOverviewText }}
+          </p>
+        </header>
+
+        <div class="rounded-2xl border border-brand-soft bg-brand-soft/10 p-5 mt-2 transition-all duration-300">
+          <div class="flex items-center gap-2 mb-3">
+            <SparklesIcon class="h-5 w-5 text-brand-500" />
+            <span class="font-semibold text-primary">AI 深度解读</span>
+          </div>
+          <div
+            v-if="formattedBertopicInsight"
+            class="prose prose-sm max-w-none text-secondary" 
+            v-html="formattedBertopicInsight"
+          ></div>
+          <p v-else class="text-sm text-muted">
+            暂无 AI 深度解读。请点击上方“重新生成”，在后端报告生成流程中补齐该区块。
+          </p>
+        </div>
+
+        <div class="grid gap-6 xl:grid-cols-[1.6fr,1fr]">
+          <AnalysisChartPanel
+            title="主题热度时间轴"
+            description="背景浅蓝色区域代表每天的样本总量走势，彩色折线展示了几个核心话题在这些天的讨论热度变化。"
+            :option="bertopicTimelineOption"
+            :has-data="hasBertopicTimelineData"
+            empty-message="暂无热度节点数据"
+          />
+
+          <article class="rounded-2xl border border-soft bg-surface p-4">
+            <header class="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-soft pb-3">
+              <p class="text-sm font-semibold text-primary">核心主题时间线</p>
+              <span class="text-xs text-muted">包含 {{ formatNumber(themeActivePoints.length) }} 个主题节点</span>
+            </header>
+            
+            <ul v-if="themeActivePoints.length" class="max-h-[560px] space-y-4 overflow-y-auto pr-1 text-sm text-secondary">
               <li
-                v-for="node in bertopicTimeNodes"
-                :key="`bertopic-node-${node.date}-${node.topTheme}`"
-                class="rounded-xl border border-soft bg-surface p-3"
+                v-for="group in themeActivePoints"
+                :key="`theme-group-${group.theme}`"
+                class="space-y-2"
               >
-                <div class="flex items-center justify-between gap-2">
-                  <p class="font-semibold text-primary">{{ node.label }}</p>
-                  <span class="text-xs text-muted">样本 {{ formatNumber(node.total) }}</span>
+                <p class="font-semibold text-primary flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-brand-500"></span>
+                  {{ group.theme }}
+                </p>
+                <div class="space-y-2 pl-4 border-l-2 border-brand-soft">
+                  <div
+                    v-for="node in group.points"
+                    :key="`theme-node-${group.theme}-${node.date}`"
+                    class="rounded-xl border border-soft bg-surface-muted p-2 hover:border-brand-soft hover:bg-brand-soft/10 transition-colors"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="font-medium text-primary">{{ node.label }}</p>
+                      <span class="text-xs font-semibold text-brand-600">热度 {{ formatNumber(node.topValue) }}</span>
+                    </div>
+                    <p class="mt-1 text-xs text-muted">当日总样本数 {{ formatNumber(node.total) }}</p>
+                  </div>
                 </div>
-                <p class="mt-1 text-xs text-secondary">主主题：{{ node.topTheme }}（{{ formatNumber(node.topValue) }}）</p>
-                <p v-if="node.tailThemes" class="mt-1 text-xs text-muted">次级主题：{{ node.tailThemes }}</p>
               </li>
             </ul>
-            <p v-else class="mt-2 text-sm text-muted">暂无 BERTopic 时间节点数据。</p>
-          </div>
-        </article>
+            <p v-else class="text-sm text-muted">暂无核心主题时间线数据。</p>
+          </article>
+        </div>
       </section>
 
       <section class="grid gap-6 xl:grid-cols-2">
@@ -199,15 +263,6 @@
             <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">洞察亮点</p>
             <h3 class="text-lg font-semibold text-primary">重点结论</h3>
           </div>
-          <button
-            type="button"
-            class="btn-secondary inline-flex items-center gap-2"
-            :disabled="exporting"
-            @click="exportHtmlReport"
-          >
-            <ArrowDownTrayIcon class="h-4 w-4" />
-            {{ exporting ? '导出中…' : '导出 HTML' }}
-          </button>
         </header>
 
         <ul v-if="highlightPoints.length" class="space-y-2 rounded-2xl border border-brand-soft bg-brand-soft/20 p-4 text-sm text-secondary">
@@ -233,7 +288,7 @@
     </template>
 
     <section v-else class="card-surface p-6 text-sm text-muted">
-      请先选择专题与时间范围，然后点击“读取报告”或“重新生成”。
+      请先选择专题与时间范围，然后点击“读取报告”或“生成”。
     </section>
   </div>
 </template>
@@ -246,6 +301,7 @@ import {
   ClockIcon,
   SparklesIcon
 } from '@heroicons/vue/24/outline'
+import { marked } from 'marked'
 import AnalysisChartPanel from '../../components/AnalysisChartPanel.vue'
 import { useReportGeneration } from '../../composables/useReportGeneration'
 
@@ -282,6 +338,17 @@ const formatNumber = (value) => {
 }
 
 const report = computed(() => (reportData.value && typeof reportData.value === 'object' ? reportData.value : null))
+const hasCurrentRangeHistory = computed(() => {
+  const start = String(reportForm.start || '').trim()
+  const end = String(reportForm.end || '').trim() || start
+  if (!start || !end) return false
+  return reportHistory.value.some((record) => record.start === start && record.end === end)
+})
+const isPrimaryActionRunning = computed(() => reportState.regenerating)
+const primaryActionText = computed(() => {
+  if (isPrimaryActionRunning.value) return '生成中…'
+  return hasCurrentRangeHistory.value ? '重新生成' : '生成'
+})
 
 const reportMeta = computed(() => ({
   title: report.value?.title || `${reportForm.topic || '专题'}舆情分析报告`,
@@ -319,7 +386,14 @@ const sentiment = computed(() => report.value?.sentiment || { positive: 0, neutr
 const contentSplit = computed(() => report.value?.contentSplit || { factual: 0, opinion: 0 })
 
 const stageNotes = computed(() => (Array.isArray(report.value?.stageNotes) ? report.value.stageNotes : []))
-const bertopicTimeNodes = computed(() => {
+const parseDateToken = (raw) => {
+  const token = String(raw || '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(token)) return null
+  const dt = new Date(`${token}T00:00:00`)
+  return Number.isNaN(dt.getTime()) ? null : dt
+}
+
+const bertopicTimelineNodes = computed(() => {
   const rows = Array.isArray(report.value?.bertopicTimeNodes) ? report.value.bertopicTimeNodes : []
   return rows
     .map((item) => {
@@ -351,8 +425,50 @@ const bertopicTimeNodes = computed(() => {
       }
     })
     .filter((item) => item.date && item.topTheme)
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 8)
+    .sort((a, b) => {
+      const left = parseDateToken(a.date)
+      const right = parseDateToken(b.date)
+      if (left && right) return left.getTime() - right.getTime()
+      if (left) return -1
+      if (right) return 1
+      return a.date.localeCompare(b.date)
+    })
+})
+const bertopicTimelineListNodes = computed(() => bertopicTimelineNodes.value)
+const bertopicOverview = computed(() => (report.value?.bertopicOverview && typeof report.value.bertopicOverview === 'object'
+  ? report.value.bertopicOverview
+  : {}))
+const bertopicCoverageRange = computed(() => {
+  const rows = bertopicTimelineNodes.value
+  if (!rows.length) return { start: '', end: '' }
+  return {
+    start: String(rows[0]?.date || '').trim(),
+    end: String(rows[rows.length - 1]?.date || '').trim()
+  }
+})
+const bertopicOverviewText = computed(() => {
+  const days = Number(bertopicOverview.value?.days || bertopicTimelineNodes.value.length || 0)
+  const mappedDocs = Number(bertopicOverview.value?.totalMappedDocs || 0)
+  const coverageStart = String(bertopicCoverageRange.value.start || '').trim()
+  const coverageEnd = String(bertopicCoverageRange.value.end || '').trim()
+  const reportStart = String(reportForm.start || '').trim()
+  const reportEnd = String(reportForm.end || reportStart || '').trim()
+  if (!days && !mappedDocs) return '我们对这期间的讨论进行了分析，整理出了核心话题在每日的变化走势。'
+
+  const baseText = coverageStart && coverageEnd
+    ? `BERTopic 结果当前覆盖 ${coverageStart} 至 ${coverageEnd} 共 ${formatNumber(days)} 个日期，映射到 ${formatNumber(mappedDocs)} 条讨论。`
+    : `BERTopic 结果共覆盖 ${formatNumber(days)} 个日期，映射到 ${formatNumber(mappedDocs)} 条讨论。`
+
+  if (coverageStart && coverageEnd && reportStart && reportEnd && (coverageStart > reportStart || coverageEnd < reportEnd)) {
+    return `${baseText} 与报告区间（${reportStart} 至 ${reportEnd}）不一致，请重新运行 BERTopic 后再生成报告。`
+  }
+
+  return baseText
+})
+const bertopicInsight = computed(() => String(report.value?.bertopicInsight || '').trim())
+const formattedBertopicInsight = computed(() => {
+  if (!bertopicInsight.value) return ''
+  return marked.parse(bertopicInsight.value, { mangle: false, headerIds: false })
 })
 const highlightPoints = computed(() => (Array.isArray(report.value?.highlightPoints) ? report.value.highlightPoints : []))
 const insightCards = computed(() => (Array.isArray(report.value?.insights) ? report.value.insights : []))
@@ -363,6 +479,7 @@ const hasSentimentData = computed(() => Boolean(sentiment.value))
 const hasContentSplitData = computed(() => Boolean(contentSplit.value))
 const hasKeywordData = computed(() => keywords.value.length > 0)
 const hasThemeData = computed(() => themes.value.length > 0)
+const hasBertopicTimelineData = computed(() => bertopicTimelineNodes.value.length > 0)
 
 const channelChartOption = computed(() => {
   const sorted = [...channels.value]
@@ -372,12 +489,14 @@ const channelChartOption = computed(() => {
     }))
     .filter((item) => item.name)
     .sort((a, b) => b.value - a.value)
+  const maxValue = sorted.length ? Math.max(...sorted.map((item) => item.value), 0) : 0
+  const axisMax = maxValue > 0 ? Math.ceil((maxValue * 1.1) / 1000) * 1000 : 1
 
   return {
     color: ['#2563eb', '#0ea5e9', '#10b981', '#f97316', '#8b5cf6', '#ef4444'],
     tooltip: { trigger: 'axis' },
-    grid: { left: 72, right: 24, top: 24, bottom: 24 },
-    xAxis: { type: 'value', axisLabel: { color: '#475569' } },
+    grid: { left: 72, right: 72, top: 24, bottom: 24 },
+    xAxis: { type: 'value', max: axisMax, axisLabel: { color: '#475569' } },
     yAxis: {
       type: 'category',
       inverse: true,
@@ -389,8 +508,9 @@ const channelChartOption = computed(() => {
         type: 'bar',
         barWidth: 18,
         data: sorted.map((item) => item.value),
+        clip: false,
         itemStyle: { borderRadius: [8, 8, 8, 8] },
-        label: { show: true, position: 'right', color: '#0f172a', fontWeight: 600 }
+        label: { show: true, position: 'right', distance: 8, color: '#0f172a', fontWeight: 600 }
       }
     ]
   }
@@ -510,7 +630,7 @@ const themeChartOption = computed(() => {
   return {
     color: ['#8b5cf6'],
     tooltip: { trigger: 'axis' },
-    grid: { left: 56, right: 24, top: 24, bottom: 48 },
+    grid: { left: 80, right: 24, top: 24, bottom: 84 },
     xAxis: {
       type: 'category',
       data: rows.map((item) => item.name),
@@ -533,6 +653,107 @@ const themeChartOption = computed(() => {
   }
 })
 
+const bertopicLeadingThemes = computed(() => {
+  const stats = new Map()
+  bertopicTimelineNodes.value.forEach((node) => {
+    node.themes.forEach((theme) => {
+      const name = String(theme?.name || '').trim()
+      const value = Number(theme?.value || 0)
+      if (!name || value <= 0) return
+      stats.set(name, (stats.get(name) || 0) + value)
+    })
+  })
+  return [...stats.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name]) => name)
+})
+
+const themeActivePoints = computed(() => {
+  const rows = bertopicTimelineNodes.value
+  const leaders = bertopicLeadingThemes.value
+  if (!rows.length || !leaders.length) return []
+
+  const grouped = []
+  for (const themeName of leaders) {
+    const points = []
+    for (const node of rows) {
+      if (node.topTheme === themeName) {
+        points.push(node)
+      }
+    }
+    if (points.length) {
+      points.sort((a, b) => b.topValue - a.topValue)
+      grouped.push({
+        theme: themeName,
+        points: points.slice(0, 3) 
+      })
+    }
+  }
+  return grouped
+})
+
+const bertopicTimelineOption = computed(() => {
+  const rows = bertopicTimelineNodes.value
+  const labels = rows.map((node) => node.label || node.date)
+  const totals = rows.map((node) => Number(node.total || 0))
+  const leaders = bertopicLeadingThemes.value
+
+  const leaderSeries = leaders.map((themeName) => ({
+    name: themeName,
+    type: 'line',
+    smooth: true,
+    showSymbol: false,
+    lineStyle: { width: 2.5 },
+    data: rows.map((node) => {
+      const matched = node.themes.find((theme) => theme.name === themeName)
+      return Number(matched?.value || 0)
+    })
+  }))
+
+  const interval = labels.length > 42 ? Math.ceil(labels.length / 12) : 0
+
+  return {
+    color: ['#1d4ed8', '#f97316', '#0ea5e9', '#10b981'],
+    tooltip: { trigger: 'axis' },
+    legend: {
+      top: 4,
+      data: ['样本总量', ...leaders],
+      textStyle: { color: '#475569', fontSize: 12 }
+    },
+    grid: { left: 56, right: 20, top: 56, bottom: labels.length > 42 ? 72 : 42 },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      boundaryGap: false,
+      axisLabel: { color: '#475569', interval }
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: '#475569' },
+      splitLine: { lineStyle: { color: '#e2e8f0' } }
+    },
+    dataZoom: labels.length > 42
+      ? [
+          { type: 'inside', start: 0, end: 100 },
+          { type: 'slider', start: 0, end: 100, height: 20, bottom: 18 }
+        ]
+      : [],
+    series: [
+      {
+        name: '样本总量',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        data: totals,
+        areaStyle: { color: 'rgba(59, 130, 246, 0.15)' },
+        lineStyle: { width: 0, color: 'rgba(59, 130, 246, 0.3)' },
+      },
+      ...leaderSeries,
+    ]
+  }
+})
+
 const handleSelectHistory = async (event) => {
   const historyId = String(event.target.value || '').trim()
   if (!historyId) return
@@ -545,6 +766,10 @@ const handleRefreshHistory = async () => {
   await loadHistory(topic)
 }
 
+const handleGenerateAction = async () => {
+  await regenerateReport()
+}
+
 const escapeHtml = (value) => String(value || '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -553,49 +778,118 @@ const escapeHtml = (value) => String(value || '')
   .replace(/'/g, '&#39;')
 
 const buildHtmlDocument = () => {
-  const payload = report.value
-  if (!payload) return ''
+  if (!report.value) return ''
 
-  const insightHtml = insightCards.value
-    .map((insight) => {
-      const points = Array.isArray(insight.points) ? insight.points : []
-      return `
-        <article class="card">
-          <h3>${escapeHtml(insight.title)}</h3>
-          <p class="headline">${escapeHtml(insight.headline)}</p>
-          <ul>${points.map((point) => `<li>${escapeHtml(point)}</li>`).join('')}</ul>
-        </article>
-      `
-    })
-    .join('')
-
-  const highlightHtml = highlightPoints.value
-    .map((point) => `<li>${escapeHtml(point)}</li>`)
-    .join('')
-
-  const bertopicNodeHtml = bertopicTimeNodes.value
-    .map((node) => {
-      const tailText = node.tailThemes ? `<p class="meta">次级主题：${escapeHtml(node.tailThemes)}</p>` : ''
-      return `
-        <li>
-          <strong>${escapeHtml(node.label)}</strong>
-          <span class="meta">主主题：${escapeHtml(node.topTheme)}（${escapeHtml(formatNumber(node.topValue))}） · 样本 ${escapeHtml(formatNumber(node.total))}</span>
-          ${tailText}
-        </li>
-      `
-    })
-    .join('')
-
-  const charts = {
+  const chartOptions = {
     channel: channelChartOption.value,
     sentiment: sentimentChartOption.value,
     contentSplit: contentSplitOption.value,
     trend: trendChartOption.value,
+    bertopicTimeline: bertopicTimelineOption.value,
     keyword: keywordChartOption.value,
     theme: themeChartOption.value
   }
 
-  const chartJson = JSON.stringify(charts)
+  const chartState = {
+    channel: hasChannelData.value,
+    sentiment: hasSentimentData.value,
+    contentSplit: hasContentSplitData.value,
+    trend: hasTrendData.value,
+    bertopicTimeline: hasBertopicTimelineData.value,
+    keyword: hasKeywordData.value,
+    theme: hasThemeData.value
+  }
+
+  const chartRuntime = Object.entries(chartState).map(([optionKey, hasData]) => ({
+    id: `chart-${optionKey}`,
+    optionKey,
+    hasData
+  }))
+
+  const renderChartPanel = (optionKey, title, description = '') => `
+    <article class="panel chart-panel">
+      <header class="panel-header">
+        <h3>${escapeHtml(title)}</h3>
+        ${description ? `<p class="panel-subtitle">${escapeHtml(description)}</p>` : ''}
+      </header>
+      ${chartState[optionKey]
+    ? `<div id="chart-${optionKey}" class="chart"></div>`
+    : '<div class="chart-empty">暂无可视化数据</div>'}
+    </article>
+  `
+
+  const stageContent = stageNotes.value.length
+    ? `<ul class="stage-list">
+      ${stageNotes.value.map((stage) => `
+        <li class="stage-item">
+          <div class="stage-head">
+            <p class="stage-title">${escapeHtml(stage.title || '-')}</p>
+            <span class="stage-badge">${escapeHtml(stage.badge || '-')}</span>
+          </div>
+          <p class="stage-meta">${escapeHtml(stage.range || '-')} · ${escapeHtml(stage.delta || '-')}</p>
+          <p class="stage-highlight">${escapeHtml(stage.highlight || '')}</p>
+        </li>
+      `).join('')}
+    </ul>`
+    : '<p class="empty-text">暂无阶段说明。</p>'
+
+  const highlightHtml = highlightPoints.value.length
+    ? `<ul class="bullet-list">
+      ${highlightPoints.value.map((point) => `<li>${escapeHtml(point)}</li>`).join('')}
+    </ul>`
+    : '<p class="empty-text">暂无洞察亮点。</p>'
+
+  const insightHtml = insightCards.value.length
+    ? `<div class="insight-grid">
+      ${insightCards.value.map((insight) => {
+    const points = Array.isArray(insight.points) ? insight.points : []
+    const pointHtml = points.length
+      ? `<ul class="bullet-list compact">${points.map((point) => `<li>${escapeHtml(point)}</li>`).join('')}</ul>`
+      : '<p class="empty-text">暂无补充要点。</p>'
+    return `
+          <article class="insight-card">
+            <p class="insight-title">${escapeHtml(insight.title)}</p>
+            <p class="insight-headline">${escapeHtml(insight.headline)}</p>
+            ${pointHtml}
+          </article>
+        `
+  }).join('')}
+    </div>`
+    : '<p class="empty-text">暂无重点结论。</p>'
+
+  const themeTimelineHtml = themeActivePoints.value.length
+    ? `<ul class="theme-group-list">
+      ${themeActivePoints.value.map((group) => {
+    const points = Array.isArray(group.points) ? group.points : []
+    const pointsHtml = points.map((node) => `
+            <article class="theme-point">
+              <div class="theme-point-head">
+                <p>${escapeHtml(node.label)}</p>
+                <span>热度 ${escapeHtml(formatNumber(node.topValue))}</span>
+              </div>
+              <p class="theme-point-meta">当日总样本数 ${escapeHtml(formatNumber(node.total))}</p>
+            </article>
+          `).join('')
+    return `
+          <li class="theme-group">
+            <p class="theme-name">${escapeHtml(group.theme)}</p>
+            <div class="theme-point-list">${pointsHtml}</div>
+          </li>
+        `
+  }).join('')}
+    </ul>`
+    : '<p class="empty-text">暂无核心主题时间线数据。</p>'
+
+  const bertopicInsightHtml = formattedBertopicInsight.value
+    ? `<div class="prose">${formattedBertopicInsight.value}</div>`
+    : '<p class="empty-text">暂无 AI 深度解读。请重新生成报告以补齐该区块。</p>'
+
+  const loadedSuffix = reportState.lastLoaded
+    ? ` · 前端读取：${escapeHtml(reportState.lastLoaded)}`
+    : ''
+
+  const chartJson = JSON.stringify(chartOptions)
+  const chartRuntimeJson = JSON.stringify(chartRuntime)
   const closeScript = '</scr' + 'ipt>'
 
   return `<!doctype html>
@@ -605,68 +899,311 @@ const buildHtmlDocument = () => {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(reportMeta.value.title)}</title>
   <style>
-    body { margin: 0; padding: 20px; background: #f8fafc; color: #0f172a; font-family: "PingFang SC", "Microsoft YaHei", sans-serif; }
-    h1, h2, h3 { margin: 0; }
-    .panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; margin-bottom: 14px; }
-    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-    .chart { height: 300px; }
-    .card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; background: #fff; }
-    .headline { margin: 8px 0; color: #1e293b; font-weight: 600; }
-    ul { margin: 6px 0 0; padding-left: 18px; color: #334155; }
-    .meta { color: #64748b; font-size: 13px; margin-top: 6px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f8fafc;
+      color: #0f172a;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    }
+    h1, h2, h3, p { margin: 0; }
+    .report-root { max-width: 1240px; margin: 0 auto; padding: 24px; display: grid; gap: 16px; }
+    .panel {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 22px;
+      padding: 18px;
+    }
+    .section-kicker {
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #64748b;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .title { font-size: 30px; line-height: 1.2; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+    .subtitle { font-size: 14px; color: #334155; margin-bottom: 6px; }
+    .meta-line { font-size: 12px; color: #64748b; }
+    .metric-grid { display: grid; gap: 12px; margin-top: 14px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+    .metric-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      background: #ffffff;
+      padding: 14px;
+    }
+    .metric-label {
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #64748b;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .metric-value {
+      color: #0f172a;
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .metric-value-lg { font-size: 30px; }
+    .metric-sub { margin-top: 6px; color: #334155; font-size: 13px; }
+    .chart-grid-3 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .chart-grid-2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+    .split-grid { display: grid; gap: 16px; }
+    .bertopic-grid { display: grid; gap: 16px; }
+    .panel-header { margin-bottom: 12px; }
+    .panel-header h3 {
+      font-size: 18px;
+      color: #0f172a;
+      line-height: 1.3;
+      font-weight: 700;
+    }
+    .panel-subtitle {
+      margin-top: 6px;
+      color: #475569;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .chart { width: 100%; height: 360px; }
+    .chart-empty {
+      height: 360px;
+      border-radius: 14px;
+      border: 1px dashed #cbd5e1;
+      background: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #64748b;
+      font-size: 14px;
+    }
+    .stage-list, .theme-group-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+    .stage-item {
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 12px;
+      background: #ffffff;
+    }
+    .stage-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .stage-title { color: #0f172a; font-size: 15px; font-weight: 700; }
+    .stage-badge {
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 700;
+      background: #dbeafe;
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      padding: 3px 9px;
+    }
+    .stage-meta { margin-top: 6px; font-size: 12px; color: #64748b; }
+    .stage-highlight { margin-top: 8px; color: #334155; font-size: 13px; line-height: 1.7; }
+    .bertopic-intro { font-size: 14px; color: #334155; line-height: 1.75; }
+    .bertopic-insight {
+      border: 1px solid #bfdbfe;
+      border-radius: 16px;
+      background: #eff6ff;
+      padding: 14px;
+      margin-top: 12px;
+    }
+    .bertopic-insight-title {
+      font-size: 14px;
+      color: #0f172a;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .theme-timeline {
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      background: #ffffff;
+      padding: 14px;
+      max-height: 560px;
+      overflow: auto;
+    }
+    .theme-group { display: grid; gap: 8px; }
+    .theme-name { color: #0f172a; font-size: 14px; font-weight: 700; }
+    .theme-point-list {
+      border-left: 2px solid #dbeafe;
+      padding-left: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .theme-point {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 10px;
+      background: #f8fafc;
+    }
+    .theme-point-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .theme-point-head p {
+      color: #0f172a;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .theme-point-head span {
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .theme-point-meta { margin-top: 5px; font-size: 12px; color: #64748b; }
+    .bullet-list {
+      margin: 0;
+      padding-left: 18px;
+      color: #334155;
+      line-height: 1.7;
+      display: grid;
+      gap: 8px;
+      font-size: 14px;
+    }
+    .bullet-list.compact { gap: 6px; font-size: 13px; }
+    .insight-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 12px; }
+    .insight-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 12px;
+      background: #ffffff;
+    }
+    .insight-title {
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #64748b;
+      font-weight: 700;
+    }
+    .insight-headline {
+      margin-top: 8px;
+      color: #0f172a;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+    .empty-text { color: #64748b; font-size: 14px; line-height: 1.75; }
+    .prose { color: #334155; line-height: 1.75; font-size: 14px; }
+    .prose :first-child { margin-top: 0; }
+    .prose :last-child { margin-bottom: 0; }
+    .prose p, .prose ul, .prose ol, .prose blockquote { margin: 0 0 10px; }
+    .prose ul, .prose ol { padding-left: 18px; }
+    .prose blockquote {
+      margin-left: 0;
+      padding: 8px 10px;
+      border-left: 3px solid #93c5fd;
+      background: #dbeafe;
+      border-radius: 6px;
+      color: #1e3a8a;
+    }
+    @media (min-width: 1120px) {
+      .split-grid { grid-template-columns: 1.6fr 1fr; }
+      .bertopic-grid { grid-template-columns: 1.6fr 1fr; }
+    }
+    @media (max-width: 768px) {
+      .report-root { padding: 16px; }
+      .panel { border-radius: 16px; padding: 14px; }
+      .title { font-size: 24px; }
+      .chart, .chart-empty { height: 300px; }
+      .theme-timeline { max-height: none; }
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js">${closeScript}
 </head>
 <body>
-  <section class="panel">
-    <h1>${escapeHtml(reportMeta.value.title)}</h1>
-    <p class="meta">${escapeHtml(reportMeta.value.subtitle)}</p>
-    <p class="meta">${escapeHtml(reportMeta.value.rangeText)} · 更新于 ${escapeHtml(reportMeta.value.lastUpdated)}</p>
-  </section>
+  <main class="report-root">
+    <section class="panel">
+      <p class="section-kicker">报告概览</p>
+      <h1 class="title">${escapeHtml(reportMeta.value.title)}</h1>
+      <p class="subtitle">${escapeHtml(reportMeta.value.subtitle)}</p>
+      <p class="meta-line">${escapeHtml(reportMeta.value.rangeText)} · 最近更新：${escapeHtml(reportMeta.value.lastUpdated)}${loadedSuffix}</p>
 
-  <section class="panel">
-    <h2>洞察亮点</h2>
-    <ul>${highlightHtml}</ul>
-  </section>
+      <div class="metric-grid">
+        <article class="metric-card">
+          <p class="metric-label">总声量</p>
+          <p class="metric-value metric-value-lg">${escapeHtml(formatNumber(metrics.value.totalVolume))}</p>
+        </article>
+        <article class="metric-card">
+          <p class="metric-label">峰值</p>
+          <p class="metric-value">${escapeHtml(formatNumber(metrics.value.peak.value))}</p>
+          <p class="metric-sub">${escapeHtml(metrics.value.peak.date || '未提供')}</p>
+        </article>
+        <article class="metric-card">
+          <p class="metric-label">情感结构</p>
+          <p class="metric-value">正向 ${escapeHtml(formatRate(metrics.value.positiveRate))}</p>
+          <p class="metric-sub">中性 ${escapeHtml(formatRate(metrics.value.neutralRate))} · 负向 ${escapeHtml(formatRate(metrics.value.negativeRate))}</p>
+        </article>
+        <article class="metric-card">
+          <p class="metric-label">内容结构</p>
+          <p class="metric-value">报道 ${escapeHtml(formatRate(metrics.value.factualRatio))}</p>
+          <p class="metric-sub">观点 ${escapeHtml(formatRate(metrics.value.opinionRatio))}</p>
+        </article>
+      </div>
+    </section>
 
-  <section class="panel">
-    <h2>BERTopic 时间节点（AI再分类）</h2>
-    <ul>${bertopicNodeHtml || '<li>暂无 BERTopic 时间节点数据</li>'}</ul>
-  </section>
+    <section class="chart-grid-3">
+      ${renderChartPanel('channel', '渠道分布')}
+      ${renderChartPanel('sentiment', '情感态度')}
+      ${renderChartPanel('contentSplit', '内容结构')}
+    </section>
 
-  <section class="panel">
-    <h2>图表</h2>
-    <div class="grid">
-      <div><h3>渠道分布</h3><div id="chart-channel" class="chart"></div></div>
-      <div><h3>情感态度</h3><div id="chart-sentiment" class="chart"></div></div>
-      <div><h3>内容结构</h3><div id="chart-content" class="chart"></div></div>
-      <div><h3>时间趋势</h3><div id="chart-trend" class="chart"></div></div>
-      <div><h3>关键词热度</h3><div id="chart-keyword" class="chart"></div></div>
-      <div><h3>主题分布</h3><div id="chart-theme" class="chart"></div></div>
-    </div>
-  </section>
+    <section class="split-grid">
+      ${renderChartPanel('trend', '时间趋势')}
+      <article class="panel">
+        <header class="panel-header">
+          <h3>节奏拆解</h3>
+          <p class="panel-subtitle">传播阶段</p>
+        </header>
+        ${stageContent}
+      </article>
+    </section>
 
-  <section class="panel">
-    <h2>重点结论</h2>
-    <div class="grid">${insightHtml}</div>
-  </section>
+    <section class="panel">
+      <header class="panel-header">
+        <h3>核心关注点随时间的变化</h3>
+        <p class="panel-subtitle">BERTopic 主题演化</p>
+      </header>
+      <p class="bertopic-intro">${escapeHtml(bertopicOverviewText.value)}</p>
+      <div class="bertopic-insight">
+        <p class="bertopic-insight-title">AI 深度解读</p>
+        ${bertopicInsightHtml}
+      </div>
+      <div class="bertopic-grid" style="margin-top: 14px;">
+        ${renderChartPanel('bertopicTimeline', '主题热度时间轴', '背景浅蓝色区域代表每天的样本总量走势，彩色折线展示了几个核心话题在这些天的讨论热度变化。')}
+        <aside class="theme-timeline">
+          <header class="panel-header">
+            <h3>核心主题时间线</h3>
+            <p class="panel-subtitle">包含 ${escapeHtml(formatNumber(themeActivePoints.value.length))} 个主题节点</p>
+          </header>
+          ${themeTimelineHtml}
+        </aside>
+      </div>
+    </section>
+
+    <section class="chart-grid-2">
+      ${renderChartPanel('keyword', '关键词热度')}
+      ${renderChartPanel('theme', '主题分布')}
+    </section>
+
+    <section class="panel">
+      <header class="panel-header">
+        <h3>重点结论</h3>
+        <p class="panel-subtitle">洞察亮点</p>
+      </header>
+      ${highlightHtml}
+      ${insightHtml}
+    </section>
+  </main>
 
   <script>
     const chartOptions = ${chartJson};
-    const map = [
-      ['chart-channel', chartOptions.channel],
-      ['chart-sentiment', chartOptions.sentiment],
-      ['chart-content', chartOptions.contentSplit],
-      ['chart-trend', chartOptions.trend],
-      ['chart-keyword', chartOptions.keyword],
-      ['chart-theme', chartOptions.theme]
-    ];
-    map.forEach(([id, option]) => {
-      const el = document.getElementById(id);
+    const chartRuntime = ${chartRuntimeJson};
+    const instances = [];
+    chartRuntime.forEach((item) => {
+      if (!item.hasData) return;
+      const el = document.getElementById(item.id);
+      const option = chartOptions[item.optionKey];
       if (!el || !option) return;
       const chart = echarts.init(el);
-      chart.setOption(option);
-      window.addEventListener('resize', () => chart.resize());
+      chart.setOption(option, true);
+      instances.push(chart);
+    });
+    window.addEventListener('resize', () => {
+      instances.forEach((chart) => chart.resize());
     });
   ${closeScript}
 </body>

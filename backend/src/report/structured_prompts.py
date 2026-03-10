@@ -88,3 +88,20 @@ def build_insights_prompt(facts: Dict[str, Any]) -> str:
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
+
+
+def build_bertopic_insight_prompt(facts: Dict[str, Any]) -> str:
+    schema = {
+        "insight_markdown": "面向业务方的BERTopic主题演化解读，使用2-4段中文Markdown，允许使用小标题与加粗。",
+    }
+    return (
+        "请基于 BERTopic 时间线事实生成“核心关注点随时间的变化”解读。\n"
+        "要求：\n"
+        "1) 明确描述关注焦点如何迁移，不要逐日流水账；\n"
+        "2) 点出长期主题与爆发主题，并结合时间节点解释原因；\n"
+        "3) 仅基于输入事实，不得编造日期、数量或事件；\n"
+        "4) 输出语言口语化但专业，避免空话；\n"
+        "5) 只输出 JSON。\n\n"
+        f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
+        f"【事实数据】\n{_json_block(facts)}"
+    )

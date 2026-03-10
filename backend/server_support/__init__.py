@@ -75,6 +75,18 @@ from .pipeline import (
     prepare_pipeline_args,
     resolve_topic_identifier,
 )
+from .topic_context import (
+    TopicContext,
+    context_to_tuple,
+    resolve_context,
+)
+from .archive_locator import (
+    ArchiveLocator,
+    ArchiveRecord,
+    LAYER_SIGNATURES,
+    compose_folder_name,
+    split_folder_range,
+)
 from .responses import (
     error,
     evaluate_success,
@@ -147,6 +159,16 @@ __all__ = [
     "normalise_topic_label",
     "prepare_pipeline_args",
     "resolve_topic_identifier",
+    # Topic context
+    "TopicContext",
+    "context_to_tuple",
+    "resolve_context",
+    # Archive locator
+    "ArchiveLocator",
+    "ArchiveRecord",
+    "LAYER_SIGNATURES",
+    "compose_folder_name",
+    "split_folder_range",
     # Response helpers
     "error",
     "evaluate_success",

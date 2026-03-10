@@ -145,10 +145,10 @@
               <DocumentTextIcon class="h-6 w-6" />
             </div>
             <div class="stat-card__content">
-              <p class="stat-card__value">{{ llmStats.totalDocs.toLocaleString() }}</p>
-              <p class="stat-card__label">文档总数</p>
+              <p class="stat-card__value">{{ llmStats.displayTotalDocs.toLocaleString() }}</p>
+              <p class="stat-card__label">文档总数（输入）</p>
               <p v-if="docStats.topicCount > 0" class="stat-card__subtext">
-                平均: {{ Math.round(llmStats.totalDocs / docStats.topicCount) }} 篇/主题
+                LLM映射: {{ llmStats.totalDocs.toLocaleString() }}（覆盖率 {{ llmStats.coverageRate.toFixed(1) }}%）
               </p>
             </div>
           </div>
@@ -159,8 +159,8 @@
             <div class="stat-card__content">
               <p class="stat-card__value">{{ llmStats.maxDocs.toLocaleString() }}</p>
               <p class="stat-card__label">最大主题文档数</p>
-              <p v-if="llmStats.totalDocs > 0" class="stat-card__subtext">
-                占比: {{ ((llmStats.maxDocs / llmStats.totalDocs) * 100).toFixed(1) }}%
+              <p v-if="llmStats.maxDocsBase > 0" class="stat-card__subtext">
+                占比: {{ ((llmStats.maxDocs / llmStats.maxDocsBase) * 100).toFixed(1) }}%
               </p>
             </div>
           </div>
@@ -354,24 +354,53 @@ const results = computed(() => {
 const hasSummary = computed(() => Boolean(results.value.summary))
 
 const summaryEntries = computed(() => {
-  // summary 包含 "主题文档统计"
   const summary = results.value.summary || {}
-  const stats = summary['主题文档统计'] || {}
-  // keywords 包含 "主题关键词"
   const keywordsData = results.value.keywords || {}
   const keywords = keywordsData['主题关键词'] || {}
-  const total = Object.values(stats).reduce((sum, info) => sum + (info['文档数'] || 0), 0)
-  const entries = Object.entries(stats).map(([name, info]) => {
-    const keywordList = keywords[name]?.关键词 || keywords[name] || []
-    return {
-      name,
-      label: name,
-      docCount: info['文档数'] || 0,
-      ratio: total ? (info['文档数'] / total) * 100 : 0,
-      keywords: (keywordList || []).slice(0, 10).map((item) => [item[0], Number(item[1]) || 0])
-    }
-  })
-  return { entries, total }
+  const sourceTotal = Number(summary.total_documents || 0)
+  const legacyStats = summary['主题文档统计']
+  const modernTopics = Array.isArray(summary.topics) ? summary.topics : []
+
+  let entries = []
+  if (legacyStats && typeof legacyStats === 'object') {
+    entries = Object.entries(legacyStats).map(([name, info]) => {
+      const keywordList = keywords[name]?.关键词 || keywords[name] || []
+      const docCount = Number(info?.['文档数'] || 0)
+      return {
+        name,
+        label: name,
+        docCount,
+        keywords: (keywordList || []).slice(0, 10).map((item) => [item[0], Number(item[1]) || 0])
+      }
+    })
+  } else if (modernTopics.length > 0) {
+    entries = modernTopics.map((topic) => {
+      const topicId = Number(topic?.topic_id)
+      const fallbackName = Number.isFinite(topicId) ? `主题${topicId}` : '未知主题'
+      const name = String(topic?.topic_name || fallbackName)
+      const keywordList = Array.isArray(topic?.keywords) ? topic.keywords : []
+      const docCount = Number(topic?.count || 0)
+      return {
+        name,
+        label: name,
+        docCount,
+        keywords: keywordList.slice(0, 10).map((item) => {
+          const text = typeof item === 'string' ? item : String(item?.[0] || '')
+          const weight = typeof item === 'string' ? 0 : Number(item?.[1] || 0)
+          return [text, Number.isFinite(weight) ? weight : 0]
+        })
+      }
+    })
+  }
+
+  const mappedTotal = entries.reduce((sum, item) => sum + (item.docCount || 0), 0)
+  const ratioBase = mappedTotal > 0 ? mappedTotal : 1
+  entries = entries.map((item) => ({
+    ...item,
+    ratio: ((item.docCount || 0) / ratioBase) * 100
+  }))
+
+  return { entries, total: mappedTotal, sourceTotal }
 })
 
 const topicDocMap = computed(() =>
@@ -423,12 +452,15 @@ const topTopics = computed(() =>
 const docStats = computed(() => {
   const entries = summaryEntries.value.entries
   if (!entries.length) {
-    return { topicCount: 0, docTotal: 0, maxDocs: 0 }
+    const sourceTotal = Number(summaryEntries.value.sourceTotal || 0)
+    return { topicCount: 0, docTotal: 0, sourceTotal, maxDocs: 0 }
   }
   const maxDocs = entries.reduce((max, item) => Math.max(max, item.docCount), 0)
+  const sourceTotal = Number(summaryEntries.value.sourceTotal || 0)
   return {
     topicCount: entries.length,
     docTotal: summaryEntries.value.total,
+    sourceTotal,
     maxDocs
   }
 })
@@ -525,19 +557,28 @@ const llmStats = computed(() => {
   if (llmClusters.value.length > 0) {
     const totalDocs = llmClusters.value.reduce((sum, cluster) => sum + (cluster.count || 0), 0)
     const maxDocs = llmClusters.value.reduce((max, cluster) => Math.max(max, cluster.count || 0), 0)
+    const displayTotalDocs = docStats.value.sourceTotal > 0 ? docStats.value.sourceTotal : docStats.value.docTotal
+    const coverageBase = displayTotalDocs > 0 ? displayTotalDocs : 1
     return {
       count: llmClusters.value.length,
       totalDocs,
-      maxDocs
+      displayTotalDocs,
+      maxDocs,
+      maxDocsBase: totalDocs > 0 ? totalDocs : displayTotalDocs,
+      coverageRate: (totalDocs / coverageBase) * 100
     }
   } else {
     // 使用原始主题数据
     const totalDocs = docStats.value.docTotal
+    const displayTotalDocs = docStats.value.sourceTotal > 0 ? docStats.value.sourceTotal : totalDocs
     const maxDocs = docStats.value.maxDocs
     return {
       count: docStats.value.topicCount,
       totalDocs,
-      maxDocs
+      displayTotalDocs,
+      maxDocs,
+      maxDocsBase: totalDocs > 0 ? totalDocs : displayTotalDocs,
+      coverageRate: displayTotalDocs > 0 ? (totalDocs / displayTotalDocs) * 100 : 100
     }
   }
 })
@@ -729,10 +770,11 @@ const donutPlotlyLayout = computed(() => {
   const totalDocs = dataSource.reduce((sum, item) => {
     return sum + (llmClusters.value.length > 0 ? item.count : item.docCount)
   }, 0)
+  const centerLabel = llmClusters.value.length > 0 ? 'LLM映射文档' : '总文档数'
   return {
     title: { text: '主题占比分布', font: { size: 14, color: '#2d3748' }, x: 0.5 },
     annotations: [
-      { font: { size: 16, color: '#4a5568' }, showarrow: false, text: '总文档数', x: 0.5, y: 0.55 },
+      { font: { size: 16, color: '#4a5568' }, showarrow: false, text: centerLabel, x: 0.5, y: 0.55 },
       { font: { size: 24, color: '#4361ee', weight: 'bold' }, showarrow: false, text: totalDocs.toLocaleString(), x: 0.5, y: 0.45 }
     ],
     showlegend: false,

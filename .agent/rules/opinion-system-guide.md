@@ -2,24 +2,31 @@
 trigger: always_on
 ---
 
-For real python environment testing, please use `uv` with Python 3.11.
+Use `uv` syntax for all Python operations in this project (Python 3.11).
 
-- Install dependencies: `uv sync`
-- Run scripts with dependency management: `uv run python <script.py>`
+## Python/Dependency Command Rules
+
+- Sync lockfile dependencies:
+  - `uv sync`
+- Install/repair a package into the project venv:
+  - `uv pip install --python .venv\Scripts\python.exe <package>`
+- Run Python scripts without re-resolving environment:
+  - `uv run --no-sync python <script.py>`
+
+Do not use bare `pip install ...` or `python ...` directly unless explicitly required by workflow docs.
 
 ## CUDA Support for BERTopic
 
-PyTorch with CUDA 11.8 must be installed **manually** after `uv sync`:
+PyTorch CUDA 11.8 installation must still use `uv pip` targeting the project venv:
 
 ```powershell
-uv pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+uv pip install --python .venv\Scripts\python.exe --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ```
 
-⚠️ **Important**: After installing CUDA version, **do NOT use `uv run python`** as it will reinstall the CPU version from lockfile.
+After CUDA install, prefer `uv run --no-sync python ...` to avoid lockfile-driven environment mutation.
 
-Instead, run scripts directly:
-- **Backend server**: `.venv\Scripts\python.exe backend/server.py`
-- **Other scripts**: `.venv\Scripts\python.exe <your_script.py>`
-- **Or activate venv**: `.venv\Scripts\Activate.ps1` then `python <script.py>`
+Examples:
+- Backend server: `uv run --no-sync python backend/server.py`
+- Other scripts: `uv run --no-sync python <your_script.py>`
 
 See workflow: `/setup-cuda` for full instructions.

@@ -1,5 +1,6 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useApiBase } from './useApiBase'
+import { normaliseArchiveRecords, normalizeArchiveResponse } from './useArchiveHistory'
 
 const { callApi } = useApiBase()
 
@@ -70,28 +71,7 @@ const FILE_MAP = {
 }
 
 const normalizeHistoryRecords = (records, fallbackTopic = '') => {
-  if (!Array.isArray(records)) return []
-
-  return records
-    .map((item, index) => {
-      const topic = String(item?.topic || fallbackTopic || '').trim()
-      const displayTopic = String(item?.display_topic || item?.displayTopic || topic).trim()
-      const start = String(item?.start || '').trim()
-      const end = String(item?.end || start).trim()
-      const folder = String(item?.folder || '').trim()
-      const id = String(item?.id || `${topic}:${folder || `${start}_${end}`}:${index}`)
-
-      return {
-        ...item,
-        id,
-        topic,
-        display_topic: displayTopic || topic,
-        start,
-        end,
-        folder
-      }
-    })
-    .filter((item) => item.topic && item.start)
+  return normaliseArchiveRecords(records, { topic: fallbackTopic })
 }
 
 // BERTopic特有的统计
@@ -100,30 +80,43 @@ const bertopicStats = computed(() => {
 
   const files = bertopicData.value.files
 
-  // 从summary文件获取原始主题统计
+  // 从summary文件获取原始主题统计（兼容旧格式/新格式）
   const summaryFile = files.summary || {}
-  const topicStats = summaryFile['主题文档统计'] || {}
+  const legacyTopicStats = summaryFile['主题文档统计']
+  const modernTopics = Array.isArray(summaryFile.topics) ? summaryFile.topics : []
 
-  const originalTopics = Object.entries(topicStats).map(([name, info]) => ({
-    name: name,
-    docCount: info['文档数'] || 0
-  }))
+  const originalTopics = legacyTopicStats && typeof legacyTopicStats === 'object'
+    ? Object.entries(legacyTopicStats).map(([name, info]) => ({
+      name,
+      docCount: Number(info?.['文档数'] || 0)
+    }))
+    : modernTopics.map((topic) => ({
+      name: String(topic?.topic_name || `主题${topic?.topic_id ?? ''}`),
+      docCount: Number(topic?.count || 0)
+    }))
 
   // 从llm_clusters获取LLM聚类统计
   const llmClusters = files.llm_clusters || []
   const llmTopics = Array.isArray(llmClusters) ? llmClusters : Object.values(llmClusters)
+  const mappedTopicDocs = originalTopics.reduce((sum, item) => sum + item.docCount, 0)
+  const sourceTotalDocs = Number(summaryFile.total_documents || mappedTopicDocs || 0)
 
   const llmStats = llmTopics.length > 0 ? {
     totalTopics: llmTopics.length,
     totalDocs: llmTopics.reduce((sum, item) => sum + (item['文档数'] || 0), 0),
-    maxDocs: Math.max(...llmTopics.map(item => item['文档数'] || 0))
+    maxDocs: Math.max(...llmTopics.map(item => item['文档数'] || 0)),
+    sourceTotalDocs,
+    coverageRate: sourceTotalDocs > 0
+      ? (llmTopics.reduce((sum, item) => sum + (item['文档数'] || 0), 0) / sourceTotalDocs) * 100
+      : 0
   } : null
 
   return {
     originalTopics,
     originalStats: {
       count: originalTopics.length,
-      totalDocs: originalTopics.reduce((sum, item) => sum + item.docCount, 0),
+      totalDocs: mappedTopicDocs,
+      sourceTotalDocs,
       maxDocs: originalTopics.length > 0 ? Math.max(...originalTopics.map(t => t.docCount)) : 0
     },
     llmStats,
@@ -179,7 +172,7 @@ const loadTopics = async (onlyWithData = false) => {
 }
 
 // 加载分析历史
-const loadHistory = async (topic, projectOverride = '') => {
+const loadHistory = async (topic) => {
   historyState.loading = true
   historyState.error = ''
 
@@ -192,17 +185,25 @@ const loadHistory = async (topic, projectOverride = '') => {
   }
 
   historyState.topic = trimmed
-  const project = (projectOverride || viewSelection.project || '').trim()
-
   try {
     const params = new URLSearchParams({ topic: trimmed })
+    const project = (viewSelection.project || '').trim()
     if (project) {
       params.set('project', project)
     }
     const response = await callApi(`/api/topic/bertopic/history?${params.toString()}`, {
       method: 'GET'
     })
-    const entries = normalizeHistoryRecords(response?.data?.records || response?.records || [], trimmed)
+    const records =
+      response?.data?.records ||
+      response?.records ||
+      response?.data?.data?.records ||
+      []
+    const fallbackTopic =
+      response?.data?.topic_identifier ||
+      response?.topic_identifier ||
+      trimmed
+    const entries = normalizeHistoryRecords(records, fallbackTopic)
     analysisHistory.value = entries
     historyState.topic = trimmed
 
@@ -229,7 +230,6 @@ const loadHistory = async (topic, projectOverride = '') => {
 const loadResults = async (range) => {
   const targetRange = range ? range : viewSelection
   const { topic, start, end } = targetRange
-  const project = (targetRange?.project || viewSelection.project || '').trim()
 
   if (!topic || !start) {
     loadState.error = '请选择专题和存档时间范围'
@@ -244,10 +244,11 @@ const loadResults = async (range) => {
 
   try {
     const params = new URLSearchParams({ topic, start })
+    if (end) params.set('end', end)
+    const project = (viewSelection.project || '').trim()
     if (project) {
       params.set('project', project)
     }
-    if (end) params.set('end', end)
 
     const response = await callApi(`/api/topic/bertopic/results?${params.toString()}`, {
       method: 'GET'
@@ -323,7 +324,7 @@ function initializeStore() {
     () => viewSelection.topic,
     async (topic) => {
       if (topic) {
-        await loadHistory(topic, viewSelection.project)
+        await loadHistory(topic)
         if (selectedHistoryId.value) {
           await applyHistorySelection(selectedHistoryId.value)
         }

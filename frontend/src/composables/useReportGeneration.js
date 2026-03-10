@@ -1,5 +1,11 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useApiBase } from './useApiBase'
+import {
+  normaliseArchiveRecords,
+  normaliseRecord,
+  splitFolderRange as sharedSplitFolderRange,
+  normalizeArchiveResponse
+} from './useArchiveHistory'
 
 const MAX_HISTORY = 24
 const { callApi } = useApiBase()
@@ -199,38 +205,9 @@ const loadTopics = async () => {
   }
 }
 
-const splitFolderRange = (folder) => {
-  const raw = String(folder || '').trim()
-  if (!raw) return { start: '', end: '' }
-  if (!raw.includes('_')) return { start: raw, end: raw }
-  const [start, end] = raw.split('_', 2)
-  const startText = String(start || '').trim()
-  const endText = String(end || '').trim() || startText
-  return { start: startText, end: endText }
-}
-
-const normaliseHistoryRecord = (record, defaults = {}) => {
-  if (!record) return null
-  const topic = String(record.topic || defaults.topic || '').trim()
-  const topicIdentifier = String(record.topic_identifier || defaults.topic_identifier || topic).trim()
-  const folder = String(record.folder || '').trim()
-  const start = String(record.start || '').trim()
-  const end = String(record.end || '').trim()
-  const resolvedRange = start ? { start, end: end || start } : splitFolderRange(folder)
-  if (!topic || !resolvedRange.start) return null
-  const resolvedFolder = folder || (resolvedRange.end !== resolvedRange.start
-    ? `${resolvedRange.start}_${resolvedRange.end}`
-    : resolvedRange.start)
-  return {
-    id: String(record.id || `${topicIdentifier}:${resolvedFolder}`),
-    topic,
-    topic_identifier: topicIdentifier || topic,
-    start: resolvedRange.start,
-    end: resolvedRange.end,
-    folder: resolvedFolder,
-    updated_at: String(record.updated_at || '')
-  }
-}
+// Delegate to the shared implementations from useArchiveHistory.js
+const splitFolderRange = sharedSplitFolderRange
+const normaliseHistoryRecord = (record, defaults = {}) => normaliseRecord(record, defaults)
 
 const loadHistory = async (topicOverride = '') => {
   const topic = String(topicOverride || reportForm.topic || '').trim()
@@ -284,6 +261,19 @@ const loadHistory = async (topicOverride = '') => {
       historyState.loading = false
     }
   }
+}
+
+const getSelectedHistoryRecord = () => {
+  if (!reportHistory.value.length) return null
+  return reportHistory.value.find((item) => item.id === selectedHistoryId.value) || reportHistory.value[0] || null
+}
+
+const syncFormWithSelectedHistory = () => {
+  const selected = getSelectedHistoryRecord()
+  if (!selected) return false
+  reportForm.start = selected.start
+  reportForm.end = selected.end
+  return true
 }
 
 const normalizeRange = (range) => {
@@ -356,6 +346,10 @@ const regenerateReport = async () => {
     reportData.value = payload
     reportState.lastLoaded = currentTimeString()
     await loadHistory(topic)
+    const matched = reportHistory.value.find((item) => item.start === start && item.end === end)
+    if (matched) {
+      selectedHistoryId.value = matched.id
+    }
     return payload
   } catch (error) {
     reportState.error = error instanceof Error ? error.message : String(error)
@@ -384,6 +378,9 @@ const applyHistorySelection = async (historyId, { shouldLoad = true } = {}) => {
 
 const refreshTopicContext = async (topic) => {
   await loadAvailableRange(topic)
-  applyRangeToForm()
   await loadHistory(topic)
+  const synced = syncFormWithSelectedHistory()
+  if (!synced) {
+    applyRangeToForm()
+  }
 }

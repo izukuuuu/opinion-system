@@ -1590,6 +1590,7 @@ def root():
         "/api/query",
         "/api/fetch",
         "/api/analyze",
+        "/api/analyze/ai-summary/rebuild",
         "/api/report",
         "/api/report/history",
         "/api/report/regenerate",

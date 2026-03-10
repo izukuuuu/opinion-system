@@ -2,12 +2,13 @@ from flask import Blueprint, request, jsonify
 from server_support.ops import _execute_operation
 from server_support.responses import error, success
 from server_support import require_fields, resolve_topic_identifier
+from server_support.topic_context import resolve_context, TopicContext
+from server_support.archive_locator import ArchiveLocator, split_folder_range, compose_folder_name
 from src.project import get_project_manager
 
 PROJECT_MANAGER = get_project_manager()
-from src.utils.setting.paths import bucket, _normalise_topic, get_data_root
+from src.utils.setting.paths import bucket
 from pathlib import Path
-import time
 import json
 import logging
 from typing import Optional, List, Dict, Any
@@ -27,31 +28,6 @@ ANALYZE_FILE_MAP = {
 }
 DEFAULT_ANALYZE_FILENAME = "result.json"
 
-def _compose_analyze_folder(start: str, end: Optional[str]) -> str:
-    start = start.strip()
-    end = (end or "").strip()
-    if not start:
-        return ""
-    if end:
-        return f"{start}_{end}"
-    return start
-
-def _split_analyze_folder(folder: str) -> tuple[str, str]:
-    folder = (folder or "").strip()
-    if not folder:
-        return "", ""
-    if "_" in folder:
-        start, end = folder.split("_", 1)
-        start = start.strip()
-        end = end.strip() or start
-    else:
-        start = folder
-        end = folder
-    return start, end
-
-def _normalise_name(value: Optional[str]) -> str:
-    return _normalise_topic(value or "")
-
 def _load_json_file(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as fh:
         try:
@@ -60,53 +36,11 @@ def _load_json_file(path: Path) -> Any:
             fh.seek(0)
             return fh.read()
 
-def _collect_analyze_history(
-    topic_identifier: str,
-    topic_label: str,
-    aliases: Optional[List[str]] = None,
-) -> List[Dict[str, Any]]:
-    data_root = get_data_root() / "projects"
-    data_root.mkdir(parents=True, exist_ok=True)
-    candidate_names: List[str] = [topic_identifier]
-    if aliases:
-        candidate_names.extend(aliases)
-    candidate_names.extend([_normalise_name(name) for name in candidate_names if name])
 
-    seen_dirs: set[str] = set()
-    records: List[Dict[str, Any]] = []
-
-    for name in candidate_names:
-        cleaned = (name or "").strip()
-        if not cleaned or cleaned in seen_dirs:
-            continue
-        seen_dirs.add(cleaned)
-        analyze_dir = data_root / cleaned / "analyze"
-        if not analyze_dir.exists():
-            continue
-        for entry in analyze_dir.iterdir():
-            if not entry.is_dir():
-                continue
-            start, end = _split_analyze_folder(entry.name)
-            if not start:
-                continue
-            stats = entry.stat()
-            records.append(
-                {
-                    "id": f"{cleaned}:{entry.name}",
-                    "topic": topic_label,
-                    "topic_identifier": cleaned,
-                    "start": start,
-                    "end": end,
-                    "folder": entry.name,
-                    "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stats.st_mtime)),
-                    "_updated_ts": stats.st_mtime,
-                }
-            )
-
-    records.sort(key=lambda item: item.get("_updated_ts", 0), reverse=True)
-    for record in records:
-        record.pop("_updated_ts", None)
-    return records
+def _resolve_analyze_root_via_locator(ctx: TopicContext, start: str, end: Optional[str]) -> Optional[Path]:
+    """Locate analyze result directory via unified ArchiveLocator."""
+    locator = ArchiveLocator(ctx)
+    return locator.resolve_result_dir("analyze", start, end)
 
 
 @analyze_bp.route('', methods=['POST'])
@@ -152,6 +86,56 @@ def analyze_endpoint():
     return jsonify(response), code
 
 
+@analyze_bp.route('/ai-summary/rebuild', methods=['POST'])
+def rebuild_ai_summary_endpoint():
+    payload = request.get_json(silent=True) or {}
+    start = str(payload.get("start") or "").strip()
+    end = str(payload.get("end") or "").strip() or None
+    only_function = str(payload.get("function") or "").strip() or None
+
+    if not start:
+        return error("Missing required field(s): start", status_code=400)
+
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return error(str(exc), status_code=400)
+
+    ctx = resolve_context(payload, PROJECT_MANAGER)
+    analyze_root = _resolve_analyze_root_via_locator(ctx, start, end)
+    if not analyze_root:
+        return error("未找到对应的分析结果目录", status_code=404)
+
+    from src.analyze import rebuild_ai_summary_from_analyze_folder  # type: ignore
+
+    ok = rebuild_ai_summary_from_analyze_folder(
+        topic_identifier,
+        analyze_root.name,
+        only_function=only_function,
+    )
+    if not ok:
+        return error("未找到可用于生成 AI 摘要的分析产物", status_code=404)
+
+    resolved_start, resolved_end = split_folder_range(analyze_root.name)
+    ai_summary_path = analyze_root / "ai_summary.json"
+    return success(
+        {
+            "data": {
+                "topic": display_name or topic_identifier,
+                "topic_identifier": topic_identifier,
+                "folder": analyze_root.name,
+                "range": {
+                    "start": resolved_start,
+                    "end": resolved_end,
+                },
+                "function": only_function or "all",
+                "ai_summary_path": str(ai_summary_path),
+                "ai_summary_exists": ai_summary_path.exists(),
+            }
+        }
+    )
+
+
 @analyze_bp.route('/history', methods=['GET'])
 def get_analyze_history():
     raw_topic = request.args.get("topic")
@@ -165,20 +149,25 @@ def get_analyze_history():
     }
 
     try:
-        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+        ctx = resolve_context(payload, PROJECT_MANAGER)
     except ValueError:
         topic_identifier = (raw_topic or "").strip()
         if not topic_identifier:
             return error("Missing required query parameters: topic or project")
         display_name = raw_topic or raw_project or topic_identifier
+        ctx = TopicContext(
+            identifier=topic_identifier,
+            display_name=display_name,
+            aliases=[a for a in (raw_topic, raw_project) if a],
+        )
 
-    aliases = [alias for alias in (raw_topic, raw_project) if alias]
-    records = _collect_analyze_history(topic_identifier, display_name, aliases)
+    locator = ArchiveLocator(ctx)
+    records = locator.list_history("analyze")
     return success(
         {
             "records": records,
-            "topic": display_name,
-            "topic_identifier": topic_identifier,
+            "topic": ctx.display_name,
+            "topic_identifier": ctx.identifier,
         }
     )
 
@@ -196,14 +185,18 @@ def get_analyze_results():
     }
 
     try:
-        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+        ctx = resolve_context(payload, PROJECT_MANAGER)
     except ValueError:
         topic_identifier = (raw_topic or "").strip()
         if not topic_identifier:
             return error("Missing required query parameters: topic or project")
-        display_name = raw_topic or raw_project or topic_identifier
+        ctx = TopicContext(
+            identifier=topic_identifier,
+            display_name=raw_topic or raw_project or topic_identifier,
+            aliases=[a for a in (raw_topic, raw_project) if a],
+        )
 
-    topic_display = display_name or raw_topic or raw_project or topic_identifier
+    topic_display = ctx.display_name or raw_topic or raw_project or ctx.identifier
 
     start = (request.args.get("start") or "").strip()
     if not start:
@@ -213,21 +206,10 @@ def get_analyze_results():
     function_alias = (request.args.get("function") or "").strip().lower() or None
     target_alias = (request.args.get("target") or "").strip()
 
-    folder_name = _compose_analyze_folder(start, end)
-    if not folder_name:
-        return error("Invalid start date supplied")
-
-    analyze_root = bucket("analyze", topic_identifier, folder_name)
-    if not analyze_root.exists():
-        fallback_root: Optional[Path] = None
-        if end:
-            single_day_folder = start.strip()
-            if single_day_folder and single_day_folder != folder_name:
-                fallback_root = bucket("analyze", topic_identifier, single_day_folder)
-        if fallback_root and fallback_root.exists():
-            analyze_root = fallback_root
-        else:
-            return error("未找到对应的分析结果目录", status_code=404)
+    locator = ArchiveLocator(ctx)
+    analyze_root = locator.resolve_result_dir("analyze", start, end)
+    if not analyze_root:
+        return error("未找到对应的分析结果目录", status_code=404)
 
     def _match_target(name: str) -> bool:
         if not target_alias:

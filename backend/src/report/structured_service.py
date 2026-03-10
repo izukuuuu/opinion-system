@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.ai import call_langchain_chat
 from ..utils.logging.logging import setup_logger
-from ..utils.setting.paths import bucket, ensure_bucket
+from ..utils.setting.paths import bucket, ensure_bucket, get_data_root
 from .data_report import (
     _collect_sections as legacy_collect_sections,
     _compose_llm_input as legacy_compose_llm_input,
@@ -29,6 +29,7 @@ from .data_report import (
 )
 from .structured_prompts import (
     REPORT_SYSTEM_PROMPT,
+    build_bertopic_insight_prompt,
     build_insights_prompt,
     build_stage_notes_prompt,
     build_title_subtitle_prompt,
@@ -54,7 +55,7 @@ BERTOPIC_FILE_MAP = {
 
 DEFAULT_ANALYZE_FILENAME = "result.json"
 REPORT_CACHE_FILENAME = "report_payload.json"
-REPORT_CACHE_VERSION = 2
+REPORT_CACHE_VERSION = 3
 
 SENTIMENT_POSITIVE = {"positive", "正面", "积极", "pos", "p"}
 SENTIMENT_NEUTRAL = {"neutral", "中性", "客观", "neu"}
@@ -101,14 +102,30 @@ def _find_json_file(dir_path: Path, preferred_filename: str) -> Optional[Path]:
 
 
 def _get_analyze_root(topic: str, start: str, end: Optional[str]) -> Path:
-    folder = _compose_folder(start, end)
-    root = bucket("analyze", topic, folder)
-    if root.exists():
-        return root
-    fallback = bucket("analyze", topic, start)
-    if fallback.exists():
-        return fallback
-    raise ValueError(f"未找到分析结果目录: {root}")
+    start_text = str(start or "").strip()
+    end_text = str(end or "").strip()
+    if not start_text:
+        raise ValueError("Missing required field(s): start")
+
+    folder_candidates: List[str] = []
+    # Align with analyze stage folder format: start_end (including single-day start_start).
+    if end_text:
+        folder_candidates.append(f"{start_text}_{end_text}")
+    for candidate in (
+        _compose_folder(start_text, end_text or None),
+        start_text,
+        f"{start_text}_{start_text}",
+    ):
+        token = str(candidate or "").strip()
+        if token and token not in folder_candidates:
+            folder_candidates.append(token)
+
+    missing_root = bucket("analyze", topic, folder_candidates[0])
+    for folder in folder_candidates:
+        root = bucket("analyze", topic, folder)
+        if root.exists():
+            return root
+    raise ValueError(f"未找到分析结果目录: {missing_root}")
 
 
 def _extract_rows(payload: Any) -> List[Dict[str, Any]]:
@@ -174,7 +191,9 @@ def _resolve_bucket_folder_root(layer: str, topic: str, folder_candidates: List[
 
 
 def _extract_topic_id(value: Any) -> Optional[int]:
-    raw = str(value or "").strip()
+    if value is None:
+        return None
+    raw = str(value).strip()
     if not raw:
         return None
     match = re.search(r"-?\d+", raw)
@@ -283,13 +302,30 @@ def _build_topicid_cluster_map(
     if not isinstance(summary_payload, dict):
         return mapping
 
-    topic_rows = summary_payload.get("topics")
-    if not isinstance(topic_rows, list):
+    topic_rows: List[Dict[str, Any]] = []
+    raw_topic_rows = summary_payload.get("topics")
+    if isinstance(raw_topic_rows, list):
+        topic_rows = [row for row in raw_topic_rows if isinstance(row, dict)]
+    else:
+        # Legacy BERTopic summary format:
+        # {"主题文档统计": {"主题0": {"文档数": ..., "文档ID": [...]}, ...}, ...}
+        legacy_stats = summary_payload.get("主题文档统计")
+        if isinstance(legacy_stats, dict):
+            for topic_name, legacy_row in legacy_stats.items():
+                if not str(topic_name or "").strip():
+                    continue
+                topic_rows.append(
+                    {
+                        "topic_id": topic_name,
+                        "topic_name": topic_name,
+                        "count": legacy_row.get("文档数") if isinstance(legacy_row, dict) else 0,
+                    }
+                )
+
+    if not topic_rows:
         return mapping
 
     for row in topic_rows:
-        if not isinstance(row, dict):
-            continue
         topic_id = _extract_topic_id(row.get("topic_id"))
         if topic_id is None:
             continue
@@ -302,11 +338,11 @@ def _build_topicid_cluster_map(
 def _load_fetch_doc_dates(topic_identifier: str, folder_candidates: List[str]) -> Dict[int, str]:
     fetch_root = _resolve_bucket_folder_root("fetch", topic_identifier, folder_candidates)
     if not fetch_root:
-        return {}
+        return _load_upload_doc_dates(topic_identifier)
 
     overall_path = fetch_root / "总体.jsonl"
     if not overall_path.exists():
-        return {}
+        return _load_upload_doc_dates(topic_identifier)
 
     records: List[Tuple[str, str]] = []
     try:
@@ -338,11 +374,67 @@ def _load_fetch_doc_dates(topic_identifier: str, folder_candidates: List[str]) -
                 date_text = _extract_date_text(published_at)
                 records.append((content_text, date_text))
     except Exception:
+        return _load_upload_doc_dates(topic_identifier)
+
+    if not records:
+        return _load_upload_doc_dates(topic_identifier)
+
+    return _build_doc_date_map(records)
+
+
+def _load_upload_doc_dates(topic_identifier: str) -> Dict[int, str]:
+    uploads_jsonl_dir = get_data_root() / "projects" / topic_identifier / "uploads" / "jsonl"
+    if not uploads_jsonl_dir.exists() or not uploads_jsonl_dir.is_dir():
         return {}
+
+    jsonl_files = sorted(
+        [path for path in uploads_jsonl_dir.glob("*.jsonl") if path.is_file()],
+        key=lambda path: path.stat().st_mtime if path.exists() else 0,
+        reverse=True,
+    )
+    if not jsonl_files:
+        return {}
+
+    records: List[Tuple[str, str]] = []
+    for file_path in jsonl_files:
+        try:
+            with file_path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    raw = line.strip()
+                    if not raw:
+                        continue
+                    try:
+                        row = json.loads(raw)
+                    except Exception:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+
+                    content = row.get("contents")
+                    if content is None:
+                        content = row.get("content")
+                    if content is None:
+                        continue
+                    content_text = str(content)
+
+                    published_at = (
+                        row.get("published_at")
+                        or row.get("publish_time")
+                        or row.get("date")
+                        or row.get("created_at")
+                    )
+                    date_text = _extract_date_text(published_at)
+                    records.append((content_text, date_text))
+        except Exception:
+            continue
 
     if not records:
         return {}
 
+    return _build_doc_date_map(records)
+
+
+def _build_doc_date_map(records: List[Tuple[str, str]]) -> Dict[int, str]:
     last_index: Dict[str, int] = {}
     for idx, (content_text, _) in enumerate(records):
         last_index[content_text] = idx
@@ -762,6 +854,60 @@ def _build_fallback_insights(
     return highlight_points, insights
 
 
+def _build_fallback_bertopic_insight(
+    *,
+    topic_label: str,
+    start: str,
+    end: str,
+    bertopic_nodes: List[Dict[str, Any]],
+) -> str:
+    if not bertopic_nodes:
+        return "暂无可用的 BERTopic 时间线数据，建议先完成 BERTopic 分析后再重新生成报告。"
+
+    coverage_start = str(bertopic_nodes[0].get("date") or "").strip()
+    coverage_end = str(bertopic_nodes[-1].get("date") or "").strip()
+    covered_days = len(bertopic_nodes)
+    mapped_docs = sum(_parse_int(item.get("total")) for item in bertopic_nodes)
+
+    theme_stats: Dict[str, int] = defaultdict(int)
+    for node in bertopic_nodes:
+        themes = node.get("themes")
+        if not isinstance(themes, list):
+            continue
+        for theme in themes:
+            if not isinstance(theme, dict):
+                continue
+            theme_name = str(theme.get("name") or "").strip()
+            if not theme_name:
+                continue
+            theme_stats[theme_name] += _parse_int(theme.get("value"))
+
+    top_themes = sorted(theme_stats.items(), key=lambda item: item[1], reverse=True)[:3]
+    top_theme_text = "、".join(f"{name}({value})" for name, value in top_themes) if top_themes else "暂无稳定主导主题"
+
+    hotspot_nodes = sorted(bertopic_nodes, key=lambda item: _parse_int(item.get("total")), reverse=True)[:3]
+    hotspot_text = "；".join(
+        f"{str(item.get('label') or item.get('date') or '').strip()}：{str(item.get('topTheme') or '').strip()}（{_parse_int(item.get('topValue'))}）"
+        for item in hotspot_nodes
+        if str(item.get("topTheme") or "").strip()
+    ) or "暂无明显爆发节点"
+
+    mismatch_note = ""
+    if coverage_start and coverage_end and (coverage_start > start or coverage_end < end):
+        mismatch_note = (
+            f"\n\n**覆盖说明**：BERTopic 时间线当前仅覆盖 {coverage_start} 至 {coverage_end}，"
+            f"与报告区间 {start} 至 {end} 不完全一致。"
+        )
+
+    return (
+        f"**{topic_label} 主题演化概览**：在 {coverage_start} 至 {coverage_end} 的 {covered_days} 个日期里，"
+        f"BERTopic 共映射 {mapped_docs} 条讨论，主导关注点主要集中在 {top_theme_text}。\n\n"
+        f"从传播节奏看，热点并非均匀分布，而是在少数关键日期集中抬升，代表性节点为：{hotspot_text}。"
+        "这通常意味着外部事件触发后，讨论会快速聚焦到单一议题，再向相关议题扩散。"
+        f"{mismatch_note}"
+    )
+
+
 def _extract_json_text(raw_text: str) -> Optional[str]:
     text = str(raw_text or "").strip()
     if not text:
@@ -967,9 +1113,37 @@ def _build_report_payload(
                     "total": _parse_int(item.get("total")),
                     "topTheme": top_theme,
                     "topValue": _parse_int(item.get("topValue")),
+                    "dominance": round(
+                        _parse_int(item.get("topValue")) / max(1, _parse_int(item.get("total"))),
+                        4,
+                    ),
                     "themes": compact_themes,
                 }
             )
+
+    bertopic_nodes_payload.sort(key=lambda item: _parse_date_value(str(item.get("date") or "")) or datetime.min)
+    bertopic_hotspots_payload = sorted(
+        [
+            {
+                "date": item.get("date"),
+                "label": item.get("label"),
+                "total": _parse_int(item.get("total")),
+                "topTheme": item.get("topTheme"),
+                "topValue": _parse_int(item.get("topValue")),
+                "dominance": float(item.get("dominance") or 0),
+            }
+            for item in bertopic_nodes_payload
+        ],
+        key=lambda item: _parse_int(item.get("total")),
+        reverse=True,
+    )[:12]
+    bertopic_overview = {
+        "mode": "daily_dominant_theme",
+        "aggregation": "day",
+        "description": "按日期聚合文档后展示当日主导主题，不表示主题持续时长。",
+        "days": len(bertopic_nodes_payload),
+        "totalMappedDocs": sum(_parse_int(item.get("total")) for item in bertopic_nodes_payload),
+    }
 
     metrics = _compute_metrics(channels, timeline, sentiment, content_split)
     main_finding = _load_main_finding(analyze_root)
@@ -990,23 +1164,57 @@ def _build_report_payload(
         "keywords": keywords[:10],
         "themes": themes[:8],
         "theme_source": theme_source,
-        "bertopic_time_nodes": sorted(
-            [
-                {
-                    "date": item.get("date"),
-                    "topTheme": item.get("topTheme"),
-                    "topValue": item.get("topValue"),
-                    "total": item.get("total"),
-                }
-                for item in bertopic_nodes_payload
-            ],
-            key=lambda item: _parse_int(item.get("total")),
-            reverse=True,
-        )[:12],
+        "bertopic_time_nodes": bertopic_hotspots_payload,
         "main_finding": main_finding,
         "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
         "legacy_report_text": legacy_context.get("full_text_short", ""),
     }
+    bertopic_timeline_for_llm = [
+        {
+            "date": str(item.get("date") or "").strip(),
+            "topTheme": str(item.get("topTheme") or "").strip(),
+            "topValue": _parse_int(item.get("topValue")),
+            "total": _parse_int(item.get("total")),
+            "secondaryThemes": [
+                str(theme.get("name") or "").strip()
+                for theme in (item.get("themes") or [])
+                if isinstance(theme, dict) and str(theme.get("name") or "").strip()
+            ][:2],
+        }
+        for item in bertopic_nodes_payload
+    ]
+    bertopic_insight_facts = {
+        "topic": topic_label,
+        "time_range": {"start": start, "end": end},
+        "bertopic_overview": bertopic_overview,
+        "bertopic_hotspots": bertopic_hotspots_payload[:10],
+        "bertopic_timeline": bertopic_timeline_for_llm,
+        "main_finding": main_finding,
+        "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
+        "legacy_report_text": legacy_context.get("full_text_short", ""),
+    }
+
+    bertopic_insight = _build_fallback_bertopic_insight(
+        topic_label=topic_label,
+        start=start,
+        end=end,
+        bertopic_nodes=bertopic_nodes_payload,
+    )
+    bertopic_insight_source = "fallback"
+    bertopic_insight_payload = _call_langchain_json(
+        build_bertopic_insight_prompt(bertopic_insight_facts),
+        max_tokens=1800,
+    )
+    if isinstance(bertopic_insight_payload, dict):
+        bertopic_insight_candidate = str(
+            bertopic_insight_payload.get("insight_markdown")
+            or bertopic_insight_payload.get("insight")
+            or bertopic_insight_payload.get("summary")
+            or ""
+        ).strip()
+        if bertopic_insight_candidate:
+            bertopic_insight = bertopic_insight_candidate
+            bertopic_insight_source = "llm"
 
     title = f"{topic_label}舆情分析报告"
     subtitle = main_finding or "基于结构化统计结果自动生成，覆盖声量、趋势、态度与主题。"
@@ -1096,6 +1304,9 @@ def _build_report_payload(
         "themes": themes,
         "themeSource": theme_source,
         "bertopicTimeNodes": bertopic_nodes_payload,
+        "bertopicHotspots": bertopic_hotspots_payload,
+        "bertopicOverview": bertopic_overview,
+        "bertopicInsight": bertopic_insight,
         "stageNotes": stage_notes,
         "highlightPoints": highlight_points,
         "insights": insights,
@@ -1105,6 +1316,7 @@ def _build_report_payload(
             "analyze_root": str(analyze_root),
             "theme_source": theme_source,
             "bertopic_context": bertopic_context.get("meta") if isinstance(bertopic_context, dict) else {},
+            "bertopic_insight_source": bertopic_insight_source,
             "legacy_context": {
                 "sections_source_topic": legacy_context.get("sections_topic") or "",
                 "manual_source_topic": legacy_context.get("manual_topic") or "",

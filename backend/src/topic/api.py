@@ -2,6 +2,8 @@ from flask import Blueprint, request, jsonify
 from server_support.ops import _execute_operation
 from server_support.responses import error, success
 from server_support import require_fields, resolve_topic_identifier
+from server_support.topic_context import resolve_context, TopicContext
+from server_support.archive_locator import ArchiveLocator, split_folder_range, compose_folder_name
 from src.project import get_project_manager
 from src.topic.prompt_config import (
     load_topic_bertopic_prompt_config,
@@ -16,11 +18,19 @@ PROJECT_MANAGER = get_project_manager()
 from src.utils.setting.paths import bucket, get_data_root
 from pathlib import Path
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 LOGGER = logging.getLogger(__name__)
 
 topic_bp = Blueprint('topic', __name__)
+
+BERTOPIC_FILE_MAP = {
+    "summary": "1主题统计结果.json",
+    "keywords": "2主题关键词.json",
+    "coords": "3文档2D坐标.json",
+    "llm_clusters": "4大模型再聚类结果.json",
+    "llm_keywords": "5大模型主题关键词.json",
+}
 
 def _load_json_file(path: Path) -> Any:
     # Local helper for this module
@@ -32,26 +42,6 @@ def _load_json_file(path: Path) -> Any:
             fh.seek(0)
             return fh.read()
 
-def _compose_analyze_folder(start: str, end: str = None) -> str:
-    # Duplicated local helper to avoid cross-module import if analyze api changes
-    start = start.strip()
-    end = (end or "").strip()
-    if not start:
-        return ""
-    if end:
-        return f"{start}_{end}"
-    return start
-
-
-def _parse_topic_folder_range(folder_name: str) -> tuple[str, str]:
-    token = str(folder_name or "").strip()
-    if not token:
-        return "", ""
-    if "_" in token:
-        start, end = token.split("_", 1)
-    else:
-        start, end = token, token
-    return start.strip(), end.strip()
 
 def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     valid, error_response = require_fields(payload, "topic", "start_date")
@@ -376,10 +366,12 @@ def save_topic_bertopic_prompt():
         data = persist_topic_bertopic_prompt_config(
             topic_identifier,
             payload.get("target_topics", payload.get("targetTopics")),
+            str(payload.get("drop_rule_prompt") or ""),
             str(payload.get("recluster_system_prompt") or ""),
             str(payload.get("recluster_user_prompt") or ""),
             str(payload.get("keyword_system_prompt") or ""),
             str(payload.get("keyword_user_prompt") or ""),
+            custom_filters=payload.get("custom_filters"),
         )
     except Exception as exc:
         LOGGER.exception("Failed to save BERTopic prompt config")
@@ -408,35 +400,34 @@ def get_topic_bertopic_results():
     }
 
     try:
-        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+        ctx = resolve_context(payload, PROJECT_MANAGER)
     except ValueError:
         topic_identifier = (raw_topic or "").strip()
         if not topic_identifier:
             return error("Missing required query parameters: topic or project")
-        display_name = raw_topic or raw_project or topic_identifier
+        ctx = TopicContext(
+            identifier=topic_identifier,
+            display_name=raw_topic or raw_project or topic_identifier,
+            aliases=[a for a in (raw_topic, raw_project, raw_dataset_id) if a],
+        )
 
-    folder_name = _compose_analyze_folder(start, end)
-    if not folder_name:
-        return error("Invalid start date supplied")
+    locator = ArchiveLocator(ctx)
+    topic_dir = locator.resolve_result_dir("topic", start, end)
 
-    topic_dir = bucket("topic", topic_identifier, folder_name)
-    if not topic_dir.exists():
-        fallback_dir = bucket("topic", topic_identifier, start)
-        if fallback_dir.exists():
-            topic_dir = fallback_dir
-        else:
-            return error("未找到对应的主题分析结果目录", status_code=404)
+    if not topic_dir:
+        return error("未找到对应的主题分析结果目录", status_code=404)
 
-    file_map = {
-        "summary": "1主题统计结果.json",
-        "keywords": "2主题关键词.json",
-        "coords": "3文档2D坐标.json",
-        "llm_clusters": "4大模型再聚类结果.json",
-        "llm_keywords": "5大模型主题关键词.json",
-    }
+    # Determine which candidate identifier matched
+    resolved_identifier = ctx.identifier
+    try:
+        # Extract the identifier from the matched path
+        # Path structure: projects_root / identifier / topic / folder
+        resolved_identifier = topic_dir.parent.parent.name
+    except (IndexError, AttributeError):
+        pass
 
     files_payload: Dict[str, Any] = {}
-    for key, filename in file_map.items():
+    for key, filename in BERTOPIC_FILE_MAP.items():
         file_path = topic_dir / filename
         if file_path.exists():
             try:
@@ -449,8 +440,8 @@ def get_topic_bertopic_results():
         return error("未找到可用的 BERTopic 结果文件", status_code=404)
 
     response_payload = {
-        "topic": display_name,
-        "topic_identifier": topic_identifier,
+        "topic": ctx.display_name,
+        "topic_identifier": resolved_identifier,
         "range": {
             "start": start,
             "end": end or start,
@@ -478,85 +469,38 @@ def get_topic_bertopic_history():
     }
 
     try:
-        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+        ctx = resolve_context(payload, PROJECT_MANAGER)
     except ValueError:
         topic_identifier = (raw_topic or raw_project or raw_dataset_id).strip()
         if not topic_identifier:
             return error("Missing required query parameters: topic/project/dataset_id")
-        display_name = raw_topic or raw_project or topic_identifier
-
-    topic_root = get_data_root() / "projects" / topic_identifier / "topic"
-    if not topic_root.exists() or not topic_root.is_dir():
-        return success(
-            {
-                "data": {
-                    "topic": display_name or topic_identifier,
-                    "topic_identifier": topic_identifier,
-                    "records": [],
-                }
-            }
+        ctx = TopicContext(
+            identifier=topic_identifier,
+            display_name=raw_topic or raw_project or topic_identifier,
+            aliases=[a for a in (raw_topic, raw_project, raw_dataset_id) if a],
         )
 
-    file_map = {
-        "summary": "1主题统计结果.json",
-        "keywords": "2主题关键词.json",
-        "coords": "3文档2D坐标.json",
-        "llm_clusters": "4大模型再聚类结果.json",
-        "llm_keywords": "5大模型主题关键词.json",
-    }
+    locator = ArchiveLocator(ctx)
+    records = locator.list_history("topic")
 
-    records: List[Dict[str, Any]] = []
-    for entry in topic_root.iterdir():
-        if not entry.is_dir() or entry.name.startswith("."):
-            continue
+    # Add display_topic field for backward compat with frontend
+    for record in records:
+        record["display_topic"] = ctx.display_name or ctx.identifier
 
-        start, end = _parse_topic_folder_range(entry.name)
-        if not start:
-            continue
-
-        available_keys: List[str] = []
-        latest_mtime = entry.stat().st_mtime
-
-        for key, filename in file_map.items():
-            path = entry / filename
-            if not path.exists():
-                continue
-            available_keys.append(key)
-            try:
-                latest_mtime = max(latest_mtime, path.stat().st_mtime)
-            except OSError:
-                pass
-
-        if not available_keys:
-            continue
-
-        records.append(
-            {
-                "id": f"{topic_identifier}:{entry.name}",
-                "topic": topic_identifier,
-                "display_topic": display_name or topic_identifier,
-                "start": start,
-                "end": end or start,
-                "folder": entry.name,
-                "available_files": available_keys,
-                "updated_at": latest_mtime,
-            }
-        )
-
-    records.sort(
-        key=lambda item: (
-            str(item.get("start") or ""),
-            str(item.get("end") or ""),
-            float(item.get("updated_at") or 0),
-        ),
-        reverse=True,
-    )
+    # Determine resolved identifier (first candidate with a topic dir)
+    resolved_identifier = ctx.identifier
+    projects_root = get_data_root() / "projects"
+    for candidate in locator._expand_candidates():
+        candidate_root = projects_root / candidate / "topic"
+        if candidate_root.exists() and candidate_root.is_dir():
+            resolved_identifier = candidate
+            break
 
     return success(
         {
             "data": {
-                "topic": display_name or topic_identifier,
-                "topic_identifier": topic_identifier,
+                "topic": ctx.display_name or ctx.identifier,
+                "topic_identifier": resolved_identifier,
                 "records": records,
             }
         }

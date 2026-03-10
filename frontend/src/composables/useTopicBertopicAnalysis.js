@@ -46,13 +46,34 @@ const form = reactive({
   project: '',
   startDate: '',
   endDate: '',
-  fetchDir: '',
-  userdict: '',
-  stopwords: '',
   runParams: createDefaultRunParams()
 })
 
+const MIN_BERTOPIC_PROMPT_TOPICS = 3
+const MAX_BERTOPIC_PROMPT_TOPICS = 50
 const DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS = 8
+const DEFAULT_DROP_RULE_PROMPT = `
+【无关主题丢弃规则（必须执行）】
+请先判断每个候选主题是否与专题“{FOCUS_TOPIC}”相关。
+
+判定标准（满足任一可判为无关）：
+1. 关键词与专题核心语义没有直接关联；
+2. 主要讨论对象偏离专题目标（例如泛娱乐、泛生活、广告噪声）；
+3. 无法给出与专题有因果或场景关联的解释。
+
+输出要求（每个聚类条目都必须包含）：
+- drop: true/false
+- drop_reason: 当 drop=true 时，写明剔除原因；当 drop=false 时可为空字符串
+
+注意：
+- 被判定为无关的条目必须单独标记 drop=true，不要混入正常主题；
+- 不要省略字段，不要输出额外解释文字。
+`.trim()
+
+const DEFAULT_CUSTOM_FILTERS = [
+  { category: '明星八卦', description: '包含明星、网红、娱乐圈等与专题无关的八卦内容' },
+  { category: '广告推广', description: '包含广告、营销推广、品牌植入等商业推广内容' }
+]
 
 const bertopicPromptState = reactive({
   loading: false,
@@ -61,11 +82,14 @@ const bertopicPromptState = reactive({
   message: '',
   exists: false,
   path: '',
-  targetTopics: DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS,
+  maxTopics: DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS,
+  dropRulePrompt: DEFAULT_DROP_RULE_PROMPT,
+  defaultDropRulePrompt: DEFAULT_DROP_RULE_PROMPT,
   reclusterSystemPrompt: '',
   reclusterUserPrompt: '',
   keywordSystemPrompt: '',
-  keywordUserPrompt: ''
+  keywordUserPrompt: '',
+  customFilters: JSON.parse(JSON.stringify(DEFAULT_CUSTOM_FILTERS))
 })
 
 const bertopicPromptBaseline = ref(null)
@@ -95,6 +119,14 @@ const historyState = reactive({
 
 const analysisHistory = ref([])
 
+let initialized = false
+
+const clampPromptTopicCount = (value) => {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(parsed)) return DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS
+  return Math.max(MIN_BERTOPIC_PROMPT_TOPICS, Math.min(MAX_BERTOPIC_PROMPT_TOPICS, parsed))
+}
+
 const hasPromptDraftChanges = computed(() => {
   const baseline = bertopicPromptBaseline.value
   if (!baseline) return false
@@ -102,46 +134,48 @@ const hasPromptDraftChanges = computed(() => {
   return JSON.stringify(current) !== JSON.stringify(baseline)
 })
 
-let initialized = false
-
-const normalizePromptText = (value) => (typeof value === 'string' ? value : '').trim()
-
-const normalizeTargetTopics = (value) => {
-  const parsed = Number.parseInt(String(value ?? ''), 10)
-  if (Number.isNaN(parsed)) return DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS
-  if (parsed < 2) return 2
-  if (parsed > 50) return 50
-  return parsed
-}
-
 const capturePromptSnapshot = () => ({
-  targetTopics: normalizeTargetTopics(bertopicPromptState.targetTopics),
-  reclusterSystemPrompt: normalizePromptText(bertopicPromptState.reclusterSystemPrompt),
-  reclusterUserPrompt: normalizePromptText(bertopicPromptState.reclusterUserPrompt),
-  keywordSystemPrompt: normalizePromptText(bertopicPromptState.keywordSystemPrompt),
-  keywordUserPrompt: normalizePromptText(bertopicPromptState.keywordUserPrompt)
+  maxTopics: clampPromptTopicCount(bertopicPromptState.maxTopics),
+  dropRulePrompt: String(bertopicPromptState.dropRulePrompt || '').trim(),
+  reclusterSystemPrompt: String(bertopicPromptState.reclusterSystemPrompt || '').trim(),
+  reclusterUserPrompt: String(bertopicPromptState.reclusterUserPrompt || '').trim(),
+  keywordSystemPrompt: String(bertopicPromptState.keywordSystemPrompt || '').trim(),
+  keywordUserPrompt: String(bertopicPromptState.keywordUserPrompt || '').trim(),
+  customFilters: JSON.parse(JSON.stringify(bertopicPromptState.customFilters || []))
 })
 
 const setPromptStateFromPayload = (payload) => {
   const data = payload || {}
   bertopicPromptState.exists = Boolean(data.exists)
   bertopicPromptState.path = data.path || ''
-  bertopicPromptState.targetTopics = normalizeTargetTopics(data.target_topics ?? data.targetTopics)
+  bertopicPromptState.maxTopics = clampPromptTopicCount(
+    data.max_topics ?? data.target_topics ?? data.maxTopics
+  )
+  bertopicPromptState.defaultDropRulePrompt = data.default_drop_rule_prompt || data.defaultDropRulePrompt || DEFAULT_DROP_RULE_PROMPT
+  
+  bertopicPromptState.dropRulePrompt = data.drop_rule_prompt || data.dropRulePrompt || bertopicPromptState.defaultDropRulePrompt
   bertopicPromptState.reclusterSystemPrompt = data.recluster_system_prompt || data.reclusterSystemPrompt || ''
   bertopicPromptState.reclusterUserPrompt = data.recluster_user_prompt || data.reclusterUserPrompt || ''
+  
   bertopicPromptState.keywordSystemPrompt = data.keyword_system_prompt || data.keywordSystemPrompt || ''
   bertopicPromptState.keywordUserPrompt = data.keyword_user_prompt || data.keywordUserPrompt || ''
+  bertopicPromptState.customFilters = Array.isArray(data.custom_filters || data.customFilters)
+    ? JSON.parse(JSON.stringify(data.custom_filters || data.customFilters))
+    : []
   bertopicPromptBaseline.value = capturePromptSnapshot()
 }
 
 const clearPromptState = () => {
   bertopicPromptState.exists = false
   bertopicPromptState.path = ''
-  bertopicPromptState.targetTopics = DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS
+  bertopicPromptState.maxTopics = DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS
+  bertopicPromptState.dropRulePrompt = DEFAULT_DROP_RULE_PROMPT
+  bertopicPromptState.defaultDropRulePrompt = DEFAULT_DROP_RULE_PROMPT
   bertopicPromptState.reclusterSystemPrompt = ''
   bertopicPromptState.reclusterUserPrompt = ''
   bertopicPromptState.keywordSystemPrompt = ''
   bertopicPromptState.keywordUserPrompt = ''
+  bertopicPromptState.customFilters = JSON.parse(JSON.stringify(DEFAULT_CUSTOM_FILTERS))
   bertopicPromptState.error = ''
   bertopicPromptState.message = ''
   bertopicPromptState.loading = false
@@ -210,7 +244,6 @@ export const useTopicBertopicAnalysis = () => {
     resetState,
     runBertopicAnalysis,
     resetForm,
-    resetOptionalFields,
     resetRunParams,
     appendLog,
     clearLogs
@@ -425,11 +458,14 @@ const saveBertopicPrompt = async (options = {}) => {
       body: JSON.stringify({
         topic,
         project: form.project || undefined,
-        target_topics: snapshot.targetTopics,
+        target_topics: snapshot.maxTopics,
+        max_topics: snapshot.maxTopics,
+        drop_rule_prompt: snapshot.dropRulePrompt,
         recluster_system_prompt: snapshot.reclusterSystemPrompt,
         recluster_user_prompt: snapshot.reclusterUserPrompt,
         keyword_system_prompt: snapshot.keywordSystemPrompt,
-        keyword_user_prompt: snapshot.keywordUserPrompt
+        keyword_user_prompt: snapshot.keywordUserPrompt,
+        custom_filters: snapshot.customFilters
       })
     })
 
@@ -454,15 +490,6 @@ const resetState = () => {
 
 const resetForm = () => {
   form.endDate = ''
-  form.fetchDir = ''
-  form.userdict = ''
-  form.stopwords = ''
-}
-
-const resetOptionalFields = () => {
-  form.fetchDir = ''
-  form.userdict = ''
-  form.stopwords = ''
 }
 
 const resetRunParams = () => {
@@ -556,11 +583,14 @@ const runBertopicAnalysis = async (params) => {
           if (currentMinCluster <= 20) {
             let suggested = 0
             if (fetchedCount < 20000) {
-              suggested = Math.floor(fetchedCount / 200)
+              suggested = Math.floor(fetchedCount / 250)
+            } else if (fetchedCount < 100000) {
+              suggested = Math.max(24, Math.floor(fetchedCount / 3000) + 16)
             } else {
-              suggested = 100
+              suggested = Math.max(36, Math.floor(fetchedCount / 10000) + 28)
             }
             suggested = Math.max(suggested, currentMinCluster, 10)
+            suggested = Math.min(suggested, 60)
 
             if (suggested > currentMinCluster) {
               form.runParams.hdbscan.min_cluster_size = suggested
@@ -594,9 +624,6 @@ const runBertopicAnalysis = async (params) => {
       project: form.project || undefined,
       start_date: form.startDate,
       end_date: form.endDate || undefined,
-      fetch_dir: form.fetchDir || undefined,
-      userdict: form.userdict || undefined,
-      stopwords: form.stopwords || undefined,
       run_params: sanitizeRunParamsForPayload(form.runParams)
     }
 
