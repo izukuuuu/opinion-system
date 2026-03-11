@@ -2,13 +2,23 @@
   <div class="min-h-screen bg-base text-primary">
     <div v-if="isLandingLayout" class="flex min-h-screen flex-col">
       <header
-        class="flex items-center justify-between border-b border-soft bg-surface/90 px-6 py-4 backdrop-blur-sm sm:px-10">
-        <div class="flex items-center gap-3">
+        class="grid grid-cols-[1fr_auto_1fr] items-center border-b border-soft bg-surface/90 px-6 py-4 backdrop-blur-sm sm:px-10">
+        <div class="flex items-center gap-3 justify-self-start">
           <span class="text-lg font-semibold text-primary">Opinion System</span>
           <span class="hidden text-sm text-secondary sm:inline">舆情监测系统</span>
         </div>
+        <nav class="hidden items-center gap-2 md:flex justify-self-center">
+          <RouterLink
+            v-for="link in landingNavLinks"
+            :key="link.label"
+            :to="link.to"
+            :class="landingLinkClasses(link)"
+          >
+            {{ link.label }}
+          </RouterLink>
+        </nav>
         <RouterLink :to="backendEntryRoute"
-          class="inline-flex items-center justify-center rounded-full bg-white px-6 py-2 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary/90 hover:text-gray-600 focus-ring-accent">
+          class="justify-self-end inline-flex items-center justify-center rounded-full bg-white px-6 py-2 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary/90 hover:text-gray-600 focus-ring-accent">
           进入后台
         </RouterLink>
       </header>
@@ -385,6 +395,10 @@ const isLandingLayout = computed(() => route.meta?.layout === 'landing')
 const backendEntryRoute = { name: 'overview-datasets' }
 
 const pageTitle = computed(() => route.meta?.title ?? '')
+const landingNavLinks = [
+  { label: '首页', to: { name: 'home' }, match: ['home'] },
+  { label: '系统介绍', to: { name: 'system-intro' }, match: ['system-intro'] }
+]
 
 const isGlobalLinkActive = (link) => {
   if (Array.isArray(link.match) && link.match.length) {
@@ -397,6 +411,16 @@ const isGlobalLinkActive = (link) => {
     return route.matched.some((record) => record.name === link.to.name)
   }
   return false
+}
+
+const landingLinkClasses = (link) => {
+  const active = Array.isArray(link.match) && link.match.includes(route.name)
+  return [
+    'rounded-full px-4 py-1.5 text-sm font-semibold transition focus-ring-accent',
+    active
+      ? 'bg-brand-soft text-brand-700'
+      : 'text-secondary hover:bg-base hover:text-primary'
+  ]
 }
 
 const getCollapsedLinkClasses = (link) => [

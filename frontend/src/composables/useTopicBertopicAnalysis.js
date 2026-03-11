@@ -70,10 +70,36 @@ const DEFAULT_DROP_RULE_PROMPT = `
 - 不要省略字段，不要输出额外解释文字。
 `.trim()
 
-const DEFAULT_CUSTOM_FILTERS = [
-  { category: '明星八卦', description: '包含明星、网红、娱乐圈等与专题无关的八卦内容' },
-  { category: '广告推广', description: '包含广告、营销推广、品牌植入等商业推广内容' }
-]
+const DEFAULT_GLOBAL_FILTERS = ['明星八卦', '广告推广', '抽奖转发', '求职招聘']
+const DEFAULT_PROJECT_FILTERS = []
+
+const normalizeFilterLabelList = (items, fallback = []) => {
+  if (!Array.isArray(items)) {
+    return JSON.parse(JSON.stringify(fallback))
+  }
+  const seen = new Set()
+  const result = []
+  items.forEach((item) => {
+    const value = String(item || '').trim()
+    if (!value || seen.has(value)) return
+    seen.add(value)
+    result.push(value)
+  })
+  return result
+}
+
+const normalizeProjectFilters = (items) => {
+  if (!Array.isArray(items)) return []
+  const result = []
+  items.forEach((item) => {
+    if (!item || typeof item !== 'object') return
+    const category = String(item.category || '').trim()
+    const description = String(item.description || '').trim()
+    if (!category && !description) return
+    result.push({ category, description })
+  })
+  return result
+}
 
 const bertopicPromptState = reactive({
   loading: false,
@@ -89,7 +115,12 @@ const bertopicPromptState = reactive({
   reclusterUserPrompt: '',
   keywordSystemPrompt: '',
   keywordUserPrompt: '',
-  customFilters: JSON.parse(JSON.stringify(DEFAULT_CUSTOM_FILTERS))
+  reclusterDimension: '',
+  mustSeparateRules: [],
+  mustMergeRules: [],
+  coreDropRules: [],
+  globalFilters: JSON.parse(JSON.stringify(DEFAULT_GLOBAL_FILTERS)),
+  projectFilters: JSON.parse(JSON.stringify(DEFAULT_PROJECT_FILTERS))
 })
 
 const bertopicPromptBaseline = ref(null)
@@ -141,7 +172,12 @@ const capturePromptSnapshot = () => ({
   reclusterUserPrompt: String(bertopicPromptState.reclusterUserPrompt || '').trim(),
   keywordSystemPrompt: String(bertopicPromptState.keywordSystemPrompt || '').trim(),
   keywordUserPrompt: String(bertopicPromptState.keywordUserPrompt || '').trim(),
-  customFilters: JSON.parse(JSON.stringify(bertopicPromptState.customFilters || []))
+  reclusterDimension: String(bertopicPromptState.reclusterDimension || '').trim(),
+  mustSeparateRules: JSON.parse(JSON.stringify(bertopicPromptState.mustSeparateRules || [])),
+  mustMergeRules: JSON.parse(JSON.stringify(bertopicPromptState.mustMergeRules || [])),
+  coreDropRules: JSON.parse(JSON.stringify(bertopicPromptState.coreDropRules || [])),
+  globalFilters: JSON.parse(JSON.stringify(bertopicPromptState.globalFilters || [])),
+  projectFilters: JSON.parse(JSON.stringify(bertopicPromptState.projectFilters || []))
 })
 
 const setPromptStateFromPayload = (payload) => {
@@ -152,16 +188,40 @@ const setPromptStateFromPayload = (payload) => {
     data.max_topics ?? data.target_topics ?? data.maxTopics
   )
   bertopicPromptState.defaultDropRulePrompt = data.default_drop_rule_prompt || data.defaultDropRulePrompt || DEFAULT_DROP_RULE_PROMPT
-  
+
   bertopicPromptState.dropRulePrompt = data.drop_rule_prompt || data.dropRulePrompt || bertopicPromptState.defaultDropRulePrompt
   bertopicPromptState.reclusterSystemPrompt = data.recluster_system_prompt || data.reclusterSystemPrompt || ''
   bertopicPromptState.reclusterUserPrompt = data.recluster_user_prompt || data.reclusterUserPrompt || ''
-  
+
   bertopicPromptState.keywordSystemPrompt = data.keyword_system_prompt || data.keywordSystemPrompt || ''
   bertopicPromptState.keywordUserPrompt = data.keyword_user_prompt || data.keywordUserPrompt || ''
-  bertopicPromptState.customFilters = Array.isArray(data.custom_filters || data.customFilters)
-    ? JSON.parse(JSON.stringify(data.custom_filters || data.customFilters))
-    : []
+
+  bertopicPromptState.reclusterDimension = data.recluster_dimension || data.reclusterDimension || ''
+  bertopicPromptState.mustSeparateRules = normalizeFilterLabelList(
+    data.custom_topic_seed_rules ??
+    data.customTopicSeedRules ??
+    data.must_separate_rules ??
+    data.mustSeparateRules
+  )
+  bertopicPromptState.mustMergeRules = normalizeFilterLabelList(
+    data.must_merge_rules ?? data.mustMergeRules
+  )
+  bertopicPromptState.coreDropRules = normalizeFilterLabelList(
+    data.core_drop_rules ?? data.coreDropRules
+  )
+
+  const resolvedGlobalFilters = data.global_filters ?? data.globalFilters
+  bertopicPromptState.globalFilters = normalizeFilterLabelList(
+    resolvedGlobalFilters,
+    DEFAULT_GLOBAL_FILTERS
+  )
+
+  const resolvedProjectFilters =
+    data.project_filters ??
+    data.projectFilters ??
+    data.custom_filters ??
+    data.customFilters
+  bertopicPromptState.projectFilters = normalizeProjectFilters(resolvedProjectFilters)
   bertopicPromptBaseline.value = capturePromptSnapshot()
 }
 
@@ -175,7 +235,12 @@ const clearPromptState = () => {
   bertopicPromptState.reclusterUserPrompt = ''
   bertopicPromptState.keywordSystemPrompt = ''
   bertopicPromptState.keywordUserPrompt = ''
-  bertopicPromptState.customFilters = JSON.parse(JSON.stringify(DEFAULT_CUSTOM_FILTERS))
+  bertopicPromptState.reclusterDimension = ''
+  bertopicPromptState.mustSeparateRules = []
+  bertopicPromptState.mustMergeRules = []
+  bertopicPromptState.coreDropRules = []
+  bertopicPromptState.globalFilters = JSON.parse(JSON.stringify(DEFAULT_GLOBAL_FILTERS))
+  bertopicPromptState.projectFilters = JSON.parse(JSON.stringify(DEFAULT_PROJECT_FILTERS))
   bertopicPromptState.error = ''
   bertopicPromptState.message = ''
   bertopicPromptState.loading = false
@@ -465,7 +530,13 @@ const saveBertopicPrompt = async (options = {}) => {
         recluster_user_prompt: snapshot.reclusterUserPrompt,
         keyword_system_prompt: snapshot.keywordSystemPrompt,
         keyword_user_prompt: snapshot.keywordUserPrompt,
-        custom_filters: snapshot.customFilters
+        recluster_dimension: snapshot.reclusterDimension,
+        custom_topic_seed_rules: snapshot.mustSeparateRules,
+        must_separate_rules: snapshot.mustSeparateRules,
+        must_merge_rules: snapshot.mustMergeRules,
+        core_drop_rules: snapshot.coreDropRules,
+        global_filters: snapshot.globalFilters,
+        project_filters: snapshot.projectFilters
       })
     })
 

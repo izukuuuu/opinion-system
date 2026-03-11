@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
+import SystemIntroView from '../views/SystemIntroView.vue'
 import TopicCreationLayout from '../views/topics/TopicCreationLayout.vue'
 import TopicCreationOverview from '../views/topics/TopicCreationOverview.vue'
 import TopicUploadStep from '../views/topics/TopicUploadStep.vue'
@@ -35,7 +36,16 @@ export const routes = [
     name: 'home',
     component: HomeView,
     meta: {
-      title: '系统简介',
+      title: '首页',
+      layout: 'landing'
+    }
+  },
+  {
+    path: '/system-intro',
+    name: 'system-intro',
+    component: SystemIntroView,
+    meta: {
+      title: '系统介绍',
       layout: 'landing'
     }
   },

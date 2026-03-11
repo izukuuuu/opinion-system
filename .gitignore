@@ -37,3 +37,7 @@ cache/
 
 # Scripts
 scripts/
+
+# Temp
+.tmp/
+.tmp-*/

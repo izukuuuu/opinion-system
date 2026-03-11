@@ -24,6 +24,7 @@ DEFAULT_JUDGE_SAMPLE_PER_TOPIC = 3
 DEFAULT_LARGE_CLUSTER_DOC_SHARE = 0.08
 DEFAULT_LARGE_CLUSTER_DOC_COUNT = 0
 DEFAULT_MAX_DROP_RATIO = 0.45
+DEFAULT_GLOBAL_FILTERS = ["明星八卦", "广告推广", "抽奖转发", "求职招聘"]
 
 DEFAULT_RECLUSTER_SYSTEM_PROMPT = (
     "你是一个专业的文本分析专家，擅长对主题进行归纳、命名和聚类。"
@@ -175,7 +176,13 @@ def _default_payload(topic: str, path: Path, exists: bool = False) -> Dict[str, 
         "keyword_system_prompt": DEFAULT_KEYWORDS_SYSTEM_PROMPT,
         "keyword_user_prompt": DEFAULT_KEYWORDS_USER_PROMPT,
         "drop_rule_prompt": DEFAULT_DROP_RULE_PROMPT,
-        "custom_filters": [],
+        "global_filters": list(DEFAULT_GLOBAL_FILTERS),
+        "project_filters": [],
+        "recluster_dimension": "",
+        "custom_topic_seed_rules": [],
+        "must_separate_rules": [],
+        "must_merge_rules": [],
+        "core_drop_rules": [],
         "metadata": {},
     }
 
@@ -285,9 +292,27 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
             "keyword_user_prompt": str(
                 keywords_prompt.get("user") or DEFAULT_KEYWORDS_USER_PROMPT
             ),
-            "custom_filters": _normalise_custom_filters(
-                settings.get("custom_filters")
+            "global_filters": [
+                str(x).strip()
+                for x in settings.get("global_filters", DEFAULT_GLOBAL_FILTERS)
+                if str(x).strip()
+            ],
+            "project_filters": _normalise_custom_filters(
+                settings.get("project_filters", settings.get("custom_filters"))
             ),
+            "recluster_dimension": str(settings.get("recluster_dimension") or ""),
+            "custom_topic_seed_rules": [
+                str(x).strip()
+                for x in settings.get("custom_topic_seed_rules", settings.get("must_separate_rules", []))
+                if str(x).strip()
+            ],
+            "must_separate_rules": [
+                str(x).strip()
+                for x in settings.get("must_separate_rules", settings.get("custom_topic_seed_rules", []))
+                if str(x).strip()
+            ],
+            "must_merge_rules": [str(x).strip() for x in settings.get("must_merge_rules", []) if str(x).strip()],
+            "core_drop_rules": [str(x).strip() for x in settings.get("core_drop_rules", []) if str(x).strip()],
             "metadata": metadata,
         }
     )
@@ -302,7 +327,13 @@ def persist_topic_bertopic_prompt_config(
     recluster_user_prompt: str,
     keyword_system_prompt: str,
     keyword_user_prompt: str,
-    custom_filters: Any = None,
+    global_filters: Any = None,
+    project_filters: Any = None,
+    recluster_dimension: str = "",
+    must_separate_rules: Any = None,
+    must_merge_rules: Any = None,
+    core_drop_rules: Any = None,
+    custom_topic_seed_rules: Any = None,
 ) -> Dict[str, Any]:
     """Persist BERTopic prompt config and return refreshed payload."""
 
@@ -324,6 +355,19 @@ def persist_topic_bertopic_prompt_config(
     final_keyword_user = (
         str(keyword_user_prompt or "").rstrip() or DEFAULT_KEYWORDS_USER_PROMPT
     )
+    
+    # Normalise new fields
+    seed_source = must_separate_rules if custom_topic_seed_rules is None else custom_topic_seed_rules
+    final_custom_topic_seeds = [str(x).strip() for x in (seed_source or []) if str(x).strip()]
+    final_must_separate = list(final_custom_topic_seeds)  # legacy compatibility
+    final_must_merge = [str(x).strip() for x in (must_merge_rules or []) if str(x).strip()]
+    final_core_drop = [str(x).strip() for x in (core_drop_rules or []) if str(x).strip()]
+
+    if global_filters is None:
+        final_global_filters = list(DEFAULT_GLOBAL_FILTERS)
+    else:
+        final_global_filters = [str(x).strip() for x in (global_filters or []) if str(x).strip()]
+    normalized_project_filters = _normalise_custom_filters(project_filters)
 
     yaml_payload: Dict[str, Any] = {
         "settings": {
@@ -338,7 +382,14 @@ def persist_topic_bertopic_prompt_config(
             "max_drop_ratio": DEFAULT_MAX_DROP_RATIO,
             "use_multi_agent": True,
             "drop_rule_prompt": final_drop_rule_prompt,
-            "custom_filters": _normalise_custom_filters(custom_filters),
+            "global_filters": final_global_filters,
+            "project_filters": normalized_project_filters,
+            "custom_filters": normalized_project_filters,  # legacy compatibility
+            "recluster_dimension": str(recluster_dimension or ""),
+            "custom_topic_seed_rules": final_custom_topic_seeds,
+            "must_separate_rules": final_must_separate,
+            "must_merge_rules": final_must_merge,
+            "core_drop_rules": final_core_drop,
         },
         "prompts": {
             PROMPT_RECLUSTER_KEY: {

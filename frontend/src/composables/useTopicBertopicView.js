@@ -130,32 +130,53 @@ const loadTopics = async (onlyWithData = false) => {
   topicsState.error = ''
 
   try {
-    // 首先尝试从远程数据库获取专题列表（像基础分析一样）
     let topics = []
-    try {
-      const response = await callApi('/api/query', {
-        method: 'POST',
-        body: JSON.stringify({ include_counts: false })
+
+    // 查看结果页优先使用后端 BERTopic 专用专题列表，保证 bucket 与存档目录一致
+    if (onlyWithData) {
+      const topicParams = new URLSearchParams({
+        only_with_data: 'true',
+        only_with_results: 'true'
       })
-      const databases = response?.data?.databases ?? []
-      topics = databases
-        .map((db) => ({
-          bucket: db.name,
-          name: db.name,
-          display_name: db.display_name || db.name,
-          source: 'database'
-        }))
-        .filter((topic) => topic.name && topic.name.trim())
-    } catch (dbError) {
-      console.warn('Failed to load topics from remote database:', dbError)
-      // 如果远程数据库调用失败，回退到BERTopic专用API
-      const queryParams = onlyWithData ? '?only_with_data=true' : ''
-      const response = await callApi(`/api/topic/bertopic/topics${queryParams}`, {
-        method: 'GET'
-      })
-      topics = response?.data?.topics || response?.topics || []
+      try {
+        const response = await callApi(`/api/topic/bertopic/topics?${topicParams.toString()}`, {
+          method: 'GET'
+        })
+        topics = response?.data?.topics || response?.topics || []
+      } catch (topicError) {
+        console.warn('Failed to load BERTopic topic list:', topicError)
+      }
     }
 
+    // 兜底：沿用数据库专题列表逻辑
+    if (!topics.length) {
+      try {
+        const response = await callApi('/api/query', {
+          method: 'POST',
+          body: JSON.stringify({ include_counts: false })
+        })
+        const databases = response?.data?.databases ?? []
+        topics = databases
+          .map((db) => ({
+            bucket: db.name,
+            name: db.name,
+            display_name: db.display_name || db.name,
+            source: 'database'
+          }))
+          .filter((topic) => topic.name && topic.name.trim())
+      } catch (dbError) {
+        console.warn('Failed to load topics from remote database:', dbError)
+        const queryParams = onlyWithData
+          ? '?only_with_data=true&only_with_results=true'
+          : ''
+        const response = await callApi(`/api/topic/bertopic/topics${queryParams}`, {
+          method: 'GET'
+        })
+        topics = response?.data?.topics || response?.topics || []
+      }
+    }
+
+    const previousTopic = (viewSelection.topic || '').trim()
     // 标准化专题格式
     topicsState.options = topics.map(t => ({
       ...t,
@@ -163,6 +184,37 @@ const loadTopics = async (onlyWithData = false) => {
       name: t.name || t.display_name || t.bucket,
       display_name: t.display_name || t.name || t.bucket
     }))
+
+    const currentTopic = (viewSelection.topic || '').trim()
+    const hasCurrentSelection = topicsState.options.some(
+      (item) => item.bucket === currentTopic
+    )
+
+    if (!hasCurrentSelection) {
+      const project = (viewSelection.project || '').trim()
+      const matchedByProject = project
+        ? topicsState.options.find(
+          (item) =>
+            item.bucket === project ||
+            item.name === project ||
+            item.display_name === project
+        )
+        : null
+
+      if (matchedByProject) {
+        viewSelection.topic = matchedByProject.bucket
+      } else if (!currentTopic && topicsState.options.length > 0) {
+        viewSelection.topic = topicsState.options[0].bucket
+      } else if (!topicsState.options.length) {
+        viewSelection.topic = ''
+      }
+    } else if (currentTopic && currentTopic === previousTopic) {
+      // 选中专题未变化时主动刷新历史，避免“同专题不触发 watch”
+      await loadHistory(currentTopic)
+      if (selectedHistoryId.value) {
+        await applyHistorySelection(selectedHistoryId.value)
+      }
+    }
   } catch (error) {
     topicsState.error = error instanceof Error ? error.message : '加载专题列表失败'
     topicsState.options = []
@@ -201,6 +253,7 @@ const loadHistory = async (topic) => {
       []
     const fallbackTopic =
       response?.data?.topic_identifier ||
+      response?.data?.data?.topic_identifier ||
       response?.topic_identifier ||
       trimmed
     const entries = normalizeHistoryRecords(records, fallbackTopic)
@@ -229,14 +282,19 @@ const loadHistory = async (topic) => {
 // 加载结果数据（从存档记录）
 const loadResults = async (range) => {
   const targetRange = range ? range : viewSelection
-  const { topic, start, end } = targetRange
+  const selectedTopic = String(viewSelection.topic || '').trim()
+  const requestedTopic = String(targetRange.topic || '').trim()
+  const topic = selectedTopic || requestedTopic
+  const { start, end } = targetRange
 
   if (!topic || !start) {
     loadState.error = '请选择专题和存档时间范围'
     return
   }
 
-  viewSelection.topic = topic
+  if (!selectedTopic && requestedTopic) {
+    viewSelection.topic = requestedTopic
+  }
   viewSelection.start = start
   viewSelection.end = end
   loadState.loading = true

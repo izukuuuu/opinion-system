@@ -18,6 +18,7 @@ PROJECT_MANAGER = get_project_manager()
 from src.utils.setting.paths import bucket, get_data_root
 from pathlib import Path
 import logging
+import json
 from typing import Dict, Any, List, Optional
 
 LOGGER = logging.getLogger(__name__)
@@ -363,6 +364,41 @@ def save_topic_bertopic_prompt():
         display_name = topic or project or topic_identifier
 
     try:
+        global_filters = payload.get("global_filters")
+        if global_filters is None:
+            global_filters = payload.get("globalFilters")
+
+        project_filters = payload.get("project_filters")
+        if project_filters is None:
+            project_filters = payload.get("projectFilters")
+        if project_filters is None:
+            project_filters = payload.get("custom_filters")
+        if project_filters is None:
+            project_filters = payload.get("customFilters")
+
+        recluster_dimension = payload.get("recluster_dimension")
+        if recluster_dimension is None:
+            recluster_dimension = payload.get("reclusterDimension")
+
+        must_separate_rules = payload.get("must_separate_rules")
+        if must_separate_rules is None:
+            must_separate_rules = payload.get("mustSeparateRules")
+        custom_topic_seed_rules = payload.get("custom_topic_seed_rules")
+        if custom_topic_seed_rules is None:
+            custom_topic_seed_rules = payload.get("customTopicSeedRules")
+
+        must_merge_rules = payload.get("must_merge_rules")
+        if must_merge_rules is None:
+            must_merge_rules = payload.get("mustMergeRules")
+
+        core_drop_rules = payload.get("core_drop_rules")
+        if core_drop_rules is None:
+            core_drop_rules = payload.get("coreDropRules")
+        if core_drop_rules is None:
+            core_drop_rules = payload.get("relevance_rules")
+        if core_drop_rules is None:
+            core_drop_rules = payload.get("relevanceRules")
+
         data = persist_topic_bertopic_prompt_config(
             topic_identifier,
             payload.get("target_topics", payload.get("targetTopics")),
@@ -371,7 +407,13 @@ def save_topic_bertopic_prompt():
             str(payload.get("recluster_user_prompt") or ""),
             str(payload.get("keyword_system_prompt") or ""),
             str(payload.get("keyword_user_prompt") or ""),
-            custom_filters=payload.get("custom_filters"),
+            global_filters=global_filters,
+            project_filters=project_filters,
+            recluster_dimension=str(recluster_dimension or ""),
+            must_separate_rules=must_separate_rules,
+            must_merge_rules=must_merge_rules,
+            core_drop_rules=core_drop_rules,
+            custom_topic_seed_rules=custom_topic_seed_rules,
         )
     except Exception as exc:
         LOGGER.exception("Failed to save BERTopic prompt config")
@@ -535,7 +577,8 @@ def list_topic_buckets():
                     for db in databases:
                         db_name = db.get("name", "").strip()
                         if db_name:
-                            project_dir = projects_dir / db_name if projects_dir.exists() else None
+                            resolved_identifier = PROJECT_MANAGER.resolve_identifier(db_name) or db_name
+                            project_dir = projects_dir / resolved_identifier if projects_dir.exists() else None
                             has_topic = False
 
                             if project_dir and project_dir.exists():
@@ -544,9 +587,10 @@ def list_topic_buckets():
 
                             if not only_with_results or has_topic:
                                 topics.append({
-                                    "bucket": db_name,
+                                    "bucket": resolved_identifier if has_topic else db_name,
                                     "name": db_name,
                                     "display_name": db.get("display_name", db_name),
+                                    "topic_identifier": resolved_identifier,
                                     "has_bertopic_results": has_topic,
                                     "source": "database"
                                 })
@@ -569,10 +613,25 @@ def list_topic_buckets():
 
                         if not only_with_data or has_data:
                             if not only_with_results or has_topic:
+                                display_name = item.name
+                                project_meta = item / "project.json"
+                                if project_meta.exists():
+                                    try:
+                                        with project_meta.open("r", encoding="utf-8") as fh:
+                                            meta_payload = json.load(fh) or {}
+                                        candidate_name = str(
+                                            meta_payload.get("name")
+                                            or meta_payload.get("display_name")
+                                            or ""
+                                        ).strip()
+                                        if candidate_name:
+                                            display_name = candidate_name
+                                    except Exception:
+                                        LOGGER.debug("Failed to read project display name for %s", item.name, exc_info=True)
                                 topics.append({
                                     "bucket": item.name,
                                     "name": item.name,
-                                    "display_name": item.name,
+                                    "display_name": display_name,
                                     "has_bertopic_results": has_topic,
                                     "source": "local"
                                 })

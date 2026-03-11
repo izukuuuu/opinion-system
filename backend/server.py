@@ -85,6 +85,12 @@ from server_support.router_prompts.utils import (
     persist_router_prompt_config,
 )
 from server_support.settings_config import register_settings_endpoints
+from server_support.hot_overview import (
+    get_today_hot_overview,
+    list_hot_overview_history,
+    rollback_hot_overview_revision,
+    reclassify_hot_overview,
+)
 
 PROJECT_MANAGER = get_project_manager()
 
@@ -290,7 +296,135 @@ def get_config():
     return jsonify(CONFIG)
 
 
+@app.get("/api/home/today-hot-overview")
+def home_today_hot_overview():
+    limit_raw = str(request.args.get("limit", "") or "").strip()
+    refresh_raw = str(request.args.get("refresh", "") or "").strip().lower()
+    mode_raw = str(request.args.get("mode", "") or "").strip().lower()
+    research_raw = str(request.args.get("research", "") or "").strip().lower()
+    force_refresh = refresh_raw in {"1", "true", "yes", "on"}
+    mode = mode_raw if mode_raw in {"fast", "research"} else "fast"
+    if not mode_raw and research_raw in {"1", "true", "yes", "on"}:
+        mode = "research"
+    limit = 12
+    if limit_raw:
+        try:
+            limit = int(limit_raw)
+        except ValueError:
+            return error("Invalid 'limit' parameter, expected integer")
 
+    LOGGER.info(
+        "API /api/home/today-hot-overview called | limit=%s force_refresh=%s mode=%s ip=%s",
+        limit,
+        force_refresh,
+        mode,
+        request.remote_addr,
+    )
+
+    try:
+        payload = get_today_hot_overview(
+            limit=limit,
+            force_refresh=force_refresh,
+            mode=mode,
+        )
+        LOGGER.info(
+            "API /api/home/today-hot-overview success | total_items=%s summary_source=%s revision_id=%s",
+            int(payload.get("total_items") or 0),
+            payload.get("summary_source"),
+            payload.get("revision_id"),
+        )
+        return success({"data": payload})
+    except Exception as exc:
+        LOGGER.exception("Failed to build today's hot overview")
+        return error(f"Failed to build today's hot overview: {str(exc)}", 500)
+
+
+@app.get("/api/home/today-hot-overview/history")
+def home_today_hot_overview_history():
+    mode_raw = str(request.args.get("mode", "") or "").strip().lower()
+    research_raw = str(request.args.get("research", "") or "").strip().lower()
+    limit_raw = str(request.args.get("limit", "") or "").strip()
+    mode = mode_raw if mode_raw in {"fast", "research"} else "fast"
+    if not mode_raw and research_raw in {"1", "true", "yes", "on"}:
+        mode = "research"
+    limit = 10
+    if limit_raw:
+        try:
+            limit = int(limit_raw)
+        except ValueError:
+            return error("Invalid 'limit' parameter, expected integer")
+
+    records = list_hot_overview_history(mode=mode, limit=limit)
+    LOGGER.info(
+        "API /api/home/today-hot-overview/history success | mode=%s records=%s",
+        mode,
+        len(records),
+    )
+    return success({"data": {"records": records, "total": len(records)}})
+
+
+@app.post("/api/home/today-hot-overview/rollback")
+def home_today_hot_overview_rollback():
+    payload = request.get_json(silent=True) or {}
+    revision_id = str(payload.get("revision_id") or "").strip()
+    mode_raw = str(payload.get("mode") or "").strip().lower()
+    mode = mode_raw if mode_raw in {"fast", "research"} else "fast"
+    if not mode_raw and str(payload.get("research") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        mode = "research"
+    if not revision_id:
+        return error("Missing required field(s): revision_id")
+
+    rolled = rollback_hot_overview_revision(
+        revision_id=revision_id,
+        mode=mode,
+    )
+    if not isinstance(rolled, dict):
+        return error("Revision not found", 404)
+    LOGGER.info(
+        "API /api/home/today-hot-overview/rollback success | revision_id=%s mode=%s",
+        revision_id,
+        mode,
+    )
+    return success({"data": rolled})
+
+
+@app.post("/api/home/today-hot-overview/reclassify")
+def home_today_hot_overview_reclassify():
+    payload = request.get_json(silent=True) or {}
+    target_title = str(payload.get("target_title") or "").strip()
+    hint = str(payload.get("hint") or "").strip()
+    mode_raw = str(payload.get("mode") or "").strip().lower()
+    mode = mode_raw if mode_raw in {"fast", "research"} else "fast"
+    if not mode_raw and str(payload.get("research") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        mode = "research"
+    
+    if not target_title:
+        return error("Missing required field(s): target_title")
+
+    LOGGER.info(
+        "API /api/home/today-hot-overview/reclassify called | target_title=%s hint=%s mode=%s",
+        target_title[:20],
+        hint[:20],
+        mode
+    )
+    
+    try:
+        new_payload = reclassify_hot_overview(
+            target_title=target_title,
+            hint=hint,
+            mode=mode,
+        )
+        if not new_payload:
+            return error("No cached overview data available to reclassify.", 404)
+        
+        LOGGER.info(
+            "API /api/home/today-hot-overview/reclassify success | revision_id=%s",
+            new_payload.get("revision_id"),
+        )
+        return success({"data": new_payload})
+    except Exception as exc:
+        LOGGER.exception("Failed to reclassify overview target")
+        return error(f"Failed to reclassify: {str(exc)}", 500)
 
 @app.route("/api/ai/chat", methods=["POST"])
 def chat_ai():

@@ -49,11 +49,18 @@ class ReclusterState(TypedDict, total=False):
     recluster_user_prompt: str
     keyword_system_prompt: str
     keyword_user_prompt: str
+    recluster_dimension: str                    # business rule: clustering perspective
+    must_separate_rules: List[str]              # business rule: custom topic seed hints (legacy key)
+    custom_topic_seed_rules: List[str]          # business rule: custom topic seed hints
+    must_merge_rules: List[str]                 # business rule: force-merge hints
+    core_drop_rules: List[str]                  # business rule: contextual relevance hints
     judge_sample_per_topic: int                  # evidence size shown to judge
     large_cluster_doc_share: float               # safeguard: keep large-share cluster
     large_cluster_doc_count: int                 # safeguard: keep large-count cluster
     max_drop_ratio: float                        # safeguard: do not drop too many clusters
-    custom_filters: List[Dict[str, str]]          # user-defined exclusion filters
+    global_filters: List[str]                    # system-level exclusion category names
+    project_filters: List[Dict[str, str]]        # user-defined exclusion filters
+    custom_filters: List[Dict[str, str]]         # legacy alias of project_filters
     logger: Any                                 # logging.Logger (not serialised)
 
     # Intermediate / outputs
@@ -73,6 +80,24 @@ _EMPTY: List[Dict[str, Any]] = []
 DEFAULT_JUDGE_SAMPLE_PER_TOPIC = 3
 DEFAULT_LARGE_CLUSTER_DOC_SHARE = 0.08
 DEFAULT_MAX_DROP_RATIO = 0.45
+
+DIMENSION_RULE_GUIDES: Dict[str, List[str]] = {
+    "业务场景": [
+        "优先按业务链路阶段、用户诉求场景、问题处理环节进行一级分组。",
+        "同一组需要能解释为同一业务情境下的同类问题或动作。",
+        "若语义接近但业务动作不同，应拆分为不同类别。",
+    ],
+    "情感倾向": [
+        "优先按情绪极性与立场方向分组（正向/负向/中性/争议）。",
+        "同组内情绪基调应一致，不要把对立情绪合并。",
+        "事实陈述类内容需先判断语气倾向再归类。",
+    ],
+    "对象实体": [
+        "优先按被讨论对象分组（品牌/机构/人物/产品/渠道）。",
+        "不同对象即使议题接近，也优先分开。",
+        "对象指代不明时，先根据上下文补全主实体再聚类。",
+    ],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +200,142 @@ def _trim_text(text: Any, max_chars: int = 220) -> str:
     if len(cleaned) <= max_chars:
         return cleaned
     return f"{cleaned[:max_chars - 1]}…"
+
+
+def _normalise_label_list(raw: Any) -> List[str]:
+    if not isinstance(raw, list):
+        return []
+    seen: set = set()
+    result: List[str] = []
+    for item in raw:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _normalise_filter_items(raw: Any) -> List[Dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    seen: set = set()
+    result: List[Dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        category = str(item.get("category") or "").strip()
+        description = str(item.get("description") or "").strip()
+        if not category and not description:
+            continue
+        key = (category, description)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({"category": category, "description": description})
+    return result
+
+
+def _resolve_custom_filters(state: ReclusterState) -> List[Dict[str, str]]:
+    """Merge global/project filters with backward-compatible legacy filters."""
+    seen: set = set()
+    resolved: List[Dict[str, str]] = []
+
+    for label in _normalise_label_list(state.get("global_filters")):
+        key = (label, "系统预设全局排除类目")
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved.append({"category": label, "description": "系统预设全局排除类目"})
+
+    project_filters = _normalise_filter_items(state.get("project_filters"))
+    legacy_filters = _normalise_filter_items(state.get("custom_filters"))
+    for item in [*project_filters, *legacy_filters]:
+        key = (item["category"], item["description"])
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved.append(item)
+
+    return resolved
+
+
+def _yaml_quote(value: Any) -> str:
+    text = str(value or "")
+    text = text.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def _append_yaml_list(lines: List[str], indent: int, items: List[str]) -> None:
+    prefix = " " * indent
+    for item in items:
+        value = str(item or "").strip()
+        if not value:
+            continue
+        lines.append(f"{prefix}- {_yaml_quote(value)}")
+
+
+def _build_business_rules_hint(
+    recluster_dimension: str,
+    custom_topic_seeds: List[str],
+    must_merge: List[str],
+) -> str:
+    dimension = str(recluster_dimension or "").strip()
+    if not (dimension or custom_topic_seeds or must_merge):
+        return ""
+
+    lines: List[str] = ["business_rules:"]
+
+    if dimension:
+        guide_items = DIMENSION_RULE_GUIDES.get(
+            dimension,
+            [
+                "请先按该视角完成一级分组，再在组内做语义细分。",
+                "同组需具备一致且可解释的共同特征，不可仅按表层关键词合并。",
+                "类别命名需体现该视角，避免泛化命名。",
+            ],
+        )
+        lines.extend(
+            [
+                "  recluster_strategy:",
+                f"    perspective: {_yaml_quote(dimension)}",
+                '    objective: "先按主导视角完成一级聚类，再在组内做语义细分与命名。"',
+                "    guide:",
+            ]
+        )
+        _append_yaml_list(lines, 6, guide_items)
+
+    if custom_topic_seeds:
+        lines.extend(
+            [
+                "  custom_topic_recognition:",
+                "    seed_topics:",
+            ]
+        )
+        _append_yaml_list(lines, 6, custom_topic_seeds)
+        lines.extend(
+            [
+                "    assignment_rule:",
+                '      - "与 seed_topics 语义高度相近的原始主题，优先归入同一类别。"',
+                '      - "该类别与其他聚类流程一致，需进入后续命名与关键词生成阶段。"',
+                '      - "若同时命中多个 seed_topics，按语义最贴近者归类并在描述中体现边界。"',
+            ]
+        )
+
+    if must_merge:
+        lines.append("  should_merge:")
+        _append_yaml_list(lines, 4, must_merge)
+
+    lines.extend(
+        [
+            "  execution_requirements:",
+            '    - "优先保证组内语义一致性，再控制组间边界清晰。"',
+            '    - "custom_topic_recognition.seed_topics 仅定义归类锚点，不直接作为最终类别名。"',
+            '    - "与 should_merge 冲突时，优先满足 seed_topics 的归类锚定。"',
+            '    - "输出类别命名需可解释，并与主导视角保持一致。"',
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _build_topic_lookup(topic_stats: List[Dict[str, Any]]) -> tuple[Dict[str, Dict[str, Any]], int]:
@@ -568,6 +729,7 @@ CLUSTER_STRATEGIST_SYSTEM = (
 CLUSTER_STRATEGIST_USER = """
 请将以下 BERTopic 主题结果合并为不超过 {max_topics} 个高层级类别。
 
+{business_rules_hint}
 {iteration_hint}
 
 输入数据：
@@ -636,11 +798,24 @@ def cluster_strategist_node(state: ReclusterState) -> Dict[str, Any]:
         indent=2,
     )
 
+    # Construct structured business rules hint (YAML-like block)
+    recluster_dimension = str(state.get("recluster_dimension") or "").strip()
+    custom_topic_seeds = _normalise_label_list(
+        state.get("custom_topic_seed_rules", state.get("must_separate_rules"))
+    )
+    must_merge = _normalise_label_list(state.get("must_merge_rules"))
+    business_rules_hint = _build_business_rules_hint(
+        recluster_dimension=recluster_dimension,
+        custom_topic_seeds=custom_topic_seeds,
+        must_merge=must_merge,
+    )
+
     prompt_template = str(state.get("recluster_user_prompt") or CLUSTER_STRATEGIST_USER)
     prompt_values = {
         "max_topics": max_topics,
         "target_topics": max_topics,
         "TARGET_TOPICS": max_topics,
+        "business_rules_hint": business_rules_hint,
         "iteration_hint": iteration_hint,
         "input_data": input_data,
         "topic_list": "\n".join(topic_descriptions),
@@ -651,6 +826,8 @@ def cluster_strategist_node(state: ReclusterState) -> Dict[str, Any]:
     prompt = prompt_template
     for key, val in prompt_values.items():
         prompt = prompt.replace(f"{{{key}}}", str(val))
+    if business_rules_hint and "{business_rules_hint}" not in prompt_template:
+        prompt = f"{prompt.rstrip()}\n\n补充业务规则（YAML）：\n{business_rules_hint}"
     if iteration_hint and "{iteration_hint}" not in prompt_template:
         prompt = f"{prompt.rstrip()}\n\n{iteration_hint}"
 
@@ -732,7 +909,14 @@ def relevance_judge_node(state: ReclusterState) -> Dict[str, Any]:
     """Judge each cluster for relevance, marking irrelevant ones for drop."""
     clusters = state.get("clusters", [])
     focus_topic = state.get("focus_topic", "")
-    drop_rule = state.get("drop_rule_prompt", "")
+    
+    core_drop = _normalise_label_list(state.get("core_drop_rules"))
+    base_drop_rule = str(state.get("drop_rule_prompt", "") or "")
+    if core_drop:
+        drop_rule = "【核心降噪指令】\n" + "\n".join(f"- {r}" for r in core_drop) + "\n\n【辅助参数说明】\n" + base_drop_rule
+    else:
+        drop_rule = base_drop_rule
+
     min_floor = max(3, int(state.get("min_topics_floor", 3)))
     topic_lookup, total_topic_docs = _build_topic_lookup(state.get("topic_stats", []))
     sample_per_topic = _coerce_int(
@@ -1105,7 +1289,8 @@ CUSTOM_FILTER_JUDGE_USER = """
 
 def custom_filter_judge_node(state: ReclusterState) -> Dict[str, Any]:
     """Apply user-defined custom filters, one LLM call per filter rule."""
-    custom_filters = state.get("custom_filters") or []
+    custom_filters = _resolve_custom_filters(state)
+
     retained = list(state.get("retained_clusters") or [])
     judged = list(state.get("judged_clusters") or [])
 
@@ -1268,11 +1453,7 @@ def _post_judge_router(state: ReclusterState) -> str:
         return "retry"
 
     # 2. Check whether custom filters are defined
-    custom_filters = state.get("custom_filters") or []
-    valid = [
-        f for f in custom_filters
-        if str(f.get("category") or "").strip() or str(f.get("description") or "").strip()
-    ]
+    valid = _resolve_custom_filters(state)
     if valid:
         _log(state, f"Supervisor: {len(valid)} 条自定义筛选规则待执行，进入 Custom Filter Judge")
         return "apply_filters"
@@ -1399,11 +1580,27 @@ def run_multi_agent_recluster(
 
     from .prompt_config import (
         DEFAULT_DROP_RULE_PROMPT,
+        DEFAULT_GLOBAL_FILTERS,
         DEFAULT_RECLUSTER_SYSTEM_PROMPT,
         DEFAULT_RECLUSTER_USER_PROMPT,
         DEFAULT_KEYWORDS_SYSTEM_PROMPT,
         DEFAULT_KEYWORDS_USER_PROMPT,
     )
+
+    raw_global_filters = config.get("global_filters") if "global_filters" in config else DEFAULT_GLOBAL_FILTERS
+    global_filters = _normalise_label_list(raw_global_filters)
+    raw_project_filters = config.get("project_filters")
+    if raw_project_filters is None:
+        raw_project_filters = config.get("custom_filters")
+    project_filters = _normalise_filter_items(raw_project_filters)
+    legacy_filters = _normalise_filter_items(config.get("custom_filters"))
+    core_drop_rules = _normalise_label_list(
+        config.get("core_drop_rules", config.get("relevance_rules", []))
+    )
+    custom_topic_seed_rules = _normalise_label_list(
+        config.get("custom_topic_seed_rules", config.get("must_separate_rules"))
+    )
+    must_merge_rules = _normalise_label_list(config.get("must_merge_rules"))
 
     initial_state: ReclusterState = {
         "topic_stats": topic_stats,
@@ -1415,11 +1612,18 @@ def run_multi_agent_recluster(
         "recluster_user_prompt": str(config.get("recluster_user_prompt") or DEFAULT_RECLUSTER_USER_PROMPT),
         "keyword_system_prompt": str(config.get("keyword_system_prompt") or DEFAULT_KEYWORDS_SYSTEM_PROMPT),
         "keyword_user_prompt": str(config.get("keyword_user_prompt") or DEFAULT_KEYWORDS_USER_PROMPT),
+        "recluster_dimension": str(config.get("recluster_dimension") or ""),
+        "must_separate_rules": custom_topic_seed_rules,
+        "custom_topic_seed_rules": custom_topic_seed_rules,
+        "must_merge_rules": must_merge_rules,
+        "core_drop_rules": core_drop_rules,
         "judge_sample_per_topic": judge_sample_per_topic,
         "large_cluster_doc_share": large_cluster_doc_share,
         "large_cluster_doc_count": large_cluster_doc_count,
         "max_drop_ratio": max_drop_ratio,
-        "custom_filters": config.get("custom_filters") or [],
+        "global_filters": global_filters,
+        "project_filters": project_filters,
+        "custom_filters": legacy_filters,
         "logger": logger,
         "iteration": 0,
         "recommended_max_topics": max_topics,
