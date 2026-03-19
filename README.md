@@ -9,30 +9,11 @@
 
 ## 🚀 快速开始：环境配置与运行
 
-本项目包含前端（Vue3）和后端（Python Flask）两部分，请按以下步骤配置环境并运行。
+本项目包含前端（Vue3）和后端（Python Flask）两部分。推荐优先使用根目录快速启动文件，它们已经统一封装了依赖检查、占位文件创建、服务启动和浏览器打开流程。
 
-### 1. 后端环境配置
+### 1. 推荐方式：根目录快速启动
 
-后端基于 Python 3.11，使用 Flask 作为服务器框架。推荐使用 `uv` 管理 Python 环境和依赖。
-
-#### 1.1 安装 uv（如未安装）
-
-```bash
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# Linux/Mac
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-#### 1.2 安装后端依赖
-
-```bash
-cd backend
-uv pip install -r requirements.txt
-```
-
-#### 1.3 准备本地数据库
+#### 1.1 先准备本地数据库
 
 本项目**不会自动安装数据库服务**，请先自行在本机准备并启动关系型数据库。
 
@@ -41,9 +22,79 @@ uv pip install -r requirements.txt
 - 启动前请自行编辑 `backend/configs/databases.yaml`
 - 根目录 `run.py` 只会检查数据库配置和连通性，不会代替你安装数据库
 
-#### 1.4 配置后端环境变量
+#### 1.2 安装 `uv` 与 Node.js（如未安装）
 
-创建 `backend/.env` 文件，写入 API 密钥：
+```bash
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+请另外安装：
+
+- Node.js 18+
+- 本地 PostgreSQL（推荐）
+
+#### 1.3 运行快速启动文件
+
+Windows：
+
+```bat
+start_win.bat
+```
+
+macOS / Linux：
+
+```bash
+./start_mac.sh
+```
+
+通用方式：
+
+```bash
+python run.py
+```
+
+这些快速启动文件会自动：
+
+- 检查 `uv pip`、`npm` 和 `backend/configs/databases.yaml` 当前激活数据库连接是否可达
+- 缺失时创建 `backend/.env`、`frontend/.env.local`、`backend/configs/databases.yaml` 等本地占位文件
+- 安装前后端依赖
+- 启动 `backend/server.py` 与前端 Vite 开发服务
+- 服务就绪后自动打开浏览器
+
+启动成功后，默认访问：
+
+- 前端：`http://127.0.0.1:5173`
+- 后端状态：`http://127.0.0.1:8000/api/status`
+
+---
+
+### 2. 手动方式（备选）
+
+#### 2.1 后端环境配置
+
+后端基于 Python 3.11，使用 Flask 作为服务器框架。请使用项目虚拟环境解释器，不要依赖系统 Python。
+
+#### 2.1.1 安装后端依赖
+
+Windows：
+
+```powershell
+uv pip install --python .venv\Scripts\python.exe -r backend\requirements.txt
+```
+
+macOS / Linux：
+
+```bash
+uv pip install --python .venv/bin/python -r backend/requirements.txt
+```
+
+#### 2.1.2 配置后端环境变量
+
+`backend/.env` 在缺失时会由 `run.py` 自动创建；如果你手动启动，也可以自己补充 API 密钥：
 
 ```env
 DASHSCOPE_API_KEY=your_api_key_here
@@ -51,31 +102,38 @@ DASHSCOPE_API_KEY=your_api_key_here
 
 > 💡 如需使用阿里云通义千问等大模型服务，请在此处填写对应的 API Key。
 
-#### 1.5 启动后端服务
+#### 2.1.3 启动后端服务
+
+Windows：
+
+```powershell
+.venv\Scripts\python.exe backend\server.py
+```
+
+macOS / Linux：
 
 ```bash
-cd backend
-uv run python server.py
+.venv/bin/python backend/server.py
 ```
 
 后端默认运行在 `http://127.0.0.1:8000`。
 
 ---
 
-### 2. 前端环境配置
+### 2.2 前端环境配置
 
 前端基于 Vue3 + Vite + TailwindCSS 构建，位于 `frontend/` 目录。需要 Node.js 环境（推荐 v18+）。
 
-#### 2.1 安装前端依赖
+#### 2.2.1 安装前端依赖
 
 ```bash
 cd frontend
 npm install
 ```
 
-#### 2.2 配置前端环境变量
+#### 2.2.2 配置前端环境变量
 
-前端环境变量文件为 `frontend/.env.local`，需写入后端 API 地址：
+前端环境变量文件为 `frontend/.env.local`。该文件在缺失时会由 `run.py` 自动创建；如果你手动启动，可写入后端 API 地址：
 
 ```env
 VITE_API_BASE_URL=http://127.0.0.1:8000/api
@@ -83,7 +141,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8000/api
 
 > 💡 如后端运行在其他地址，请相应修改此配置。
 
-#### 2.3 启动前端开发服务器
+#### 2.2.3 启动前端开发服务器
 
 ```bash
 cd frontend
@@ -94,12 +152,11 @@ npm run dev
 
 ---
 
-### 3. 完整启动流程（推荐）
+### 3. 手动完整启动流程
 
 ```bash
 # 终端 1：启动后端
-cd backend
-uv run python server.py
+.venv\Scripts\python.exe backend\server.py
 
 # 终端 2：启动前端
 cd frontend
@@ -248,21 +305,16 @@ OpinionSystem
 # 克隆项目
 git clone <repository-url>
 cd OpinionSystem
-
-# 使用 uv 安装依赖 (Python 3.11)
-uv pip install -r requirements.txt
 ```
 
-### 2. 配置环境
+请先准备：
 
-创建 `.env` 文件并配置API密钥：
+- Python 3.11+
+- `uv`
+- Node.js 18+
+- 本地 PostgreSQL（推荐）
 
-```bash
-# .env
-DASHSCOPE_API_KEY=your_api_key_here
-```
-
-### 3. 配置数据库
+### 2. 配置数据库
 
 数据库需要**自行在本机安装和配置**，推荐使用 **PostgreSQL**。  
 项目不会自动创建数据库服务，只会读取你的本地配置并尝试连接。
@@ -280,7 +332,21 @@ connections:
 active: primary
 ```
 
-如使用根目录启动脚本：
+### 3. 推荐启动方式
+
+Windows：
+
+```bat
+start_win.bat
+```
+
+macOS / Linux：
+
+```bash
+./start_mac.sh
+```
+
+通用方式：
 
 ```bash
 python run.py
@@ -288,7 +354,20 @@ python run.py
 
 脚本会在启动前检查 `uv pip`、`npm` 和当前激活数据库连接是否可达；如果本地数据库未安装、未启动，或 `backend/configs/databases.yaml` 配置错误，会直接提示你先处理。
 
-### 4. 准备数据
+### 4. 手动方式（备选）
+
+```powershell
+uv pip install --python .venv\Scripts\python.exe -r backend\requirements.txt
+.venv\Scripts\python.exe backend\server.py
+```
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### 5. 准备数据
 
 将TRS导出的Excel文件放入：
 ```
@@ -899,48 +978,29 @@ python main.py RouterRetrieve \
 
 ```
 OpinionSystem/
-├── configs/                    # 配置文件
-│   ├── analysis.yaml          # 分析功能配置
-│   ├── channels.yaml          # 渠道映射配置
-│   ├── databases.yaml         # 数据库配置
-│   ├── explain.yaml           # 解读功能配置
-│   ├── llm.yaml              # LLM模型配置
-│   ├── stopwords.txt         # 停用词表
-│   └── prompt/               # 提示词模板
-│       ├── explain/           # 解读提示词
-│       ├── filter/           # 筛选提示词
-│       ├── router_vec/       # 向量化提示词
-│       └── router_retrieve/  # 检索提示词
-├── data/                      # 数据目录
-│   ├── raw/                  # 原始数据
-│   ├── merge/                # 合并数据
-│   ├── clean/                # 清洗数据
-│   ├── filter/               # 筛选数据
-│   ├── fetch/                # 提取数据
-│   ├── analyze/              # 分析结果
-│   └── explain/              # 解读结果
-├── logs/                      # 日志目录
-│   ├── RouterVectorize_{主题}/
-│   └── RagRouter_{主题}/
-├── src/                       # 源代码
-│   ├── merge/                # 合并模块
-│   ├── clean/                # 清洗模块
-│   ├── filter/               # 筛选模块
-│   ├── update/               # 上传模块
-│   ├── query/                # 查询模块
-│   ├── fetch/                # 提取模块
-│   ├── analyze/              # 分析模块
-│   ├── explain/              # 解读模块
-│   └── utils/                # 工具模块
-│       ├── ai/               # AI接口
-│       ├── io/               # 数据IO
-│       ├── logging/          # 日志系统
-│       ├── setting/          # 配置管理
-│       └── rag/              # RAG系统
-│           ├── tagrag/       # TagRAG
-│           └── ragrouter/    # RouterRAG
-├── main.py                    # 主程序入口
-├── requirements.txt           # 依赖列表
+├── run.py                      # 跨平台快速启动与环境检查
+├── start_win.bat              # Windows 快速启动入口
+├── start_mac.sh               # macOS / Linux 快速启动入口
+├── config.yaml                # 前后端基础运行地址配置
+├── backend/
+│   ├── server.py              # Web 服务入口
+│   ├── main.py                # CLI 流水线入口
+│   ├── requirements.txt       # 后端依赖列表
+│   ├── configs/               # 后端配置文件
+│   │   ├── analysis.yaml      # 分析功能配置
+│   │   ├── channels.yaml      # 渠道映射配置
+│   │   ├── databases.yaml     # 数据库配置
+│   │   ├── explain.yaml       # 解读功能配置
+│   │   ├── llm.yaml           # LLM模型配置
+│   │   └── prompt/            # 提示词模板
+│   ├── data/                  # 项目数据与运行产物
+│   ├── logs/                  # 日志目录
+│   ├── server_support/        # 服务辅助模块
+│   └── src/                   # 后端核心模块
+├── frontend/
+│   ├── package.json           # 前端依赖与脚本
+│   ├── vite.config.js         # Vite 配置
+│   └── src/                   # Vue 前端源码
 └── README.md                  # 项目文档
 ```
 
@@ -948,7 +1008,7 @@ OpinionSystem/
 
 ## 配置说明
 
-### 1. LLM配置 (`configs/llm.yaml`)
+### 1. LLM配置 (`backend/configs/llm.yaml`)
 
 ```yaml
 # 数据筛选使用的模型
@@ -984,7 +1044,7 @@ embedding_llm:
   model: text-embedding-v4
 ```
 
-### 2. 分析配置 (`configs/analysis.yaml`)
+### 2. 分析配置 (`backend/configs/analysis.yaml`)
 
 ```yaml
 # 可用的分析功能列表
@@ -1003,7 +1063,7 @@ keywords:
   min_freq: 2     # 最小词频
 ```
 
-### 3. 解读配置 (`configs/explain.yaml`)
+### 3. 解读配置 (`backend/configs/explain.yaml`)
 
 ```yaml
 # 解读函数配置
@@ -1041,7 +1101,7 @@ functions:
     target: 渠道
 ```
 
-### 4. 渠道配置 (`configs/channels.yaml`)
+### 4. 渠道配置 (`backend/configs/channels.yaml`)
 
 ```yaml
 channels:
