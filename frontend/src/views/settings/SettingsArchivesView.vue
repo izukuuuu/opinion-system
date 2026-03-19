@@ -13,10 +13,14 @@
               <h2 class="mt-1 text-2xl font-bold text-slate-900">配置存档导入 / 导出</h2>
             </div>
           </div>
-          <div class="ml-0 space-y-3 sm:ml-14 sm:pl-4">
-            <p class="text-sm leading-relaxed text-slate-600">
-              一键打包或恢复被 git 忽略的关键配置文件，便于在不同环境间快速迁移、备份恢复或项目初始化。
-              存档将包含所有必要的环境配置和本地数据文件，可用于新环境的初始化部署或还原。
+            <div class="ml-0 space-y-3 sm:ml-14 sm:pl-4">
+              <p class="text-sm leading-relaxed text-slate-600">
+              一键打包或恢复可迁移的关键配置文件，便于在不同环境间快速迁移、备份恢复或项目初始化。
+              存档聚焦配置，不包含 <code>backend/data</code> 这类项目数据目录。
+              </p>
+            <p class="text-sm leading-relaxed text-slate-500">
+              运行时占位文件如 <code>frontend/.env.local</code>、缺失目录和空白 <code>backend/.env</code> 会由根目录
+              <code>run.py</code> 自动补齐；存档主要用于迁移数据库、模型、RAG、Prompt 和热榜过滤等实际设置。
             </p>
             <div class="flex flex-wrap gap-3">
               <span class="inline-flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
@@ -64,6 +68,16 @@
                 </svg>
                 <span>{{ exportState.message }}</span>
               </p>
+            </div>
+
+            <div v-if="exportState.included.length > 0" class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 ring-1 ring-inset ring-sky-100">
+              <p class="mb-2 text-xs font-semibold text-sky-800">本次存档包含以下配置根路径：</p>
+              <ul class="space-y-1 text-xs text-sky-700">
+                <li v-for="item in exportState.included" :key="item" class="flex items-start gap-2">
+                  <span class="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400"></span>
+                  <span class="break-all">{{ item }}</span>
+                </li>
+              </ul>
             </div>
 
             <!-- 错误消息 -->
@@ -201,6 +215,7 @@ const exportState = reactive({
   loading: false,
   message: '',
   error: '',
+  included: [],
   missing: []
 })
 
@@ -245,6 +260,7 @@ const handleExport = async () => {
   exportState.loading = true
   exportState.error = ''
   exportState.message = ''
+  exportState.included = []
   exportState.missing = []
   try {
     const endpoint = await buildApiUrl('/settings/archives/export')
@@ -263,6 +279,7 @@ const handleExport = async () => {
     anchor.remove()
     window.URL.revokeObjectURL(downloadUrl)
 
+    exportState.included = parseHeaderList(response.headers.get('X-Backup-Roots'))
     exportState.missing = parseHeaderList(response.headers.get('X-Backup-Missing'))
     exportState.message = '存档已生成并开始下载'
   } catch (err) {

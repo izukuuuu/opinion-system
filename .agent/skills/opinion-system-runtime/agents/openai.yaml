@@ -1,0 +1,4 @@
+interface:
+  display_name: "Opinion Runtime"
+  short_description: "Run and troubleshoot local OpinionSystem services"
+  default_prompt: "Use $opinion-system-runtime to start or debug the local OpinionSystem frontend and backend."

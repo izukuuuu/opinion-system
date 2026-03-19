@@ -32,7 +32,16 @@ cd backend
 uv pip install -r requirements.txt
 ```
 
-#### 1.3 配置后端环境变量
+#### 1.3 准备本地数据库
+
+本项目**不会自动安装数据库服务**，请先自行在本机准备并启动关系型数据库。
+
+- 推荐使用 **PostgreSQL**
+- 默认本地开发建议使用 `localhost:5432`
+- 启动前请自行编辑 `backend/configs/databases.yaml`
+- 根目录 `run.py` 只会检查数据库配置和连通性，不会代替你安装数据库
+
+#### 1.4 配置后端环境变量
 
 创建 `backend/.env` 文件，写入 API 密钥：
 
@@ -42,7 +51,7 @@ DASHSCOPE_API_KEY=your_api_key_here
 
 > 💡 如需使用阿里云通义千问等大模型服务，请在此处填写对应的 API Key。
 
-#### 1.4 启动后端服务
+#### 1.5 启动后端服务
 
 ```bash
 cd backend
@@ -255,16 +264,29 @@ DASHSCOPE_API_KEY=your_api_key_here
 
 ### 3. 配置数据库
 
-编辑 `configs/databases.yaml`：
+数据库需要**自行在本机安装和配置**，推荐使用 **PostgreSQL**。  
+项目不会自动创建数据库服务，只会读取你的本地配置并尝试连接。
+
+编辑 `backend/configs/databases.yaml`：
 
 ```yaml
-postgresql:
-  host: localhost
-  port: 5432
-  database: opinion_db
-  user: your_username
-  password: your_password
+db_url: postgresql+psycopg2://postgres:your_password@localhost:5432/postgres
+connections:
+  - id: primary
+    name: 本地PostgreSQL
+    engine: postgresql
+    url: postgresql+psycopg2://postgres:your_password@localhost:5432/postgres
+    description: 本地开发数据库
+active: primary
 ```
+
+如使用根目录启动脚本：
+
+```bash
+python run.py
+```
+
+脚本会在启动前检查 `uv pip`、`npm` 和当前激活数据库连接是否可达；如果本地数据库未安装、未启动，或 `backend/configs/databases.yaml` 配置错误，会直接提示你先处理。
 
 ### 4. 准备数据
 

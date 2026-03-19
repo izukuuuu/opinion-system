@@ -1,10 +1,14 @@
-"""Utilities for exporting and importing runtime backups.
+"""Utilities for exporting and importing runtime configuration backups.
 
-The backup payload should include git-ignored runtime assets:
-- ``backend/.env``
+The backup payload intentionally focuses on migratable configuration assets:
+- ``config.yaml``
+- ``backend/.env`` (if present)
 - ``backend/configs/``
-- ``backend/data/``
-- ``frontend/.env.local``
+- ``backend/server_support/hot_overview_filters.yaml`` (if present)
+
+Files that can be regenerated locally, such as ``frontend/.env.local`` or empty
+runtime directories, are handled by ``run.py`` instead of the settings backup.
+Project data under ``backend/data`` is excluded on purpose.
 """
 
 from __future__ import annotations
@@ -25,11 +29,20 @@ __all__ = [
 ]
 
 _BACKUP_ITEMS = [
+    ("config.yaml", PROJECT_ROOT / "config.yaml", "file"),
     ("backend/.env", BACKEND_DIR / ".env", "file"),
     ("backend/configs", CONFIGS_DIR, "dir"),
-    ("backend/data", BACKEND_DIR / "data", "dir"),
-    ("frontend/.env.local", PROJECT_ROOT / "frontend" / ".env.local", "file"),
+    (
+        "backend/server_support/hot_overview_filters.yaml",
+        BACKEND_DIR / "server_support" / "hot_overview_filters.yaml",
+        "file",
+    ),
 ]
+
+_IGNORED_FILENAMES = {
+    ".DS_Store",
+    "Thumbs.db",
+}
 
 
 def _utc_timestamp() -> str:
@@ -38,6 +51,8 @@ def _utc_timestamp() -> str:
 
 def _iter_backup_files(label: str, path: Path) -> Iterable[Tuple[str, Path]]:
     if path.is_file():
+        if path.name in _IGNORED_FILENAMES:
+            return
         yield label, path
         return
 
@@ -45,7 +60,7 @@ def _iter_backup_files(label: str, path: Path) -> Iterable[Tuple[str, Path]]:
         return
 
     for child in path.rglob("*"):
-        if child.is_file():
+        if child.is_file() and child.name not in _IGNORED_FILENAMES:
             relative = child.relative_to(path)
             arcname = str(Path(label) / relative)
             yield arcname, child
@@ -55,7 +70,7 @@ def build_settings_backup() -> Tuple[io.BytesIO, str, Dict[str, object]]:
     """Bundle runtime assets into an in-memory zip archive."""
 
     manifest: Dict[str, object] = {
-        "version": 1,
+        "version": 2,
         "generated_at": _utc_timestamp(),
         "included_roots": [],
         "missing_roots": [],

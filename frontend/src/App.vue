@@ -304,12 +304,6 @@ const navigationGroups = [
         icon: PresentationChartLineIcon
       },
       {
-        label: '内容分析',
-        description: '舆情内容编码分析',
-        to: { name: 'content-analysis-prompt' },
-        icon: DocumentTextIcon
-      },
-      {
         label: '主题分析',
         description: '舆情主题分析',
         to: { name: 'topic-analysis-bertopic' },

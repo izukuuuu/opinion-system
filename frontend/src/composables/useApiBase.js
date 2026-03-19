@@ -47,7 +47,15 @@ export const useApiBase = () => {
     if (!(rest.body instanceof FormData) && !finalHeaders['Content-Type']) {
       finalHeaders['Content-Type'] = 'application/json'
     }
-    const response = await fetch(url, { ...rest, headers: finalHeaders })
+    let response
+    try {
+      response = await fetch(url, { ...rest, headers: finalHeaders })
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error || '')
+      throw new Error(
+        `无法连接后端：${url}。${detail || '网络请求失败'}。请在“设置 → 后端地址”确认地址可达。`
+      )
+    }
     if (!response.ok) {
       const message = await safeReadBody(response)
       throw new Error(message || `请求失败: ${response.status}`)

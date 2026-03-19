@@ -1,0 +1,92 @@
+block_page_patterns:
+  - 您需要允许该网站执行 javascript
+  - enable javascript
+  - please enable javascript
+  - access denied
+  - forbidden
+  - verify you are human
+  - 验证码
+  - 人机验证
+  - cloudflare
+  - unavailable for legal reasons
+
+generic_summary_patterns:
+  - 引发公众
+  - 引发关注
+  - 持续升温
+  - 值得关注
+  - 体现
+  - 释放信号
+  - 风险提示
+  - 保持审慎
+  - 未说明具体
+  - 相关讨论热度
+
+nav_menu_tokens:
+  - 关于我们
+  - 网站声明
+  - 联系方式
+  - 用户反馈
+  - 网站地图
+  - 帮助
+  - 注册
+  - 登录
+  - 首页
+  - 电报
+  - 话题
+  - 盯盘
+  - VIP
+  - 下载
+  - 头条
+  - A股
+  - 港股
+  - 基金
+  - 地产
+  - 金融
+  - 汽车
+  - 科创
+  - 品见
+
+nav_noise_markers:
+  - 关于我们
+  - 网站声明
+  - 联系方式
+  - 用户反馈
+  - 网站地图
+  - 注册|登录
+  - 节目官网
+  - 节目单
+  - 栏目片库
+  - 首页电报话题
+
+share_noise_markers:
+  - 微信扫描二维码
+  - 分享到好友和朋友圈
+  - 分享至好友和朋友圈
+  - 打开微信
+  - 微信扫一扫
+  - 复制链接
+
+fact_marker_pattern: "(来源：|记者|当地时间|发布|表示|指出|回应|通报|报告|称|宣布|20\\d{2}年\\d{1,2}月\\d{1,2}日|。|：)"
+
+official_domain_suffixes:
+  - .gov.cn
+  - .gov
+  - .edu.cn
+  - .edu
+
+low_trust_domain_tokens:
+  - weibo.com
+  - toutiao.com
+  - tieba.baidu.com
+  - zhihu.com
+  - search.bilibili.com
+  - m.bilibili.com
+
+authority_domain_scores: {}
+
+quality_gate:
+  min_chars: 220
+  min_sentences: 3
+  min_readerable_score: 0.48
+  max_nav_hits: 12

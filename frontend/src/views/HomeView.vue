@@ -1,16 +1,10 @@
 <template>
-  <div class="mx-auto flex max-w-6xl flex-col gap-10 px-6 pb-24 pt-16 sm:px-10 lg:px-12">
+  <div class="mx-auto flex w-full max-w-[1680px] flex-col gap-10 px-6 pb-24 pt-16 sm:px-10 xl:px-12 2xl:px-16">
     <section class="flex items-start justify-between gap-4">
       <div>
         <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">Today Hot Overview</p>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-primary sm:text-4xl">首页 · 今日热点</h1>
       </div>
-      <RouterLink
-        :to="{ name: 'system-intro' }"
-        class="inline-flex items-center justify-center rounded-full border border-soft px-5 py-2 text-sm font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-ring-accent"
-      >
-        查看系统介绍
-      </RouterLink>
     </section>
 
     <section class="rounded-[34px] border border-soft/80 bg-surface px-8 py-9 shadow-[0_20px_55px_rgba(15,23,42,0.08)]">
@@ -58,63 +52,120 @@
             {{ hotOverview.detailed_overview }}
           </p>
           <p class="mt-3 text-xs text-muted">
-            快照日期：{{ formatSnapshotDate(hotOverview.snapshot_date) }} · 生成时间：{{ formatLocalTime(hotOverview.generated_at) }} · 来源：{{ hotOverview.summary_source }}
+            快照日期：{{ formatSnapshotDate(hotOverview.snapshot_date) }} · 生成时间：{{ formatLocalTime(hotOverview.generated_at) }}
           </p>
         </div>
 
-        <div v-if="hotSections.length" class="space-y-10">
-          <section
-            v-for="section in hotSections"
-            :key="section.title"
-            class="space-y-4"
-          >
+        <div class="grid gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)] xl:items-start">
+          <div class="space-y-10">
             <div class="flex items-center gap-3">
-              <h3 class="text-2xl font-semibold tracking-tight text-primary">{{ section.title }}</h3>
-              <span class="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-surface">
-                {{ section.badge || '关注' }}
+              <h3 class="text-2xl font-semibold tracking-tight text-primary">AI内容精读</h3>
+            </div>
+            <section
+              v-for="section in hotInsightSections"
+              :key="section.title"
+              class="space-y-5 rounded-[26px] border border-soft/80 bg-base/45 p-5"
+            >
+              <div class="flex items-center gap-3">
+                <h4 class="text-2xl font-semibold tracking-tight text-primary">{{ section.title }}</h4>
+                <span class="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-surface">
+                  {{ section.badge || '关注' }}
+                </span>
+              </div>
+              <div class="grid gap-6">
+                <article
+                  v-for="(card, cardIndex) in section.cards || []"
+                  :key="`${section.title}-${card.headline}-${cardIndex}`"
+                  class="rounded-[24px] border border-soft/80 bg-surface px-6 py-6 shadow-[0_14px_32px_rgba(15,23,42,0.08)]"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <h5 class="text-2xl leading-8 font-semibold text-primary">{{ card.headline }}</h5>
+                    <span class="whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold" :class="stanceClass(card.stance)">
+                      {{ card.stance || '中性' }}
+                    </span>
+                  </div>
+                  <div class="mt-4 h-2 overflow-hidden rounded-full bg-base">
+                    <div
+                      class="h-full rounded-full bg-primary/80 transition-[width] duration-500 ease-out"
+                      :style="{ width: `${normalizeHeat(card.heat)}%` }"
+                    ></div>
+                  </div>
+                  <p class="mt-4 text-sm font-semibold text-primary">热度 {{ normalizeHeat(card.heat) }}</p>
+                  <p class="mt-3 text-sm leading-8 text-secondary">{{ card.summary }}</p>
+
+                  <div class="mt-5 flex flex-wrap gap-2 border-t border-soft/70 pt-4">
+                    <span
+                      v-for="(tag, tagIndex) in card.tags || []"
+                      :key="`${tagLabel(tag)}-${tagIndex}`"
+                      class="rounded-full border px-3 py-1 text-xs font-medium"
+                      :class="tagChipClass(tag)"
+                    >
+                      {{ tagLabel(tag) }}
+                    </span>
+                  </div>
+                </article>
+              </div>
+            </section>
+            <div
+              v-if="!hotInsightSections.length"
+              class="rounded-2xl border border-soft bg-base/60 px-5 py-4 text-sm text-secondary"
+            >
+              暂无可展示的精读内容。
+            </div>
+          </div>
+
+          <aside class="space-y-6">
+            <div class="flex items-center gap-3">
+              <h3 class="text-2xl font-semibold tracking-tight text-primary">热点速览（分类）</h3>
+              <span class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                聚类视图
               </span>
             </div>
-            <div class="grid gap-5 xl:grid-cols-3 lg:grid-cols-2">
-              <article
-                v-for="(card, cardIndex) in section.cards || []"
-                :key="`${section.title}-${card.headline}-${cardIndex}`"
-                class="rounded-[28px] border border-soft/70 bg-surface px-6 py-6 shadow-[0_12px_35px_rgba(15,23,42,0.06)]"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <h4 class="text-2xl leading-8 font-semibold text-primary">{{ card.headline }}</h4>
-                  <span class="whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold" :class="stanceClass(card.stance)">
-                    {{ card.stance || '中性' }}
-                  </span>
-                </div>
-                <div class="mt-4 h-2 overflow-hidden rounded-full bg-base">
-                  <div
-                    class="h-full rounded-full bg-primary/80 transition-[width] duration-500 ease-out"
-                    :style="{ width: `${normalizeHeat(card.heat)}%` }"
-                  ></div>
-                </div>
-                <p class="mt-4 text-sm font-semibold text-primary">热度 {{ normalizeHeat(card.heat) }}</p>
-                <p class="mt-3 text-sm leading-7 text-secondary">{{ card.summary }}</p>
-
-                <div v-if="getBackground(card.headline)" class="mt-4 rounded-xl bg-indigo-50/60 p-3.5 border border-indigo-100/60">
-                  <p class="text-[13px] text-indigo-800/80 leading-relaxed">
-                    <span class="font-semibold text-indigo-900/90 mr-1">AI 背景探测:</span>
-                    {{ getBackground(card.headline) }}
+            <section
+              v-for="cluster in hotReviewClusters"
+              :key="cluster.title"
+              class="space-y-4 rounded-2xl border border-soft/80 bg-surface px-4 py-4 shadow-[0_10px_22px_rgba(15,23,42,0.05)]"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <h4 class="text-lg font-semibold tracking-tight text-primary">{{ cluster.title }}</h4>
+                <span class="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                  {{ (cluster.items || []).length }} 条
+                </span>
+              </div>
+              <div class="space-y-3">
+                <article
+                  v-for="(item, itemIndex) in cluster.items || []"
+                  :key="`${cluster.title}-${item.title}-${itemIndex}`"
+                  class="rounded-xl border border-soft/80 bg-base/30 px-4 py-3 shadow-[0_8px_18px_rgba(15,23,42,0.04)]"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <h5 class="text-base font-semibold leading-6 text-primary">{{ item.title }}</h5>
+                  </div>
+                  <p class="mt-2 text-xs text-muted">
+                    {{ item.source || '未知来源' }} · 排名 #{{ item.rank || '--' }} · 热度 {{ normalizeHeat(item.heat) }}
                   </p>
-                </div>
-
-                <div class="mt-5 flex flex-wrap gap-2 border-t border-soft/70 pt-4">
-                  <span
-                    v-for="(tag, tagIndex) in card.tags || []"
-                    :key="`${tagLabel(tag)}-${tagIndex}`"
-                    class="rounded-full border px-3 py-1 text-xs font-medium"
-                    :class="tagChipClass(tag)"
-                  >
-                    {{ tagLabel(tag) }}
-                  </span>
-                </div>
-              </article>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <a
+                      v-for="(link, linkIndex) in item.urls || []"
+                      :key="`${item.title}-${link.url}-${linkIndex}`"
+                      :href="link.url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex items-center rounded-full border border-soft px-3 py-1 text-xs font-semibold text-brand-600 hover:border-brand-soft hover:text-brand-700"
+                    >
+                      {{ link.domain || '原始链接' }}
+                    </a>
+                  </div>
+                </article>
+              </div>
+            </section>
+            <div
+              v-if="!hotReviewClusters.length"
+              class="rounded-2xl border border-soft bg-base/60 px-5 py-4 text-sm text-secondary"
+            >
+              暂无热点速览数据。
             </div>
-          </section>
+          </aside>
         </div>
 
         <div class="rounded-[24px] border border-soft/70 bg-surface px-6 py-6">
@@ -157,7 +208,6 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
 import { useApiBase } from '@/composables/useApiBase'
 
 const { callApi } = useApiBase()
@@ -166,6 +216,12 @@ const hotLoading = ref(true)
 const hotError = ref('')
 const hotKeywords = computed(() => hotOverview.value?.keyword_pool || [])
 const hotSections = computed(() => hotOverview.value?.sections || [])
+const hotInsightSections = computed(() =>
+  (hotSections.value || [])
+    .map((section) => ({ ...section, cards: Array.isArray(section?.cards) ? section.cards : [] }))
+    .filter((section) => Array.isArray(section?.cards) && section.cards.length > 0)
+)
+const hotReviewClusters = computed(() => hotOverview.value?.other_hotspot_review?.clusters || [])
 
 const refreshHotOverview = async (forceRefresh = false) => {
   hotLoading.value = true
@@ -184,11 +240,6 @@ const refreshHotOverview = async (forceRefresh = false) => {
   } finally {
     hotLoading.value = false
   }
-}
-
-const getBackground = (headline) => {
-  if (!hotOverview.value || !hotOverview.value._backgrounds) return ''
-  return hotOverview.value._backgrounds[headline] || ''
 }
 
 const formatLocalTime = (value) => {
