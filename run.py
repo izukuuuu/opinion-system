@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import shutil
@@ -37,6 +38,14 @@ class Runtime:
     uv_executable: str
 
 
+@dataclass(frozen=True)
+class TorchInstallPlan:
+    profile: str
+    index_url: str | None
+    expect_cuda: bool
+    summary: str
+
+
 def log(message: str) -> None:
     print(f"[run.py] {message}", flush=True)
 
@@ -44,6 +53,15 @@ def log(message: str) -> None:
 def run_command(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
     log(f"Running: {' '.join(command)}")
     subprocess.run(command, cwd=str(cwd) if cwd else None, env=env, check=True)
+
+
+def probe_command(command: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+    )
 
 
 def find_command(*names: str) -> str | None:
@@ -148,6 +166,183 @@ def detect_runtime() -> Runtime:
         npm_executable=npm_executable,
         uv_executable=uv_executable,
     )
+
+
+def rerun_hint(runtime: Runtime) -> str:
+    if runtime.system == "windows":
+        return "start_win.bat or run.py"
+    return "./start_mac.sh or run.py"
+
+
+def detect_nvidia_gpu(runtime: Runtime) -> str | None:
+    smi_names = ("nvidia-smi.exe", "nvidia-smi") if runtime.system == "windows" else ("nvidia-smi",)
+    nvidia_smi = find_command(*smi_names)
+    if nvidia_smi:
+        result = probe_command(
+            [nvidia_smi, "--query-gpu=name", "--format=csv,noheader"],
+            cwd=ROOT,
+        )
+        names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if result.returncode == 0 and names:
+            return ", ".join(dict.fromkeys(names))
+
+    if runtime.system != "windows":
+        return None
+
+    powershell = find_command("powershell.exe", "powershell")
+    if not powershell:
+        return None
+
+    result = probe_command(
+        [
+            powershell,
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
+        ],
+        cwd=ROOT,
+    )
+    if result.returncode != 0:
+        return None
+
+    names = [
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip() and "nvidia" in line.lower()
+    ]
+    if names:
+        return ", ".join(dict.fromkeys(names))
+    return None
+
+
+def detect_cuda_toolkit(runtime: Runtime) -> str | None:
+    env_hits: list[str] = []
+    for env_name in ("CUDA_PATH", "CUDA_HOME"):
+        raw_value = os.environ.get(env_name)
+        if raw_value and Path(raw_value).exists():
+            env_hits.append(f"{env_name}={raw_value}")
+
+    nvcc = find_command("nvcc.exe", "nvcc") if runtime.system == "windows" else find_command("nvcc")
+    if nvcc:
+        result = probe_command([nvcc, "--version"], cwd=ROOT)
+        if result.returncode == 0:
+            lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            detail = lines[-1] if lines else nvcc
+            if env_hits:
+                return f"{detail}; {'; '.join(env_hits)}"
+            return detail
+
+    if env_hits:
+        return "; ".join(env_hits)
+
+    if runtime.system == "windows":
+        cuda_root = Path("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA")
+        if cuda_root.exists():
+            versions = sorted(path.name for path in cuda_root.iterdir() if path.is_dir())
+            if versions:
+                return f"CUDA toolkit directories detected: {', '.join(versions)}"
+
+    return None
+
+
+def select_torch_install_plan(runtime: Runtime) -> TorchInstallPlan:
+    machine = platform.machine().lower()
+
+    if runtime.system == "darwin":
+        summary = "macOS does not support CUDA. run.py will use the standard PyTorch build."
+        if machine == "arm64":
+            summary += " Apple Silicon hosts can use MPS when the feature supports it."
+        else:
+            summary += " Intel macOS hosts will run PyTorch on CPU."
+        return TorchInstallPlan(
+            profile="macos-default",
+            index_url=None,
+            expect_cuda=False,
+            summary=summary,
+        )
+
+    nvidia_gpu = detect_nvidia_gpu(runtime)
+    if nvidia_gpu:
+        cuda_toolkit = detect_cuda_toolkit(runtime)
+        if not cuda_toolkit:
+            raise SystemExit(
+                f"Detected an NVIDIA GPU on this {platform.system()} host, but no CUDA toolkit was found.\n"
+                f"GPU: {nvidia_gpu}\n"
+                f"Please install CUDA 11.8 or newer, then rerun {rerun_hint(runtime)}."
+            )
+
+        return TorchInstallPlan(
+            profile=f"{runtime.system}-cuda",
+            index_url="https://download.pytorch.org/whl/cu118",
+            expect_cuda=True,
+            summary=(
+                f"Detected NVIDIA GPU ({nvidia_gpu}) and CUDA ({cuda_toolkit}). "
+                "run.py will use the CUDA-enabled PyTorch build (cu118)."
+            ),
+        )
+
+    if runtime.system == "windows":
+        return TorchInstallPlan(
+            profile="windows-cpu",
+            index_url="https://download.pytorch.org/whl/cpu",
+            expect_cuda=False,
+            summary=(
+                "No NVIDIA GPU/CUDA toolkit was detected on Windows. "
+                "run.py will use the CPU-only PyTorch build."
+            ),
+        )
+
+    return TorchInstallPlan(
+        profile=f"{runtime.system}-default",
+        index_url=None,
+        expect_cuda=False,
+        summary=(
+            f"No NVIDIA GPU/CUDA toolkit was detected on {platform.system()}. "
+            "run.py will use the standard PyTorch build."
+        ),
+    )
+
+
+def read_torch_status(repo_python: Path) -> dict[str, object] | None:
+    script = (
+        "import json\n"
+        "try:\n"
+        "    import torch\n"
+        "except Exception:\n"
+        "    raise SystemExit(1)\n"
+        "payload = {\n"
+        "    'version': getattr(torch, '__version__', None),\n"
+        "    'cuda': getattr(getattr(torch, 'version', None), 'cuda', None),\n"
+        "    'cuda_available': bool(torch.cuda.is_available()) if hasattr(torch, 'cuda') else False,\n"
+        "}\n"
+        "print(json.dumps(payload))\n"
+    )
+    result = probe_command([str(repo_python), "-c", script], cwd=ROOT)
+    if result.returncode != 0:
+        return None
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    try:
+        return json.loads(lines[-1])
+    except json.JSONDecodeError:
+        return None
+
+
+def torch_dependencies_ready(runtime: Runtime, plan: TorchInstallPlan) -> bool:
+    status = read_torch_status(runtime.repo_python)
+    if not status:
+        return False
+
+    if plan.expect_cuda:
+        return bool(status.get("cuda")) and bool(status.get("cuda_available"))
+
+    if plan.profile == "windows-cpu":
+        return not bool(status.get("cuda"))
+
+    return True
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -295,7 +490,7 @@ def backend_dependencies_ready(repo_python: Path) -> bool:
     command = [
         str(repo_python),
         "-c",
-        "import flask, flask_cors, openai, pandas, yaml; import lancedb",
+        "import flask, flask_cors, openai, pandas, yaml, langgraph; import lancedb",
     ]
     result = subprocess.run(command, cwd=str(ROOT), capture_output=True, text=True)
     return result.returncode == 0
@@ -311,24 +506,57 @@ def frontend_dependencies_ready() -> bool:
     return True
 
 
-def install_backend_dependencies(runtime: Runtime, force: bool) -> None:
-    if not force and backend_dependencies_ready(runtime.repo_python):
-        log("Backend dependencies already look ready.")
+def install_torch_dependencies(runtime: Runtime, force: bool, plan: TorchInstallPlan) -> None:
+    if not force and torch_dependencies_ready(runtime, plan):
+        log(f"PyTorch already matches the current host profile: {plan.profile}")
         return
 
-    log("Installing backend dependencies with uv pip.")
-    run_command(
-        [
-            runtime.uv_executable,
-            "pip",
-            "install",
-            "--python",
-            str(runtime.repo_python),
-            "-r",
-            str(BACKEND_DIR / "requirements.txt"),
-        ],
-        cwd=ROOT,
-    )
+    log(plan.summary)
+    command = [
+        runtime.uv_executable,
+        "pip",
+        "install",
+        "--python",
+        str(runtime.repo_python),
+        "--force-reinstall",
+    ]
+    if plan.index_url:
+        command.extend(["--index-url", plan.index_url])
+    command.extend(["torch", "torchvision", "torchaudio"])
+    run_command(command, cwd=ROOT)
+
+    if not torch_dependencies_ready(runtime, plan):
+        if plan.expect_cuda:
+            raise SystemExit(
+                "CUDA-enabled PyTorch was installed, but `torch.cuda.is_available()` is still false.\n"
+                "Please verify the NVIDIA driver and CUDA installation, then rerun run.py."
+            )
+        raise SystemExit(
+            f"PyTorch installation did not match the expected host profile: {plan.profile}.\n"
+            "Please inspect the environment and rerun run.py."
+        )
+
+
+def install_backend_dependencies(runtime: Runtime, force: bool, torch_plan: TorchInstallPlan) -> None:
+    backend_ready = backend_dependencies_ready(runtime.repo_python)
+    if not force and backend_ready:
+        log("Backend Python dependencies already look ready.")
+    else:
+        log("Installing backend dependencies with uv pip.")
+        run_command(
+            [
+                runtime.uv_executable,
+                "pip",
+                "install",
+                "--python",
+                str(runtime.repo_python),
+                "-r",
+                str(BACKEND_DIR / "requirements.txt"),
+            ],
+            cwd=ROOT,
+        )
+
+    install_torch_dependencies(runtime, force, torch_plan)
 
 
 def install_frontend_dependencies(runtime: Runtime, force: bool) -> None:
@@ -459,13 +687,17 @@ def main() -> None:
 
     runtime = detect_runtime()
     ensure_runtime_placeholders(args.backend_port)
+    torch_plan: TorchInstallPlan | None = None
 
     if not args.frontend_only:
         require_database()
+        torch_plan = select_torch_install_plan(runtime)
+        log(torch_plan.summary)
 
     if not args.skip_install:
         if not args.frontend_only:
-            install_backend_dependencies(runtime, args.force_install)
+            assert torch_plan is not None
+            install_backend_dependencies(runtime, args.force_install, torch_plan)
         if not args.backend_only:
             install_frontend_dependencies(runtime, args.force_install)
 

@@ -61,7 +61,10 @@ python run.py
 
 - 检查 `uv pip`、`npm` 和 `backend/configs/databases.yaml` 当前激活数据库连接是否可达
 - 缺失时创建 `backend/.env`、`frontend/.env.local`、`backend/configs/databases.yaml` 等本地占位文件
-- 安装前后端依赖
+- 安装前后端依赖，并按主机环境自动选择 PyTorch 方案
+- macOS 自动使用标准 PyTorch；Apple Silicon 可走 MPS，Intel Mac 走 CPU
+- Windows 没有 NVIDIA / CUDA 时自动切到 CPU 版 PyTorch
+- Windows 检测到 NVIDIA GPU 但系统没有 CUDA 时会直接退出，并提示先安装 CUDA 11.8+
 - 启动 `backend/server.py` 与前端 Vite 开发服务
 - 服务就绪后自动打开浏览器
 
@@ -92,7 +95,29 @@ macOS / Linux：
 uv pip install --python .venv/bin/python -r backend/requirements.txt
 ```
 
-#### 2.1.2 配置后端环境变量
+#### 2.1.2 安装 PyTorch（按主机环境选择）
+
+macOS：
+
+```bash
+uv pip install --python .venv/bin/python torch torchvision torchaudio
+```
+
+Windows，无 NVIDIA GPU / 不准备使用 CUDA：
+
+```powershell
+uv pip install --python .venv\Scripts\python.exe --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio
+```
+
+Windows，已安装 NVIDIA GPU 且系统已装 CUDA 11.8+：
+
+```powershell
+uv pip install --python .venv\Scripts\python.exe --index-url https://download.pytorch.org/whl/cu118 torch torchvision torchaudio
+```
+
+如果是 Windows 且检测到 NVIDIA GPU，但系统还没有 CUDA，请先安装 CUDA，再继续后端环境安装。
+
+#### 2.1.3 配置后端环境变量
 
 `backend/.env` 在缺失时会由 `run.py` 自动创建；如果你手动启动，也可以自己补充 API 密钥：
 
@@ -102,7 +127,7 @@ DASHSCOPE_API_KEY=your_api_key_here
 
 > 💡 如需使用阿里云通义千问等大模型服务，请在此处填写对应的 API Key。
 
-#### 2.1.3 启动后端服务
+#### 2.1.4 启动后端服务
 
 Windows：
 
@@ -352,13 +377,33 @@ macOS / Linux：
 python run.py
 ```
 
-脚本会在启动前检查 `uv pip`、`npm` 和当前激活数据库连接是否可达；如果本地数据库未安装、未启动，或 `backend/configs/databases.yaml` 配置错误，会直接提示你先处理。
+脚本会在启动前检查 `uv pip`、`npm`、当前激活数据库连接以及当前主机对应的 PyTorch/CUDA 方案；如果本地数据库未安装、未启动，或 `backend/configs/databases.yaml` 配置错误，会直接提示你先处理。
+如果是 Windows 且检测到 NVIDIA GPU，但系统没有 CUDA，脚本会直接退出并提示先安装 CUDA 11.8+。
 
 ### 4. 手动方式（备选）
 
+Windows，无 NVIDIA GPU / 不准备使用 CUDA：
+
 ```powershell
 uv pip install --python .venv\Scripts\python.exe -r backend\requirements.txt
+uv pip install --python .venv\Scripts\python.exe --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio
 .venv\Scripts\python.exe backend\server.py
+```
+
+Windows，已安装 NVIDIA GPU 且系统已装 CUDA 11.8+：
+
+```powershell
+uv pip install --python .venv\Scripts\python.exe -r backend\requirements.txt
+uv pip install --python .venv\Scripts\python.exe --index-url https://download.pytorch.org/whl/cu118 torch torchvision torchaudio
+.venv\Scripts\python.exe backend\server.py
+```
+
+macOS：
+
+```bash
+uv pip install --python .venv/bin/python -r backend/requirements.txt
+uv pip install --python .venv/bin/python torch torchvision torchaudio
+.venv/bin/python backend/server.py
 ```
 
 ```bash
