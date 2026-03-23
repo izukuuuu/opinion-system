@@ -18,12 +18,20 @@ PROMPT_RECLUSTER_KEY = "topic_bertopic_recluster"
 PROMPT_KEYWORDS_KEY = "topic_bertopic_keywords"
 DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS = 8
 DEFAULT_TOPIC_BERTOPIC_MIN_TOPICS = 3
-DEFAULT_RECLUSTER_TOPIC_LIMIT = 80
+LEGACY_DEFAULT_RECLUSTER_TOPIC_LIMIT = 80
+DEFAULT_RECLUSTER_TOPIC_LIMIT = 140
+DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO = 0.55
 DEFAULT_TOPIC_SAMPLE_SIZE = 4
 DEFAULT_JUDGE_SAMPLE_PER_TOPIC = 3
 DEFAULT_LARGE_CLUSTER_DOC_SHARE = 0.08
 DEFAULT_LARGE_CLUSTER_DOC_COUNT = 0
 DEFAULT_MAX_DROP_RATIO = 0.45
+DEFAULT_PREFILTER_ENABLED = True
+DEFAULT_PREFILTER_SIMILARITY_FLOOR = 0.24
+DEFAULT_PREFILTER_MAX_DROP_RATIO = 0.35
+DEFAULT_PREFILTER_QUERY_HINT = ""
+DEFAULT_PREFILTER_NEGATIVE_HINT = ""
+DEFAULT_PROJECT_STOPWORDS: list[str] = []
 DEFAULT_GLOBAL_FILTERS = ["明星八卦", "广告推广", "抽奖转发", "求职招聘"]
 
 DEFAULT_RECLUSTER_SYSTEM_PROMPT = (
@@ -155,6 +163,30 @@ def _normalise_custom_filters(raw: Any) -> list:
     return result
 
 
+def _normalise_text_lines(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        source = "\n".join(str(item or "") for item in raw)
+    else:
+        source = str(raw or "")
+
+    lines: list[str] = []
+    seen: set[str] = set()
+    for item in source.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        value = str(item or "").strip().lstrip("\ufeff")
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        lines.append(value)
+    return lines
+
+
+def _join_text_lines(lines: Any) -> str:
+    values = _normalise_text_lines(lines)
+    if not values:
+        return ""
+    return "\n".join(values) + "\n"
+
+
 def _default_payload(topic: str, path: Path, exists: bool = False) -> Dict[str, Any]:
     return {
         "topic": topic,
@@ -164,11 +196,20 @@ def _default_payload(topic: str, path: Path, exists: bool = False) -> Dict[str, 
         "max_topics": DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS,
         "min_topics": DEFAULT_TOPIC_BERTOPIC_MIN_TOPICS,
         "recluster_topic_limit": DEFAULT_RECLUSTER_TOPIC_LIMIT,
+        "recluster_target_coverage_ratio": DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO,
         "topic_sample_size": DEFAULT_TOPIC_SAMPLE_SIZE,
         "judge_sample_per_topic": DEFAULT_JUDGE_SAMPLE_PER_TOPIC,
         "large_cluster_doc_share": DEFAULT_LARGE_CLUSTER_DOC_SHARE,
         "large_cluster_doc_count": DEFAULT_LARGE_CLUSTER_DOC_COUNT,
         "max_drop_ratio": DEFAULT_MAX_DROP_RATIO,
+        "pre_filter_enabled": DEFAULT_PREFILTER_ENABLED,
+        "pre_filter_similarity_floor": DEFAULT_PREFILTER_SIMILARITY_FLOOR,
+        "pre_filter_max_drop_ratio": DEFAULT_PREFILTER_MAX_DROP_RATIO,
+        "pre_filter_query_hint": DEFAULT_PREFILTER_QUERY_HINT,
+        "pre_filter_negative_hint": DEFAULT_PREFILTER_NEGATIVE_HINT,
+        "project_stopwords": list(DEFAULT_PROJECT_STOPWORDS),
+        "project_stopwords_text": "",
+        "project_stopwords_line_count": 0,
         "use_multi_agent": True,
         "default_drop_rule_prompt": DEFAULT_DROP_RULE_PROMPT,
         "recluster_system_prompt": DEFAULT_RECLUSTER_SYSTEM_PROMPT,
@@ -210,6 +251,11 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
     metadata = yaml_payload.get("metadata")
     if not isinstance(metadata, dict):
         metadata = {}
+    metadata_version_raw = metadata.get("version", 0)
+    try:
+        metadata_version = int(metadata_version_raw)
+    except (TypeError, ValueError):
+        metadata_version = 0
 
     recluster_prompt = prompts.get(PROMPT_RECLUSTER_KEY)
     if not isinstance(recluster_prompt, dict):
@@ -229,6 +275,24 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
     else:
         use_multi_agent = str(use_multi_agent_val).lower().strip() not in ("false", "0", "no")
 
+    pre_filter_enabled_val = settings.get("pre_filter_enabled", DEFAULT_PREFILTER_ENABLED)
+    if isinstance(pre_filter_enabled_val, bool):
+        pre_filter_enabled = pre_filter_enabled_val
+    else:
+        pre_filter_enabled = str(pre_filter_enabled_val).lower().strip() not in ("false", "0", "no")
+
+    resolved_recluster_limit = _coerce_positive_int(
+        settings.get("recluster_topic_limit", DEFAULT_RECLUSTER_TOPIC_LIMIT),
+        DEFAULT_RECLUSTER_TOPIC_LIMIT,
+        20,
+        200,
+    )
+    if (
+        metadata_version < 5
+        and resolved_recluster_limit == LEGACY_DEFAULT_RECLUSTER_TOPIC_LIMIT
+    ):
+        resolved_recluster_limit = DEFAULT_RECLUSTER_TOPIC_LIMIT
+
     payload.update(
         {
             "exists": True,
@@ -240,11 +304,15 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
                 3,
                 50,
             ),
-            "recluster_topic_limit": _coerce_positive_int(
-                settings.get("recluster_topic_limit", DEFAULT_RECLUSTER_TOPIC_LIMIT),
-                DEFAULT_RECLUSTER_TOPIC_LIMIT,
-                20,
-                200,
+            "recluster_topic_limit": resolved_recluster_limit,
+            "recluster_target_coverage_ratio": _coerce_ratio(
+                settings.get(
+                    "recluster_target_coverage_ratio",
+                    DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO,
+                ),
+                DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO,
+                0.2,
+                0.95,
             ),
             "topic_sample_size": _coerce_positive_int(
                 settings.get("topic_sample_size", DEFAULT_TOPIC_SAMPLE_SIZE),
@@ -275,6 +343,28 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
                 DEFAULT_MAX_DROP_RATIO,
                 0.0,
                 0.9,
+            ),
+            "pre_filter_enabled": pre_filter_enabled,
+            "pre_filter_similarity_floor": _coerce_ratio(
+                settings.get("pre_filter_similarity_floor", DEFAULT_PREFILTER_SIMILARITY_FLOOR),
+                DEFAULT_PREFILTER_SIMILARITY_FLOOR,
+                0.0,
+                0.95,
+            ),
+            "pre_filter_max_drop_ratio": _coerce_ratio(
+                settings.get("pre_filter_max_drop_ratio", DEFAULT_PREFILTER_MAX_DROP_RATIO),
+                DEFAULT_PREFILTER_MAX_DROP_RATIO,
+                0.0,
+                0.9,
+            ),
+            "pre_filter_query_hint": str(
+                settings.get("pre_filter_query_hint", DEFAULT_PREFILTER_QUERY_HINT) or ""
+            ).strip(),
+            "pre_filter_negative_hint": str(
+                settings.get("pre_filter_negative_hint", DEFAULT_PREFILTER_NEGATIVE_HINT) or ""
+            ).strip(),
+            "project_stopwords": _normalise_text_lines(
+                settings.get("project_stopwords", DEFAULT_PROJECT_STOPWORDS)
             ),
             "use_multi_agent": use_multi_agent,
             "drop_rule_prompt": str(
@@ -316,6 +406,8 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
             "metadata": metadata,
         }
     )
+    payload["project_stopwords_text"] = _join_text_lines(payload.get("project_stopwords", []))
+    payload["project_stopwords_line_count"] = len(payload.get("project_stopwords", []))
     return payload
 
 
@@ -334,6 +426,14 @@ def persist_topic_bertopic_prompt_config(
     must_merge_rules: Any = None,
     core_drop_rules: Any = None,
     custom_topic_seed_rules: Any = None,
+    pre_filter_enabled: Any = None,
+    pre_filter_similarity_floor: Any = None,
+    pre_filter_max_drop_ratio: Any = None,
+    pre_filter_query_hint: str = "",
+    pre_filter_negative_hint: str = "",
+    project_stopwords: Any = None,
+    recluster_topic_limit: Any = None,
+    recluster_target_coverage_ratio: Any = None,
 ) -> Dict[str, Any]:
     """Persist BERTopic prompt config and return refreshed payload."""
 
@@ -362,6 +462,39 @@ def persist_topic_bertopic_prompt_config(
     final_must_separate = list(final_custom_topic_seeds)  # legacy compatibility
     final_must_merge = [str(x).strip() for x in (must_merge_rules or []) if str(x).strip()]
     final_core_drop = [str(x).strip() for x in (core_drop_rules or []) if str(x).strip()]
+    if pre_filter_enabled is None:
+        final_pre_filter_enabled = DEFAULT_PREFILTER_ENABLED
+    elif isinstance(pre_filter_enabled, bool):
+        final_pre_filter_enabled = pre_filter_enabled
+    else:
+        final_pre_filter_enabled = str(pre_filter_enabled).lower().strip() not in ("false", "0", "no")
+    final_pre_filter_similarity_floor = _coerce_ratio(
+        pre_filter_similarity_floor,
+        DEFAULT_PREFILTER_SIMILARITY_FLOOR,
+        0.0,
+        0.95,
+    )
+    final_pre_filter_max_drop_ratio = _coerce_ratio(
+        pre_filter_max_drop_ratio,
+        DEFAULT_PREFILTER_MAX_DROP_RATIO,
+        0.0,
+        0.9,
+    )
+    final_pre_filter_query_hint = str(pre_filter_query_hint or "").strip()
+    final_pre_filter_negative_hint = str(pre_filter_negative_hint or "").strip()
+    final_project_stopwords = _normalise_text_lines(project_stopwords)
+    final_recluster_topic_limit = _coerce_positive_int(
+        recluster_topic_limit,
+        DEFAULT_RECLUSTER_TOPIC_LIMIT,
+        20,
+        200,
+    )
+    final_recluster_target_coverage_ratio = _coerce_ratio(
+        recluster_target_coverage_ratio,
+        DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO,
+        0.2,
+        0.95,
+    )
 
     if global_filters is None:
         final_global_filters = list(DEFAULT_GLOBAL_FILTERS)
@@ -374,12 +507,19 @@ def persist_topic_bertopic_prompt_config(
             "target_topics": final_target_topics,
             "max_topics": final_target_topics,
             "min_topics": DEFAULT_TOPIC_BERTOPIC_MIN_TOPICS,
-            "recluster_topic_limit": DEFAULT_RECLUSTER_TOPIC_LIMIT,
+            "recluster_topic_limit": final_recluster_topic_limit,
+            "recluster_target_coverage_ratio": final_recluster_target_coverage_ratio,
             "topic_sample_size": DEFAULT_TOPIC_SAMPLE_SIZE,
             "judge_sample_per_topic": DEFAULT_JUDGE_SAMPLE_PER_TOPIC,
             "large_cluster_doc_share": DEFAULT_LARGE_CLUSTER_DOC_SHARE,
             "large_cluster_doc_count": DEFAULT_LARGE_CLUSTER_DOC_COUNT,
             "max_drop_ratio": DEFAULT_MAX_DROP_RATIO,
+            "pre_filter_enabled": final_pre_filter_enabled,
+            "pre_filter_similarity_floor": final_pre_filter_similarity_floor,
+            "pre_filter_max_drop_ratio": final_pre_filter_max_drop_ratio,
+            "pre_filter_query_hint": final_pre_filter_query_hint,
+            "pre_filter_negative_hint": final_pre_filter_negative_hint,
+            "project_stopwords": final_project_stopwords,
             "use_multi_agent": True,
             "drop_rule_prompt": final_drop_rule_prompt,
             "global_filters": final_global_filters,
@@ -403,7 +543,7 @@ def persist_topic_bertopic_prompt_config(
         },
         "metadata": {
             "updated_at": _utc_now(),
-            "version": 3,
+            "version": 6,
         },
     }
 
@@ -417,6 +557,12 @@ __all__ = [
     "DEFAULT_DROP_RULE_PROMPT",
     "DEFAULT_KEYWORDS_SYSTEM_PROMPT",
     "DEFAULT_KEYWORDS_USER_PROMPT",
+    "DEFAULT_PREFILTER_ENABLED",
+    "DEFAULT_PREFILTER_MAX_DROP_RATIO",
+    "DEFAULT_PREFILTER_NEGATIVE_HINT",
+    "DEFAULT_PREFILTER_QUERY_HINT",
+    "DEFAULT_PREFILTER_SIMILARITY_FLOOR",
+    "DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO",
     "DEFAULT_RECLUSTER_SYSTEM_PROMPT",
     "DEFAULT_RECLUSTER_USER_PROMPT",
     "DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS",

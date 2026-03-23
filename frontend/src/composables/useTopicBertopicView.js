@@ -67,7 +67,8 @@ const FILE_MAP = {
   keywords: "2主题关键词",
   coords: "3文档2D坐标",
   llm_clusters: "4大模型再聚类结果",
-  llm_keywords: "5大模型主题关键词"
+  llm_keywords: "5大模型主题关键词",
+  temporal: "6主题时间趋势"
 }
 
 const normalizeHistoryRecords = (records, fallbackTopic = '') => {

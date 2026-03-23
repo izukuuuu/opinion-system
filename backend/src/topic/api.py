@@ -11,7 +11,9 @@ from src.topic.prompt_config import (
 )
 from src.topic.config import (
     load_bertopic_config,
+    load_bertopic_stopwords,
     save_bertopic_config,
+    save_bertopic_stopwords,
 )
 
 PROJECT_MANAGER = get_project_manager()
@@ -31,6 +33,7 @@ BERTOPIC_FILE_MAP = {
     "coords": "3文档2D坐标.json",
     "llm_clusters": "4大模型再聚类结果.json",
     "llm_keywords": "5大模型主题关键词.json",
+    "temporal": "6主题时间趋势.json",
 }
 
 def _load_json_file(path: Path) -> Any:
@@ -399,6 +402,42 @@ def save_topic_bertopic_prompt():
         if core_drop_rules is None:
             core_drop_rules = payload.get("relevanceRules")
 
+        pre_filter_enabled = payload.get("pre_filter_enabled")
+        if pre_filter_enabled is None:
+            pre_filter_enabled = payload.get("preFilterEnabled")
+
+        pre_filter_similarity_floor = payload.get("pre_filter_similarity_floor")
+        if pre_filter_similarity_floor is None:
+            pre_filter_similarity_floor = payload.get("preFilterSimilarityFloor")
+
+        pre_filter_max_drop_ratio = payload.get("pre_filter_max_drop_ratio")
+        if pre_filter_max_drop_ratio is None:
+            pre_filter_max_drop_ratio = payload.get("preFilterMaxDropRatio")
+
+        pre_filter_query_hint = payload.get("pre_filter_query_hint")
+        if pre_filter_query_hint is None:
+            pre_filter_query_hint = payload.get("preFilterQueryHint")
+
+        pre_filter_negative_hint = payload.get("pre_filter_negative_hint")
+        if pre_filter_negative_hint is None:
+            pre_filter_negative_hint = payload.get("preFilterNegativeHint")
+
+        project_stopwords = payload.get("project_stopwords")
+        if project_stopwords is None:
+            project_stopwords = payload.get("projectStopwords")
+        if project_stopwords is None:
+            project_stopwords = payload.get("project_stopwords_text")
+        if project_stopwords is None:
+            project_stopwords = payload.get("projectStopwordsText")
+
+        recluster_topic_limit = payload.get("recluster_topic_limit")
+        if recluster_topic_limit is None:
+            recluster_topic_limit = payload.get("reclusterTopicLimit")
+
+        recluster_target_coverage_ratio = payload.get("recluster_target_coverage_ratio")
+        if recluster_target_coverage_ratio is None:
+            recluster_target_coverage_ratio = payload.get("reclusterTargetCoverageRatio")
+
         data = persist_topic_bertopic_prompt_config(
             topic_identifier,
             payload.get("target_topics", payload.get("targetTopics")),
@@ -414,6 +453,14 @@ def save_topic_bertopic_prompt():
             must_merge_rules=must_merge_rules,
             core_drop_rules=core_drop_rules,
             custom_topic_seed_rules=custom_topic_seed_rules,
+            pre_filter_enabled=pre_filter_enabled,
+            pre_filter_similarity_floor=pre_filter_similarity_floor,
+            pre_filter_max_drop_ratio=pre_filter_max_drop_ratio,
+            pre_filter_query_hint=str(pre_filter_query_hint or ""),
+            pre_filter_negative_hint=str(pre_filter_negative_hint or ""),
+            project_stopwords=project_stopwords,
+            recluster_topic_limit=recluster_topic_limit,
+            recluster_target_coverage_ratio=recluster_target_coverage_ratio,
         )
     except Exception as exc:
         LOGGER.exception("Failed to save BERTopic prompt config")
@@ -679,3 +726,25 @@ def update_bertopic_config():
         return success({"data": config})
     except Exception as exc:
         return error(f"保存配置失败: {str(exc)}")
+
+
+@topic_bp.route('/config/stopwords', methods=['GET'])
+def get_bertopic_stopwords():
+    """获取 BERTopic 停用词配置文件内容"""
+    try:
+        data = load_bertopic_stopwords()
+        return success({"data": data})
+    except Exception as exc:
+        return error(f"加载停用词失败: {str(exc)}")
+
+
+@topic_bp.route('/config/stopwords', methods=['POST'])
+def update_bertopic_stopwords():
+    """更新 BERTopic 停用词配置文件内容"""
+    try:
+        payload = request.get_json(silent=True) or {}
+        content = payload.get("content", payload.get("text", ""))
+        data = save_bertopic_stopwords(content)
+        return success({"data": data})
+    except Exception as exc:
+        return error(f"保存停用词失败: {str(exc)}")

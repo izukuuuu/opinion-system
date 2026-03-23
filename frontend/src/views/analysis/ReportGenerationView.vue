@@ -447,17 +447,20 @@ const bertopicCoverageRange = computed(() => {
   }
 })
 const bertopicOverviewText = computed(() => {
-  const days = Number(bertopicOverview.value?.days || bertopicTimelineNodes.value.length || 0)
+  const bucketCount = Number(
+    bertopicOverview.value?.bucketCount || bertopicOverview.value?.days || bertopicTimelineNodes.value.length || 0
+  )
   const mappedDocs = Number(bertopicOverview.value?.totalMappedDocs || 0)
+  const aggregationLabel = String(bertopicOverview.value?.aggregationLabel || '日').trim() || '日'
   const coverageStart = String(bertopicCoverageRange.value.start || '').trim()
   const coverageEnd = String(bertopicCoverageRange.value.end || '').trim()
   const reportStart = String(reportForm.start || '').trim()
   const reportEnd = String(reportForm.end || reportStart || '').trim()
-  if (!days && !mappedDocs) return '我们对这期间的讨论进行了分析，整理出了核心话题在每日的变化走势。'
+  if (!bucketCount && !mappedDocs) return '我们对这期间的讨论进行了分析，整理出了核心话题在时序上的变化走势。'
 
   const baseText = coverageStart && coverageEnd
-    ? `BERTopic 结果当前覆盖 ${coverageStart} 至 ${coverageEnd} 共 ${formatNumber(days)} 个日期，映射到 ${formatNumber(mappedDocs)} 条讨论。`
-    : `BERTopic 结果共覆盖 ${formatNumber(days)} 个日期，映射到 ${formatNumber(mappedDocs)} 条讨论。`
+    ? `BERTopic 结果当前覆盖 ${coverageStart} 至 ${coverageEnd} 共 ${formatNumber(bucketCount)} 个${aggregationLabel}级时间桶，映射到 ${formatNumber(mappedDocs)} 条讨论。`
+    : `BERTopic 结果共覆盖 ${formatNumber(bucketCount)} 个${aggregationLabel}级时间桶，映射到 ${formatNumber(mappedDocs)} 条讨论。`
 
   if (coverageStart && coverageEnd && reportStart && reportEnd && (coverageStart > reportStart || coverageEnd < reportEnd)) {
     return `${baseText} 与报告区间（${reportStart} 至 ${reportEnd}）不一致，请重新运行 BERTopic 后再生成报告。`

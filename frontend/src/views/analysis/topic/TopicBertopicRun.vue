@@ -113,12 +113,26 @@
             </div>
           </div>
 
-          <label class="block">
-            <span class="text-xs font-bold text-muted uppercase tracking-wider">最大主题数 Max Topics</span>
-            <input v-model.number="bertopicPromptState.maxTopics" type="number" min="3" max="50"
-              class="input w-full mt-1.5" />
-            <span class="text-[11px] text-muted mt-1 block">AI 会自动推断合理的主题数量（最少 3 个），此值为上限约束</span>
-          </label>
+          <div class="grid gap-4 md:grid-cols-3">
+            <label class="block">
+              <span class="text-xs font-bold text-muted uppercase tracking-wider">最大主题数 Max Topics</span>
+              <input v-model.number="bertopicPromptState.maxTopics" type="number" min="3" max="50"
+                class="input w-full mt-1.5" />
+              <span class="text-[11px] text-muted mt-1 block">AI 会自动推断合理的主题数量，此值为一级主题上限。</span>
+            </label>
+            <label class="block">
+              <span class="text-xs font-bold text-muted uppercase tracking-wider">重分类输入上限</span>
+              <input v-model.number="bertopicPromptState.reclusterTopicLimit" type="number" min="20" max="200"
+                class="input w-full mt-1.5" />
+              <span class="text-[11px] text-muted mt-1 block">送入 LLM 的 raw topics 上限，过低会导致覆盖不足。</span>
+            </label>
+            <label class="block">
+              <span class="text-xs font-bold text-muted uppercase tracking-wider">目标覆盖率</span>
+              <input v-model.number="bertopicPromptState.reclusterTargetCoverageRatio" type="number" min="0.2"
+                max="0.95" step="0.01" class="input w-full mt-1.5" />
+              <span class="text-[11px] text-muted mt-1 block">优先纳入高频主题，尽量覆盖更多文档再做汇总。</span>
+            </label>
+          </div>
 
           <!-- Dual-Mode Prompt Configuration -->
           <div class="mt-8 space-y-4 pt-2 animate-in slide-in-from-top-2 duration-200">
@@ -135,8 +149,7 @@
                   @click="promptMode = 'analyst'">
                   业务调整模式
                 </button>
-                <button type="button"
-                  class="mode-switch__btn mode-switch__btn--with-icon"
+                <button type="button" class="mode-switch__btn mode-switch__btn--with-icon"
                   :class="promptMode === 'expert' ? 'mode-switch__btn--active' : 'mode-switch__btn--idle'"
                   @click="promptMode = 'expert'">
                   <CommandLineIcon class="h-3 w-3" />
@@ -170,16 +183,16 @@
                 </div>
                 <p class="text-[11px] text-secondary">让 AI 根据哪种维度对文档进行最底层的划分。</p>
                 <div class="flex flex-wrap items-center gap-2 mt-2">
-                  <button type="button" v-for="dim in reclusterDimensionOptions" :key="dim.label"
-                    class="pill-btn" :class="bertopicPromptState.reclusterDimension === dim.value
+                  <button type="button" v-for="dim in reclusterDimensionOptions" :key="dim.label" class="pill-btn"
+                    :class="bertopicPromptState.reclusterDimension === dim.value
                       ? 'pill-btn--active'
-                      : 'pill-btn--idle'"
-                    @click="bertopicPromptState.reclusterDimension = dim.value">
+                      : 'pill-btn--idle'" @click="bertopicPromptState.reclusterDimension = dim.value">
                     {{ dim.label }}
                   </button>
                 </div>
                 <div class="dimension-explain-grid">
-                  <div v-for="dim in reclusterDimensionOptions" :key="`explain-${dim.label}`" class="dimension-explain-item"
+                  <div v-for="dim in reclusterDimensionOptions" :key="`explain-${dim.label}`"
+                    class="dimension-explain-item"
                     :class="bertopicPromptState.reclusterDimension === dim.value ? 'dimension-explain-item--active' : ''">
                     <p class="dimension-explain-title">{{ dim.label }}</p>
                     <p class="dimension-explain-text">{{ dim.description }}</p>
@@ -254,16 +267,13 @@
                     <p class="text-[11px] text-secondary leading-relaxed">系统内置的常态化噪声，适用于绝大多数分析场景。</p>
 
                     <div class="noise-card">
-                      <div v-for="gf in ['明星八卦', '广告推广', '抽奖转发', '求职招聘']" :key="gf"
-                        class="global-filter-row">
+                      <div v-for="gf in ['明星八卦', '广告推广', '抽奖转发', '求职招聘']" :key="gf" class="global-filter-row">
                         <span class="text-xs font-semibold text-primary">{{ gf }}</span>
-                        <button type="button"
-                          class="switch-track"
+                        <button type="button" class="switch-track"
                           :class="bertopicPromptState.globalFilters.includes(gf) ? 'switch-track--on' : 'switch-track--off'"
                           @click="toggleGlobalFilter(gf)">
                           <span class="sr-only">Toggle Global Filter</span>
-                          <span aria-hidden="true"
-                            class="switch-thumb"
+                          <span aria-hidden="true" class="switch-thumb"
                             :class="bertopicPromptState.globalFilters.includes(gf) ? 'switch-thumb--on' : 'switch-thumb--off'" />
                         </button>
                       </div>
@@ -280,8 +290,7 @@
 
                     <div class="rule-input-shell project-filter-shell">
                       <div class="flex flex-col gap-1.5 mb-2" v-if="bertopicPromptState.projectFilters.length > 0">
-                        <span v-for="(pf, idx) in bertopicPromptState.projectFilters" :key="idx"
-                          class="chip-row">
+                        <span v-for="(pf, idx) in bertopicPromptState.projectFilters" :key="idx" class="chip-row">
                           <span class="chip-row__content" :title="pf.description || pf.category">
                             <span class="chip-row__category">{{ getProjectFilterCategory(pf) }}</span>
                             <span v-if="getProjectFilterDescription(pf)" class="chip-row__description">
@@ -296,10 +305,8 @@
                       </div>
 
                       <div class="project-filter-form">
-                        <input type="text" v-model.trim="newFilterCategory"
-                          @keyup.enter="addFilter"
-                          class="input project-filter-input"
-                          placeholder="类别名称，如：本地资讯" />
+                        <input type="text" v-model.trim="newFilterCategory" @keyup.enter="addFilter"
+                          class="input project-filter-input" placeholder="类别名称，如：本地资讯" />
                         <div class="input-inline-shell">
                           <input type="text" v-model.trim="newFilterDescription" @keyup.enter="addFilter"
                             class="w-full text-xs border-none bg-transparent focus:ring-0 p-0 placeholder:text-muted/70"
@@ -428,8 +435,7 @@
                     <div class="space-y-1">
                       <p class="text-xs text-secondary">在此设置模型判断是否丢弃主题的基础参数约定。核心降噪指令会拼接于此上方。</p>
                     </div>
-                    <button type="button"
-                      class="btn-secondary px-3 py-1.5 text-xs"
+                    <button type="button" class="btn-secondary px-3 py-1.5 text-xs"
                       @click="restoreDefaultDropRulePrompt">
                       恢复通用模板
                     </button>
@@ -452,11 +458,103 @@
             </div>
           </div>
 
-          <div v-if="bertopicPromptState.error || bertopicPromptState.message"
-            class="state-banner text-xs"
+          <div v-if="bertopicPromptState.error || bertopicPromptState.message" class="state-banner text-xs"
             :class="bertopicPromptState.error ? 'state-banner-danger' : 'state-banner-success'">
             {{ bertopicPromptState.error || bertopicPromptState.message }}
           </div>
+        </section>
+
+        <section class="card-surface p-6 space-y-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="space-y-1">
+              <h3 class="text-sm font-bold text-primary flex items-center gap-2">
+                <DocumentTextIcon class="h-4 w-4 text-muted" />
+                <span>项目停用词配置</span>
+              </h3>
+              <p class="text-xs text-secondary">
+                仅对当前专题生效，会和全局 `configs/stopwords.txt` 合并后一起参与 BERTopic 分词。
+              </p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button type="button" class="btn btn-ghost btn-sm whitespace-nowrap"
+                :disabled="bertopicPromptState.loading || !form.topic.trim()" @click="loadBertopicPrompt(form.topic)">
+                {{ bertopicPromptState.loading ? '加载中…' : '重载配置' }}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" :disabled="!canSavePrompt"
+                @click="handleSavePrompt">
+                {{ bertopicPromptState.saving ? '保存中…' : '保存项目停用词' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-amber-200/60 bg-amber-50/70 p-4 text-sm text-amber-900">
+            <p class="font-semibold">编辑说明</p>
+            <p class="mt-1 leading-6">
+              一行一个停用词。这里保存的是当前专题的局部停用词，不会影响其他项目；运行时会自动与全局停用词去重合并。
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-4 text-xs text-secondary">
+            <span>配置文件：{{ bertopicPromptState.path || 'configs/prompt/topic_bertopic/<topic>.yaml' }}</span>
+            <span>存储字段：settings.project_stopwords</span>
+            <span>当前行数：{{ projectStopwordCount }}</span>
+          </div>
+
+          <textarea v-model="bertopicPromptState.projectStopwordsText" rows="12"
+            class="input min-h-[320px] w-full resize-y font-mono text-sm leading-6" placeholder="一行一个项目停用词" />
+        </section>
+
+        <section class="card-surface p-6 space-y-4">
+          <div class="space-y-1">
+            <h3 class="text-sm font-bold text-primary flex items-center gap-2">
+              <FunnelIcon class="h-4 w-4 text-muted" />
+              <span>专题相关性预过滤</span>
+            </h3>
+            <p class="text-xs text-secondary">
+              在 BERTopic 前先用嵌入相似度过滤明显离题文档，减少噪声混入。
+            </p>
+          </div>
+
+          <div class="grid gap-4 lg:grid-cols-4">
+            <label class="runtime-field">
+              <span class="runtime-field-label">启用预过滤</span>
+              <span class="runtime-field-key">pre_filter_enabled</span>
+              <div class="runtime-toggle-row">
+                <input v-model="bertopicPromptState.preFilterEnabled" type="checkbox" class="checkbox-custom" />
+                <span class="runtime-toggle-text">启用</span>
+              </div>
+            </label>
+            <label class="runtime-field">
+              <span class="runtime-field-label">最低相似度</span>
+              <span class="runtime-field-key">similarity_floor</span>
+              <input v-model.number="bertopicPromptState.preFilterSimilarityFloor" type="number" min="0" max="0.95"
+                step="0.01" class="input runtime-input w-full" />
+            </label>
+            <label class="runtime-field">
+              <span class="runtime-field-label">最大丢弃比例</span>
+              <span class="runtime-field-key">max_drop_ratio</span>
+              <input v-model.number="bertopicPromptState.preFilterMaxDropRatio" type="number" min="0" max="0.9"
+                step="0.01" class="input runtime-input w-full" />
+            </label>
+            <div class="rounded-2xl border border-soft bg-surface/60 px-4 py-3 text-[11px] text-secondary leading-5">
+              <p>推荐起点：`0.24 / 0.35`。</p>
+              <p>如果误杀相关文本，先降低最低相似度；如果噪声仍多，再提高相似度或收紧丢弃比例。</p>
+            </div>
+          </div>
+
+          <label class="block">
+            <span class="text-[11px] font-bold text-muted uppercase tracking-wider">查询增强词</span>
+            <textarea v-model="bertopicPromptState.preFilterQueryHint" rows="3"
+              class="input run-textarea w-full mt-1.5 resize-y text-xs leading-relaxed"
+              placeholder="可补充专题锚点，例如：吸烟、戒烟、控烟政策、二手烟、无烟环境、烟草监管" />
+          </label>
+
+          <label class="block">
+            <span class="text-[11px] font-bold text-muted uppercase tracking-wider">排除词 / 负向约束</span>
+            <textarea v-model="bertopicPromptState.preFilterNegativeHint" rows="3"
+              class="input run-textarea w-full mt-1.5 resize-y text-xs leading-relaxed"
+              placeholder="命中这些词且未命中专题锚点时会优先剔除" />
+          </label>
         </section>
 
         <!-- Runtime Parameters -->
@@ -538,7 +636,8 @@
                 <label class="runtime-field">
                   <span class="runtime-field-label">随机种子</span>
                   <span class="runtime-field-key">random_state</span>
-                  <input v-model.number="form.runParams.umap.random_state" type="number" class="input runtime-input w-full" />
+                  <input v-model.number="form.runParams.umap.random_state" type="number"
+                    class="input runtime-input w-full" />
                 </label>
               </div>
             </div>
@@ -602,8 +701,7 @@
                   <span class="runtime-field-label">输出详细日志</span>
                   <span class="runtime-field-key">verbose</span>
                   <div class="runtime-toggle-row">
-                    <input v-model="form.runParams.bertopic.verbose" type="checkbox"
-                      class="checkbox-custom" />
+                    <input v-model="form.runParams.bertopic.verbose" type="checkbox" class="checkbox-custom" />
                     <span class="runtime-toggle-text">启用</span>
                   </div>
                 </label>
@@ -633,8 +731,7 @@
       </section>
 
       <!-- Success Result -->
-      <section v-if="lastResult"
-        class="state-banner state-banner-success p-6 animate-in slide-in-from-bottom-2">
+      <section v-if="lastResult" class="state-banner state-banner-success p-6 animate-in slide-in-from-bottom-2">
         <div class="flex items-center gap-5">
           <div class="result-badge">
             <CheckBadgeIcon class="h-8 w-8" />
@@ -644,7 +741,7 @@
             <p class="text-sm text-secondary">主题模型已成功构建，相关数据资产已生成。</p>
           </div>
           <div class="ml-auto">
-            <router-link :to="`/analysis/topic/bertopic/results`" class="btn btn-primary">
+            <router-link :to="`/topic/bertopic/view`" class="btn btn-primary">
               查看分析报告
               <ArrowRightIcon class="h-4 w-4 ml-1" />
             </router-link>
@@ -957,6 +1054,14 @@ const canSavePrompt = computed(() => {
     !bertopicPromptState.loading &&
     !bertopicPromptState.saving
   )
+})
+
+const projectStopwordCount = computed(() => {
+  return String(bertopicPromptState.projectStopwordsText || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .length
 })
 
 const canSubmit = computed(() => {
@@ -1357,7 +1462,7 @@ const handleSavePrompt = async () => {
   padding: 0.7rem 0.875rem;
 }
 
-.global-filter-row + .global-filter-row {
+.global-filter-row+.global-filter-row {
   border-top: 1px solid var(--color-border-soft);
 }
 

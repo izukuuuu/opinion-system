@@ -180,6 +180,11 @@
         <PlotlyChartPanel :data="sankeyPlotlyData" :layout="sankeyPlotlyLayout" :config="sankeyPlotlyConfig"
           :has-data="sankeyPlotlyHasData" title="原始主题 → 新主题合并关系（桑基图）" description="展示 BERTopic 原始主题与 LLM 新主题之间的合并关系。" />
       </div>
+
+      <div v-if="temporalHeatmapHasData" class="chart-panel--tall">
+        <PlotlyChartPanel :data="temporalHeatmapData" :layout="temporalHeatmapLayout" :config="temporalHeatmapConfig"
+          :has-data="temporalHeatmapHasData" title="主题时序热度图" :description="temporalHeatmapDescription" />
+      </div>
     </section>
 
     <section v-if="coordsOption.hasData" class="topic-dashboard__card umap-section">
@@ -582,6 +587,145 @@ const llmStats = computed(() => {
     }
   }
 })
+
+const temporalPayload = computed(() => {
+  const payload = results.value.temporal
+  return payload && typeof payload === 'object' ? payload : {}
+})
+
+const temporalOverview = computed(() => {
+  const overview = temporalPayload.value.overview
+  return overview && typeof overview === 'object' ? overview : {}
+})
+
+const temporalHeatmapSource = computed(() => {
+  const llmPayload = temporalPayload.value.llm_clusters
+  const rawPayload = temporalPayload.value.raw_topics
+  const llmSeries = Array.isArray(llmPayload?.series) ? llmPayload.series : []
+  if (llmSeries.length > 0) {
+    return {
+      mode: 'llm',
+      series: llmSeries
+    }
+  }
+
+  const rawSeries = Array.isArray(rawPayload?.series) ? rawPayload.series : []
+  if (!rawSeries.length) {
+    return { mode: 'raw', series: [] }
+  }
+
+  return {
+    mode: 'raw',
+    series: [...rawSeries]
+      .sort((a, b) => Number(b?.total_count || 0) - Number(a?.total_count || 0))
+      .slice(0, Math.min(15, rawSeries.length))
+  }
+})
+
+const temporalHeatmapDataset = computed(() => {
+  const series = Array.isArray(temporalHeatmapSource.value.series) ? temporalHeatmapSource.value.series : []
+  if (!series.length) {
+    return { mode: temporalHeatmapSource.value.mode, dates: [], themes: [], z: [], max: 0 }
+  }
+
+  const dateLabelMap = {}
+  const dateSet = new Set()
+  const normalizedSeries = series.map((item) => {
+    const title = String(item?.title || item?.name || '').trim() || '未知主题'
+    const points = Array.isArray(item?.points) ? item.points : []
+    const pointMap = {}
+    points.forEach((point) => {
+      const date = String(point?.date || '').trim()
+      if (!date) return
+      dateSet.add(date)
+      dateLabelMap[date] = String(point?.label || date).trim() || date
+      pointMap[date] = Number(point?.count || 0)
+    })
+    return {
+      title,
+      pointMap
+    }
+  })
+
+  const dates = [...dateSet].sort((a, b) => a.localeCompare(b))
+  const themes = normalizedSeries.map((item) => item.title)
+  const z = normalizedSeries.map((item) => dates.map((date) => Number(item.pointMap[date] || 0)))
+  const max = z.reduce((acc, row) => Math.max(acc, ...row), 0)
+
+  return {
+    mode: temporalHeatmapSource.value.mode,
+    dates,
+    dateLabels: dates.map((date) => dateLabelMap[date] || date),
+    themes,
+    z,
+    max
+  }
+})
+
+const temporalHeatmapHasData = computed(() =>
+  temporalHeatmapDataset.value.themes.length > 0 && temporalHeatmapDataset.value.dates.length > 0
+)
+
+const temporalHeatmapDescription = computed(() => {
+  const aggregationLabel = String(temporalOverview.value?.aggregationLabel || '日').trim() || '日'
+  const bucketCount = Number(temporalOverview.value?.bucketCount || temporalHeatmapDataset.value.dates.length || 0)
+  const totalMappedDocs = Number(temporalOverview.value?.totalMappedDocs || 0)
+  const scopeLabel = temporalHeatmapDataset.value.mode === 'llm' ? 'LLM 新主题' : 'BERTopic 原始主题'
+  const base = `基于 BERTopic 原生 temporal 输出，按${aggregationLabel}聚合展示${scopeLabel}热度，共 ${bucketCount} 个时间桶。`
+  if (totalMappedDocs > 0) {
+    return `${base} 当前覆盖 ${totalMappedDocs.toLocaleString()} 篇映射文档。`
+  }
+  return base
+})
+
+const temporalHeatmapData = computed(() => {
+  if (!temporalHeatmapHasData.value) return []
+  return [{
+    type: 'heatmap',
+    x: temporalHeatmapDataset.value.dateLabels,
+    y: temporalHeatmapDataset.value.themes,
+    z: temporalHeatmapDataset.value.z,
+    colorscale: [
+      [0, '#fff7ed'],
+      [0.2, '#fed7aa'],
+      [0.4, '#fdba74'],
+      [0.6, '#fb923c'],
+      [0.8, '#ea580c'],
+      [1, '#7c2d12']
+    ],
+    colorbar: {
+      title: '文档数'
+    },
+    hovertemplate: '<b>%{y}</b><br>时间: %{x}<br>文档数: %{z}<extra></extra>'
+  }]
+})
+
+const temporalHeatmapLayout = computed(() => ({
+  title: { text: '主题时序热度图', font: { size: 14, color: '#2d3748' }, x: 0.5 },
+  xaxis: {
+    title: '时间',
+    tickangle: -35,
+    tickfont: { size: 10 },
+    automargin: true
+  },
+  yaxis: {
+    title: temporalHeatmapDataset.value.mode === 'llm' ? 'LLM 新主题' : '原始主题',
+    tickfont: { size: 11 },
+    automargin: true
+  },
+  margin: { l: 160, r: 60, t: 50, b: 90 },
+  height: Math.max(360, temporalHeatmapDataset.value.themes.length * 52 + 120),
+  plot_bgcolor: 'rgba(255,255,255,.5)',
+  paper_bgcolor: 'rgba(255,255,255,.7)',
+  font: { family: 'Segoe UI, PingFang SC, Microsoft YaHei' }
+}))
+
+const temporalHeatmapConfig = {
+  displayModeBar: true,
+  modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+  displaylogo: false,
+  responsive: true
+}
 
 // 格式化原始主题名称（用于title提示）
 const formatOriginalTopicName = (orig) => {
@@ -1292,7 +1436,8 @@ const exportData = () => {
       keywords: cluster.keywords.map(kw =>
         Array.isArray(kw) ? { word: kw[0], weight: kw[1] } : { word: kw, weight: 0 }
       )
-    }))
+    })),
+    temporal: temporalPayload.value
   }
 
   const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json;charset=utf-8' })

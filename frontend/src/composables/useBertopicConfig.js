@@ -1,12 +1,16 @@
 import { reactive, ref } from 'vue'
 import { useApiBase } from './useApiBase'
 
-const DEFAULT_BERTOPIC_MODEL = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
+const DEFAULT_BERTOPIC_MODEL = 'moka-ai/m3e-base'
 
 const DEFAULT_EMBEDDING_MODEL_OPTIONS = Object.freeze([
   {
     value: DEFAULT_BERTOPIC_MODEL,
-    label: '推荐 (多语言) - sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
+    label: '推荐 (8GB GPU / 中文) - moka-ai/m3e-base'
+  },
+  {
+    value: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+    label: '兼容优先 (多语言) - sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
   },
   {
     value: 'sentence-transformers/all-MiniLM-L6-v2',
@@ -26,7 +30,7 @@ const DEFAULT_EMBEDDING_MODEL_OPTIONS = Object.freeze([
   },
   {
     value: 'BAAI/bge-large-zh-v1.5',
-    label: '高精度中文 - BAAI/bge-large-zh-v1.5'
+    label: '高精度中文 (8GB GPU 建议小批次) - BAAI/bge-large-zh-v1.5'
   }
 ])
 
@@ -39,7 +43,7 @@ const MODEL_LABEL_MAP = Object.freeze(
 
 const buildDefaultEmbeddingConfig = () => ({
   model_name: DEFAULT_BERTOPIC_MODEL,
-  device: 'cpu',
+  device: 'auto',
   batch_size: 32
 })
 
@@ -81,6 +85,18 @@ export const useBertopicConfig = () => {
 
   const configState = reactive({
     loading: false,
+    error: ''
+  })
+
+  const stopwordsForm = reactive({
+    path: '',
+    content: '',
+    line_count: 0
+  })
+
+  const stopwordsState = reactive({
+    loading: false,
+    saving: false,
     error: ''
   })
 
@@ -186,14 +202,76 @@ export const useBertopicConfig = () => {
     syncModelOptionsWithCurrentModel()
   }
 
+  const loadStopwords = async () => {
+    stopwordsState.loading = true
+    stopwordsState.error = ''
+
+    try {
+      const response = await callApi('/api/topic/config/stopwords', {
+        method: 'GET'
+      })
+      const data = response?.data || {}
+      stopwordsForm.path = String(data.path || '')
+      stopwordsForm.content = String(data.content || '')
+      stopwordsForm.line_count = Number(data.line_count || 0)
+      return response
+    } catch (error) {
+      stopwordsState.error = error instanceof Error ? error.message : '加载停用词失败'
+      console.error('Failed to load BERTopic stopwords:', error)
+      throw error
+    } finally {
+      stopwordsState.loading = false
+    }
+  }
+
+  const saveStopwords = async () => {
+    stopwordsState.saving = true
+    stopwordsState.error = ''
+
+    try {
+      const response = await callApi('/api/topic/config/stopwords', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          content: stopwordsForm.content
+        })
+      })
+
+      const data = response?.data || {}
+      stopwordsForm.path = String(data.path || '')
+      stopwordsForm.content = String(data.content || '')
+      stopwordsForm.line_count = Number(data.line_count || 0)
+      return response
+    } catch (error) {
+      stopwordsState.error = error instanceof Error ? error.message : '保存停用词失败'
+      console.error('Failed to save BERTopic stopwords:', error)
+      throw error
+    } finally {
+      stopwordsState.saving = false
+    }
+  }
+
+  const resetStopwordsForm = () => {
+    stopwordsForm.path = ''
+    stopwordsForm.content = ''
+    stopwordsForm.line_count = 0
+  }
+
   return {
     configForm,
     configState,
+    stopwordsForm,
+    stopwordsState,
     embeddingModelState,
     embeddingModelOptions,
     loadConfig,
     saveConfig,
     resetConfigForm,
-    loadEmbeddingModels
+    loadEmbeddingModels,
+    loadStopwords,
+    saveStopwords,
+    resetStopwordsForm
   }
 }

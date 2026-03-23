@@ -72,6 +72,14 @@ const DEFAULT_DROP_RULE_PROMPT = `
 
 const DEFAULT_GLOBAL_FILTERS = ['明星八卦', '广告推广', '抽奖转发', '求职招聘']
 const DEFAULT_PROJECT_FILTERS = []
+const DEFAULT_PRE_FILTER_ENABLED = true
+const DEFAULT_PRE_FILTER_SIMILARITY_FLOOR = 0.24
+const DEFAULT_PRE_FILTER_MAX_DROP_RATIO = 0.35
+const DEFAULT_PRE_FILTER_QUERY_HINT = ''
+const DEFAULT_PRE_FILTER_NEGATIVE_HINT = ''
+const DEFAULT_PROJECT_STOPWORDS_TEXT = ''
+const DEFAULT_RECLUSTER_TOPIC_LIMIT = 140
+const DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO = 0.55
 
 const normalizeFilterLabelList = (items, fallback = []) => {
   if (!Array.isArray(items)) {
@@ -109,6 +117,8 @@ const bertopicPromptState = reactive({
   exists: false,
   path: '',
   maxTopics: DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS,
+  reclusterTopicLimit: DEFAULT_RECLUSTER_TOPIC_LIMIT,
+  reclusterTargetCoverageRatio: DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO,
   dropRulePrompt: DEFAULT_DROP_RULE_PROMPT,
   defaultDropRulePrompt: DEFAULT_DROP_RULE_PROMPT,
   reclusterSystemPrompt: '',
@@ -119,6 +129,12 @@ const bertopicPromptState = reactive({
   mustSeparateRules: [],
   mustMergeRules: [],
   coreDropRules: [],
+  preFilterEnabled: DEFAULT_PRE_FILTER_ENABLED,
+  preFilterSimilarityFloor: DEFAULT_PRE_FILTER_SIMILARITY_FLOOR,
+  preFilterMaxDropRatio: DEFAULT_PRE_FILTER_MAX_DROP_RATIO,
+  preFilterQueryHint: DEFAULT_PRE_FILTER_QUERY_HINT,
+  preFilterNegativeHint: DEFAULT_PRE_FILTER_NEGATIVE_HINT,
+  projectStopwordsText: DEFAULT_PROJECT_STOPWORDS_TEXT,
   globalFilters: JSON.parse(JSON.stringify(DEFAULT_GLOBAL_FILTERS)),
   projectFilters: JSON.parse(JSON.stringify(DEFAULT_PROJECT_FILTERS))
 })
@@ -158,6 +174,18 @@ const clampPromptTopicCount = (value) => {
   return Math.max(MIN_BERTOPIC_PROMPT_TOPICS, Math.min(MAX_BERTOPIC_PROMPT_TOPICS, parsed))
 }
 
+const normalizeReclusterTopicLimit = (value) => {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(parsed)) return DEFAULT_RECLUSTER_TOPIC_LIMIT
+  return Math.max(20, Math.min(200, parsed))
+}
+
+const normalizeCoverageRatio = (value) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO
+  return Math.max(0.2, Math.min(0.95, parsed))
+}
+
 const hasPromptDraftChanges = computed(() => {
   const baseline = bertopicPromptBaseline.value
   if (!baseline) return false
@@ -167,6 +195,8 @@ const hasPromptDraftChanges = computed(() => {
 
 const capturePromptSnapshot = () => ({
   maxTopics: clampPromptTopicCount(bertopicPromptState.maxTopics),
+  reclusterTopicLimit: normalizeReclusterTopicLimit(bertopicPromptState.reclusterTopicLimit),
+  reclusterTargetCoverageRatio: normalizeCoverageRatio(bertopicPromptState.reclusterTargetCoverageRatio),
   dropRulePrompt: String(bertopicPromptState.dropRulePrompt || '').trim(),
   reclusterSystemPrompt: String(bertopicPromptState.reclusterSystemPrompt || '').trim(),
   reclusterUserPrompt: String(bertopicPromptState.reclusterUserPrompt || '').trim(),
@@ -176,6 +206,12 @@ const capturePromptSnapshot = () => ({
   mustSeparateRules: JSON.parse(JSON.stringify(bertopicPromptState.mustSeparateRules || [])),
   mustMergeRules: JSON.parse(JSON.stringify(bertopicPromptState.mustMergeRules || [])),
   coreDropRules: JSON.parse(JSON.stringify(bertopicPromptState.coreDropRules || [])),
+  preFilterEnabled: Boolean(bertopicPromptState.preFilterEnabled),
+  preFilterSimilarityFloor: Number(bertopicPromptState.preFilterSimilarityFloor ?? DEFAULT_PRE_FILTER_SIMILARITY_FLOOR),
+  preFilterMaxDropRatio: Number(bertopicPromptState.preFilterMaxDropRatio ?? DEFAULT_PRE_FILTER_MAX_DROP_RATIO),
+  preFilterQueryHint: String(bertopicPromptState.preFilterQueryHint || '').trim(),
+  preFilterNegativeHint: String(bertopicPromptState.preFilterNegativeHint || '').trim(),
+  projectStopwordsText: String(bertopicPromptState.projectStopwordsText || ''),
   globalFilters: JSON.parse(JSON.stringify(bertopicPromptState.globalFilters || [])),
   projectFilters: JSON.parse(JSON.stringify(bertopicPromptState.projectFilters || []))
 })
@@ -186,6 +222,16 @@ const setPromptStateFromPayload = (payload) => {
   bertopicPromptState.path = data.path || ''
   bertopicPromptState.maxTopics = clampPromptTopicCount(
     data.max_topics ?? data.target_topics ?? data.maxTopics
+  )
+  bertopicPromptState.reclusterTopicLimit = normalizeReclusterTopicLimit(
+    data.recluster_topic_limit ??
+    data.reclusterTopicLimit ??
+    DEFAULT_RECLUSTER_TOPIC_LIMIT
+  )
+  bertopicPromptState.reclusterTargetCoverageRatio = normalizeCoverageRatio(
+    data.recluster_target_coverage_ratio ??
+    data.reclusterTargetCoverageRatio ??
+    DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO
   )
   bertopicPromptState.defaultDropRulePrompt = data.default_drop_rule_prompt || data.defaultDropRulePrompt || DEFAULT_DROP_RULE_PROMPT
 
@@ -209,6 +255,32 @@ const setPromptStateFromPayload = (payload) => {
   bertopicPromptState.coreDropRules = normalizeFilterLabelList(
     data.core_drop_rules ?? data.coreDropRules
   )
+  bertopicPromptState.preFilterEnabled = Boolean(
+    data.pre_filter_enabled ?? data.preFilterEnabled ?? DEFAULT_PRE_FILTER_ENABLED
+  )
+  bertopicPromptState.preFilterSimilarityFloor = Number(
+    data.pre_filter_similarity_floor ??
+    data.preFilterSimilarityFloor ??
+    DEFAULT_PRE_FILTER_SIMILARITY_FLOOR
+  )
+  bertopicPromptState.preFilterMaxDropRatio = Number(
+    data.pre_filter_max_drop_ratio ??
+    data.preFilterMaxDropRatio ??
+    DEFAULT_PRE_FILTER_MAX_DROP_RATIO
+  )
+  bertopicPromptState.preFilterQueryHint = String(
+    data.pre_filter_query_hint ?? data.preFilterQueryHint ?? DEFAULT_PRE_FILTER_QUERY_HINT
+  )
+  bertopicPromptState.preFilterNegativeHint = String(
+    data.pre_filter_negative_hint ?? data.preFilterNegativeHint ?? DEFAULT_PRE_FILTER_NEGATIVE_HINT
+  )
+  bertopicPromptState.projectStopwordsText = String(
+    data.project_stopwords_text ??
+    data.projectStopwordsText ??
+    (Array.isArray(data.project_stopwords ?? data.projectStopwords)
+      ? (data.project_stopwords ?? data.projectStopwords).join('\n')
+      : DEFAULT_PROJECT_STOPWORDS_TEXT)
+  )
 
   const resolvedGlobalFilters = data.global_filters ?? data.globalFilters
   bertopicPromptState.globalFilters = normalizeFilterLabelList(
@@ -229,6 +301,8 @@ const clearPromptState = () => {
   bertopicPromptState.exists = false
   bertopicPromptState.path = ''
   bertopicPromptState.maxTopics = DEFAULT_BERTOPIC_PROMPT_TARGET_TOPICS
+  bertopicPromptState.reclusterTopicLimit = DEFAULT_RECLUSTER_TOPIC_LIMIT
+  bertopicPromptState.reclusterTargetCoverageRatio = DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO
   bertopicPromptState.dropRulePrompt = DEFAULT_DROP_RULE_PROMPT
   bertopicPromptState.defaultDropRulePrompt = DEFAULT_DROP_RULE_PROMPT
   bertopicPromptState.reclusterSystemPrompt = ''
@@ -239,6 +313,12 @@ const clearPromptState = () => {
   bertopicPromptState.mustSeparateRules = []
   bertopicPromptState.mustMergeRules = []
   bertopicPromptState.coreDropRules = []
+  bertopicPromptState.preFilterEnabled = DEFAULT_PRE_FILTER_ENABLED
+  bertopicPromptState.preFilterSimilarityFloor = DEFAULT_PRE_FILTER_SIMILARITY_FLOOR
+  bertopicPromptState.preFilterMaxDropRatio = DEFAULT_PRE_FILTER_MAX_DROP_RATIO
+  bertopicPromptState.preFilterQueryHint = DEFAULT_PRE_FILTER_QUERY_HINT
+  bertopicPromptState.preFilterNegativeHint = DEFAULT_PRE_FILTER_NEGATIVE_HINT
+  bertopicPromptState.projectStopwordsText = DEFAULT_PROJECT_STOPWORDS_TEXT
   bertopicPromptState.globalFilters = JSON.parse(JSON.stringify(DEFAULT_GLOBAL_FILTERS))
   bertopicPromptState.projectFilters = JSON.parse(JSON.stringify(DEFAULT_PROJECT_FILTERS))
   bertopicPromptState.error = ''
@@ -525,6 +605,8 @@ const saveBertopicPrompt = async (options = {}) => {
         project: form.project || undefined,
         target_topics: snapshot.maxTopics,
         max_topics: snapshot.maxTopics,
+        recluster_topic_limit: snapshot.reclusterTopicLimit,
+        recluster_target_coverage_ratio: snapshot.reclusterTargetCoverageRatio,
         drop_rule_prompt: snapshot.dropRulePrompt,
         recluster_system_prompt: snapshot.reclusterSystemPrompt,
         recluster_user_prompt: snapshot.reclusterUserPrompt,
@@ -535,6 +617,12 @@ const saveBertopicPrompt = async (options = {}) => {
         must_separate_rules: snapshot.mustSeparateRules,
         must_merge_rules: snapshot.mustMergeRules,
         core_drop_rules: snapshot.coreDropRules,
+        pre_filter_enabled: snapshot.preFilterEnabled,
+        pre_filter_similarity_floor: snapshot.preFilterSimilarityFloor,
+        pre_filter_max_drop_ratio: snapshot.preFilterMaxDropRatio,
+        pre_filter_query_hint: snapshot.preFilterQueryHint,
+        pre_filter_negative_hint: snapshot.preFilterNegativeHint,
+        project_stopwords: snapshot.projectStopwordsText,
         global_filters: snapshot.globalFilters,
         project_filters: snapshot.projectFilters
       })

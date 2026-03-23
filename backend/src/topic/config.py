@@ -13,11 +13,12 @@ from typing import Any, Dict
 from ..utils.setting.paths import get_configs_root
 
 CONFIG_FILE = get_configs_root() / "bertopic.json"
+STOPWORDS_FILE = get_configs_root() / "stopwords.txt"
 
 DEFAULT_BERTOPIC_CONFIG = {
     "embedding": {
-        "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-        "device": "cpu",
+        "model_name": "moka-ai/m3e-base",
+        "device": "auto",
         "batch_size": 32
     },
     "custom_filters": [
@@ -55,3 +56,49 @@ def save_bertopic_config(config: Dict[str, Any]) -> Dict[str, Any]:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
     return load_bertopic_config()
+
+
+def _normalize_stopwords_content(content: Any) -> str:
+    text = str(content or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = []
+    seen = set()
+    for raw in text.split("\n"):
+        value = str(raw or "").strip().lstrip("\ufeff")
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        lines.append(value)
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
+def load_bertopic_stopwords() -> Dict[str, Any]:
+    """Load BERTopic stopwords file content and metadata."""
+    if not STOPWORDS_FILE.exists():
+        return {
+            "path": str(STOPWORDS_FILE),
+            "content": "",
+            "line_count": 0,
+        }
+
+    try:
+        content = STOPWORDS_FILE.read_text(encoding="utf-8")
+    except Exception:
+        content = ""
+
+    normalized = _normalize_stopwords_content(content)
+    line_count = len([line for line in normalized.splitlines() if line.strip()])
+    return {
+        "path": str(STOPWORDS_FILE),
+        "content": normalized,
+        "line_count": line_count,
+    }
+
+
+def save_bertopic_stopwords(content: Any) -> Dict[str, Any]:
+    """Save BERTopic stopwords file and return refreshed payload."""
+    STOPWORDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    normalized = _normalize_stopwords_content(content)
+    STOPWORDS_FILE.write_text(normalized, encoding="utf-8")
+    return load_bertopic_stopwords()

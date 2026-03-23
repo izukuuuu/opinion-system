@@ -51,11 +51,12 @@ BERTOPIC_FILE_MAP = {
     "coords": "3文档2D坐标.json",
     "llm_clusters": "4大模型再聚类结果.json",
     "llm_keywords": "5大模型主题关键词.json",
+    "temporal": "6主题时间趋势.json",
 }
 
 DEFAULT_ANALYZE_FILENAME = "result.json"
 REPORT_CACHE_FILENAME = "report_payload.json"
-REPORT_CACHE_VERSION = 3
+REPORT_CACHE_VERSION = 4
 
 SENTIMENT_POSITIVE = {"positive", "正面", "积极", "pos", "p"}
 SENTIMENT_NEUTRAL = {"neutral", "中性", "客观", "neu"}
@@ -520,25 +521,109 @@ def _build_bertopic_time_nodes(
     return time_nodes, stats
 
 
+def _normalize_bertopic_time_nodes(rows: Any) -> List[Dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+
+    nodes: List[Dict[str, Any]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        date_text = str(item.get("date") or "").strip()
+        top_theme = str(item.get("topTheme") or "").strip()
+        if not date_text or not top_theme:
+            continue
+        raw_themes = item.get("themes")
+        themes: List[Dict[str, Any]] = []
+        if isinstance(raw_themes, list):
+            for theme in raw_themes:
+                if not isinstance(theme, dict):
+                    continue
+                name = str(theme.get("name") or "").strip()
+                if not name:
+                    continue
+                themes.append({"name": name, "value": _parse_int(theme.get("value"))})
+        themes.sort(key=lambda theme: theme.get("value", 0), reverse=True)
+        nodes.append(
+            {
+                "date": date_text,
+                "label": str(item.get("label") or _format_label_date(date_text)),
+                "total": _parse_int(item.get("total")),
+                "topTheme": top_theme,
+                "topValue": _parse_int(item.get("topValue")),
+                "themes": themes,
+            }
+        )
+
+    nodes.sort(key=lambda item: _parse_date_value(str(item.get("date") or "")) or datetime.min)
+    return nodes
+
+
+def _extract_temporal_time_context(temporal_payload: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
+    if not isinstance(temporal_payload, dict):
+        return [], {}, {}
+
+    nodes_raw = temporal_payload.get("time_nodes")
+    if not isinstance(nodes_raw, list):
+        llm_payload = temporal_payload.get("llm_clusters")
+        if isinstance(llm_payload, dict) and isinstance(llm_payload.get("time_nodes"), list):
+            nodes_raw = llm_payload.get("time_nodes")
+    if not isinstance(nodes_raw, list):
+        raw_payload = temporal_payload.get("raw_topics")
+        if isinstance(raw_payload, dict) and isinstance(raw_payload.get("time_nodes"), list):
+            nodes_raw = raw_payload.get("time_nodes")
+
+    nodes = _normalize_bertopic_time_nodes(nodes_raw)
+    meta = temporal_payload.get("meta") if isinstance(temporal_payload.get("meta"), dict) else {}
+    overview = temporal_payload.get("overview") if isinstance(temporal_payload.get("overview"), dict) else {}
+    return nodes, meta, overview
+
+
 def _load_bertopic_report_context(
     topic_identifier: str,
     folder_candidates: List[str],
 ) -> Dict[str, Any]:
     topic_root = _resolve_bucket_folder_root("topic", topic_identifier, folder_candidates)
     if not topic_root:
-        return {"themes": [], "time_nodes": [], "meta": {"source": ""}}
+        return {"themes": [], "time_nodes": [], "overview": {}, "meta": {"source": ""}}
 
     summary_payload = _load_json_safely(topic_root / BERTOPIC_FILE_MAP["summary"])
-    coords_payload = _load_json_safely(topic_root / BERTOPIC_FILE_MAP["coords"])
     cluster_payload = _load_json_safely(topic_root / BERTOPIC_FILE_MAP["llm_clusters"])
     keyword_payload = _load_json_safely(topic_root / BERTOPIC_FILE_MAP["llm_keywords"])
+    temporal_payload = _load_json_safely(topic_root / BERTOPIC_FILE_MAP["temporal"])
 
     themes, cluster_by_topic_name, cluster_by_topic_id = _parse_bertopic_themes(cluster_payload, keyword_payload)
+    cluster_doc_total = sum(_parse_int(item.get("value")) for item in themes)
+    temporal_nodes, temporal_meta, temporal_overview = _extract_temporal_time_context(temporal_payload)
+    if temporal_nodes:
+        temporal_docs = _parse_int(temporal_meta.get("temporal_documents"))
+        mapped_docs = _parse_int(temporal_meta.get("llm_mapped_documents"))
+        if mapped_docs <= 0:
+            mapped_docs = sum(_parse_int(item.get("total")) for item in temporal_nodes)
+        coverage = float(temporal_meta.get("llm_coverage_rate") or 0.0)
+        if coverage <= 0 and temporal_docs > 0:
+            coverage = mapped_docs / max(1, temporal_docs)
+        return {
+            "themes": themes,
+            "time_nodes": temporal_nodes,
+            "overview": temporal_overview,
+            "meta": {
+                "source": str(topic_root),
+                "time_source": "temporal",
+                "cluster_count": len(themes),
+                "cluster_doc_total": cluster_doc_total,
+                "time_node_count": len(temporal_nodes),
+                "mapped_docs": mapped_docs,
+                "dated_docs": temporal_docs,
+                "coverage_rate": round(coverage, 4),
+                "temporal_meta": temporal_meta,
+            },
+        }
+
+    coords_payload = _load_json_safely(topic_root / BERTOPIC_FILE_MAP["coords"])
     topicid_cluster_map = _build_topicid_cluster_map(summary_payload, cluster_by_topic_name, cluster_by_topic_id)
     doc_date_map = _load_fetch_doc_dates(topic_identifier, folder_candidates)
     time_nodes, time_node_stats = _build_bertopic_time_nodes(coords_payload, topicid_cluster_map, doc_date_map)
-
-    cluster_doc_total = sum(_parse_int(item.get("value")) for item in themes)
     coverage = 0.0
     if time_node_stats.get("dated_docs", 0) > 0:
         coverage = time_node_stats["mapped_docs"] / max(1, time_node_stats["dated_docs"])
@@ -546,8 +631,10 @@ def _load_bertopic_report_context(
     return {
         "themes": themes,
         "time_nodes": time_nodes,
+        "overview": {},
         "meta": {
             "source": str(topic_root),
+            "time_source": "legacy_doc_mapping",
             "cluster_count": len(themes),
             "cluster_doc_total": cluster_doc_total,
             "topicid_cluster_count": len(topicid_cluster_map),
@@ -1060,6 +1147,9 @@ def _build_report_payload(
     bertopic_context = _load_bertopic_report_context(topic_identifier, folder_candidates)
     bertopic_themes = bertopic_context.get("themes") if isinstance(bertopic_context, dict) else []
     bertopic_time_nodes = bertopic_context.get("time_nodes") if isinstance(bertopic_context, dict) else []
+    bertopic_overview_from_context = (
+        bertopic_context.get("overview") if isinstance(bertopic_context, dict) else {}
+    )
 
     channels = _build_channel_data(volume_rows)
     timeline = _build_timeline_data(trend_rows)
@@ -1137,13 +1227,26 @@ def _build_report_payload(
         key=lambda item: _parse_int(item.get("total")),
         reverse=True,
     )[:12]
-    bertopic_overview = {
-        "mode": "daily_dominant_theme",
-        "aggregation": "day",
-        "description": "按日期聚合文档后展示当日主导主题，不表示主题持续时长。",
-        "days": len(bertopic_nodes_payload),
-        "totalMappedDocs": sum(_parse_int(item.get("total")) for item in bertopic_nodes_payload),
-    }
+    bertopic_overview = dict(bertopic_overview_from_context or {})
+    total_mapped_docs = sum(_parse_int(item.get("total")) for item in bertopic_nodes_payload)
+    if not bertopic_overview:
+        bertopic_overview = {
+            "mode": "daily_dominant_theme",
+            "aggregation": "day",
+            "aggregationLabel": "日",
+            "description": "按日期聚合文档后展示当日主导主题，不表示主题持续时长。",
+            "bucketCount": len(bertopic_nodes_payload),
+            "days": len(bertopic_nodes_payload),
+            "totalMappedDocs": total_mapped_docs,
+        }
+    else:
+        bertopic_overview.setdefault("mode", "native_topics_over_time")
+        bertopic_overview.setdefault("aggregation", "day")
+        bertopic_overview.setdefault("aggregationLabel", "日")
+        bertopic_overview.setdefault("description", "基于 BERTopic temporal 结果的主题热度分布。")
+        bertopic_overview.setdefault("bucketCount", len(bertopic_nodes_payload))
+        bertopic_overview.setdefault("days", bertopic_overview.get("bucketCount") or len(bertopic_nodes_payload))
+        bertopic_overview.setdefault("totalMappedDocs", total_mapped_docs)
 
     metrics = _compute_metrics(channels, timeline, sentiment, content_split)
     main_finding = _load_main_finding(analyze_root)

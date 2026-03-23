@@ -10,6 +10,8 @@ import gc
 import asyncio
 import random
 import warnings
+from collections import defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Iterable, Any
 
@@ -45,7 +47,14 @@ from ..fetch.data_fetch import get_topic_available_date_range
 from .prompt_config import (
     DEFAULT_DROP_RULE_PROMPT,
     DEFAULT_KEYWORDS_SYSTEM_PROMPT,
+    DEFAULT_PREFILTER_ENABLED,
+    DEFAULT_PREFILTER_MAX_DROP_RATIO,
+    DEFAULT_PREFILTER_NEGATIVE_HINT,
+    DEFAULT_PREFILTER_QUERY_HINT,
+    DEFAULT_PREFILTER_SIMILARITY_FLOOR,
     DEFAULT_KEYWORDS_USER_PROMPT,
+    DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO,
+    DEFAULT_RECLUSTER_TOPIC_LIMIT as DEFAULT_PROMPT_RECLUSTER_TOPIC_LIMIT,
     DEFAULT_RECLUSTER_SYSTEM_PROMPT,
     DEFAULT_RECLUSTER_USER_PROMPT,
     DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS,
@@ -56,7 +65,7 @@ from .config import load_bertopic_config
 
 # 配置常量
 TARGET_TOPICS = DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS  # 大模型合并后的目标主题数
-DEFAULT_RECLUSTER_TOPIC_LIMIT = 80
+DEFAULT_RECLUSTER_TOPIC_LIMIT = DEFAULT_PROMPT_RECLUSTER_TOPIC_LIMIT
 DEFAULT_TOPIC_SAMPLE_SIZE = 4
 DEFAULT_TOPIC_SAMPLE_CHARS = 220
 DEFAULT_RUN_PARAMS: Dict[str, Any] = {
@@ -88,6 +97,32 @@ DEFAULT_RUN_PARAMS: Dict[str, Any] = {
 
 MAX_PREPROCESSED_TOKENS = 4096
 MAX_PREPROCESSED_CHARS = 12000
+DEFAULT_PREFILTER_SAMPLE_SIZE = 2048
+MIN_PREFILTER_DOCS = 50
+MIN_PREFILTER_ANCHOR_HITS = 5
+TOPIC_HINT_GENERIC_TERMS = {
+    "专题",
+    "舆情",
+    "分析",
+    "数据库",
+    "数据",
+    "主题",
+    "项目",
+    "事件",
+    "观察",
+}
+
+DATE_FIELD_CANDIDATES = (
+    "published_at",
+    "publish_time",
+    "date",
+    "created_at",
+    "pubtime",
+    "发布时间",
+    "发布日期",
+    "时间",
+    "日期",
+)
 
 
 def _normalize_contents_column(df: pd.DataFrame, logger, source: str) -> pd.DataFrame:
@@ -105,13 +140,51 @@ def _normalize_contents_column(df: pd.DataFrame, logger, source: str) -> pd.Data
     return pd.DataFrame()
 
 
-def _read_jsonl_contents_stream(file_path: Path, logger) -> List[str]:
+def _extract_date_text(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    match = re.search(r"(20\d{2}-\d{2}-\d{2})", raw)
+    return match.group(1) if match else ""
+
+
+def _prefer_earlier_date(current: str, candidate: str) -> str:
+    current_text = _extract_date_text(current)
+    candidate_text = _extract_date_text(candidate)
+    if not current_text:
+        return candidate_text
+    if not candidate_text:
+        return current_text
+    return candidate_text if candidate_text < current_text else current_text
+
+
+def _dedupe_text_records(records: Iterable[Tuple[Any, Any]]) -> Tuple[List[Tuple[str, str]], int]:
+    record_dates: Dict[str, str] = {}
+    ordered_texts: List[str] = []
+    duplicate_rows = 0
+
+    for raw_text, raw_date in records:
+        text = str(raw_text or "").strip()
+        if not text:
+            continue
+        date_text = _extract_date_text(raw_date)
+        if text in record_dates:
+            duplicate_rows += 1
+            record_dates[text] = _prefer_earlier_date(record_dates[text], date_text)
+            continue
+        record_dates[text] = date_text
+        ordered_texts.append(text)
+
+    return [(text, record_dates.get(text, "")) for text in ordered_texts], duplicate_rows
+
+
+def _read_jsonl_records_stream(file_path: Path, logger) -> List[Tuple[str, str]]:
     """
-    Stream read a large JSONL file and deduplicate by contents (keep first),
+    Stream read a large JSONL file and deduplicate by contents,
     avoiding pandas full-file load OOM.
     """
-    deduped: List[str] = []
-    seen: set = set()
+    deduped: List[Tuple[str, str]] = []
+    record_index: Dict[str, int] = {}
     total_rows = 0
     valid_rows = 0
     duplicate_rows = 0
@@ -143,13 +216,21 @@ def _read_jsonl_contents_stream(file_path: Path, logger) -> List[str]:
                 if not content_text:
                     continue
                 valid_rows += 1
+                date_text = ""
+                for key in DATE_FIELD_CANDIDATES:
+                    date_text = _extract_date_text(item.get(key))
+                    if date_text:
+                        break
 
-                if content_text in seen:
+                if content_text in record_index:
                     duplicate_rows += 1
+                    idx = record_index[content_text]
+                    existing_text, existing_date = deduped[idx]
+                    deduped[idx] = (existing_text, _prefer_earlier_date(existing_date, date_text))
                     continue
 
-                seen.add(content_text)
-                deduped.append(content_text)
+                record_index[content_text] = len(deduped)
+                deduped.append((content_text, date_text))
     except Exception as exc:
         log_error(logger, f"流式读取失败 {file_path.name}: {exc}", "TopicBertopic")
         return []
@@ -165,8 +246,8 @@ def _read_jsonl_contents_stream(file_path: Path, logger) -> List[str]:
     return deduped
 
 
-def _extract_texts_from_df(df: pd.DataFrame, logger, source: str) -> List[str]:
-    """从 DataFrame 提取文本并去重，返回 Python 列表以避免 Arrow 大内存转换。"""
+def _extract_records_from_df(df: pd.DataFrame, logger, source: str) -> List[Tuple[str, str]]:
+    """从 DataFrame 提取文本与日期并去重，返回 Python 列表以避免 Arrow 大内存转换。"""
     if df.empty:
         return []
 
@@ -174,32 +255,32 @@ def _extract_texts_from_df(df: pd.DataFrame, logger, source: str) -> List[str]:
     if normalized.empty or 'contents' not in normalized.columns:
         return []
 
-    texts: List[str] = []
-    for value in normalized['contents']:
+    candidate_columns = ["contents"] + [col for col in DATE_FIELD_CANDIDATES if col in normalized.columns]
+    subset = normalized[candidate_columns]
+    records_iter = []
+    for row in subset.itertuples(index=False, name=None):
+        value = row[0] if row else None
         if value is None or pd.isna(value):
             continue
         text = str(value).strip()
         if not text:
             continue
-        texts.append(text)
+        date_text = ""
+        for raw_date in row[1:]:
+            date_text = _extract_date_text(raw_date)
+            if date_text:
+                break
+        records_iter.append((text, date_text))
 
-    if not texts:
+    if not records_iter:
         return []
 
-    deduped: List[str] = []
-    seen: set = set()
-    duplicate_rows = 0
-    for text in texts:
-        if text in seen:
-            duplicate_rows += 1
-            continue
-        seen.add(text)
-        deduped.append(text)
+    deduped, duplicate_rows = _dedupe_text_records(records_iter)
 
     if duplicate_rows > 0:
         log_success(
             logger,
-            f"{source} 去重: {len(texts)} -> {len(deduped)}",
+            f"{source} 去重: {len(records_iter)} -> {len(deduped)}",
             "TopicBertopic",
         )
     return deduped
@@ -365,6 +446,20 @@ def _resolve_recluster_topic_limit(prompt_config: Optional[Dict[str, Any]]) -> i
     return max(20, min(200, parsed))
 
 
+def _resolve_recluster_target_coverage(prompt_config: Optional[Dict[str, Any]]) -> float:
+    if not isinstance(prompt_config, dict):
+        return DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO
+    return _coerce_float(
+        prompt_config.get(
+            "recluster_target_coverage_ratio",
+            DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO,
+        ),
+        DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO,
+        minimum=0.2,
+        maximum=0.95,
+    )
+
+
 def _resolve_topic_sample_size(prompt_config: Optional[Dict[str, Any]]) -> int:
     if not isinstance(prompt_config, dict):
         return DEFAULT_TOPIC_SAMPLE_SIZE
@@ -431,47 +526,130 @@ def _select_topics_for_recluster(topic_stats: List[Dict[str, Any]], limit: int) 
     - keep most high-volume topics
     - add evenly sampled long-tail topics for semantic diversity
     """
+    return _select_topics_for_recluster_with_metadata(
+        topic_stats,
+        limit,
+        DEFAULT_RECLUSTER_TARGET_COVERAGE_RATIO,
+    )[0]
+
+
+def _select_topics_for_recluster_with_metadata(
+    topic_stats: List[Dict[str, Any]],
+    limit: int,
+    coverage_target: float,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     if limit <= 0 or not topic_stats:
-        return []
-    if len(topic_stats) <= limit:
-        return list(topic_stats)
+        return [], {
+            "configured_limit": max(0, int(limit)),
+            "effective_limit": 0,
+            "coverage_target": float(coverage_target),
+            "selected_docs": 0,
+            "total_docs": 0,
+            "coverage_ratio": 0.0,
+            "head_size": 0,
+            "diversity_size": 0,
+            "coverage_head_size": 0,
+        }
 
-    head_size = max(1, int(round(limit * 0.7)))
-    head_size = min(head_size, limit, len(topic_stats))
-    tail_slots = max(0, limit - head_size)
+    ordered = list(topic_stats)
+    effective_limit = min(len(ordered), max(1, int(limit)))
 
-    selected = list(topic_stats[:head_size])
-    if tail_slots <= 0:
-        return selected
+    topic_counts: List[int] = []
+    total_docs = 0
+    for topic in ordered:
+        try:
+            count = max(0, int(topic.get("count") or 0))
+        except (TypeError, ValueError):
+            count = 0
+        topic_counts.append(count)
+        total_docs += count
 
-    tail = topic_stats[head_size:]
-    if len(tail) <= tail_slots:
-        selected.extend(tail)
-        return selected
+    if len(ordered) <= effective_limit:
+        return ordered, {
+            "configured_limit": int(limit),
+            "effective_limit": len(ordered),
+            "coverage_target": float(coverage_target),
+            "selected_docs": int(total_docs),
+            "total_docs": int(total_docs),
+            "coverage_ratio": 1.0 if total_docs else 0.0,
+            "head_size": len(ordered),
+            "diversity_size": 0,
+            "coverage_head_size": len(ordered),
+        }
 
-    # Evenly sample from long tail to increase thematic spread.
+    coverage_head_size = 0
+    coverage_docs = 0
+    if total_docs > 0:
+        required_docs = total_docs * float(coverage_target)
+        for idx, count in enumerate(topic_counts):
+            coverage_docs += count
+            coverage_head_size = idx + 1
+            if coverage_docs >= required_docs:
+                break
+    if coverage_head_size <= 0:
+        coverage_head_size = min(len(ordered), effective_limit)
+
+    base_head_size = max(1, int(round(effective_limit * 0.7)))
+    if coverage_head_size > effective_limit:
+        head_size = effective_limit
+    else:
+        head_size = min(effective_limit, max(base_head_size, coverage_head_size))
+    tail_slots = max(0, effective_limit - head_size)
+
+    selected = list(ordered[:head_size])
+    tail = ordered[head_size:]
     picked_indices: set = set()
-    for i in range(tail_slots):
-        # midpoint sampling in each segment
-        pos = int(((i + 0.5) * len(tail)) / tail_slots)
-        pos = max(0, min(len(tail) - 1, pos))
-        if pos in picked_indices:
-            # fallback: find next unused index
-            cursor = pos
-            while cursor < len(tail) and cursor in picked_indices:
-                cursor += 1
-            if cursor >= len(tail):
-                cursor = pos
-                while cursor >= 0 and cursor in picked_indices:
-                    cursor -= 1
-            if cursor < 0 or cursor >= len(tail):
-                continue
-            pos = cursor
-        picked_indices.add(pos)
+    if tail_slots > 0 and tail:
+        if len(tail) <= tail_slots:
+            selected.extend(tail)
+        else:
+            for i in range(tail_slots):
+                pos = int(((i + 0.5) * len(tail)) / tail_slots)
+                pos = max(0, min(len(tail) - 1, pos))
+                if pos in picked_indices:
+                    cursor = pos
+                    while cursor < len(tail) and cursor in picked_indices:
+                        cursor += 1
+                    if cursor >= len(tail):
+                        cursor = pos
+                        while cursor >= 0 and cursor in picked_indices:
+                            cursor -= 1
+                    if cursor < 0 or cursor >= len(tail):
+                        continue
+                    pos = cursor
+                picked_indices.add(pos)
+            for idx in sorted(picked_indices):
+                selected.append(tail[idx])
 
-    for idx in sorted(picked_indices):
-        selected.append(tail[idx])
-    return selected[:limit]
+    selected = selected[:effective_limit]
+    selected_docs = 0
+    for topic in selected:
+        try:
+            selected_docs += max(0, int(topic.get("count") or 0))
+        except (TypeError, ValueError):
+            continue
+
+    actual_diversity_size = max(0, len(selected) - min(head_size, len(selected)))
+    return selected, {
+        "configured_limit": int(limit),
+        "effective_limit": len(selected),
+        "coverage_target": float(coverage_target),
+        "selected_docs": int(selected_docs),
+        "total_docs": int(total_docs),
+        "coverage_ratio": float(selected_docs / total_docs) if total_docs else 0.0,
+        "head_size": min(head_size, len(selected)),
+        "diversity_size": int(actual_diversity_size),
+        "coverage_head_size": int(coverage_head_size),
+    }
+
+
+def _resolve_effective_topic_sample_size(requested_sample_size: int, selected_topic_count: int) -> int:
+    sample_size = max(1, int(requested_sample_size))
+    if selected_topic_count >= 120:
+        return min(sample_size, 2)
+    if selected_topic_count >= 80:
+        return min(sample_size, 3)
+    return sample_size
 
 
 def _default_paths(topic: str, start_date: str, end_date: str = None, bucket_topic: Optional[str] = None) -> Dict[str, Path]:
@@ -551,9 +729,9 @@ def _ensure_fetch_data(topic: str, start_date: str, end_date: str, logger, bucke
     return bool(success)
 
 
-def _load_and_merge_data(fetch_dir: Path, logger) -> List[str]:
+def _load_and_merge_data(fetch_dir: Path, logger) -> List[Tuple[str, str]]:
     """
-    从fetch目录读取所有数据并合并
+    从fetch目录读取所有数据并合并，保留文本与日期
     优先读取总体.jsonl，其次合并各渠道数据
     """
     if not fetch_dir.exists():
@@ -569,9 +747,9 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> List[str]:
                 log_skip(logger, "总体数据为空，尝试渠道文件", "TopicBertopic")
             else:
                 log_success(logger, f"读取总体数据: {len(df)}条", "TopicBertopic")
-                texts = _extract_texts_from_df(df, logger, "总体数据")
-                if texts:
-                    return texts
+                records = _extract_records_from_df(df, logger, "总体数据")
+                if records:
+                    return records
         except MemoryError:
             try:
                 del df
@@ -579,9 +757,9 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> List[str]:
                 pass
             gc.collect()
             log_skip(logger, f"总体数据过大，切换流式读取: {overall_file}", "TopicBertopic")
-            texts = _read_jsonl_contents_stream(overall_file, logger)
-            if texts:
-                return texts
+            records = _read_jsonl_records_stream(overall_file, logger)
+            if records:
+                return records
         except Exception as e:
             log_error(logger, f"读取总体数据失败: {e}", "TopicBertopic")
 
@@ -593,16 +771,22 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> List[str]:
 
     log_success(logger, f"找到{len(jsonl_files)}个渠道文件，开始合并", "TopicBertopic")
 
-    merged_texts: List[str] = []
-    seen: set = set()
+    merged_records: List[Tuple[str, str]] = []
+    record_index: Dict[str, int] = {}
 
-    def _append_unique(items: Iterable[str]) -> int:
+    def _append_unique(items: Iterable[Tuple[str, str]]) -> int:
         appended = 0
-        for text in items:
-            if text in seen:
+        for text, date_text in items:
+            if text in record_index:
+                idx = record_index[text]
+                existing_text, existing_date = merged_records[idx]
+                merged_records[idx] = (
+                    existing_text,
+                    _prefer_earlier_date(existing_date, date_text),
+                )
                 continue
-            seen.add(text)
-            merged_texts.append(text)
+            record_index[text] = len(merged_records)
+            merged_records.append((text, date_text))
             appended += 1
         return appended
 
@@ -610,13 +794,13 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> List[str]:
         try:
             df = read_jsonl(file_path)
             if not df.empty:
-                texts = _extract_texts_from_df(df, logger, file_path.name)
-                if not texts:
+                records = _extract_records_from_df(df, logger, file_path.name)
+                if not records:
                     continue
-                added = _append_unique(texts)
+                added = _append_unique(records)
                 log_success(
                     logger,
-                    f"读取: {file_path.name} - 原始{len(texts)}条, 新增{added}条",
+                    f"读取: {file_path.name} - 原始{len(records)}条, 新增{added}条",
                     "TopicBertopic",
                 )
         except MemoryError:
@@ -626,23 +810,23 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> List[str]:
                 pass
             gc.collect()
             log_skip(logger, f"文件过大，切换流式读取: {file_path.name}", "TopicBertopic")
-            texts = _read_jsonl_contents_stream(file_path, logger)
-            if texts:
-                added = _append_unique(texts)
+            records = _read_jsonl_records_stream(file_path, logger)
+            if records:
+                added = _append_unique(records)
                 log_success(
                     logger,
-                    f"读取(流式): {file_path.name} - 原始{len(texts)}条, 新增{added}条",
+                    f"读取(流式): {file_path.name} - 原始{len(records)}条, 新增{added}条",
                     "TopicBertopic",
                 )
         except Exception as e:
             log_error(logger, f"读取失败 {file_path.name}: {e}", "TopicBertopic")
 
-    if not merged_texts:
+    if not merged_records:
         log_error(logger, "所有文件读取失败", "TopicBertopic")
         return []
 
-    log_success(logger, f"合并后文本总量: {len(merged_texts)}条", "TopicBertopic")
-    return merged_texts
+    log_success(logger, f"合并后文本总量: {len(merged_records)}条", "TopicBertopic")
+    return merged_records
 
 
 def _load_dict_file(file_path: Path, logger) -> set:
@@ -665,30 +849,543 @@ def _load_dict_file(file_path: Path, logger) -> set:
         return set()
 
 
+def _clean_raw_text_value(value: Any) -> str:
+    """Normalise raw text before semantic encoding or tokenisation."""
+    if value is None or pd.isna(value):
+        return ""
+
+    text = str(value).replace("\x00", " ")
+    text = text.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
+    text = re.sub(r"[\u0000-\u001f\u007f-\u009f]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _normalise_raw_texts(
+    records: Iterable[Tuple[str, str]],
+    logger,
+    total_count: Optional[int] = None,
+) -> Tuple[List[str], List[str]]:
+    """Clean and deduplicate raw texts while keeping natural sentence form."""
+    cleaned_texts: List[str] = []
+    cleaned_dates: List[str] = []
+    seen: Dict[str, int] = {}
+    empty_count = 0
+    duplicate_count = 0
+
+    for i, record in enumerate(records):
+        if isinstance(record, (tuple, list)):
+            value = record[0] if len(record) > 0 else ""
+            raw_date = record[1] if len(record) > 1 else ""
+        else:
+            value = record
+            raw_date = ""
+        cleaned = _clean_raw_text_value(value)
+        if not cleaned:
+            empty_count += 1
+            continue
+        date_text = _extract_date_text(raw_date)
+        if cleaned in seen:
+            duplicate_count += 1
+            idx = seen[cleaned]
+            cleaned_dates[idx] = _prefer_earlier_date(cleaned_dates[idx], date_text)
+            continue
+        seen[cleaned] = len(cleaned_texts)
+        cleaned_texts.append(cleaned)
+        cleaned_dates.append(date_text)
+
+        if (i + 1) % 1000 == 0:
+            if total_count:
+                log_success(logger, f"已清洗原文 {i + 1}/{total_count} 条", "TopicBertopic")
+            else:
+                log_success(logger, f"已清洗原文 {i + 1} 条", "TopicBertopic")
+
+    log_success(logger, f"原文清洗完成，有效文本: {len(cleaned_texts)}", "TopicBertopic")
+    if duplicate_count > 0:
+        log_skip(logger, f"清洗后重复文本已去重: {duplicate_count}条", "TopicBertopic")
+    if empty_count > 0:
+        log_skip(logger, f"清洗后空文本已跳过: {empty_count}条", "TopicBertopic")
+    undated_count = sum(1 for item in cleaned_dates if not item)
+    if undated_count > 0:
+        log_skip(logger, f"缺少日期的文本: {undated_count}条", "TopicBertopic")
+    return cleaned_texts, cleaned_dates
+
+
+def _normalise_label_list(raw: Any) -> List[str]:
+    if not isinstance(raw, list):
+        return []
+    seen: set = set()
+    values: List[str] = []
+    for item in raw:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+    return values
+
+
+def _resolve_prefilter_settings(prompt_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    config = prompt_config if isinstance(prompt_config, dict) else {}
+    return {
+        "enabled": _coerce_bool(
+            config.get("pre_filter_enabled"),
+            DEFAULT_PREFILTER_ENABLED,
+        ),
+        "similarity_floor": _coerce_float(
+            config.get("pre_filter_similarity_floor"),
+            DEFAULT_PREFILTER_SIMILARITY_FLOOR,
+            minimum=0.0,
+            maximum=0.95,
+        ),
+        "max_drop_ratio": _coerce_float(
+            config.get("pre_filter_max_drop_ratio"),
+            DEFAULT_PREFILTER_MAX_DROP_RATIO,
+            minimum=0.0,
+            maximum=0.9,
+        ),
+        "query_hint": str(
+            (config.get("pre_filter_query_hint") if isinstance(config, dict) else "")
+            or DEFAULT_PREFILTER_QUERY_HINT
+        ).strip(),
+        "negative_hint": str(
+            (config.get("pre_filter_negative_hint") if isinstance(config, dict) else "")
+            or DEFAULT_PREFILTER_NEGATIVE_HINT
+        ).strip(),
+    }
+
+
+def _build_prefilter_query_text(topic_name: str, prompt_config: Optional[Dict[str, Any]]) -> str:
+    config = prompt_config if isinstance(prompt_config, dict) else {}
+    seed_rules = _normalise_label_list(
+        config.get("custom_topic_seed_rules", config.get("must_separate_rules", []))
+    )
+    hint = _resolve_prefilter_settings(config)["query_hint"]
+
+    parts = [str(topic_name or "").strip()]
+    if seed_rules:
+        parts.append("相关锚点：" + "；".join(seed_rules))
+    if hint:
+        parts.append("补充相关性说明：" + hint)
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _split_prefilter_hint_values(raw: str) -> List[str]:
+    values: List[str] = []
+    seen: set = set()
+    for item in re.split(r"[\s，,；;、|/]+", str(raw or "").strip()):
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+    return values
+
+
+def _build_topic_hint_phrases(topic_name: str, prompt_config: Optional[Dict[str, Any]]) -> List[str]:
+    config = prompt_config if isinstance(prompt_config, dict) else {}
+    seed_rules = _normalise_label_list(
+        config.get("custom_topic_seed_rules", config.get("must_separate_rules", []))
+    )
+    query_hint = _resolve_prefilter_settings(config)["query_hint"]
+
+    seed_candidates: List[str] = [str(topic_name or "").strip(), *seed_rules]
+    hint_candidates = _split_prefilter_hint_values(query_hint) if query_hint else []
+
+    phrases: List[str] = []
+    seen: set = set()
+
+    def _add_phrase(value: str):
+        phrase = str(value or "").strip()
+        if (
+            len(phrase) < 2
+            or phrase.isdigit()
+            or phrase in TOPIC_HINT_GENERIC_TERMS
+            or phrase in seen
+        ):
+            return
+        seen.add(phrase)
+        phrases.append(phrase)
+
+    for candidate in seed_candidates:
+        _add_phrase(candidate)
+        for token in jieba.lcut(str(candidate or "")):
+            token = str(token or "").strip()
+            if token in TOPIC_HINT_GENERIC_TERMS:
+                continue
+            _add_phrase(token)
+
+    for candidate in hint_candidates:
+        _add_phrase(candidate)
+
+    return phrases
+
+
+def _build_negative_hint_phrases(prompt_config: Optional[Dict[str, Any]]) -> List[str]:
+    negative_hint = _resolve_prefilter_settings(prompt_config)["negative_hint"]
+    if not negative_hint:
+        return []
+
+    phrases: List[str] = []
+    seen: set = set()
+    for candidate in _split_prefilter_hint_values(negative_hint):
+        phrase = str(candidate or "").strip()
+        if len(phrase) < 2 or phrase.isdigit() or phrase in seen:
+            continue
+        seen.add(phrase)
+        phrases.append(phrase)
+    return phrases
+
+
+def _build_topic_stat_relevance_text(
+    topic: Dict[str, Any],
+    topic_samples_by_id: Dict[int, List[str]],
+) -> str:
+    parts: List[str] = []
+    topic_name = str(topic.get("topic_name") or "").strip()
+    if topic_name:
+        parts.append(topic_name)
+
+    keywords = topic.get("keywords")
+    if isinstance(keywords, list):
+        parts.extend(str(item or "").strip() for item in keywords if str(item or "").strip())
+
+    topic_id = topic.get("topic_id")
+    try:
+        topic_id_int = int(topic_id)
+    except (TypeError, ValueError):
+        topic_id_int = None
+
+    if topic_id_int is not None:
+        samples = topic_samples_by_id.get(topic_id_int, [])
+        parts.extend(str(item or "").strip() for item in samples if str(item or "").strip())
+
+    return " ".join(parts).strip()
+
+
+def _build_topic_stat_label_text(topic: Dict[str, Any]) -> str:
+    parts: List[str] = []
+    topic_name = str(topic.get("topic_name") or "").strip()
+    if topic_name:
+        parts.append(topic_name)
+
+    keywords = topic.get("keywords")
+    if isinstance(keywords, list):
+        parts.extend(str(item or "").strip() for item in keywords if str(item or "").strip())
+
+    return " ".join(parts).strip()
+
+
+def _filter_recluster_topic_stats(
+    topic_stats: List[Dict[str, Any]],
+    topic_samples_by_id: Dict[int, List[str]],
+    *,
+    topic_name: str,
+    prompt_config: Optional[Dict[str, Any]],
+    logger,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Drop raw topics that are clearly off-topic before LLM reclustering."""
+    if not topic_stats:
+        return [], []
+
+    negative_phrases = _build_negative_hint_phrases(prompt_config)
+    if not negative_phrases:
+        return list(topic_stats), []
+
+    positive_phrases = _build_topic_hint_phrases(topic_name, prompt_config)
+    filtered_topics: List[Dict[str, Any]] = []
+    dropped_topics: List[Dict[str, Any]] = []
+
+    for topic in topic_stats:
+        relevance_text = _build_topic_stat_relevance_text(topic, topic_samples_by_id)
+        label_text = _build_topic_stat_label_text(topic)
+        if not relevance_text:
+            filtered_topics.append(topic)
+            continue
+
+        negative_matches = [phrase for phrase in negative_phrases if phrase in relevance_text]
+        if not negative_matches:
+            filtered_topics.append(topic)
+            continue
+
+        positive_matches = [phrase for phrase in positive_phrases if phrase in label_text]
+        should_drop = bool(negative_matches) and not positive_matches
+        if not should_drop:
+            filtered_topics.append(topic)
+            continue
+
+        dropped_topics.append(
+            {
+                **topic,
+                "negative_matches": negative_matches,
+                "positive_matches": positive_matches,
+            }
+        )
+
+    if not filtered_topics and dropped_topics:
+        log_skip(
+            logger,
+            "重分类前 raw topic 负向过滤结果为空，已回退为不过滤以避免全量丢失",
+            "TopicBertopic",
+        )
+        return list(topic_stats), []
+
+    if dropped_topics:
+        dropped_docs = sum(int(item.get("count") or 0) for item in dropped_topics)
+        preview = "；".join(
+            f"{str(item.get('topic_name') or '').strip()}({int(item.get('count') or 0)})"
+            for item in dropped_topics[:10]
+        )
+        log_skip(
+            logger,
+            (
+                f"重分类前 raw topic 负向过滤: {len(topic_stats)} -> {len(filtered_topics)}，"
+                f"剔除 {len(dropped_topics)} 个主题 / {dropped_docs} 篇"
+                + (f"，示例: {preview}" if preview else "")
+            ),
+            "TopicBertopic",
+        )
+
+    return filtered_topics, dropped_topics
+
+
+def _load_embedding_model(logger) -> Tuple[SentenceTransformer, str, str, int]:
+    """Load the embedding model once for both relevance filtering and BERTopic."""
+    config = load_bertopic_config()
+    embedding_config = config.get("embedding", {})
+    model_name = embedding_config.get(
+        "model_name",
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    )
+    requested_device = str(embedding_config.get("device", "cpu") or "cpu").strip().lower()
+    batch_size = int(embedding_config.get("batch_size") or 32)
+
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError(f"无法导入 torch: {exc}") from exc
+
+    if requested_device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device = requested_device
+
+    if device == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("配置要求 CUDA，但当前环境未检测到可用 GPU")
+        props = torch.cuda.get_device_properties(0)
+        gpu_mem_gb = props.total_memory / (1024 ** 3)
+        gpu_name = torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else "Unknown GPU"
+        if gpu_mem_gb <= 8.5 and "bge-large" in str(model_name).lower() and batch_size > 8:
+            log_skip(
+                logger,
+                f"检测到 {gpu_name} 显存约 {gpu_mem_gb:.1f}GB，已将大模型嵌入批大小 {batch_size} -> 8",
+                "TopicBertopic",
+            )
+            batch_size = 8
+        log_success(logger, f"使用本地 CUDA 嵌入推理: {gpu_name}", "TopicBertopic")
+
+    log_success(
+        logger,
+        f"加载嵌入模型: {model_name} (device={device}, batch_size={batch_size})",
+        "TopicBertopic",
+    )
+    embedding_model = SentenceTransformer(model_name, device=device)
+    return embedding_model, str(model_name), str(device), int(batch_size)
+
+
+def _encode_text_embeddings(
+    texts: List[str],
+    embedding_model: SentenceTransformer,
+    *,
+    batch_size: int,
+    logger,
+    log_label: str,
+) -> np.ndarray:
+    """Encode texts in chunks so long runs can report progress."""
+    if not texts:
+        return np.empty((0, 0), dtype=np.float32)
+
+    total = len(texts)
+    chunk_size = max(batch_size * 32, 256)
+    chunk_size = min(chunk_size, 2048)
+    chunks: List[np.ndarray] = []
+
+    for start in range(0, total, chunk_size):
+        stop = min(total, start + chunk_size)
+        chunk_embeddings = embedding_model.encode(
+            texts[start:stop],
+            batch_size=batch_size,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        chunks.append(np.asarray(chunk_embeddings, dtype=np.float32))
+        log_success(
+            logger,
+            f"{log_label}: 已编码 {stop}/{total} 条",
+            "TopicBertopic",
+        )
+
+    return np.vstack(chunks) if chunks else np.empty((0, 0), dtype=np.float32)
+
+
+def _apply_topic_relevance_prefilter(
+    raw_texts: List[str],
+    raw_embeddings: np.ndarray,
+    topic_name: str,
+    prompt_config: Optional[Dict[str, Any]],
+    embedding_model: SentenceTransformer,
+    *,
+    raw_dates: Optional[List[str]] = None,
+    batch_size: int,
+    logger,
+) -> Tuple[List[str], np.ndarray, List[str]]:
+    """Filter obviously off-topic documents before BERTopic clustering."""
+    if not raw_texts or raw_embeddings.size == 0:
+        return raw_texts, raw_embeddings, list(raw_dates or [])
+
+    normalized_dates = list(raw_dates or [])
+    if len(normalized_dates) != len(raw_texts):
+        normalized_dates = [""] * len(raw_texts)
+
+    settings = _resolve_prefilter_settings(prompt_config)
+    if not settings["enabled"]:
+        log_skip(logger, "专题相关性预过滤已关闭，保留全部文档", "TopicBertopic")
+        return raw_texts, raw_embeddings, normalized_dates
+
+    if len(raw_texts) < MIN_PREFILTER_DOCS:
+        log_skip(
+            logger,
+            f"文本量较小({len(raw_texts)}条)，跳过专题相关性预过滤",
+            "TopicBertopic",
+        )
+        return raw_texts, raw_embeddings, normalized_dates
+
+    query_text = _build_prefilter_query_text(topic_name, prompt_config)
+    if not query_text:
+        log_skip(logger, "未生成专题相关性查询文本，跳过预过滤", "TopicBertopic")
+        return raw_texts, raw_embeddings, normalized_dates
+
+    query_embeddings = _encode_text_embeddings(
+        [query_text],
+        embedding_model,
+        batch_size=max(1, min(batch_size, 8)),
+        logger=logger,
+        log_label="专题相关性查询嵌入",
+    )
+    if query_embeddings.size == 0:
+        log_skip(logger, "查询嵌入生成失败，跳过预过滤", "TopicBertopic")
+        return raw_texts, raw_embeddings, normalized_dates
+
+    query_embedding = np.asarray(query_embeddings[0], dtype=np.float32)
+    scores = np.asarray(np.matmul(raw_embeddings, query_embedding), dtype=np.float32)
+    if scores.size == 0:
+        return raw_texts, raw_embeddings, normalized_dates
+
+    similarity_floor = float(settings["similarity_floor"])
+    max_drop_ratio = float(settings["max_drop_ratio"])
+    quantile_threshold = float(np.quantile(scores, max_drop_ratio)) if scores.size > 1 else similarity_floor
+    threshold = min(similarity_floor, quantile_threshold)
+
+    keep_mask = scores >= threshold
+    hint_phrases = _build_topic_hint_phrases(topic_name, prompt_config)
+    negative_hint_phrases = _build_negative_hint_phrases(prompt_config)
+    anchor_hit_mask = np.zeros(len(raw_texts), dtype=bool)
+    negative_hit_mask = np.zeros(len(raw_texts), dtype=bool)
+    strict_no_anchor_threshold = threshold
+    no_anchor_strict_drop = 0
+    if hint_phrases:
+        anchor_hit_mask = np.asarray(
+            [any(phrase in text for phrase in hint_phrases) for text in raw_texts],
+            dtype=bool,
+        )
+        anchor_hit_count = int(np.count_nonzero(anchor_hit_mask))
+        if anchor_hit_count >= MIN_PREFILTER_ANCHOR_HITS:
+            anchor_scores = scores[anchor_hit_mask]
+            strict_no_anchor_threshold = max(
+                threshold,
+                float(np.quantile(anchor_scores, 0.10)),
+            )
+            no_anchor_mask = ~anchor_hit_mask
+            strict_keep_mask = scores >= strict_no_anchor_threshold
+            no_anchor_strict_drop = int(
+                np.count_nonzero(keep_mask & no_anchor_mask & ~strict_keep_mask)
+            )
+            keep_mask[no_anchor_mask] = strict_keep_mask[no_anchor_mask]
+
+    hard_negative_drop = 0
+    if negative_hint_phrases:
+        negative_hit_mask = np.asarray(
+            [any(phrase in text for phrase in negative_hint_phrases) for text in raw_texts],
+            dtype=bool,
+        )
+        hard_negative_mask = negative_hit_mask & ~anchor_hit_mask
+        hard_negative_drop = int(np.count_nonzero(keep_mask & hard_negative_mask))
+        keep_mask[hard_negative_mask] = False
+
+    rescued_by_hint = 0
+    if hint_phrases:
+        for idx, text in enumerate(raw_texts):
+            if keep_mask[idx]:
+                continue
+            if any(phrase in text for phrase in hint_phrases):
+                keep_mask[idx] = True
+                rescued_by_hint += 1
+
+    keep_count = int(np.count_nonzero(keep_mask))
+    drop_count = int(len(raw_texts) - keep_count)
+    if keep_count < max(20, int(len(raw_texts) * 0.2)):
+        log_skip(
+            logger,
+            (
+                "专题相关性预过滤结果过于激进，已回退为保留全部文档 "
+                f"(threshold={threshold:.4f}, keep={keep_count}, total={len(raw_texts)})"
+            ),
+            "TopicBertopic",
+        )
+        return raw_texts, raw_embeddings, normalized_dates
+
+    filtered_texts = [text for text, keep in zip(raw_texts, keep_mask) if bool(keep)]
+    filtered_embeddings = np.asarray(raw_embeddings[keep_mask], dtype=np.float32)
+    filtered_dates = [date for date, keep in zip(normalized_dates, keep_mask) if bool(keep)]
+
+    log_success(
+        logger,
+        (
+            "专题相关性预过滤完成: "
+            f"threshold={threshold:.4f}, keep={keep_count}, drop={drop_count}, "
+            f"anchor_hits={int(np.count_nonzero(anchor_hit_mask))}, "
+            f"negative_hits={int(np.count_nonzero(negative_hit_mask))}, "
+            f"strict_no_anchor_threshold={strict_no_anchor_threshold:.4f}, "
+            f"no_anchor_strict_drop={no_anchor_strict_drop}, "
+            f"hard_negative_drop={hard_negative_drop}, "
+            f"rescue_by_hint={rescued_by_hint}, score[min/median/max]="
+            f"{float(scores.min()):.4f}/{float(np.median(scores)):.4f}/{float(scores.max()):.4f}"
+        ),
+        "TopicBertopic",
+    )
+    return filtered_texts, filtered_embeddings, filtered_dates
+
+
 def _preprocess_text(
     texts: Iterable[str],
     user_words: set,
     stop_words: set,
     logger,
     total_count: Optional[int] = None,
-) -> List[str]:
+) -> Tuple[List[str], List[int]]:
     """文本预处理和分词"""
     # 添加用户词典
     for word in user_words:
         jieba.add_word(word)
 
-    processed_texts = []
+    processed_texts: List[str] = []
+    kept_indices: List[int] = []
     truncated_count = 0
     cleaned_empty_count = 0
     for i, text in enumerate(texts):
-        if text is None or pd.isna(text):
-            continue
-
-        # 清理文本
-        text = str(text).replace("\x00", " ")
-        text = text.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
-        text = re.sub(r'[\u0000-\u001f\u007f-\u009f]+', ' ', text)
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = _clean_raw_text_value(text)
         if not text:
             cleaned_empty_count += 1
             continue
@@ -717,6 +1414,7 @@ def _preprocess_text(
 
             if processed:
                 processed_texts.append(processed)
+                kept_indices.append(i)
                 if doc_truncated:
                     truncated_count += 1
 
@@ -739,7 +1437,418 @@ def _preprocess_text(
         )
     if cleaned_empty_count > 0:
         log_skip(logger, f"清洗后空文本已跳过: {cleaned_empty_count}条", "TopicBertopic")
-    return processed_texts
+    return processed_texts, kept_indices
+
+
+def _format_temporal_bucket_label(date_text: str, granularity: str) -> str:
+    raw = _extract_date_text(date_text)
+    if not raw:
+        return str(date_text or "").strip()
+    try:
+        dt = datetime.strptime(raw, "%Y-%m-%d")
+    except Exception:
+        return raw
+    if granularity == "month":
+        return f"{dt.year}年{dt.month}月"
+    if granularity == "week":
+        return f"{dt.month}月{dt.day}日当周"
+    return f"{dt.month}月{dt.day}日"
+
+
+def _sort_date_token(value: str) -> datetime:
+    raw = _extract_date_text(value)
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d")
+    except Exception:
+        return datetime.min
+
+
+def _resolve_temporal_granularity(date_texts: List[str]) -> str:
+    unique_dates = sorted({_extract_date_text(item) for item in date_texts if _extract_date_text(item)})
+    unique_count = len(unique_dates)
+    if unique_count <= 120:
+        return "day"
+    if unique_count <= 420:
+        return "week"
+    return "month"
+
+
+def _bucket_temporal_date(date_text: str, granularity: str) -> str:
+    raw = _extract_date_text(date_text)
+    if not raw:
+        return ""
+    try:
+        dt = datetime.strptime(raw, "%Y-%m-%d")
+    except Exception:
+        return ""
+    if granularity == "week":
+        dt = dt - timedelta(days=dt.weekday())
+    elif granularity == "month":
+        dt = dt.replace(day=1)
+    return dt.strftime("%Y-%m-%d")
+
+
+def _prepare_temporal_dates(date_texts: List[str]) -> Tuple[List[str], Dict[str, Any]]:
+    granularity = _resolve_temporal_granularity(date_texts)
+    bucketed_dates = [_bucket_temporal_date(item, granularity) for item in date_texts]
+    unique_raw_dates = sorted({_extract_date_text(item) for item in date_texts if _extract_date_text(item)})
+    unique_bucket_dates = sorted({item for item in bucketed_dates if item}, key=_sort_date_token)
+    aggregation_label = {"day": "日", "week": "周", "month": "月"}.get(granularity, "日")
+    return bucketed_dates, {
+        "aggregation": granularity,
+        "aggregation_label": aggregation_label,
+        "original_date_count": len(unique_raw_dates),
+        "bucket_count": len(unique_bucket_dates),
+        "bucket_start": unique_bucket_dates[0] if unique_bucket_dates else "",
+        "bucket_end": unique_bucket_dates[-1] if unique_bucket_dates else "",
+    }
+
+
+def _extract_numeric_topic_id(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    match = re.search(r"-?\d+", str(value).strip())
+    if not match:
+        return None
+    try:
+        return int(match.group(0))
+    except Exception:
+        return None
+
+
+def _load_json_if_exists(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def _load_llm_cluster_mapping(cluster_payload: Any) -> Tuple[Dict[int, str], Dict[str, Dict[str, Any]]]:
+    topic_to_cluster: Dict[int, str] = {}
+    cluster_meta: Dict[str, Dict[str, Any]] = {}
+
+    if isinstance(cluster_payload, dict):
+        items = list(cluster_payload.items())
+    elif isinstance(cluster_payload, list):
+        items = [(str(index + 1), item) for index, item in enumerate(cluster_payload)]
+    else:
+        items = []
+
+    for fallback_name, raw in items:
+        if not isinstance(raw, dict):
+            continue
+        cluster_name = str(
+            raw.get("主题命名") or raw.get("cluster_name") or raw.get("name") or fallback_name
+        ).strip()
+        if not cluster_name:
+            continue
+
+        original_topics_raw = raw.get("原始主题集合")
+        if not isinstance(original_topics_raw, list):
+            original_topics_raw = raw.get("topics")
+        if not isinstance(original_topics_raw, list):
+            original_topics_raw = []
+
+        original_topics = [str(item).strip() for item in original_topics_raw if str(item or "").strip()]
+        cluster_meta[cluster_name] = {
+            "name": cluster_name,
+            "title": cluster_name,
+            "description": str(raw.get("主题描述") or raw.get("description") or "").strip(),
+            "original_topics": original_topics,
+            "declared_doc_count": _coerce_int(raw.get("文档数"), 0, minimum=0),
+        }
+        for topic_name in original_topics:
+            topic_id = _extract_numeric_topic_id(topic_name)
+            if topic_id is not None:
+                topic_to_cluster[topic_id] = cluster_name
+
+    return topic_to_cluster, cluster_meta
+
+
+def _build_time_nodes_from_series(series: List[Dict[str, Any]], granularity: str) -> List[Dict[str, Any]]:
+    node_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    for item in series:
+        theme_name = str(item.get("title") or item.get("name") or "").strip()
+        if not theme_name:
+            continue
+        points = item.get("points")
+        if not isinstance(points, list):
+            continue
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            date_text = _extract_date_text(point.get("date"))
+            count = _coerce_int(point.get("count"), 0, minimum=0)
+            if not date_text or count <= 0:
+                continue
+            node_counts[date_text][theme_name] += count
+
+    nodes: List[Dict[str, Any]] = []
+    for date_text in sorted(node_counts.keys(), key=_sort_date_token):
+        theme_rows = sorted(
+            [{"name": name, "value": value} for name, value in node_counts[date_text].items() if value > 0],
+            key=lambda item: item["value"],
+            reverse=True,
+        )
+        if not theme_rows:
+            continue
+        total = sum(item["value"] for item in theme_rows)
+        top_theme = theme_rows[0]
+        nodes.append(
+            {
+                "date": date_text,
+                "label": _format_temporal_bucket_label(date_text, granularity),
+                "total": total,
+                "topTheme": top_theme["name"],
+                "topValue": top_theme["value"],
+                "themes": theme_rows,
+            }
+        )
+    return nodes
+
+
+def _build_temporal_payload(
+    topic_model: BERTopic,
+    vectorizer_texts: List[str],
+    topic_assignments: List[int],
+    raw_dates: List[str],
+    topic_stats: List[Dict[str, Any]],
+    topic_name: str,
+    start_date: str,
+    end_date: str,
+    logger,
+    llm_cluster_payload: Any = None,
+) -> Optional[Dict[str, Any]]:
+    if not vectorizer_texts or not raw_dates:
+        log_skip(logger, "缺少日期信息，跳过 BERTopic temporal 输出", "TopicBertopic")
+        return None
+    if len(vectorizer_texts) != len(topic_assignments) or len(raw_dates) != len(vectorizer_texts):
+        log_skip(logger, "文档/主题/日期长度不一致，跳过 BERTopic temporal 输出", "TopicBertopic")
+        return None
+
+    dated_docs: List[str] = []
+    dated_topics: List[int] = []
+    dated_dates: List[str] = []
+    undated_documents = 0
+    outlier_documents = 0
+
+    for doc_text, topic_value, date_text in zip(vectorizer_texts, topic_assignments, raw_dates):
+        normalized_date = _extract_date_text(date_text)
+        if not normalized_date:
+            undated_documents += 1
+            continue
+        topic_id = _extract_numeric_topic_id(topic_value)
+        if topic_id is None or topic_id == -1:
+            outlier_documents += 1
+            continue
+        dated_docs.append(doc_text)
+        dated_topics.append(topic_id)
+        dated_dates.append(normalized_date)
+
+    if len(dated_docs) < 20:
+        log_skip(
+            logger,
+            f"带日期且非离群的文档过少({len(dated_docs)}条)，跳过 BERTopic temporal 输出",
+            "TopicBertopic",
+        )
+        return None
+
+    bucketed_dates, bucket_meta = _prepare_temporal_dates(dated_dates)
+    log_success(
+        logger,
+        (
+            f"生成 BERTopic temporal 输出: 带日期文档 {len(dated_docs)} 条, "
+            f"{bucket_meta['bucket_count']} 个{bucket_meta['aggregation_label']}级时间桶"
+        ),
+        "TopicBertopic",
+    )
+
+    temporal_timestamps = [pd.Timestamp(item) for item in bucketed_dates]
+    temporal_df = topic_model.topics_over_time(
+        dated_docs,
+        temporal_timestamps,
+        topics=dated_topics,
+    )
+    if temporal_df is None or temporal_df.empty:
+        log_skip(logger, "BERTopic topics_over_time 结果为空，跳过 temporal 输出", "TopicBertopic")
+        return None
+
+    topic_name_map = {
+        _coerce_int(item.get("topic_id"), -999999): str(item.get("topic_name") or f"主题{item.get('topic_id')}")
+        for item in topic_stats
+        if isinstance(item, dict) and item.get("topic_id") is not None
+    }
+
+    raw_series_map: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    raw_topic_totals: Dict[int, int] = defaultdict(int)
+    bucket_totals: Dict[str, int] = defaultdict(int)
+
+    for row in temporal_df.itertuples(index=False):
+        topic_id = _extract_numeric_topic_id(getattr(row, "Topic", None))
+        if topic_id is None or topic_id == -1:
+            continue
+        timestamp_value = getattr(row, "Timestamp", None)
+        if isinstance(timestamp_value, pd.Timestamp):
+            bucket_date = timestamp_value.strftime("%Y-%m-%d")
+        else:
+            bucket_date = _extract_date_text(timestamp_value)
+        count = _coerce_int(getattr(row, "Frequency", 0), 0, minimum=0)
+        if not bucket_date or count <= 0:
+            continue
+        words_value = getattr(row, "Words", "")
+        words_text = "" if words_value is None or pd.isna(words_value) else str(words_value)
+        words = [item.strip() for item in words_text.split(",") if item and item.strip()]
+        raw_series_map[topic_id].append(
+            {
+                "date": bucket_date,
+                "label": _format_temporal_bucket_label(bucket_date, bucket_meta["aggregation"]),
+                "count": count,
+                "words": words[:5],
+            }
+        )
+        raw_topic_totals[topic_id] += count
+        bucket_totals[bucket_date] += count
+
+    raw_series: List[Dict[str, Any]] = []
+    for topic_id, points in raw_series_map.items():
+        points.sort(key=lambda item: _sort_date_token(item.get("date", "")))
+        raw_series.append(
+            {
+                "topic_id": topic_id,
+                "name": topic_name_map.get(topic_id, f"主题{topic_id}"),
+                "title": topic_name_map.get(topic_id, f"主题{topic_id}"),
+                "total_count": raw_topic_totals.get(topic_id, 0),
+                "points": points,
+            }
+        )
+    raw_series.sort(key=lambda item: item.get("total_count", 0), reverse=True)
+
+    raw_time_nodes = _build_time_nodes_from_series(raw_series, bucket_meta["aggregation"])
+    raw_bucket_totals = [
+        {
+            "date": date_text,
+            "label": _format_temporal_bucket_label(date_text, bucket_meta["aggregation"]),
+            "count": bucket_totals[date_text],
+        }
+        for date_text in sorted(bucket_totals.keys(), key=_sort_date_token)
+    ]
+
+    llm_topic_map, llm_cluster_meta = _load_llm_cluster_mapping(llm_cluster_payload)
+    llm_cluster_points: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    llm_mapped_documents = 0
+
+    for item in raw_series:
+        topic_id = _extract_numeric_topic_id(item.get("topic_id"))
+        if topic_id is None:
+            continue
+        cluster_name = llm_topic_map.get(topic_id)
+        if not cluster_name:
+            continue
+        for point in item.get("points") or []:
+            if not isinstance(point, dict):
+                continue
+            date_text = _extract_date_text(point.get("date"))
+            count = _coerce_int(point.get("count"), 0, minimum=0)
+            if not date_text or count <= 0:
+                continue
+            llm_cluster_points[cluster_name][date_text] += count
+            llm_mapped_documents += count
+
+    llm_cluster_series: List[Dict[str, Any]] = []
+    for cluster_name, date_counts in llm_cluster_points.items():
+        meta = llm_cluster_meta.get(cluster_name, {})
+        points = [
+            {
+                "date": date_text,
+                "label": _format_temporal_bucket_label(date_text, bucket_meta["aggregation"]),
+                "count": count,
+            }
+            for date_text, count in sorted(date_counts.items(), key=lambda item: _sort_date_token(item[0]))
+            if count > 0
+        ]
+        total_count = sum(point["count"] for point in points)
+        if total_count <= 0:
+            continue
+        llm_cluster_series.append(
+            {
+                "name": cluster_name,
+                "title": str(meta.get("title") or cluster_name).strip() or cluster_name,
+                "description": str(meta.get("description") or "").strip(),
+                "original_topics": meta.get("original_topics") or [],
+                "declared_doc_count": _coerce_int(meta.get("declared_doc_count"), 0, minimum=0),
+                "total_count": total_count,
+                "points": points,
+            }
+        )
+    llm_cluster_series.sort(key=lambda item: item.get("total_count", 0), reverse=True)
+
+    llm_time_nodes = _build_time_nodes_from_series(llm_cluster_series, bucket_meta["aggregation"])
+    heatmap_dates = [item.get("date") for item in llm_time_nodes if str(item.get("date") or "").strip()]
+    heatmap_themes = [str(item.get("title") or item.get("name") or "").strip() for item in llm_cluster_series]
+    heatmap_matrix: List[List[int]] = []
+    for item in llm_cluster_series:
+        point_map = {
+            _extract_date_text(point.get("date")): _coerce_int(point.get("count"), 0, minimum=0)
+            for point in (item.get("points") or [])
+            if isinstance(point, dict)
+        }
+        heatmap_matrix.append([point_map.get(date_text, 0) for date_text in heatmap_dates])
+
+    total_temporal_documents = sum(item.get("count", 0) for item in raw_bucket_totals)
+    overview = {
+        "mode": "native_topics_over_time",
+        "aggregation": bucket_meta["aggregation"],
+        "aggregationLabel": bucket_meta["aggregation_label"],
+        "bucketCount": bucket_meta["bucket_count"],
+        "days": bucket_meta["bucket_count"],
+        "description": f"基于 BERTopic 原生 topics_over_time 按{bucket_meta['aggregation_label']}聚合主题热度。",
+        "rangeStart": bucket_meta["bucket_start"],
+        "rangeEnd": bucket_meta["bucket_end"],
+        "totalTemporalDocs": total_temporal_documents,
+        "totalMappedDocs": llm_mapped_documents if llm_cluster_series else total_temporal_documents,
+    }
+
+    return {
+        "topic": topic_name,
+        "date_range": f"{start_date}_{end_date}",
+        "overview": overview,
+        "meta": {
+            "source": "bertopic.topics_over_time",
+            "aggregation": bucket_meta["aggregation"],
+            "aggregation_label": bucket_meta["aggregation_label"],
+            "original_date_count": bucket_meta["original_date_count"],
+            "bucket_count": bucket_meta["bucket_count"],
+            "bucket_start": bucket_meta["bucket_start"],
+            "bucket_end": bucket_meta["bucket_end"],
+            "input_documents": len(vectorizer_texts),
+            "undated_documents": undated_documents,
+            "outlier_documents": outlier_documents,
+            "temporal_documents": total_temporal_documents,
+            "raw_topic_count": len(raw_series),
+            "llm_cluster_count": len(llm_cluster_series),
+            "llm_mapped_documents": llm_mapped_documents,
+            "llm_coverage_rate": round(llm_mapped_documents / max(1, total_temporal_documents), 4),
+        },
+        "time_nodes": llm_time_nodes if llm_time_nodes else raw_time_nodes,
+        "raw_topics": {
+            "series": raw_series,
+            "time_nodes": raw_time_nodes,
+            "bucket_totals": raw_bucket_totals,
+        },
+        "llm_clusters": {
+            "series": llm_cluster_series,
+            "time_nodes": llm_time_nodes,
+            "heatmap": {
+                "dates": heatmap_dates,
+                "themes": heatmap_themes,
+                "matrix": heatmap_matrix,
+            },
+        },
+    }
 
 
 class _SafeFormatDict(dict):
@@ -989,7 +2098,10 @@ def _append_drop_instruction(prompt: str, focus_topic: str, drop_rule_prompt: st
 
 
 def _run_bertopic(
-    texts: List[str],
+    raw_texts: List[str],
+    vectorizer_texts: List[str],
+    raw_embeddings: np.ndarray,
+    raw_dates: List[str],
     topic_name: str,
     start_date: str,
     end_date: str,
@@ -997,6 +2109,7 @@ def _run_bertopic(
     logger,
     prompt_config: Optional[Dict[str, Any]] = None,
     run_params: Optional[Dict[str, Any]] = None,
+    embedding_model: Optional[SentenceTransformer] = None,
 ) -> bool:
     """运行BERTopic主题分析"""
     try:
@@ -1008,7 +2121,7 @@ def _run_bertopic(
 
         # 动态调整配置：根据数据量自动优化 min_cluster_size
         # 策略倾向于“保留更多可交给 LLM 合并的细粒度主题”，避免过早合并。
-        n_docs = len(texts)
+        n_docs = len(vectorizer_texts)
         if n_docs >= 2000:
             current_min_cluster = int(hdbscan_params["min_cluster_size"])
             # 仅在当前设置较小（默认值附近）时触发自动调整
@@ -1048,78 +2161,53 @@ def _run_bertopic(
             "TopicBertopic",
         )
 
-        # 设置BERTopic参数
-        vectorizer_model = CountVectorizer(
-            stop_words=None,  # 已在前端处理停用词
-            ngram_range=(
-                int(vectorizer_params["ngram_min"]),
-                int(vectorizer_params["ngram_max"]),
-            ),
-            min_df=vectorizer_params["min_df"],
-            max_df=vectorizer_params["max_df"]
-        )
-
-        umap_model = UMAP(
-            n_neighbors=int(umap_params["n_neighbors"]),
-            n_components=int(umap_params["n_components"]),
-            min_dist=float(umap_params["min_dist"]),
-            metric=str(umap_params["metric"]),
-            random_state=int(umap_params["random_state"]),
-            low_memory=True,
-            n_jobs=1,
-        )
-
-        hdbscan_model = HDBSCAN(
-            min_cluster_size=int(hdbscan_params["min_cluster_size"]),
-            min_samples=int(hdbscan_params["min_samples"]),
-            metric=str(hdbscan_params["metric"]),
-            cluster_selection_method=str(hdbscan_params["cluster_selection_method"])
-        )
-
-        # 加载嵌入模型配置
-        try:
-            config = load_bertopic_config()
-            embedding_config = config.get("embedding", {})
-            model_name = embedding_config.get("model_name", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-            requested_device = str(embedding_config.get("device", "cpu") or "cpu").strip().lower()
-            batch_size = int(embedding_config.get("batch_size") or 32)
-            try:
-                import torch
-            except Exception as exc:
-                raise RuntimeError(f"无法导入 torch: {exc}")
-
-            if requested_device == "auto":
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-            else:
-                device = requested_device
-
-            if device == "cuda":
-                if not torch.cuda.is_available():
-                    raise RuntimeError("配置要求 CUDA，但当前环境未检测到可用 GPU")
-                gpu_name = torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else "Unknown GPU"
-                log_success(logger, f"使用本地 CUDA 嵌入推理: {gpu_name}", "TopicBertopic")
-
-            log_success(
-                logger,
-                f"加载嵌入模型: {model_name} (device={device}, batch_size={batch_size})",
-                "TopicBertopic",
-            )
-            embedding_model = SentenceTransformer(model_name, device=device)
-        except Exception as e:
-            log_error(logger, f"加载本地嵌入模型失败: {e}", "TopicBertopic")
+        if embedding_model is None:
+            log_error(logger, "未提供嵌入模型实例", "TopicBertopic")
+            return False
+        if raw_embeddings.size == 0:
+            log_error(logger, "未提供可用文档嵌入", "TopicBertopic")
             return False
 
-        # 初始化BERTopic
-        topic_model = BERTopic(
-            embedding_model=embedding_model,
-            vectorizer_model=vectorizer_model,
-            umap_model=umap_model,
-            hdbscan_model=hdbscan_model,
-            language="chinese (simplified)",
-            top_n_words=int(bertopic_params["top_n_words"]),
-            calculate_probabilities=bool(bertopic_params["calculate_probabilities"]),
-            verbose=bool(bertopic_params["verbose"])
-        )
+        def _build_topic_model(current_vectorizer_params: Dict[str, Any]) -> BERTopic:
+            vectorizer_model = CountVectorizer(
+                stop_words=None,  # 已在前端处理停用词
+                ngram_range=(
+                    int(current_vectorizer_params["ngram_min"]),
+                    int(current_vectorizer_params["ngram_max"]),
+                ),
+                min_df=current_vectorizer_params["min_df"],
+                max_df=current_vectorizer_params["max_df"],
+            )
+
+            umap_model = UMAP(
+                n_neighbors=int(umap_params["n_neighbors"]),
+                n_components=int(umap_params["n_components"]),
+                min_dist=float(umap_params["min_dist"]),
+                metric=str(umap_params["metric"]),
+                random_state=int(umap_params["random_state"]),
+                low_memory=True,
+                n_jobs=1,
+            )
+
+            hdbscan_model = HDBSCAN(
+                min_cluster_size=int(hdbscan_params["min_cluster_size"]),
+                min_samples=int(hdbscan_params["min_samples"]),
+                metric=str(hdbscan_params["metric"]),
+                cluster_selection_method=str(hdbscan_params["cluster_selection_method"]),
+            )
+
+            return BERTopic(
+                embedding_model=embedding_model,
+                vectorizer_model=vectorizer_model,
+                umap_model=umap_model,
+                hdbscan_model=hdbscan_model,
+                language="chinese (simplified)",
+                top_n_words=int(bertopic_params["top_n_words"]),
+                calculate_probabilities=bool(bertopic_params["calculate_probabilities"]),
+                verbose=bool(bertopic_params["verbose"]),
+            )
+
+        topic_model = _build_topic_model(vectorizer_params)
 
         previous_string_storage = None
         string_storage_changed = False
@@ -1139,7 +2227,25 @@ def _run_bertopic(
         # 训练模型
         log_success(logger, "开始训练BERTopic模型...", "TopicBertopic")
         try:
-            topics, probs = topic_model.fit_transform(texts)
+            try:
+                topics, probs = topic_model.fit_transform(vectorizer_texts, embeddings=raw_embeddings)
+            except ValueError as exc:
+                if "max_df corresponds to < documents than min_df" not in str(exc):
+                    raise
+                fallback_vectorizer_params = dict(vectorizer_params)
+                fallback_vectorizer_params["min_df"] = 1
+                fallback_vectorizer_params["max_df"] = 1.0
+                log_skip(
+                    logger,
+                    (
+                        "预过滤后主题样本过少，触发 CountVectorizer 回退: "
+                        f"min_df {vectorizer_params['min_df']} -> 1, "
+                        f"max_df {vectorizer_params['max_df']} -> 1.0"
+                    ),
+                    "TopicBertopic",
+                )
+                topic_model = _build_topic_model(fallback_vectorizer_params)
+                topics, probs = topic_model.fit_transform(vectorizer_texts, embeddings=raw_embeddings)
         finally:
             if string_storage_changed:
                 try:
@@ -1160,7 +2266,7 @@ def _run_bertopic(
                     "topic_id": int(row['Topic']),
                     "topic_name": str(row['Name']),
                     "count": int(row['Count']),
-                    "frequency": float(row['Count'] / len(texts)),
+                    "frequency": float(row['Count'] / len(vectorizer_texts)),
                     "keywords": topic_keywords,
                 })
 
@@ -1169,7 +2275,7 @@ def _run_bertopic(
 
         topic_sample_size = _resolve_topic_sample_size(prompt_config)
         topic_samples_by_id = _build_topic_doc_samples(
-            texts,
+            raw_texts,
             topics,
             sample_size=topic_sample_size,
             max_chars=DEFAULT_TOPIC_SAMPLE_CHARS,
@@ -1186,7 +2292,7 @@ def _run_bertopic(
             json.dump({
                 "topic": topic_name,
                 "date_range": f"{start_date}_{end_date}",
-                "total_documents": len(texts),
+                "total_documents": len(vectorizer_texts),
                 "topics": topic_stats
             }, f, ensure_ascii=False, indent=2)
 
@@ -1239,12 +2345,17 @@ def _run_bertopic(
             ):
                 for i, (topic_id, embedding) in enumerate(zip(topics, reduced_doc_embeddings)):
                     if topic_id != -1:  # 排除离群点
-                        doc_coords.append({
+                        record = {
                             "doc_id": i,
                             "topic_id": int(topic_id),
                             "x": float(embedding[0]),
                             "y": float(embedding[1]),
-                        })
+                        }
+                        if i < len(raw_dates):
+                            date_text = _extract_date_text(raw_dates[i])
+                            if date_text:
+                                record["date"] = date_text
+                        doc_coords.append(record)
             else:
                 log_skip(logger, "未获取到可用的文档2D坐标，跳过可视化坐标输出", "TopicBertopic")
         except Exception as e:
@@ -1265,9 +2376,28 @@ def _run_bertopic(
         # 4-5. 使用大模型进行主题聚类和生成新关键词
         if topic_stats and len(topic_stats) > 0:
             try:
+                recluster_topic_stats, _ = _filter_recluster_topic_stats(
+                    topic_stats,
+                    topic_samples_by_id,
+                    topic_name=topic_name,
+                    prompt_config=prompt_config,
+                    logger=logger,
+                )
+                if not recluster_topic_stats:
+                    recluster_topic_stats = list(topic_stats)
+
                 topic_limit = _resolve_recluster_topic_limit(prompt_config)
-                target_limit = min(topic_limit, len(topic_stats))
-                topic_stats_for_llm = _select_topics_for_recluster(topic_stats, target_limit)
+                coverage_target = _resolve_recluster_target_coverage(prompt_config)
+                target_limit = min(topic_limit, len(recluster_topic_stats))
+                topic_stats_for_llm, selection_meta = _select_topics_for_recluster_with_metadata(
+                    recluster_topic_stats,
+                    target_limit,
+                    coverage_target,
+                )
+                effective_topic_sample_size = _resolve_effective_topic_sample_size(
+                    topic_sample_size,
+                    len(topic_stats_for_llm),
+                )
 
                 enriched_topic_stats: List[Dict[str, Any]] = []
                 for topic in topic_stats_for_llm:
@@ -1280,19 +2410,36 @@ def _run_bertopic(
                     enriched_topic_stats.append(
                         {
                             **topic,
-                            "samples": samples[:topic_sample_size],
+                            "samples": samples[:effective_topic_sample_size],
                         }
                     )
 
-                if len(topic_stats) > target_limit:
-                    head_size = max(1, int(round(target_limit * 0.7)))
-                    head_size = min(head_size, target_limit)
-                    diversity_size = max(0, target_limit - head_size)
+                total_docs = int(selection_meta.get("total_docs") or 0)
+                selected_docs = int(selection_meta.get("selected_docs") or 0)
+                coverage_ratio = float(selection_meta.get("coverage_ratio") or 0.0)
+                head_size = int(selection_meta.get("head_size") or 0)
+                diversity_size = int(selection_meta.get("diversity_size") or 0)
+                if len(recluster_topic_stats) > len(topic_stats_for_llm):
+                    doc_coverage_text = (
+                        f"{selected_docs}/{total_docs} ({coverage_ratio * 100:.2f}%)"
+                        if total_docs > 0
+                        else "0/0 (0.00%)"
+                    )
                     log_success(
                         logger,
                         (
-                            f"重分类输入主题选择: 总{len(topic_stats)}个, 使用{target_limit}个 "
-                            f"(高频{head_size} + 发散{diversity_size})"
+                            f"重分类输入主题选择: 总{len(recluster_topic_stats)}个, 使用{len(topic_stats_for_llm)}个 "
+                            f"(主题文档覆盖率目标{coverage_target * 100:.2f}%, 实际{doc_coverage_text}, "
+                            f"高频{head_size} + 发散{diversity_size})"
+                        ),
+                        "TopicBertopic",
+                    )
+                if effective_topic_sample_size != topic_sample_size:
+                    log_skip(
+                        logger,
+                        (
+                            f"重分类主题较多({len(topic_stats_for_llm)}个)，"
+                            f"样本文本数 {topic_sample_size} -> {effective_topic_sample_size}"
                         ),
                         "TopicBertopic",
                     )
@@ -1319,6 +2466,23 @@ def _run_bertopic(
                     )
             except Exception as e:
                 log_error(logger, f"大模型聚类失败: {e}", "TopicBertopic")
+
+        temporal_payload = _build_temporal_payload(
+            topic_model,
+            vectorizer_texts,
+            list(topics),
+            raw_dates,
+            topic_stats,
+            topic_name,
+            start_date,
+            end_date,
+            logger,
+            llm_cluster_payload=_load_json_if_exists(output_dir / "4大模型再聚类结果.json"),
+        )
+        if temporal_payload:
+            with open(output_dir / "6主题时间趋势.json", "w", encoding="utf-8") as f:
+                json.dump(temporal_payload, f, ensure_ascii=False, indent=2)
+            log_success(logger, "已保存 BERTopic temporal 结果: 6主题时间趋势.json", "TopicBertopic")
 
         log_success(logger, "BERTopic分析完成", "TopicBertopic")
         return True
@@ -1720,6 +2884,24 @@ def run_topic_bertopic(
         else:
             stop_words = _load_dict_file(paths["stopwords"], logger)
 
+        project_stop_words = {
+            str(item or "").strip()
+            for item in (prompt_config.get("project_stopwords") or [])
+            if str(item or "").strip()
+        }
+        if project_stop_words:
+            before_merge_count = len(stop_words)
+            stop_words.update(project_stop_words)
+            merged_added_count = len(stop_words) - before_merge_count
+            log_success(
+                logger,
+                (
+                    f"加载项目停用词: {len(project_stop_words)}个, "
+                    f"合并新增 {merged_added_count} 个"
+                ),
+                "TopicBertopic",
+            )
+
         # 加载和预处理数据
         texts = _load_and_merge_data(paths["fetch_dir"], logger)
         if not texts:
@@ -1733,19 +2915,63 @@ def run_topic_bertopic(
 
         log_success(logger, f"加载文本数据: {text_count}条", "TopicBertopic")
 
-        # 文本预处理
-        processed_texts = _preprocess_text(
+        raw_texts, raw_dates = _normalise_raw_texts(
             texts,
-            user_words,
-            stop_words,
             logger,
             total_count=text_count,
         )
         del texts
         gc.collect()
+        if not raw_texts:
+            log_error(logger, "原文清洗后没有有效内容", "TopicBertopic")
+            return False
+
+        try:
+            embedding_model, _, _, embedding_batch_size = _load_embedding_model(logger)
+        except Exception as exc:
+            log_error(logger, f"加载本地嵌入模型失败: {exc}", "TopicBertopic")
+            return False
+
+        raw_embeddings = _encode_text_embeddings(
+            raw_texts,
+            embedding_model,
+            batch_size=embedding_batch_size,
+            logger=logger,
+            log_label="原文语义嵌入",
+        )
+        if raw_embeddings.size == 0:
+            log_error(logger, "原文嵌入生成失败", "TopicBertopic")
+            return False
+
+        raw_texts, raw_embeddings, raw_dates = _apply_topic_relevance_prefilter(
+            raw_texts,
+            raw_embeddings,
+            topic_label,
+            prompt_config,
+            embedding_model,
+            raw_dates=raw_dates,
+            batch_size=embedding_batch_size,
+            logger=logger,
+        )
+        if not raw_texts or raw_embeddings.size == 0:
+            log_error(logger, "预过滤后没有可用文本", "TopicBertopic")
+            return False
+
+        # 文本预处理
+        processed_texts, kept_indices = _preprocess_text(
+            raw_texts,
+            user_words,
+            stop_words,
+            logger,
+            total_count=len(raw_texts),
+        )
         if not processed_texts:
             log_error(logger, "文本预处理后没有有效内容", "TopicBertopic")
             return False
+        if len(kept_indices) != len(raw_texts):
+            raw_texts = [raw_texts[idx] for idx in kept_indices]
+            raw_dates = [raw_dates[idx] for idx in kept_indices]
+            raw_embeddings = np.asarray(raw_embeddings[kept_indices], dtype=np.float32)
 
         # 确保输出目录存在
         output_dir = paths["out_analyze"]
@@ -1753,7 +2979,10 @@ def run_topic_bertopic(
 
         # 运行BERTopic分析
         success = _run_bertopic(
+            raw_texts,
             processed_texts,
+            raw_embeddings,
+            raw_dates,
             topic_label,
             start_date,
             end_date,
@@ -1761,6 +2990,7 @@ def run_topic_bertopic(
             logger,
             prompt_config=prompt_config,
             run_params=run_params,
+            embedding_model=embedding_model,
         )
 
         if success:
