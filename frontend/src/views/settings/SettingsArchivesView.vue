@@ -10,17 +10,17 @@
             </div>
             <div class="flex-1">
               <p class="text-xs font-semibold uppercase tracking-[0.38em] text-slate-400">存档工具</p>
-              <h2 class="mt-1 text-2xl font-bold text-slate-900">配置存档导入 / 导出</h2>
+              <h2 class="mt-1 text-2xl font-bold text-slate-900">环境存档导入 / 导出</h2>
             </div>
           </div>
             <div class="ml-0 space-y-3 sm:ml-14 sm:pl-4">
               <p class="text-sm leading-relaxed text-slate-600">
-              一键打包或恢复可迁移的关键配置文件，便于在不同环境间快速迁移、备份恢复或项目初始化。
-              存档聚焦配置，不包含 <code>backend/data</code> 这类项目数据目录。
+              一键打包或恢复当前环境的关键配置与项目数据，便于在不同环境间快速迁移、备份恢复或项目初始化。
+              存档会包含 <code>backend/data</code> 目录中的运行产物与项目存档。
               </p>
             <p class="text-sm leading-relaxed text-slate-500">
               运行时占位文件如 <code>frontend/.env.local</code>、缺失目录和空白 <code>backend/.env</code> 会由根目录
-              <code>run.py</code> 自动补齐；存档主要用于迁移数据库、模型、RAG、Prompt 和热榜过滤等实际设置。
+              <code>run.py</code> 自动补齐；存档主要用于迁移数据库、模型、RAG、Prompt、热榜过滤以及已有项目数据。
             </p>
             <div class="flex flex-wrap gap-3">
               <span class="inline-flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
@@ -44,7 +44,7 @@
               <span>导出存档</span>
             </div>
             <p class="text-sm leading-relaxed text-slate-600">
-              将当前环境的配置文件打包为 ZIP 存档，自动触发浏览器下载，便于迁移或人工备份。
+              将当前环境的配置文件与数据目录打包为 ZIP 存档，自动触发浏览器下载，便于迁移或人工备份。
             </p>
           </header>
 
@@ -71,7 +71,7 @@
             </div>
 
             <div v-if="exportState.included.length > 0" class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 ring-1 ring-inset ring-sky-100">
-              <p class="mb-2 text-xs font-semibold text-sky-800">本次存档包含以下配置根路径：</p>
+              <p class="mb-2 text-xs font-semibold text-sky-800">本次存档包含以下根路径：</p>
               <ul class="space-y-1 text-xs text-sky-700">
                 <li v-for="item in exportState.included" :key="item" class="flex items-start gap-2">
                   <span class="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400"></span>
@@ -113,7 +113,7 @@
               <span>导入存档</span>
             </div>
             <p class="text-sm leading-relaxed text-slate-600">
-              选择之前导出的 ZIP 存档文件并上传，系统将自动解压并恢复相应的配置文件。
+              选择之前导出的 ZIP 存档文件并上传，系统将自动解压并恢复相应的配置文件与数据目录。
             </p>
           </header>
 

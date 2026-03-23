@@ -1,14 +1,14 @@
-"""Utilities for exporting and importing runtime configuration backups.
+"""Utilities for exporting and importing runtime backups.
 
-The backup payload intentionally focuses on migratable configuration assets:
+The backup payload includes both configuration assets and runtime project data:
 - ``config.yaml``
 - ``backend/.env`` (if present)
 - ``backend/configs/``
+- ``backend/data/``
 - ``backend/server_support/hot_overview_filters.yaml`` (if present)
 
 Files that can be regenerated locally, such as ``frontend/.env.local`` or empty
 runtime directories, are handled by ``run.py`` instead of the settings backup.
-Project data under ``backend/data`` is excluded on purpose.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ _BACKUP_ITEMS = [
     ("config.yaml", PROJECT_ROOT / "config.yaml", "file"),
     ("backend/.env", BACKEND_DIR / ".env", "file"),
     ("backend/configs", CONFIGS_DIR, "dir"),
+    ("backend/data", BACKEND_DIR / "data", "dir"),
     (
         "backend/server_support/hot_overview_filters.yaml",
         BACKEND_DIR / "server_support" / "hot_overview_filters.yaml",
@@ -70,7 +71,7 @@ def build_settings_backup() -> Tuple[io.BytesIO, str, Dict[str, object]]:
     """Bundle runtime assets into an in-memory zip archive."""
 
     manifest: Dict[str, object] = {
-        "version": 2,
+        "version": 3,
         "generated_at": _utc_timestamp(),
         "included_roots": [],
         "missing_roots": [],

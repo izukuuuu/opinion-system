@@ -711,9 +711,6 @@ def filter_status_stream():
     return response
 
 
-
-
-
 @app.post("/api/merge")
 def merge_endpoint():
     payload = request.get_json(silent=True) or {}

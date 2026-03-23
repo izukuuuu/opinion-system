@@ -113,9 +113,10 @@ const ensureTopicSelection = () => {
   if (!topicOptions.value.length) return
   const current = String(reportForm.topic || '').trim()
   if (current && topicOptions.value.includes(current)) {
-    return
+    return false
   }
   reportForm.topic = topicOptions.value[0]
+  return true
 }
 
 const changeTopic = (value) => {
@@ -183,6 +184,7 @@ const loadAvailableRange = async (topicOverride = '', { force = false } = {}) =>
 }
 
 const loadTopics = async () => {
+  const previousTopic = String(reportForm.topic || '').trim()
   topicsState.loading = true
   topicsState.error = ''
   try {
@@ -194,7 +196,11 @@ const loadTopics = async () => {
     topicsState.options = databases
       .map((db) => String(db?.name || '').trim())
       .filter((name, index, arr) => name && arr.indexOf(name) === index)
-    ensureTopicSelection()
+    const topicChanged = ensureTopicSelection()
+    const currentTopic = String(reportForm.topic || '').trim()
+    if (!topicChanged && currentTopic && currentTopic === previousTopic) {
+      await refreshTopicContext(currentTopic)
+    }
   } catch (error) {
     topicsState.error = error instanceof Error ? error.message : '加载专题失败'
     topicsState.options = []
@@ -247,9 +253,20 @@ const loadHistory = async (topicOverride = '') => {
       return
     }
 
+    const previousSelectedId = selectedHistoryId.value
     const exists = normalized.some((record) => record.id === selectedHistoryId.value)
     if (!exists) {
       selectedHistoryId.value = normalized[0].id
+    }
+    const shouldSyncForm =
+      topic === String(reportForm.topic || '').trim() &&
+      (
+        !String(reportForm.start || '').trim() ||
+        !String(reportForm.end || reportForm.start || '').trim() ||
+        previousSelectedId !== selectedHistoryId.value
+      )
+    if (shouldSyncForm) {
+      syncFormWithSelectedHistory()
     }
   } catch (error) {
     if (requestId !== historyRequestId) return
@@ -283,10 +300,35 @@ const normalizeRange = (range) => {
   return { topic, start, end }
 }
 
+const hasCompleteRange = (range) => {
+  const normalized = normalizeRange(range)
+  return Boolean(normalized.topic && normalized.start && normalized.end)
+}
+
+const hydrateRangeFromCurrentTopic = async () => {
+  const topic = String(reportForm.topic || '').trim()
+  if (!topic) return normalizeRange(reportForm)
+
+  if (!reportHistory.value.length || historyState.topic !== topic) {
+    await loadHistory(topic)
+  }
+
+  let hydrated = syncFormWithSelectedHistory()
+  if (!hydrated && (availableRange.topic !== topic || !availableRange.start)) {
+    await loadAvailableRange(topic)
+  }
+  if (!hydrated) {
+    applyRangeToForm()
+  }
+
+  return normalizeRange(reportForm)
+}
+
 const currentTimeString = () => new Date().toLocaleString('zh-CN', { hour12: false })
 
 const loadReport = async (rangeOverride = null) => {
-  const { topic, start, end } = normalizeRange(rangeOverride || reportForm)
+  const resolvedRange = rangeOverride ? normalizeRange(rangeOverride) : await hydrateRangeFromCurrentTopic()
+  const { topic, start, end } = resolvedRange
   if (!topic || !start || !end) {
     reportState.error = 'Topic / Start / End 为必填'
     return null
@@ -322,7 +364,9 @@ const loadReport = async (rangeOverride = null) => {
 }
 
 const regenerateReport = async () => {
-  const { topic, start, end } = normalizeRange(reportForm)
+  const { topic, start, end } = hasCompleteRange(reportForm)
+    ? normalizeRange(reportForm)
+    : await hydrateRangeFromCurrentTopic()
   if (!topic || !start || !end) {
     reportState.error = 'Topic / Start / End 为必填'
     return null
