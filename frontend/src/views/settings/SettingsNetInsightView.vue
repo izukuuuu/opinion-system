@@ -154,8 +154,8 @@
         <label class="flex items-center gap-3 rounded-2xl border border-soft bg-base-soft px-4 py-3 text-sm text-secondary cursor-pointer select-none">
           <input v-model="form.headless" type="checkbox" class="rounded border-soft accent-brand-600" />
           <div>
-            <span class="font-medium text-primary">浏览器无头模式</span>
-            <p class="text-xs text-muted mt-0.5">后台采集时不显示浏览器窗口</p>
+            <span class="font-medium text-primary">隐藏浏览器窗口</span>
+            <p class="text-xs text-muted mt-0.5">关闭后会显示浏览器窗口，便于观察登录过程</p>
           </div>
         </label>
         <label class="flex items-center gap-3 rounded-2xl border border-soft bg-base-soft px-4 py-3 text-sm text-secondary cursor-pointer select-none">
@@ -253,9 +253,9 @@ const form = reactive({
   user: '',
   password: '',
   clearPassword: false,
-  headless: true,
+  headless: false,
   noProxy: false,
-  loginTimeoutMs: 90000,
+  loginTimeoutMs: 120000,
   workerIdleSeconds: 90,
   pageSize: 50,
   sort: 'comments_desc',
@@ -286,7 +286,7 @@ async function fetchSettings() {
     form.clearPassword = false
     form.headless = Boolean(runtime.headless)
     form.noProxy = Boolean(runtime.no_proxy)
-    form.loginTimeoutMs = Number(runtime.login_timeout_ms || 90000)
+    form.loginTimeoutMs = Number(runtime.login_timeout_ms || 120000)
     form.workerIdleSeconds = Number(runtime.worker_idle_seconds || 90)
     form.pageSize = Number(runtime.page_size || 50)
     form.sort = String(runtime.sort || 'comments_desc')
@@ -316,7 +316,7 @@ async function submit() {
         clear_password: form.clearPassword,
         headless: form.headless,
         no_proxy: form.noProxy,
-        login_timeout_ms: Number(form.loginTimeoutMs || 90000),
+        login_timeout_ms: Number(form.loginTimeoutMs || 120000),
         worker_idle_seconds: Number(form.workerIdleSeconds || 90),
         page_size: Number(form.pageSize || 50),
         sort: form.sort,

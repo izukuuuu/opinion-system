@@ -17,9 +17,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "pass": "",
     },
     "runtime": {
-        "headless": True,
+        "headless": False,
         "no_proxy": False,
-        "login_timeout_ms": 90000,
+        "login_timeout_ms": 120000,
         "worker_idle_seconds": 90,
         "page_size": 50,
         "sort": "comments_desc",
@@ -65,9 +65,9 @@ def load_netinsight_config() -> Dict[str, Any]:
     runtime = config.get("runtime")
     if not isinstance(runtime, dict):
         runtime = {}
-    runtime["headless"] = bool(runtime.get("headless", True))
+    runtime["headless"] = bool(runtime.get("headless", False))
     runtime["no_proxy"] = bool(runtime.get("no_proxy", False))
-    runtime["login_timeout_ms"] = _safe_int(runtime.get("login_timeout_ms"), 90000, minimum=10000)
+    runtime["login_timeout_ms"] = _safe_int(runtime.get("login_timeout_ms"), 120000, minimum=10000)
     runtime["worker_idle_seconds"] = _safe_int(runtime.get("worker_idle_seconds"), 90, minimum=15)
     runtime["page_size"] = _safe_int(runtime.get("page_size"), 50, minimum=10)
     runtime["sort"] = str(runtime.get("sort") or "comments_desc").strip() or "comments_desc"

@@ -61,6 +61,39 @@
           />
           {{ autoRefresh ? '自动刷新' : '已暂停' }}
         </button>
+        <!-- Login status badge + button -->
+        <div class="flex items-center gap-1.5">
+          <span
+            class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium"
+            :class="{
+              'border-emerald-200 bg-emerald-50 text-emerald-700': loginState.status === 'ok',
+              'border-amber-200 bg-amber-50 text-amber-700': loginState.status === 'logging_in',
+              'border-rose-200 bg-rose-50 text-rose-700': loginState.status === 'failed',
+              'border-slate-200 bg-slate-50 text-slate-500': loginState.status === 'idle' || !loginState.status,
+            }"
+          >
+            <span
+              class="inline-block h-1.5 w-1.5 rounded-full"
+              :class="{
+                'bg-emerald-400': loginState.status === 'ok',
+                'bg-amber-400 animate-pulse': loginState.status === 'logging_in',
+                'bg-rose-400': loginState.status === 'failed',
+                'bg-slate-300': loginState.status === 'idle' || !loginState.status,
+              }"
+            />
+            {{ loginStatusLabel }}
+          </span>
+          <button
+            type="button"
+            class="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
+            :disabled="loginState.status === 'logging_in' || !settingsState.credentials.configured"
+            :title="!settingsState.credentials.configured ? '请先配置账号密码' : ''"
+            @click="triggerLogin"
+          >
+            {{ loginState.status === 'logging_in' ? '登录中…' : '登录' }}
+          </button>
+        </div>
+
         <button
           type="button"
           class="rounded-lg border border-slate-200 p-1.5 text-slate-400 transition hover:bg-slate-100"
@@ -78,6 +111,27 @@
       class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800"
     >
       还没有填写 NetInsight 账号，任务暂时无法运行。点右上角齿轮图标进入设置，填好账号密码再来。
+    </div>
+    <div
+      v-else-if="loginState.status === 'logging_in'"
+      class="border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900"
+    >
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span class="inline-flex items-center gap-2 font-medium">
+          <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+          正在登录 NetInsight
+        </span>
+        <span class="text-amber-800">{{ loginState.step || '等待后台返回进度…' }}</span>
+        <span class="text-amber-700">
+          {{ settingsState.runtime.headless ? '当前为隐藏浏览器窗口模式' : '当前会显示浏览器窗口' }}
+        </span>
+      </div>
+    </div>
+    <div
+      v-else-if="loginState.status === 'failed'"
+      class="border-b border-rose-200 bg-rose-50 px-4 py-2.5 text-xs text-rose-800"
+    >
+      登录失败：{{ loginState.error || '未知错误' }}
     </div>
     <div
       v-else-if="feedback.message"
@@ -551,6 +605,8 @@ const downloadingTaskId = ref('')
 const activeTab = ref('all')
 const expandedTaskId = ref(null)
 const showAdvanced = ref(false)
+const loginState = ref({ status: 'idle', logged_in_at: null, error: null, username: '' })
+const loginPollTimer = ref(null)
 
 const worker = ref({})
 const settingsState = reactive({
@@ -619,6 +675,14 @@ function toggleExpand(id) {
   expandedTaskId.value = expandedTaskId.value === id ? null : id
 }
 
+const loginStatusLabel = computed(() => {
+  const s = loginState.value.status
+  if (s === 'ok') return `已登录${loginState.value.username ? ' · ' + loginState.value.username : ''}`
+  if (s === 'logging_in') return loginState.value.step || '登录中…'
+  if (s === 'failed') return '登录失败'
+  return '未登录'
+})
+
 const workerStatusLabel = computed(() => {
   if (!worker.value?.running) return '离线'
   if (worker.value?.status === 'running') return `运行中${worker.value?.current_task_id ? ` · ${worker.value.current_task_id}` : ''}`
@@ -662,6 +726,63 @@ function resetTaskForm() {
   taskForm.sort = String(settingsState.runtime.sort || 'comments_desc')
   taskForm.infoType = String(settingsState.runtime.info_type || '2')
   taskForm.dedupeByContent = true
+}
+
+async function fetchLoginState() {
+  try {
+    const response = await callApi('/api/netinsight/login', { method: 'GET' })
+    loginState.value = response?.data || { status: 'idle' }
+  } catch {
+    // ignore
+  }
+}
+
+async function triggerLogin() {
+  if (loginState.value.status === 'logging_in') return
+  try {
+    loginState.value = {
+      ...loginState.value,
+      status: 'logging_in',
+      step: '准备启动…',
+      error: null,
+    }
+    const response = await callApi('/api/netinsight/login', { method: 'POST' })
+    loginState.value = response?.data || loginState.value
+    startLoginPoll()
+  } catch (err) {
+    feedback.type = 'error'
+    feedback.message = err instanceof Error ? err.message : '登录请求失败'
+  }
+}
+
+function startLoginPoll() {
+  stopLoginPoll()
+
+  const poll = async () => {
+    await fetchLoginState()
+    if (loginState.value.status !== 'logging_in') {
+      stopLoginPoll()
+      if (loginState.value.status === 'failed') {
+        feedback.type = 'error'
+        feedback.message = `登录失败：${loginState.value.error || '未知错误'}（可点击登录重试）`
+      } else if (loginState.value.status === 'ok') {
+        feedback.type = 'success'
+        feedback.message = '登录成功'
+      }
+    }
+  }
+
+  void poll()
+  loginPollTimer.value = window.setInterval(() => {
+    void poll()
+  }, 800)
+}
+
+function stopLoginPoll() {
+  if (loginPollTimer.value) {
+    window.clearInterval(loginPollTimer.value)
+    loginPollTimer.value = null
+  }
 }
 
 async function fetchProjects() {
@@ -953,12 +1074,14 @@ function stopRefreshLoop() {
 
 
 onMounted(async () => {
-  await Promise.all([fetchSettings(), fetchProjects(), fetchTasks()])
+  await Promise.all([fetchSettings(), fetchProjects(), fetchTasks(), fetchLoginState()])
   resetTaskForm()
   startRefreshLoop()
+  if (loginState.value.status === 'logging_in') startLoginPoll()
 })
 
 onBeforeUnmount(() => {
   stopRefreshLoop()
+  stopLoginPoll()
 })
 </script>

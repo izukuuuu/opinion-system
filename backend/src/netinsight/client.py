@@ -125,10 +125,11 @@ def login_and_capture(
     username: str,
     password: str,
     *,
-    headless: bool = True,
+    headless: bool = False,
     no_proxy: bool = False,
     login_timeout_ms: int = 90000,
     browser_channel: str = "",
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> RequestContext:
     return asyncio.run(
         _login_and_capture_async(
@@ -138,6 +139,7 @@ def login_and_capture(
             no_proxy=no_proxy,
             login_timeout_ms=login_timeout_ms,
             browser_channel=browser_channel,
+            progress_callback=progress_callback,
         )
     )
 
@@ -150,7 +152,16 @@ async def _login_and_capture_async(
     no_proxy: bool,
     login_timeout_ms: int,
     browser_channel: str,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> RequestContext:
+    def _step(msg: str) -> None:
+        if progress_callback:
+            try:
+                progress_callback(msg)
+            except Exception:
+                pass
+
+    deadline = time.monotonic() + max(login_timeout_ms, 10000) / 1000.0
     try:
         from playwright.async_api import async_playwright
     except Exception as exc:  # pragma: no cover
@@ -172,39 +183,48 @@ async def _login_and_capture_async(
             if proxy_url:
                 launch_options["proxy"] = {"server": proxy_url}
 
+        _step("正在启动浏览器…")
         browser = await _launch_browser(playwright, launch_options, browser_channel)
         context = await browser.new_context()
         page = await context.new_page()
         try:
-            await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=login_timeout_ms)
-            await page.wait_for_timeout(3500)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=min(15000, login_timeout_ms))
-            except Exception:
-                pass
+            _step("正在打开登录页面…")
+            await page.goto(LOGIN_URL, wait_until="commit", timeout=_remaining_timeout_ms(deadline))
+            await page.wait_for_timeout(1500)
 
-            account_input = page.locator('input[placeholder="账号"]')
-            await account_input.wait_for(state="visible", timeout=min(15000, login_timeout_ms))
+            _step("正在等待登录表单…")
+            login_form = await _wait_for_login_form(page, deadline)
+
+            _step("正在填写账号密码…")
+            account_input = login_form.locator(
+                'input[placeholder="账号"], input[placeholder*="账号"], input[type="text"]'
+            ).first
+            await account_input.wait_for(state="visible", timeout=_remaining_timeout_ms(deadline))
             await account_input.fill(username)
 
-            password_input = page.locator('input[placeholder="密码"]')
-            await password_input.wait_for(state="visible", timeout=min(15000, login_timeout_ms))
+            password_input = login_form.locator(
+                'input[placeholder="密码"], input[placeholder*="密码"], input[type="password"]'
+            ).first
+            await password_input.wait_for(state="visible", timeout=_remaining_timeout_ms(deadline))
             await password_input.fill(password)
 
-            login_button = page.locator('button.el-button--primary:has-text("登 录")')
+            _step("正在点击登录按钮…")
+            login_button = login_form.locator('button.el-button--primary:has-text("登 录")').first
             if await login_button.count() == 0:
-                login_button = page.locator('button.el-button--primary:has-text("登录")')
+                login_button = login_form.locator('button.el-button--primary:has-text("登录")').first
             if await login_button.count() == 0:
-                login_button = page.locator("button.el-button--primary")
+                login_button = login_form.locator("button.el-button--primary").first
             await login_button.click()
 
+            _step("正在等待登录跳转…")
             await page.wait_for_timeout(2500)
             try:
-                await page.wait_for_load_state("networkidle", timeout=min(18000, login_timeout_ms))
+                await page.wait_for_load_state("networkidle", timeout=min(18000, _remaining_timeout_ms(deadline)))
             except Exception:
                 pass
             await page.wait_for_timeout(3500)
 
+            _step("正在获取会话凭证…")
             cookies_list = await context.cookies()
             cookies = {cookie["name"]: cookie["value"] for cookie in cookies_list}
             session_id = cookies.get("TRSJSESSIONID")
@@ -227,10 +247,10 @@ async def _launch_browser(playwright: Any, launch_options: Dict[str, Any], brows
     candidates: List[Dict[str, Any]] = []
     if browser_channel:
         candidates.append({**launch_options, "channel": browser_channel})
-    candidates.append(dict(launch_options))
     if os.name == "nt":
         candidates.append({**launch_options, "channel": "msedge"})
         candidates.append({**launch_options, "channel": "chrome"})
+    candidates.append(dict(launch_options))
 
     last_error: Optional[Exception] = None
     for options in candidates:
@@ -243,6 +263,45 @@ async def _launch_browser(playwright: Any, launch_options: Dict[str, Any], brows
         "无法启动浏览器完成 NetInsight 登录。"
         "请确认已安装 Playwright 浏览器，或本机存在可用的 Edge/Chrome。"
     ) from last_error
+
+
+async def _wait_for_login_form(page: Any, deadline: float):
+    try:
+        account_tab = page.locator('#tab-account, .el-tabs__item:has-text("账号登录")').first
+        if await account_tab.count() > 0:
+            await account_tab.click(timeout=3000)
+    except Exception:
+        pass
+
+    await page.wait_for_function(
+        """
+        () => {
+          const scope =
+            document.querySelector('form.login-form') ||
+            document.querySelector('#pane-account') ||
+            document.body
+          if (!scope) return false
+          const account =
+            scope.querySelector('input[placeholder="账号"]') ||
+            scope.querySelector('input[placeholder*="账号"]') ||
+            scope.querySelector('input[type="text"]')
+          const password =
+            scope.querySelector('input[placeholder="密码"]') ||
+            scope.querySelector('input[placeholder*="密码"]') ||
+            scope.querySelector('input[type="password"]')
+          return Boolean(account && password)
+        }
+        """,
+        timeout=_remaining_timeout_ms(deadline),
+    )
+    return page.locator("form.login-form, #pane-account").first
+
+
+def _remaining_timeout_ms(deadline: float) -> int:
+    remaining = int((deadline - time.monotonic()) * 1000)
+    if remaining <= 0:
+        raise NetInsightError("NetInsight 登录超时，请检查网络或稍后重试。")
+    return remaining
 
 
 def query_platform_counts(
@@ -460,7 +519,10 @@ def _query_keyword_count(
             response = session.post(COUNT_API_URL, data=payload, timeout=30)
             response.raise_for_status()
             result = response.json()
-            if int(result.get("code") or 0) != 200:
+            code = int(result.get("code") or 0)
+            if code == 515:
+                raise NetInsightError("NetInsight 登录态已失效，请重新登录。")
+            if code != 200:
                 raise NetInsightError(
                     f"NetInsight 计数接口返回异常: code={result.get('code')} message={result.get('message') or ''}"
                 )

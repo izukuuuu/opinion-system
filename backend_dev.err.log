@@ -1,0 +1,29 @@
+INFO:server_support.hot_overview:hot_overview filters reloaded | file=F:\opinion-system\backend\server_support\hot_overview_filters.yaml mtime=1773218884.9517474 block=10 generic=10 nav_tokens=23 authority_overrides=0
+INFO:__main__:Starting OpinionSystem backend on 0.0.0.0:8000 (set OPINION_BACKEND_PORT to override)
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8000
+ * Running on http://198.18.0.1:8000
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:05] "GET /api/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:07] "[35m[1mPOST /api/netinsight/tasks/ni-20260331-133014-c41752/retry HTTP/1.1[0m" 201 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:11] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:15] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:19] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:23] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:27] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:31] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:35] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:39] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:43] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:47] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:52] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:03:56] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:04:00] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:04:04] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:04:08] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:04:12] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:04:16] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:04:20] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:04:24] "GET /api/netinsight/tasks HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [31/Mar/2026 22:04:28] "GET /api/netinsight/tasks HTTP/1.1" 200 -

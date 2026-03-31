@@ -20,6 +20,8 @@ from .planner import normalize_keywords, normalize_platforms
 STATE_ROOT = get_data_root() / "_netinsight"
 TASK_STATE_DIR = STATE_ROOT / "tasks"
 WORKER_STATUS_PATH = STATE_ROOT / "worker.json"
+LOGIN_STATE_PATH = STATE_ROOT / "login_state.json"
+SESSION_STATE_PATH = STATE_ROOT / "session_state.json"
 _TASK_EVENTS_LIMIT = 60
 OUTPUT_FILE_NAMES = {
     "csv": "records.csv",
@@ -375,6 +377,31 @@ def write_worker_status(payload: Dict[str, Any]) -> Dict[str, Any]:
     return status
 
 
+def read_login_state() -> Dict[str, Any]:
+    try:
+        if LOGIN_STATE_PATH.exists():
+            return json.loads(LOGIN_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"status": "idle", "logged_in_at": None, "error": None, "username": ""}
+
+
+def write_login_state(state: Dict[str, Any]) -> None:
+    _ensure_state_dirs()
+    _atomic_write_json(LOGIN_STATE_PATH, state)
+
+
+def read_session_state() -> Dict[str, Any]:
+    _ensure_state_dirs()
+    payload = _load_json(SESSION_STATE_PATH, {})
+    return payload if isinstance(payload, dict) else {}
+
+
+def write_session_state(state: Dict[str, Any]) -> None:
+    _ensure_state_dirs()
+    _atomic_write_json(SESSION_STATE_PATH, state)
+
+
 def output_dir_for_task(task: Dict[str, Any]) -> Path:
     task_id = str(task.get("id") or "").strip()
     project_id = str(task.get("project_id") or "").strip()
@@ -534,6 +561,22 @@ def _reconcile_orphaned_running_tasks(worker_status: Dict[str, Any]) -> None:
 def _is_process_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                False,
+                pid,
+            )
+            if not handle:
+                return False
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        except Exception:
+            return False
     try:
         os.kill(pid, 0)
     except OSError:
@@ -578,10 +621,12 @@ __all__ = [
     "mark_task_failed",
     "mark_task_progress",
     "output_dir_for_task",
+    "read_session_state",
     "reserve_next_task",
     "resolve_task_output_file",
     "retry_task",
     "should_cancel",
     "store_search_plan",
+    "write_session_state",
     "write_worker_status",
 ]

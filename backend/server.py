@@ -172,6 +172,8 @@ from src.fluid.api import fluid_bp
 from src.analyze.api import analyze_bp
 from src.topic.api import topic_bp
 from src.report.api import report_bp
+import threading as _threading
+
 from src.netinsight import cancel_task as cancel_netinsight_task
 from src.netinsight import create_task as create_netinsight_task
 from src.netinsight import delete_task as delete_netinsight_task
@@ -180,8 +182,11 @@ from src.netinsight import get_task as get_netinsight_task
 from src.netinsight import list_tasks as list_netinsight_tasks
 from src.netinsight import load_worker_status as load_netinsight_worker_status
 from src.netinsight import plan_task_from_brief
+from src.netinsight import read_login_state as read_netinsight_login_state
+from src.netinsight import write_session_state as write_netinsight_session_state
 from src.netinsight import resolve_task_output_file as resolve_netinsight_task_output_file
 from src.netinsight import retry_task as retry_netinsight_task
+from src.netinsight import write_login_state as write_netinsight_login_state
 
 app = Flask(__name__)
 app.register_blueprint(fluid_bp, url_prefix='/api/fluid')
@@ -1554,6 +1559,99 @@ def netinsight_delete_task(task_id: str):
 @app.get("/api/netinsight/worker")
 def netinsight_worker_status():
     return success({"data": load_netinsight_worker_status()})
+
+
+@app.get("/api/netinsight/login")
+def netinsight_login_status():
+    return success({"data": read_netinsight_login_state()})
+
+
+_netinsight_login_thread: _threading.Thread | None = None
+
+
+@app.post("/api/netinsight/login")
+def netinsight_trigger_login():
+    global _netinsight_login_thread
+    state = read_netinsight_login_state()
+    if state.get("status") == "logging_in":
+        return success({"data": state, "message": "登录正在进行中，请稍候"})
+
+    from src.netinsight.client import NetInsightError, login_and_capture
+    from src.netinsight.config import load_netinsight_config, resolve_netinsight_credentials
+
+    config = load_netinsight_config()
+    creds = resolve_netinsight_credentials()
+    username = creds.get("user", "")
+    password = creds.get("pass", "")
+    if not username or not password:
+        return jsonify({"status": "error", "message": "未配置账号密码，请先在设置里填写"}), 400
+
+    runtime = config.get("runtime", {})
+    LOGGER.info(
+        "NetInsight login requested | headless=%s browser_channel=%s",
+        bool(runtime.get("headless", False)),
+        str(runtime.get("browser_channel") or "") or "default",
+    )
+    write_netinsight_login_state({
+        "status": "logging_in",
+        "step": "准备启动…",
+        "logged_in_at": None,
+        "error": None,
+        "username": username,
+    })
+
+    def _do_login():
+        from datetime import datetime, timezone
+
+        def _on_step(msg: str) -> None:
+            LOGGER.info("NetInsight login | %s", msg)
+            write_netinsight_login_state({
+                "status": "logging_in",
+                "step": msg,
+                "logged_in_at": None,
+                "error": None,
+                "username": username,
+            })
+
+        try:
+            context = login_and_capture(
+                username,
+                password,
+                headless=bool(runtime.get("headless", False)),
+                no_proxy=bool(runtime.get("no_proxy", False)),
+                login_timeout_ms=int(runtime.get("login_timeout_ms") or 120000),
+                browser_channel=str(runtime.get("browser_channel") or ""),
+                progress_callback=_on_step,
+            )
+            saved_at = datetime.now(timezone.utc).isoformat()
+            write_netinsight_session_state({
+                "username": username,
+                "saved_at": saved_at,
+                "headers": context.headers,
+                "cookies": context.cookies,
+            })
+            write_netinsight_login_state({
+                "status": "ok",
+                "step": "登录成功",
+                "logged_in_at": saved_at,
+                "error": None,
+                "username": username,
+            })
+            LOGGER.info("NetInsight login completed successfully")
+        except Exception as exc:
+            LOGGER.exception("NetInsight login failed")
+            write_netinsight_login_state({
+                "status": "failed",
+                "step": "登录失败",
+                "logged_in_at": None,
+                "error": str(exc),
+                "username": username,
+            })
+
+    t = _threading.Thread(target=_do_login, daemon=True)
+    t.start()
+    _netinsight_login_thread = t
+    return success({"data": read_netinsight_login_state(), "message": "已开始登录，请稍候…"})
 
 
 @app.put("/api/projects/<string:name>/datasets/<string:dataset_id>/mapping")

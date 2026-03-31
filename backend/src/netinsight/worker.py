@@ -17,6 +17,7 @@ for path in (BACKEND_DIR, SRC_DIR):
         sys.path.insert(0, path_str)
 
 from src.netinsight.client import NetInsightError  # type: ignore
+from src.netinsight.client import RequestContext  # type: ignore
 from src.netinsight.client import collect_platform_records  # type: ignore
 from src.netinsight.client import deduplicate_records  # type: ignore
 from src.netinsight.client import login_and_capture  # type: ignore
@@ -31,9 +32,11 @@ from src.netinsight.task_queue import (  # type: ignore
     mark_task_failed,
     mark_task_progress,
     output_dir_for_task,
+    read_session_state,
     reserve_next_task,
     should_cancel,
     store_search_plan,
+    write_session_state,
     write_worker_status,
 )
 
@@ -137,23 +140,6 @@ def _run_task(task_id: str) -> None:
     if should_cancel(task_id):
         raise TaskCancelled("任务在启动前已被取消")
 
-    mark_task_progress(
-        task_id,
-        phase="login",
-        message="正在登录 NetInsight",
-        percentage=5,
-        event_level="info",
-    )
-    context = login_and_capture(
-        username=username,
-        password=password,
-        headless=bool(runtime.get("headless", True)),
-        no_proxy=bool(runtime.get("no_proxy", False)),
-        login_timeout_ms=int(runtime.get("login_timeout_ms") or 90000),
-        browser_channel=str(runtime.get("browser_channel") or ""),
-    )
-
-    task = get_task(task_id)
     keywords = list(task.get("keywords") or [])
     platforms = list(task.get("platforms") or [])
     config = task.get("config", {})
@@ -164,6 +150,18 @@ def _run_task(task_id: str) -> None:
     info_type = str(config.get("info_type") or "2")
     per_platform_limit = max(1, total_limit // max(len(platforms), 1))
 
+    context_source = "cached"
+    context = _load_cached_context(task_id, username)
+    if not context:
+        context_source = "fresh"
+        context = _login_with_progress(
+            task_id=task_id,
+            username=username,
+            password=password,
+            runtime=runtime,
+            initial_message="正在登录 NetInsight",
+        )
+
     counts_total = max(len(keywords) * len(platforms), 1)
     counts_completed = 0
     aggregated_plan: Dict[str, Any] = {}
@@ -172,20 +170,47 @@ def _run_task(task_id: str) -> None:
 
     for platform in platforms:
         _raise_if_cancelled(task_id)
-        result = query_platform_counts(
-            keywords=keywords,
-            time_range=time_range,
-            platform=platform,
-            threshold=per_platform_limit,
-            context=context,
-            progress_callback=lambda payload, current_platform=platform, done=counts_completed: _handle_count_progress(
-                task_id,
-                payload,
-                current_platform=current_platform,
-                counts_completed_base=done,
-                counts_total=counts_total,
-            ),
-        )
+        try:
+            result = query_platform_counts(
+                keywords=keywords,
+                time_range=time_range,
+                platform=platform,
+                threshold=per_platform_limit,
+                context=context,
+                progress_callback=lambda payload, current_platform=platform, done=counts_completed: _handle_count_progress(
+                    task_id,
+                    payload,
+                    current_platform=current_platform,
+                    counts_completed_base=done,
+                    counts_total=counts_total,
+                ),
+            )
+        except NetInsightError as exc:
+            if context_source == "cached" and _is_login_expired(exc):
+                context_source = "fresh"
+                context = _login_with_progress(
+                    task_id=task_id,
+                    username=username,
+                    password=password,
+                    runtime=runtime,
+                    initial_message="缓存登录已失效，正在重新登录 NetInsight",
+                )
+                result = query_platform_counts(
+                    keywords=keywords,
+                    time_range=time_range,
+                    platform=platform,
+                    threshold=per_platform_limit,
+                    context=context,
+                    progress_callback=lambda payload, current_platform=platform, done=counts_completed: _handle_count_progress(
+                        task_id,
+                        payload,
+                        current_platform=current_platform,
+                        counts_completed_base=done,
+                        counts_total=counts_total,
+                    ),
+                )
+            else:
+                raise
         counts_completed += len(keywords)
         aggregated_plan[platform] = result
         planned_total += int(result.get("planned_total") or 0)
@@ -212,23 +237,53 @@ def _run_task(task_id: str) -> None:
         _raise_if_cancelled(task_id)
         platform_plan = aggregated_plan.get(platform) or {}
         search_matrix = platform_plan.get("search_matrix") or {}
-        result = collect_platform_records(
-            search_matrix=search_matrix,
-            time_range=time_range,
-            platform=platform,
-            context=context,
-            page_size=page_size,
-            sort=sort,
-            info_type=info_type,
-            task_id=task_id,
-            progress_callback=lambda payload, idx=platform_index: _handle_collect_progress(
-                task_id,
-                payload,
-                planned_total=planned_total,
-                platform_index=idx,
-                platform_total=len(platforms),
-            ),
-        )
+        try:
+            result = collect_platform_records(
+                search_matrix=search_matrix,
+                time_range=time_range,
+                platform=platform,
+                context=context,
+                page_size=page_size,
+                sort=sort,
+                info_type=info_type,
+                task_id=task_id,
+                progress_callback=lambda payload, idx=platform_index: _handle_collect_progress(
+                    task_id,
+                    payload,
+                    planned_total=planned_total,
+                    platform_index=idx,
+                    platform_total=len(platforms),
+                ),
+            )
+        except NetInsightError as exc:
+            if context_source == "cached" and _is_login_expired(exc):
+                context_source = "fresh"
+                context = _login_with_progress(
+                    task_id=task_id,
+                    username=username,
+                    password=password,
+                    runtime=runtime,
+                    initial_message="缓存登录已失效，正在重新登录 NetInsight",
+                )
+                result = collect_platform_records(
+                    search_matrix=search_matrix,
+                    time_range=time_range,
+                    platform=platform,
+                    context=context,
+                    page_size=page_size,
+                    sort=sort,
+                    info_type=info_type,
+                    task_id=task_id,
+                    progress_callback=lambda payload, idx=platform_index: _handle_collect_progress(
+                        task_id,
+                        payload,
+                        planned_total=planned_total,
+                        platform_index=idx,
+                        platform_total=len(platforms),
+                    ),
+                )
+            else:
+                raise
         records = result.get("records") or []
         summary = result.get("search_summary") or {}
         all_records.extend(records)
@@ -278,6 +333,82 @@ def _run_task(task_id: str) -> None:
         output,
         f"采集完成，导出 {len(deduped_records)} 条记录",
     )
+
+
+def _load_cached_context(task_id: str, username: str) -> RequestContext | None:
+    session_state = read_session_state()
+    saved_user = str(session_state.get("username") or "").strip()
+    headers = session_state.get("headers")
+    cookies = session_state.get("cookies")
+    if saved_user != username or not isinstance(headers, dict) or not isinstance(cookies, dict):
+        return None
+
+    LOGGER.info(
+        "NetInsight worker | task=%s reusing cached session saved_at=%s",
+        task_id,
+        str(session_state.get("saved_at") or ""),
+    )
+    mark_task_progress(
+        task_id,
+        phase="login",
+        message="正在复用已登录的 NetInsight 会话",
+        percentage=5,
+        event_level="info",
+    )
+    return RequestContext(
+        headers={str(key): str(value) for key, value in headers.items()},
+        cookies={str(key): str(value) for key, value in cookies.items()},
+    )
+
+
+def _login_with_progress(
+    *,
+    task_id: str,
+    username: str,
+    password: str,
+    runtime: Dict[str, Any],
+    initial_message: str,
+) -> RequestContext:
+    mark_task_progress(
+        task_id,
+        phase="login",
+        message=initial_message,
+        percentage=5,
+        event_level="info",
+    )
+
+    def _on_login_step(message: str) -> None:
+        LOGGER.info("NetInsight worker login | task=%s step=%s", task_id, message)
+        mark_task_progress(
+            task_id,
+            phase="login",
+            message=message,
+            percentage=8,
+        )
+
+    context = login_and_capture(
+        username=username,
+        password=password,
+        headless=bool(runtime.get("headless", False)),
+        no_proxy=bool(runtime.get("no_proxy", False)),
+        login_timeout_ms=int(runtime.get("login_timeout_ms") or 120000),
+        browser_channel=str(runtime.get("browser_channel") or ""),
+        progress_callback=_on_login_step,
+    )
+    write_session_state(
+        {
+            "username": username,
+            "saved_at": utc_now(),
+            "headers": context.headers,
+            "cookies": context.cookies,
+        }
+    )
+    return context
+
+
+def _is_login_expired(exc: Exception) -> bool:
+    message = str(exc or "")
+    return "登录态已失效" in message or "code=515" in message or "会话 Cookie" in message
 
 
 def _handle_count_progress(
