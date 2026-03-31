@@ -15,6 +15,9 @@ from server_support import (
     success,
     resolve_topic_identifier,
 )
+from src.netinsight import load_netinsight_config  # type: ignore
+from src.netinsight import persist_netinsight_config  # type: ignore
+from src.netinsight import summarise_netinsight_credentials  # type: ignore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -338,6 +341,89 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
         config["langchain"] = langchain
         persist_llm_config(config)
         return success({"data": langchain})
+
+    @app.get("/api/settings/netinsight")
+    def get_netinsight_settings():
+        config = load_netinsight_config()
+        runtime = dict(config.get("runtime", {}))
+        planner = dict(config.get("planner", {}))
+        return success(
+            {
+                "data": {
+                    "credentials": summarise_netinsight_credentials(),
+                    "runtime": runtime,
+                    "planner": planner,
+                }
+            }
+        )
+
+    @app.put("/api/settings/netinsight")
+    def update_netinsight_settings():
+        payload = request.get_json(silent=True) or {}
+        config = load_netinsight_config()
+
+        credentials = dict(config.get("credentials", {}))
+        runtime = dict(config.get("runtime", {}))
+        planner = dict(config.get("planner", {}))
+
+        if "user" in payload:
+            credentials["user"] = str(payload.get("user") or "").strip()
+        if payload.get("clear_password"):
+            credentials["pass"] = ""
+        elif "password" in payload:
+            password = str(payload.get("password") or "").strip()
+            if password:
+                credentials["pass"] = password
+
+        for field in ("headless", "no_proxy"):
+            if field in payload:
+                value = payload.get(field)
+                if isinstance(value, bool):
+                    runtime[field] = value
+                elif isinstance(value, str):
+                    runtime[field] = value.strip().lower() in {"1", "true", "yes", "on"}
+                else:
+                    runtime[field] = bool(value)
+
+        for field in ("login_timeout_ms", "worker_idle_seconds", "page_size"):
+            if field in payload:
+                try:
+                    runtime[field] = int(payload.get(field))
+                except (TypeError, ValueError):
+                    return error(f"Field '{field}' must be an integer")
+
+        for field in ("sort", "info_type", "browser_channel"):
+            if field in payload:
+                runtime[field] = str(payload.get(field) or "").strip()
+
+        for field in ("default_days", "default_total_limit"):
+            if field in payload:
+                try:
+                    planner[field] = int(payload.get(field))
+                except (TypeError, ValueError):
+                    return error(f"Field '{field}' must be an integer")
+
+        if "default_platforms" in payload:
+            value = payload.get("default_platforms")
+            if not isinstance(value, list):
+                return error("Field 'default_platforms' must be a list")
+            planner["default_platforms"] = [str(item).strip() for item in value if str(item).strip()]
+
+        config["credentials"] = credentials
+        config["runtime"] = runtime
+        config["planner"] = planner
+        persist_netinsight_config(config)
+
+        saved = load_netinsight_config()
+        return success(
+            {
+                "data": {
+                    "credentials": summarise_netinsight_credentials(),
+                    "runtime": dict(saved.get("runtime", {})),
+                    "planner": dict(saved.get("planner", {})),
+                }
+            }
+        )
 
     @app.post("/api/settings/llm/presets")
     def create_llm_preset():

@@ -185,7 +185,7 @@
 import { ref, reactive, onMounted, watch, computed, nextTick } from 'vue'
 import { ArrowPathIcon } from '@heroicons/vue/24/outline'
 import { useRoute } from 'vue-router'
-import * as echarts from 'echarts'
+import { echarts } from '@/utils/echarts'
 
 const route = useRoute()
 const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'

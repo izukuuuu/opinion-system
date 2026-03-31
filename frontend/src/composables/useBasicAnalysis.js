@@ -8,10 +8,15 @@ import {
 } from './useArchiveHistory'
 import {
   buildChartOption,
+  buildTrendFlowDataset,
+  buildTrendStackedAreaOption,
+  buildTrendStackedShareOption,
   buildRawText,
   extractRows,
   isHorizontalBarFunction,
-  sortRowsDescending
+  sortRowsDescending,
+  translateAnalysisLabel,
+  translateRows
 } from '../utils/chartBuilder'
 
 const analysisFunctions = [
@@ -148,12 +153,14 @@ const analysisSections = computed(() => {
       description: ''
     }
     const displayLabel = sanitizeLabel(meta.label) || meta.label || func.name
-    const targets = func.targets
+    const baseTargets = Array.isArray(func.targets) ? func.targets : []
+    const targets = baseTargets
       .map((target) => {
-        const rows = extractRows(target.data)
+        const rows = translateRows(extractRows(target.data))
         const shouldSortDescending = isHorizontalBarFunction(func.name)
         const displayRows = shouldSortDescending ? sortRowsDescending(rows) : rows
-        const targetTitle = `${displayLabel} · ${target.target}`
+        const translatedTargetLabel = translateAnalysisLabel(target.target)
+        const targetTitle = `${displayLabel} · ${translatedTargetLabel}`
         return {
           target: target.target,
           title: targetTitle,
@@ -161,15 +168,45 @@ const analysisSections = computed(() => {
           option: buildChartOption(func.name, displayRows, targetTitle),
           hasData: rows.length > 0,
           rows: displayRows.slice(0, 12),
-          rawText: buildRawText(target.data)
+          rawText: buildRawText(target.data),
+          order: translatedTargetLabel === '总体' ? 10 : 20
         }
       })
-      .sort((a, b) => {
-        // 将"总体"放在前面
-        if (a.target === '总体') return -1
-        if (b.target === '总体') return 1
-        return 0
-      })
+
+    if (func.name === 'trends') {
+      const flowDataset = buildTrendFlowDataset(baseTargets)
+      if (flowDataset) {
+        targets.unshift(
+          {
+            target: '__trend_share__',
+            title: `${displayLabel} · 渠道占比堆叠`,
+            subtitle: '100% 堆叠占比图，查看各渠道在不同日期的相对份额变化。',
+            option: buildTrendStackedShareOption(`${displayLabel} · 渠道占比堆叠`, flowDataset),
+            hasData: true,
+            rows: flowDataset.summaryRows,
+            rawText: buildRawText(flowDataset.raw),
+            order: 1
+          },
+          {
+            target: '__trend_flow__',
+            title: `${displayLabel} · 渠道声量堆叠`,
+            subtitle: '按日期对齐各渠道趋势，查看声量在时间轴上的流动与累积变化。',
+            option: buildTrendStackedAreaOption(`${displayLabel} · 渠道声量堆叠`, flowDataset),
+            hasData: true,
+            rows: flowDataset.summaryRows,
+            rawText: buildRawText(flowDataset.raw),
+            order: 0
+          }
+        )
+      }
+    }
+
+    targets.sort((a, b) => {
+      const orderDiff = (a.order ?? 50) - (b.order ?? 50)
+      if (orderDiff !== 0) return orderDiff
+      return String(a.title || '').localeCompare(String(b.title || ''))
+    })
+
     return {
       name: func.name,
       label: meta.label,

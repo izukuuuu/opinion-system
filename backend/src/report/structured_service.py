@@ -30,6 +30,7 @@ from .data_report import (
 from .structured_prompts import (
     REPORT_SYSTEM_PROMPT,
     build_bertopic_insight_prompt,
+    build_bertopic_temporal_narrative_prompt,
     build_insights_prompt,
     build_stage_notes_prompt,
     build_title_subtitle_prompt,
@@ -56,7 +57,7 @@ BERTOPIC_FILE_MAP = {
 
 DEFAULT_ANALYZE_FILENAME = "result.json"
 REPORT_CACHE_FILENAME = "report_payload.json"
-REPORT_CACHE_VERSION = 4
+REPORT_CACHE_VERSION = 5
 
 SENTIMENT_POSITIVE = {"positive", "正面", "积极", "pos", "p"}
 SENTIMENT_NEUTRAL = {"neutral", "中性", "客观", "neu"}
@@ -559,6 +560,267 @@ def _normalize_bertopic_time_nodes(rows: Any) -> List[Dict[str, Any]]:
     return nodes
 
 
+def _normalize_bertopic_temporal_series(rows: Any) -> List[Dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+
+    series_rows: List[Dict[str, Any]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or item.get("name") or "").strip()
+        if not title:
+            continue
+        raw_points = item.get("points")
+        if not isinstance(raw_points, list):
+            continue
+        points: List[Dict[str, Any]] = []
+        for point in raw_points:
+            if not isinstance(point, dict):
+                continue
+            date_text = _extract_date_text(point.get("date"))
+            if not date_text:
+                continue
+            count = _parse_int(point.get("count") or point.get("value"))
+            if count <= 0:
+                continue
+            points.append(
+                {
+                    "date": date_text,
+                    "label": str(point.get("label") or _format_label_date(date_text)),
+                    "count": count,
+                }
+            )
+        if not points:
+            continue
+        points.sort(key=lambda point: _parse_date_value(point.get("date") or "") or datetime.min)
+        total_count = _parse_int(item.get("total_count"))
+        if total_count <= 0:
+            total_count = sum(point["count"] for point in points)
+        series_rows.append(
+            {
+                "name": str(item.get("name") or title).strip() or title,
+                "title": title,
+                "description": str(item.get("description") or "").strip(),
+                "total_count": total_count,
+                "original_topics": [
+                    str(topic).strip()
+                    for topic in (item.get("original_topics") or [])
+                    if str(topic or "").strip()
+                ],
+                "points": points,
+            }
+        )
+
+    series_rows.sort(key=lambda item: item.get("total_count", 0), reverse=True)
+    return series_rows
+
+
+def _build_time_nodes_from_series(series_rows: List[Dict[str, Any]], aggregation: str) -> List[Dict[str, Any]]:
+    node_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    for item in series_rows:
+        theme_name = str(item.get("title") or item.get("name") or "").strip()
+        if not theme_name:
+            continue
+        points = item.get("points")
+        if not isinstance(points, list):
+            continue
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            date_text = _extract_date_text(point.get("date"))
+            count = _parse_int(point.get("count") or point.get("value"))
+            if not date_text or count <= 0:
+                continue
+            node_counts[date_text][theme_name] += count
+
+    nodes: List[Dict[str, Any]] = []
+    for date_text in sorted(node_counts.keys(), key=lambda item: _parse_date_value(item) or datetime.min):
+        theme_rows = sorted(
+            [{"name": name, "value": value} for name, value in node_counts[date_text].items() if value > 0],
+            key=lambda item: item["value"],
+            reverse=True,
+        )
+        if not theme_rows:
+            continue
+        total = sum(item["value"] for item in theme_rows)
+        top_theme = theme_rows[0]
+        nodes.append(
+            {
+                "date": date_text,
+                "label": _format_label_date(date_text),
+                "total": total,
+                "topTheme": top_theme["name"],
+                "topValue": top_theme["value"],
+                "themes": theme_rows,
+                "aggregation": aggregation,
+            }
+        )
+    return nodes
+
+
+def _build_bertopic_temporal_series_from_nodes(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    series_points: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for node in nodes:
+        date_text = _extract_date_text(node.get("date"))
+        if not date_text:
+            continue
+        label = str(node.get("label") or _format_label_date(date_text))
+        for theme in (node.get("themes") or []):
+            if not isinstance(theme, dict):
+                continue
+            theme_name = str(theme.get("name") or "").strip()
+            value = _parse_int(theme.get("value"))
+            if not theme_name or value <= 0:
+                continue
+            series_points[theme_name].append(
+                {
+                    "date": date_text,
+                    "label": label,
+                    "count": value,
+                }
+            )
+
+    series_rows: List[Dict[str, Any]] = []
+    for theme_name, points in series_points.items():
+        points.sort(key=lambda point: _parse_date_value(point.get("date") or "") or datetime.min)
+        total_count = sum(point.get("count", 0) for point in points)
+        if total_count <= 0:
+            continue
+        series_rows.append(
+            {
+                "name": theme_name,
+                "title": theme_name,
+                "description": "",
+                "total_count": total_count,
+                "original_topics": [],
+                "points": points,
+            }
+        )
+    series_rows.sort(key=lambda item: item.get("total_count", 0), reverse=True)
+    return series_rows
+
+
+def _build_bertopic_temporal_heatmap(series_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not series_rows:
+        return {"dates": [], "dateLabels": [], "themes": [], "matrix": [], "max": 0}
+
+    date_labels: Dict[str, str] = {}
+    date_set = set()
+    for item in series_rows:
+        for point in item.get("points") or []:
+            date_text = _extract_date_text(point.get("date"))
+            if not date_text:
+                continue
+            date_set.add(date_text)
+            date_labels[date_text] = str(point.get("label") or _format_label_date(date_text))
+
+    dates = sorted(date_set, key=lambda item: _parse_date_value(item) or datetime.min)
+    themes = [str(item.get("title") or item.get("name") or "").strip() for item in series_rows]
+    matrix: List[List[int]] = []
+    max_value = 0
+    for item in series_rows:
+        point_map = {
+            _extract_date_text(point.get("date")): _parse_int(point.get("count"))
+            for point in (item.get("points") or [])
+            if isinstance(point, dict)
+        }
+        row = [point_map.get(date_text, 0) for date_text in dates]
+        max_value = max(max_value, max(row) if row else 0)
+        matrix.append(row)
+
+    return {
+        "dates": dates,
+        "dateLabels": [date_labels.get(date_text, date_text) for date_text in dates],
+        "themes": themes,
+        "matrix": matrix,
+        "max": max_value,
+    }
+
+
+def _build_bertopic_temporal_hotspots(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    hotspots = [
+        {
+            "date": item.get("date"),
+            "label": item.get("label"),
+            "total": _parse_int(item.get("total")),
+            "topTheme": str(item.get("topTheme") or "").strip(),
+            "topValue": _parse_int(item.get("topValue")),
+            "dominance": round(
+                _parse_int(item.get("topValue")) / max(1, _parse_int(item.get("total"))),
+                4,
+            ),
+        }
+        for item in nodes
+        if isinstance(item, dict)
+    ]
+    hotspots.sort(key=lambda item: _parse_int(item.get("total")), reverse=True)
+    return hotspots[:12]
+
+
+def _build_standardized_bertopic_temporal_context(temporal_payload: Any) -> Dict[str, Any]:
+    if not isinstance(temporal_payload, dict):
+        return {
+            "overview": {},
+            "meta": {},
+            "time_nodes": [],
+            "series": [],
+            "raw_series": [],
+            "llm_series": [],
+            "heatmap": {},
+            "hotspots": [],
+            "leading_themes": [],
+            "series_source": "",
+        }
+
+    overview = temporal_payload.get("overview") if isinstance(temporal_payload.get("overview"), dict) else {}
+    meta = temporal_payload.get("meta") if isinstance(temporal_payload.get("meta"), dict) else {}
+    nodes, _, _ = _extract_temporal_time_context(temporal_payload)
+
+    llm_payload = temporal_payload.get("llm_clusters") if isinstance(temporal_payload.get("llm_clusters"), dict) else {}
+    raw_payload = temporal_payload.get("raw_topics") if isinstance(temporal_payload.get("raw_topics"), dict) else {}
+    llm_series = _normalize_bertopic_temporal_series(llm_payload.get("series"))
+    raw_series = _normalize_bertopic_temporal_series(raw_payload.get("series"))
+
+    series_source = ""
+    series_rows: List[Dict[str, Any]] = []
+    if llm_series:
+        series_rows = llm_series
+        series_source = "llm_clusters"
+    elif raw_series:
+        series_rows = raw_series
+        series_source = "raw_topics"
+    elif nodes:
+        series_rows = _build_bertopic_temporal_series_from_nodes(nodes)
+        series_source = "time_nodes"
+
+    if not nodes and series_rows:
+        aggregation = str(overview.get("aggregation") or meta.get("aggregation") or "day").strip() or "day"
+        nodes = _build_time_nodes_from_series(series_rows, aggregation)
+
+    heatmap = _build_bertopic_temporal_heatmap(series_rows)
+    hotspots = _build_bertopic_temporal_hotspots(nodes)
+    leading_themes = [
+        str(item.get("title") or item.get("name") or "").strip()
+        for item in series_rows[:5]
+        if str(item.get("title") or item.get("name") or "").strip()
+    ]
+
+    return {
+        "overview": dict(overview or {}),
+        "meta": dict(meta or {}),
+        "time_nodes": nodes,
+        "series": series_rows,
+        "raw_series": raw_series,
+        "llm_series": llm_series,
+        "heatmap": heatmap,
+        "hotspots": hotspots,
+        "leading_themes": leading_themes,
+        "series_source": series_source,
+    }
+
+
 def _extract_temporal_time_context(temporal_payload: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
     if not isinstance(temporal_payload, dict):
         return [], {}, {}
@@ -585,7 +847,18 @@ def _load_bertopic_report_context(
 ) -> Dict[str, Any]:
     topic_root = _resolve_bucket_folder_root("topic", topic_identifier, folder_candidates)
     if not topic_root:
-        return {"themes": [], "time_nodes": [], "overview": {}, "meta": {"source": ""}}
+        return {
+            "themes": [],
+            "time_nodes": [],
+            "series": [],
+            "raw_series": [],
+            "llm_series": [],
+            "overview": {},
+            "heatmap": {},
+            "hotspots": [],
+            "leading_themes": [],
+            "meta": {"source": ""},
+        }
 
     summary_payload = _load_json_safely(topic_root / BERTOPIC_FILE_MAP["summary"])
     cluster_payload = _load_json_safely(topic_root / BERTOPIC_FILE_MAP["llm_clusters"])
@@ -594,8 +867,18 @@ def _load_bertopic_report_context(
 
     themes, cluster_by_topic_name, cluster_by_topic_id = _parse_bertopic_themes(cluster_payload, keyword_payload)
     cluster_doc_total = sum(_parse_int(item.get("value")) for item in themes)
-    temporal_nodes, temporal_meta, temporal_overview = _extract_temporal_time_context(temporal_payload)
-    if temporal_nodes:
+    temporal_context = _build_standardized_bertopic_temporal_context(temporal_payload)
+    temporal_nodes = temporal_context.get("time_nodes") if isinstance(temporal_context, dict) else []
+    temporal_series = temporal_context.get("series") if isinstance(temporal_context, dict) else []
+    temporal_heatmap = temporal_context.get("heatmap") if isinstance(temporal_context, dict) else {}
+    temporal_hotspots = temporal_context.get("hotspots") if isinstance(temporal_context, dict) else []
+    temporal_leading_themes = temporal_context.get("leading_themes") if isinstance(temporal_context, dict) else []
+    temporal_meta = temporal_context.get("meta") if isinstance(temporal_context, dict) else {}
+    temporal_overview = temporal_context.get("overview") if isinstance(temporal_context, dict) else {}
+    temporal_series_source = str(
+        temporal_context.get("series_source") if isinstance(temporal_context, dict) else ""
+    ).strip()
+    if temporal_nodes or temporal_series:
         temporal_docs = _parse_int(temporal_meta.get("temporal_documents"))
         mapped_docs = _parse_int(temporal_meta.get("llm_mapped_documents"))
         if mapped_docs <= 0:
@@ -603,16 +886,32 @@ def _load_bertopic_report_context(
         coverage = float(temporal_meta.get("llm_coverage_rate") or 0.0)
         if coverage <= 0 and temporal_docs > 0:
             coverage = mapped_docs / max(1, temporal_docs)
+        overview = dict(temporal_overview or {})
+        if temporal_nodes:
+            overview.setdefault("rangeStart", str(temporal_nodes[0].get("date") or "").strip())
+            overview.setdefault("rangeEnd", str(temporal_nodes[-1].get("date") or "").strip())
+        overview.setdefault("bucketCount", len(temporal_nodes))
+        overview.setdefault("days", overview.get("bucketCount") or len(temporal_nodes))
+        overview.setdefault("totalMappedDocs", mapped_docs)
+        overview.setdefault("totalTemporalDocs", temporal_docs)
         return {
             "themes": themes,
             "time_nodes": temporal_nodes,
-            "overview": temporal_overview,
+            "series": temporal_series if isinstance(temporal_series, list) else [],
+            "raw_series": temporal_context.get("raw_series") if isinstance(temporal_context, dict) else [],
+            "llm_series": temporal_context.get("llm_series") if isinstance(temporal_context, dict) else [],
+            "overview": overview,
+            "heatmap": temporal_heatmap if isinstance(temporal_heatmap, dict) else {},
+            "hotspots": temporal_hotspots if isinstance(temporal_hotspots, list) else [],
+            "leading_themes": temporal_leading_themes if isinstance(temporal_leading_themes, list) else [],
             "meta": {
                 "source": str(topic_root),
                 "time_source": "temporal",
+                "series_source": temporal_series_source or "temporal",
                 "cluster_count": len(themes),
                 "cluster_doc_total": cluster_doc_total,
                 "time_node_count": len(temporal_nodes),
+                "series_count": len(temporal_series) if isinstance(temporal_series, list) else 0,
                 "mapped_docs": mapped_docs,
                 "dated_docs": temporal_docs,
                 "coverage_rate": round(coverage, 4),
@@ -627,18 +926,46 @@ def _load_bertopic_report_context(
     coverage = 0.0
     if time_node_stats.get("dated_docs", 0) > 0:
         coverage = time_node_stats["mapped_docs"] / max(1, time_node_stats["dated_docs"])
+    legacy_series = _build_bertopic_temporal_series_from_nodes(time_nodes)
+    legacy_heatmap = _build_bertopic_temporal_heatmap(legacy_series)
+    legacy_hotspots = _build_bertopic_temporal_hotspots(time_nodes)
+    legacy_leading_themes = [
+        str(item.get("title") or item.get("name") or "").strip()
+        for item in legacy_series[:5]
+        if str(item.get("title") or item.get("name") or "").strip()
+    ]
+    legacy_overview = {
+        "mode": "legacy_doc_mapping",
+        "aggregation": "day",
+        "aggregationLabel": "日",
+        "description": "基于文档日期回填生成的主题时序估计。",
+        "bucketCount": len(time_nodes),
+        "days": len(time_nodes),
+        "rangeStart": str(time_nodes[0].get("date") or "").strip() if time_nodes else "",
+        "rangeEnd": str(time_nodes[-1].get("date") or "").strip() if time_nodes else "",
+        "totalMappedDocs": _parse_int(time_node_stats.get("mapped_docs")),
+        "totalTemporalDocs": _parse_int(time_node_stats.get("dated_docs")),
+    }
 
     return {
         "themes": themes,
         "time_nodes": time_nodes,
-        "overview": {},
+        "series": legacy_series,
+        "raw_series": legacy_series,
+        "llm_series": [],
+        "overview": legacy_overview,
+        "heatmap": legacy_heatmap,
+        "hotspots": legacy_hotspots,
+        "leading_themes": legacy_leading_themes,
         "meta": {
             "source": str(topic_root),
             "time_source": "legacy_doc_mapping",
+            "series_source": "legacy_doc_mapping",
             "cluster_count": len(themes),
             "cluster_doc_total": cluster_doc_total,
             "topicid_cluster_count": len(topicid_cluster_map),
             "time_node_count": len(time_nodes),
+            "series_count": len(legacy_series),
             "mapped_docs": time_node_stats.get("mapped_docs", 0),
             "dated_docs": time_node_stats.get("dated_docs", 0),
             "coverage_rate": round(coverage, 4),
@@ -995,6 +1322,132 @@ def _build_fallback_bertopic_insight(
     )
 
 
+def _build_fallback_bertopic_temporal_narrative(
+    *,
+    topic_label: str,
+    start: str,
+    end: str,
+    bertopic_overview: Dict[str, Any],
+    bertopic_meta: Dict[str, Any],
+    bertopic_nodes: List[Dict[str, Any]],
+    bertopic_series: List[Dict[str, Any]],
+    bertopic_hotspots: List[Dict[str, Any]],
+    leading_themes: List[str],
+) -> Dict[str, Any]:
+    if not bertopic_nodes and not bertopic_series:
+        return {
+            "summary": "暂无可用的 BERTopic 时序结果，报告当前无法给出稳定的主题迁移解读。",
+            "shiftSignals": [],
+            "watchpoints": ["请先完成 BERTopic 时序挖掘，并确认结果目录中存在主题时间趋势输出。"],
+        }
+
+    coverage_start = str(
+        bertopic_overview.get("rangeStart")
+        or (bertopic_nodes[0].get("date") if bertopic_nodes else "")
+        or ""
+    ).strip()
+    coverage_end = str(
+        bertopic_overview.get("rangeEnd")
+        or (bertopic_nodes[-1].get("date") if bertopic_nodes else "")
+        or ""
+    ).strip()
+    bucket_count = _parse_int(
+        bertopic_overview.get("bucketCount") or bertopic_overview.get("days") or len(bertopic_nodes)
+    )
+    mapped_docs = _parse_int(
+        bertopic_overview.get("totalMappedDocs")
+        or bertopic_meta.get("mapped_docs")
+        or bertopic_meta.get("mappedDocs")
+        or sum(_parse_int(item.get("total")) for item in bertopic_nodes)
+    )
+    dated_docs = _parse_int(
+        bertopic_overview.get("totalTemporalDocs")
+        or bertopic_meta.get("dated_docs")
+        or bertopic_meta.get("datedDocs")
+    )
+    try:
+        coverage_rate = float(
+            bertopic_meta.get("coverage_rate")
+            or bertopic_meta.get("coverageRate")
+            or 0.0
+        )
+    except Exception:
+        coverage_rate = 0.0
+
+    top_theme_names = [str(item).strip() for item in leading_themes if str(item or "").strip()][:3]
+    if not top_theme_names and bertopic_series:
+        top_theme_names = [
+            str(item.get("title") or item.get("name") or "").strip()
+            for item in bertopic_series[:3]
+            if str(item.get("title") or item.get("name") or "").strip()
+        ]
+    top_theme_text = "、".join(top_theme_names) if top_theme_names else "暂无稳定主导主题"
+
+    switches: List[str] = []
+    previous_theme = ""
+    for node in bertopic_nodes:
+        current_theme = str(node.get("topTheme") or "").strip()
+        if not current_theme:
+            continue
+        if previous_theme and previous_theme != current_theme:
+            switches.append(
+                f"{str(node.get('label') or node.get('date') or '').strip()} 由 {previous_theme} 切换至 {current_theme}"
+            )
+        previous_theme = current_theme
+
+    hotspot_signals = [
+        (
+            f"{str(item.get('label') or item.get('date') or '').strip()} 讨论量 {_parse_int(item.get('total'))}，"
+            f"主导主题为 {str(item.get('topTheme') or '').strip()}，占比约 {round(float(item.get('dominance') or 0) * 100, 1)}%"
+        )
+        for item in bertopic_hotspots[:3]
+        if isinstance(item, dict) and str(item.get("topTheme") or "").strip()
+    ]
+    shift_signals = (switches[:2] + hotspot_signals)[:4]
+
+    series_source = str(
+        bertopic_meta.get("series_source") or bertopic_meta.get("seriesSource") or ""
+    ).strip()
+    source_text = {
+        "llm_clusters": "LLM 重组主题",
+        "raw_topics": "BERTopic 原始主题",
+        "legacy_doc_mapping": "文档日期回填结果",
+        "time_nodes": "主导主题节点结果",
+    }.get(series_source, "BERTopic 主题时序")
+
+    summary = (
+        f"{topic_label} 在 {coverage_start or start} 至 {coverage_end or end} 期间共形成 "
+        f"{bucket_count or len(bertopic_nodes)} 个时间桶，映射 {mapped_docs} 条讨论。"
+        f"当前报告引用 {source_text} 作为时序主线，主题焦点主要围绕 {top_theme_text} 展开，"
+        "讨论热度会在少数关键日期集中抬升，并伴随主导主题切换。"
+    )
+
+    watchpoints: List[str] = []
+    if coverage_start and coverage_end and (coverage_start > start or coverage_end < end):
+        watchpoints.append(
+            f"BERTopic 时序覆盖仅到 {coverage_start} 至 {coverage_end}，与报告区间 {start} 至 {end} 不完全一致。"
+        )
+    if dated_docs > 0 and coverage_rate > 0 and coverage_rate < 0.6:
+        watchpoints.append(f"主题时序映射覆盖率仅 {round(coverage_rate * 100, 1)}%，需注意未映射文档对结论的影响。")
+    if bucket_count > 0 and bucket_count < 3:
+        watchpoints.append("时间桶数量过少，当前更适合做节点说明，不适合过度解读长期迁移。")
+    if bertopic_hotspots:
+        strongest = max(
+            (float(item.get("dominance") or 0.0) for item in bertopic_hotspots if isinstance(item, dict)),
+            default=0.0,
+        )
+        if strongest >= 0.75:
+            watchpoints.append("存在单主题占比极高的爆发窗口，解读时需区分事件峰值与长期主线。")
+    if not watchpoints:
+        watchpoints.append("当前覆盖范围与主题集中度整体可用，但仍建议结合原始热点事件做交叉核验。")
+
+    return {
+        "summary": summary,
+        "shiftSignals": shift_signals,
+        "watchpoints": watchpoints[:3],
+    }
+
+
 def _extract_json_text(raw_text: str) -> Optional[str]:
     text = str(raw_text or "").strip()
     if not text:
@@ -1147,6 +1600,13 @@ def _build_report_payload(
     bertopic_context = _load_bertopic_report_context(topic_identifier, folder_candidates)
     bertopic_themes = bertopic_context.get("themes") if isinstance(bertopic_context, dict) else []
     bertopic_time_nodes = bertopic_context.get("time_nodes") if isinstance(bertopic_context, dict) else []
+    bertopic_series_from_context = bertopic_context.get("series") if isinstance(bertopic_context, dict) else []
+    bertopic_hotspots_from_context = bertopic_context.get("hotspots") if isinstance(bertopic_context, dict) else []
+    bertopic_heatmap_from_context = bertopic_context.get("heatmap") if isinstance(bertopic_context, dict) else {}
+    bertopic_leading_themes_from_context = (
+        bertopic_context.get("leading_themes") if isinstance(bertopic_context, dict) else []
+    )
+    bertopic_meta_from_context = bertopic_context.get("meta") if isinstance(bertopic_context, dict) else {}
     bertopic_overview_from_context = (
         bertopic_context.get("overview") if isinstance(bertopic_context, dict) else {}
     )
@@ -1176,7 +1636,7 @@ def _build_report_payload(
     themes.sort(key=lambda item: item.get("value", 0), reverse=True)
     themes = themes[:8]
 
-    bertopic_nodes_payload = []
+    bertopic_nodes_payload: List[Dict[str, Any]] = []
     if isinstance(bertopic_time_nodes, list):
         for item in bertopic_time_nodes:
             if not isinstance(item, dict):
@@ -1212,29 +1672,156 @@ def _build_report_payload(
             )
 
     bertopic_nodes_payload.sort(key=lambda item: _parse_date_value(str(item.get("date") or "")) or datetime.min)
-    bertopic_hotspots_payload = sorted(
-        [
-            {
-                "date": item.get("date"),
-                "label": item.get("label"),
-                "total": _parse_int(item.get("total")),
-                "topTheme": item.get("topTheme"),
-                "topValue": _parse_int(item.get("topValue")),
-                "dominance": float(item.get("dominance") or 0),
-            }
-            for item in bertopic_nodes_payload
-        ],
-        key=lambda item: _parse_int(item.get("total")),
-        reverse=True,
-    )[:12]
+    bertopic_series_payload: List[Dict[str, Any]] = []
+    if isinstance(bertopic_series_from_context, list):
+        for item in bertopic_series_from_context:
+            if not isinstance(item, dict):
+                continue
+            theme_name = str(item.get("title") or item.get("name") or "").strip()
+            if not theme_name:
+                continue
+            raw_points = item.get("points")
+            if not isinstance(raw_points, list):
+                continue
+            points = []
+            for point in raw_points:
+                if not isinstance(point, dict):
+                    continue
+                date_text = str(point.get("date") or "").strip()
+                if not date_text:
+                    continue
+                points.append(
+                    {
+                        "date": date_text,
+                        "label": str(point.get("label") or _format_label_date(date_text)).strip() or _format_label_date(date_text),
+                        "count": _parse_int(point.get("count") or point.get("value")),
+                    }
+                )
+            points = [point for point in points if point["count"] > 0]
+            if not points:
+                continue
+            points.sort(key=lambda point: _parse_date_value(point.get("date") or "") or datetime.min)
+            bertopic_series_payload.append(
+                {
+                    "name": str(item.get("name") or theme_name).strip() or theme_name,
+                    "title": theme_name,
+                    "description": str(item.get("description") or "").strip(),
+                    "totalCount": _parse_int(item.get("total_count") or item.get("totalCount") or sum(point["count"] for point in points)),
+                    "originalTopics": [
+                        str(topic).strip()
+                        for topic in (item.get("original_topics") or item.get("originalTopics") or [])
+                        if str(topic or "").strip()
+                    ],
+                    "points": points,
+                }
+            )
+    bertopic_series_payload.sort(key=lambda item: item.get("totalCount", 0), reverse=True)
+
+    if not bertopic_nodes_payload and bertopic_series_payload:
+        aggregation = str(
+            bertopic_overview_from_context.get("aggregation")
+            if isinstance(bertopic_overview_from_context, dict)
+            else ""
+        ).strip() or "day"
+        bertopic_time_nodes = _build_time_nodes_from_series(bertopic_series_payload, aggregation)
+        for item in bertopic_time_nodes:
+            if not isinstance(item, dict):
+                continue
+            node_themes = item.get("themes")
+            compact_themes = []
+            if isinstance(node_themes, list):
+                for node_theme in node_themes[:5]:
+                    if not isinstance(node_theme, dict):
+                        continue
+                    name = str(node_theme.get("name") or "").strip()
+                    if not name:
+                        continue
+                    compact_themes.append({"name": name, "value": _parse_int(node_theme.get("value"))})
+            bertopic_nodes_payload.append(
+                {
+                    "date": str(item.get("date") or "").strip(),
+                    "label": str(item.get("label") or "").strip(),
+                    "total": _parse_int(item.get("total")),
+                    "topTheme": str(item.get("topTheme") or "").strip(),
+                    "topValue": _parse_int(item.get("topValue")),
+                    "dominance": round(
+                        _parse_int(item.get("topValue")) / max(1, _parse_int(item.get("total"))),
+                        4,
+                    ),
+                    "themes": compact_themes,
+                }
+            )
+        bertopic_nodes_payload.sort(key=lambda item: _parse_date_value(str(item.get("date") or "")) or datetime.min)
+
+    bertopic_hotspots_payload: List[Dict[str, Any]] = []
+    if isinstance(bertopic_hotspots_from_context, list):
+        for item in bertopic_hotspots_from_context:
+            if not isinstance(item, dict):
+                continue
+            theme_name = str(item.get("topTheme") or "").strip()
+            date_text = str(item.get("date") or "").strip()
+            if not theme_name or not date_text:
+                continue
+            bertopic_hotspots_payload.append(
+                {
+                    "date": date_text,
+                    "label": str(item.get("label") or _format_label_date(date_text)).strip() or _format_label_date(date_text),
+                    "total": _parse_int(item.get("total")),
+                    "topTheme": theme_name,
+                    "topValue": _parse_int(item.get("topValue")),
+                    "dominance": round(float(item.get("dominance") or 0.0), 4),
+                }
+            )
+    if not bertopic_hotspots_payload:
+        bertopic_hotspots_payload = sorted(
+            [
+                {
+                    "date": item.get("date"),
+                    "label": item.get("label"),
+                    "total": _parse_int(item.get("total")),
+                    "topTheme": item.get("topTheme"),
+                    "topValue": _parse_int(item.get("topValue")),
+                    "dominance": float(item.get("dominance") or 0),
+                }
+                for item in bertopic_nodes_payload
+            ],
+            key=lambda item: _parse_int(item.get("total")),
+            reverse=True,
+        )[:12]
+
+    bertopic_leading_themes_payload = [
+        str(item).strip()
+        for item in (bertopic_leading_themes_from_context or [])
+        if str(item or "").strip()
+    ][:5]
+    if not bertopic_leading_themes_payload and bertopic_series_payload:
+        bertopic_leading_themes_payload = [
+            str(item.get("title") or item.get("name") or "").strip()
+            for item in bertopic_series_payload[:5]
+            if str(item.get("title") or item.get("name") or "").strip()
+        ]
+    if not bertopic_leading_themes_payload and bertopic_nodes_payload:
+        theme_totals: Dict[str, int] = defaultdict(int)
+        for node in bertopic_nodes_payload:
+            for theme in (node.get("themes") or []):
+                if not isinstance(theme, dict):
+                    continue
+                theme_name = str(theme.get("name") or "").strip()
+                if not theme_name:
+                    continue
+                theme_totals[theme_name] += _parse_int(theme.get("value"))
+        bertopic_leading_themes_payload = [
+            name for name, _ in sorted(theme_totals.items(), key=lambda item: item[1], reverse=True)[:5]
+        ]
+
     bertopic_overview = dict(bertopic_overview_from_context or {})
     total_mapped_docs = sum(_parse_int(item.get("total")) for item in bertopic_nodes_payload)
     if not bertopic_overview:
         bertopic_overview = {
-            "mode": "daily_dominant_theme",
+            "mode": "legacy_doc_mapping",
             "aggregation": "day",
             "aggregationLabel": "日",
-            "description": "按日期聚合文档后展示当日主导主题，不表示主题持续时长。",
+            "description": "基于文档日期回填生成的主题时序估计。",
             "bucketCount": len(bertopic_nodes_payload),
             "days": len(bertopic_nodes_payload),
             "totalMappedDocs": total_mapped_docs,
@@ -1247,6 +1834,78 @@ def _build_report_payload(
         bertopic_overview.setdefault("bucketCount", len(bertopic_nodes_payload))
         bertopic_overview.setdefault("days", bertopic_overview.get("bucketCount") or len(bertopic_nodes_payload))
         bertopic_overview.setdefault("totalMappedDocs", total_mapped_docs)
+    bertopic_overview.setdefault("rangeStart", str(bertopic_nodes_payload[0].get("date") or "").strip() if bertopic_nodes_payload else "")
+    bertopic_overview.setdefault("rangeEnd", str(bertopic_nodes_payload[-1].get("date") or "").strip() if bertopic_nodes_payload else "")
+    bertopic_overview.setdefault(
+        "totalTemporalDocs",
+        _parse_int(
+            bertopic_overview.get("totalTemporalDocs")
+            or bertopic_meta_from_context.get("dated_docs")
+            or bertopic_meta_from_context.get("datedDocs")
+        ),
+    )
+
+    bertopic_heatmap_payload = bertopic_heatmap_from_context if isinstance(bertopic_heatmap_from_context, dict) else {}
+    if not bertopic_heatmap_payload and bertopic_series_payload:
+        heatmap_source_rows = [
+            {
+                "title": item.get("title"),
+                "name": item.get("name"),
+                "points": item.get("points"),
+            }
+            for item in bertopic_series_payload
+        ]
+        bertopic_heatmap_payload = _build_bertopic_temporal_heatmap(heatmap_source_rows)
+
+    try:
+        bertopic_coverage_rate = float(
+            bertopic_meta_from_context.get("coverage_rate")
+            or bertopic_meta_from_context.get("coverageRate")
+            or 0.0
+        )
+    except Exception:
+        bertopic_coverage_rate = 0.0
+    bertopic_temporal_meta = {
+        "source": str(bertopic_meta_from_context.get("source") or "").strip(),
+        "timeSource": str(bertopic_meta_from_context.get("time_source") or "").strip(),
+        "seriesSource": str(
+            bertopic_meta_from_context.get("series_source")
+            or bertopic_meta_from_context.get("seriesSource")
+            or ""
+        ).strip(),
+        "clusterCount": _parse_int(bertopic_meta_from_context.get("cluster_count") or bertopic_meta_from_context.get("clusterCount")),
+        "clusterDocTotal": _parse_int(
+            bertopic_meta_from_context.get("cluster_doc_total") or bertopic_meta_from_context.get("clusterDocTotal")
+        ),
+        "timeNodeCount": len(bertopic_nodes_payload),
+        "seriesCount": len(bertopic_series_payload),
+        "mappedDocs": _parse_int(
+            bertopic_meta_from_context.get("mapped_docs")
+            or bertopic_meta_from_context.get("mappedDocs")
+            or total_mapped_docs
+        ),
+        "datedDocs": _parse_int(
+            bertopic_meta_from_context.get("dated_docs")
+            or bertopic_meta_from_context.get("datedDocs")
+            or bertopic_overview.get("totalTemporalDocs")
+        ),
+        "coverageRate": round(bertopic_coverage_rate, 4),
+        "temporalMeta": bertopic_meta_from_context.get("temporal_meta")
+        if isinstance(bertopic_meta_from_context.get("temporal_meta"), dict)
+        else {},
+    }
+    if not bertopic_temporal_meta["seriesSource"]:
+        bertopic_temporal_meta["seriesSource"] = bertopic_temporal_meta["timeSource"] or "time_nodes"
+
+    bertopic_temporal_payload = {
+        "overview": bertopic_overview,
+        "meta": bertopic_temporal_meta,
+        "timeNodes": bertopic_nodes_payload,
+        "hotspots": bertopic_hotspots_payload,
+        "series": bertopic_series_payload,
+        "heatmap": bertopic_heatmap_payload,
+        "leadingThemes": bertopic_leading_themes_payload,
+    }
 
     metrics = _compute_metrics(channels, timeline, sentiment, content_split)
     main_finding = _load_main_finding(analyze_root)
@@ -1268,6 +1927,12 @@ def _build_report_payload(
         "themes": themes[:8],
         "theme_source": theme_source,
         "bertopic_time_nodes": bertopic_hotspots_payload,
+        "bertopic_temporal": {
+            "overview": bertopic_overview,
+            "meta": bertopic_temporal_meta,
+            "leading_themes": bertopic_leading_themes_payload,
+            "series_source": bertopic_temporal_meta.get("seriesSource"),
+        },
         "main_finding": main_finding,
         "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
         "legacy_report_text": legacy_context.get("full_text_short", ""),
@@ -1286,12 +1951,57 @@ def _build_report_payload(
         }
         for item in bertopic_nodes_payload
     ]
+    bertopic_series_summary = []
+    for item in bertopic_series_payload[:6]:
+        points = item.get("points") if isinstance(item.get("points"), list) else []
+        peak_point = max(points, key=lambda point: _parse_int(point.get("count")), default={})
+        bertopic_series_summary.append(
+            {
+                "theme": str(item.get("title") or item.get("name") or "").strip(),
+                "totalCount": _parse_int(item.get("totalCount")),
+                "activeBuckets": len(points),
+                "peakDate": str(peak_point.get("date") or "").strip(),
+                "peakCount": _parse_int(peak_point.get("count")),
+            }
+        )
+    bertopic_switches_for_llm = []
+    previous_theme = ""
+    for item in bertopic_nodes_payload:
+        current_theme = str(item.get("topTheme") or "").strip()
+        if previous_theme and current_theme and previous_theme != current_theme:
+            bertopic_switches_for_llm.append(
+                {
+                    "date": str(item.get("date") or "").strip(),
+                    "fromTheme": previous_theme,
+                    "toTheme": current_theme,
+                    "total": _parse_int(item.get("total")),
+                    "topValue": _parse_int(item.get("topValue")),
+                }
+            )
+        if current_theme:
+            previous_theme = current_theme
     bertopic_insight_facts = {
         "topic": topic_label,
         "time_range": {"start": start, "end": end},
         "bertopic_overview": bertopic_overview,
+        "bertopic_series_source": bertopic_temporal_meta.get("seriesSource"),
+        "bertopic_leading_themes": bertopic_leading_themes_payload,
         "bertopic_hotspots": bertopic_hotspots_payload[:10],
         "bertopic_timeline": bertopic_timeline_for_llm,
+        "bertopic_series_summary": bertopic_series_summary,
+        "main_finding": main_finding,
+        "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
+        "legacy_report_text": legacy_context.get("full_text_short", ""),
+    }
+    bertopic_temporal_narrative_facts = {
+        "topic": topic_label,
+        "time_range": {"start": start, "end": end},
+        "bertopic_overview": bertopic_overview,
+        "bertopic_meta": bertopic_temporal_meta,
+        "bertopic_leading_themes": bertopic_leading_themes_payload,
+        "bertopic_hotspots": bertopic_hotspots_payload[:8],
+        "bertopic_switches": bertopic_switches_for_llm[:8],
+        "bertopic_series_summary": bertopic_series_summary,
         "main_finding": main_finding,
         "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
         "legacy_report_text": legacy_context.get("full_text_short", ""),
@@ -1318,6 +2028,40 @@ def _build_report_payload(
         if bertopic_insight_candidate:
             bertopic_insight = bertopic_insight_candidate
             bertopic_insight_source = "llm"
+
+    bertopic_temporal_narrative = _build_fallback_bertopic_temporal_narrative(
+        topic_label=topic_label,
+        start=start,
+        end=end,
+        bertopic_overview=bertopic_overview,
+        bertopic_meta=bertopic_temporal_meta,
+        bertopic_nodes=bertopic_nodes_payload,
+        bertopic_series=bertopic_series_payload,
+        bertopic_hotspots=bertopic_hotspots_payload,
+        leading_themes=bertopic_leading_themes_payload,
+    )
+    bertopic_temporal_narrative_source = "fallback"
+    bertopic_temporal_narrative_payload = _call_langchain_json(
+        build_bertopic_temporal_narrative_prompt(bertopic_temporal_narrative_facts),
+        max_tokens=1200,
+    )
+    if isinstance(bertopic_temporal_narrative_payload, dict):
+        summary_candidate = str(bertopic_temporal_narrative_payload.get("summary") or "").strip()
+        shift_signals_candidate = bertopic_temporal_narrative_payload.get("shiftSignals")
+        watchpoints_candidate = bertopic_temporal_narrative_payload.get("watchpoints")
+        if summary_candidate:
+            bertopic_temporal_narrative["summary"] = summary_candidate
+            bertopic_temporal_narrative_source = "llm"
+        if isinstance(shift_signals_candidate, list):
+            parsed_shift_signals = [str(item).strip() for item in shift_signals_candidate if str(item or "").strip()]
+            if parsed_shift_signals:
+                bertopic_temporal_narrative["shiftSignals"] = parsed_shift_signals[:4]
+                bertopic_temporal_narrative_source = "llm"
+        if isinstance(watchpoints_candidate, list):
+            parsed_watchpoints = [str(item).strip() for item in watchpoints_candidate if str(item or "").strip()]
+            if parsed_watchpoints:
+                bertopic_temporal_narrative["watchpoints"] = parsed_watchpoints[:3]
+                bertopic_temporal_narrative_source = "llm"
 
     title = f"{topic_label}舆情分析报告"
     subtitle = main_finding or "基于结构化统计结果自动生成，覆盖声量、趋势、态度与主题。"
@@ -1409,7 +2153,9 @@ def _build_report_payload(
         "bertopicTimeNodes": bertopic_nodes_payload,
         "bertopicHotspots": bertopic_hotspots_payload,
         "bertopicOverview": bertopic_overview,
+        "bertopicTemporal": bertopic_temporal_payload,
         "bertopicInsight": bertopic_insight,
+        "bertopicTemporalNarrative": bertopic_temporal_narrative,
         "stageNotes": stage_notes,
         "highlightPoints": highlight_points,
         "insights": insights,
@@ -1420,6 +2166,7 @@ def _build_report_payload(
             "theme_source": theme_source,
             "bertopic_context": bertopic_context.get("meta") if isinstance(bertopic_context, dict) else {},
             "bertopic_insight_source": bertopic_insight_source,
+            "bertopic_temporal_narrative_source": bertopic_temporal_narrative_source,
             "legacy_context": {
                 "sections_source_topic": legacy_context.get("sections_topic") or "",
                 "manual_source_topic": legacy_context.get("manual_topic") or "",

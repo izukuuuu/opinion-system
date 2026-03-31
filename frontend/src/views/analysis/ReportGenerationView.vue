@@ -207,6 +207,45 @@
           </p>
         </div>
 
+        <div class="grid gap-4 md:grid-cols-3">
+          <article class="rounded-2xl border border-soft bg-surface p-4">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">时序摘要</p>
+            <p class="mt-3 text-sm leading-7 text-secondary">
+              {{ bertopicTemporalNarrative.summary || '暂无结构化时序摘要。' }}
+            </p>
+          </article>
+
+          <article class="rounded-2xl border border-soft bg-surface p-4">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">迁移信号</p>
+            <ul v-if="bertopicTemporalNarrative.shiftSignals.length" class="mt-3 space-y-2 text-sm text-secondary">
+              <li
+                v-for="(signal, index) in bertopicTemporalNarrative.shiftSignals"
+                :key="`bertopic-signal-${index}`"
+                class="flex gap-2"
+              >
+                <span class="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600"></span>
+                <span>{{ signal }}</span>
+              </li>
+            </ul>
+            <p v-else class="mt-3 text-sm text-muted">暂无明显迁移信号。</p>
+          </article>
+
+          <article class="rounded-2xl border border-soft bg-surface p-4">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">关注提醒</p>
+            <ul v-if="bertopicTemporalNarrative.watchpoints.length" class="mt-3 space-y-2 text-sm text-secondary">
+              <li
+                v-for="(point, index) in bertopicTemporalNarrative.watchpoints"
+                :key="`bertopic-watchpoint-${index}`"
+                class="flex gap-2"
+              >
+                <span class="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"></span>
+                <span>{{ point }}</span>
+              </li>
+            </ul>
+            <p v-else class="mt-3 text-sm text-muted">暂无额外提醒。</p>
+          </article>
+        </div>
+
         <div class="grid gap-6 xl:grid-cols-[1.6fr,1fr]">
           <AnalysisChartPanel
             title="主题热度时间轴"
@@ -393,52 +432,176 @@ const parseDateToken = (raw) => {
   return Number.isNaN(dt.getTime()) ? null : dt
 }
 
-const bertopicTimelineNodes = computed(() => {
-  const rows = Array.isArray(report.value?.bertopicTimeNodes) ? report.value.bertopicTimeNodes : []
-  return rows
-    .map((item) => {
-      const date = String(item?.date || '').trim()
-      const label = String(item?.label || date).trim()
-      const topTheme = String(item?.topTheme || '').trim()
-      const topValue = Number(item?.topValue || 0)
-      const total = Number(item?.total || 0)
-      const themes = Array.isArray(item?.themes)
-        ? item.themes
-          .map((theme) => ({
-            name: String(theme?.name || '').trim(),
-            value: Number(theme?.value || 0)
-          }))
-          .filter((theme) => theme.name)
-        : []
-      const tailThemes = themes
-        .slice(1, 3)
-        .map((theme) => `${theme.name}(${formatNumber(theme.value)})`)
-        .join('、')
-      return {
-        date,
-        label: label || date,
-        topTheme,
-        topValue,
-        total,
-        themes,
-        tailThemes
-      }
-    })
-    .filter((item) => item.date && item.topTheme)
-    .sort((a, b) => {
-      const left = parseDateToken(a.date)
-      const right = parseDateToken(b.date)
-      if (left && right) return left.getTime() - right.getTime()
-      if (left) return -1
-      if (right) return 1
-      return a.date.localeCompare(b.date)
-    })
-})
-const bertopicTimelineListNodes = computed(() => bertopicTimelineNodes.value)
-const bertopicOverview = computed(() => (report.value?.bertopicOverview && typeof report.value.bertopicOverview === 'object'
-  ? report.value.bertopicOverview
+const bertopicTemporal = computed(() => (report.value?.bertopicTemporal && typeof report.value.bertopicTemporal === 'object'
+  ? report.value.bertopicTemporal
   : {}))
+const bertopicTemporalMeta = computed(() => (bertopicTemporal.value?.meta && typeof bertopicTemporal.value.meta === 'object'
+  ? bertopicTemporal.value.meta
+  : {}))
+
+const normalizeBertopicThemes = (rows) => (
+  Array.isArray(rows)
+    ? rows
+      .map((theme) => ({
+        name: String(theme?.name || '').trim(),
+        value: Number(theme?.value || 0)
+      }))
+      .filter((theme) => theme.name)
+      .sort((a, b) => b.value - a.value)
+    : []
+)
+
+const normalizeBertopicTimelineNodes = (rows) => (
+  Array.isArray(rows)
+    ? rows
+      .map((item) => {
+        const date = String(item?.date || '').trim()
+        const label = String(item?.label || date).trim()
+        const topTheme = String(item?.topTheme || '').trim()
+        const topValue = Number(item?.topValue || 0)
+        const total = Number(item?.total || 0)
+        const themes = normalizeBertopicThemes(item?.themes)
+        const tailThemes = themes
+          .slice(1, 3)
+          .map((theme) => `${theme.name}(${formatNumber(theme.value)})`)
+          .join('、')
+        return {
+          date,
+          label: label || date,
+          topTheme,
+          topValue,
+          total,
+          themes,
+          tailThemes
+        }
+      })
+      .filter((item) => item.date && item.topTheme)
+      .sort((a, b) => {
+        const left = parseDateToken(a.date)
+        const right = parseDateToken(b.date)
+        if (left && right) return left.getTime() - right.getTime()
+        if (left) return -1
+        if (right) return 1
+        return a.date.localeCompare(b.date)
+      })
+    : []
+)
+
+const normalizeBertopicSeries = (rows) => (
+  Array.isArray(rows)
+    ? rows
+      .map((item) => {
+        const title = String(item?.title || item?.name || '').trim()
+        const rawPoints = Array.isArray(item?.points) ? item.points : []
+        const points = rawPoints
+          .map((point) => {
+            const date = String(point?.date || '').trim()
+            return {
+              date,
+              label: String(point?.label || date).trim() || date,
+              count: Number(point?.count || point?.value || 0)
+            }
+          })
+          .filter((point) => point.date && point.count > 0)
+          .sort((a, b) => {
+            const left = parseDateToken(a.date)
+            const right = parseDateToken(b.date)
+            if (left && right) return left.getTime() - right.getTime()
+            if (left) return -1
+            if (right) return 1
+            return a.date.localeCompare(b.date)
+          })
+        if (!title || !points.length) return null
+        return {
+          name: String(item?.name || title).trim() || title,
+          title,
+          description: String(item?.description || '').trim(),
+          totalCount: Number(item?.totalCount || item?.total_count || points.reduce((sum, point) => sum + point.count, 0)),
+          originalTopics: Array.isArray(item?.originalTopics || item?.original_topics)
+            ? (item?.originalTopics || item?.original_topics).map((topic) => String(topic || '').trim()).filter(Boolean)
+            : [],
+          points
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.totalCount - a.totalCount)
+    : []
+)
+
+const deriveBertopicSeriesFromNodes = (nodes) => {
+  const buckets = new Map()
+  nodes.forEach((node) => {
+    node.themes.forEach((theme) => {
+      const current = buckets.get(theme.name) || []
+      current.push({
+        date: node.date,
+        label: node.label || node.date,
+        count: Number(theme.value || 0)
+      })
+      buckets.set(theme.name, current)
+    })
+  })
+
+  return [...buckets.entries()]
+    .map(([title, points]) => ({
+      name: title,
+      title,
+      description: '',
+      totalCount: points.reduce((sum, point) => sum + Number(point.count || 0), 0),
+      originalTopics: [],
+      points: [...points].sort((a, b) => {
+        const left = parseDateToken(a.date)
+        const right = parseDateToken(b.date)
+        if (left && right) return left.getTime() - right.getTime()
+        if (left) return -1
+        if (right) return 1
+        return a.date.localeCompare(b.date)
+      })
+    }))
+    .sort((a, b) => b.totalCount - a.totalCount)
+}
+
+const getBertopicSourceLabel = (source) => ({
+  llm_clusters: 'LLM 新主题时序序列',
+  raw_topics: 'BERTopic 原始主题时序序列',
+  legacy_doc_mapping: '回填映射时序序列',
+  time_nodes: '主导主题节点序列'
+}[String(source || '').trim()] || '')
+
+const bertopicTimelineNodes = computed(() => {
+  const rows = Array.isArray(bertopicTemporal.value?.timeNodes)
+    ? bertopicTemporal.value.timeNodes
+    : (Array.isArray(report.value?.bertopicTimeNodes) ? report.value.bertopicTimeNodes : [])
+  return normalizeBertopicTimelineNodes(rows)
+})
+const bertopicTemporalSeries = computed(() => {
+  const standardized = normalizeBertopicSeries(bertopicTemporal.value?.series)
+  if (standardized.length) return standardized
+  return deriveBertopicSeriesFromNodes(bertopicTimelineNodes.value)
+})
+const bertopicOverview = computed(() => (bertopicTemporal.value?.overview && typeof bertopicTemporal.value.overview === 'object'
+  ? bertopicTemporal.value.overview
+  : (report.value?.bertopicOverview && typeof report.value.bertopicOverview === 'object'
+      ? report.value.bertopicOverview
+      : {})))
+const bertopicTemporalNarrative = computed(() => {
+  const payload = report.value?.bertopicTemporalNarrative
+  return {
+    summary: String(payload?.summary || '').trim(),
+    shiftSignals: Array.isArray(payload?.shiftSignals)
+      ? payload.shiftSignals.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    watchpoints: Array.isArray(payload?.watchpoints)
+      ? payload.watchpoints.map((item) => String(item || '').trim()).filter(Boolean)
+      : []
+  }
+})
 const bertopicCoverageRange = computed(() => {
+  const overviewStart = String(bertopicOverview.value?.rangeStart || '').trim()
+  const overviewEnd = String(bertopicOverview.value?.rangeEnd || '').trim()
+  if (overviewStart || overviewEnd) {
+    return { start: overviewStart, end: overviewEnd }
+  }
   const rows = bertopicTimelineNodes.value
   if (!rows.length) return { start: '', end: '' }
   return {
@@ -450,28 +613,63 @@ const bertopicOverviewText = computed(() => {
   const bucketCount = Number(
     bertopicOverview.value?.bucketCount || bertopicOverview.value?.days || bertopicTimelineNodes.value.length || 0
   )
-  const mappedDocs = Number(bertopicOverview.value?.totalMappedDocs || 0)
+  const mappedDocs = Number(
+    bertopicOverview.value?.totalMappedDocs || bertopicTemporalMeta.value?.mappedDocs || 0
+  )
   const aggregationLabel = String(bertopicOverview.value?.aggregationLabel || '日').trim() || '日'
   const coverageStart = String(bertopicCoverageRange.value.start || '').trim()
   const coverageEnd = String(bertopicCoverageRange.value.end || '').trim()
   const reportStart = String(reportForm.start || '').trim()
   const reportEnd = String(reportForm.end || reportStart || '').trim()
+  const sourceLabel = getBertopicSourceLabel(
+    bertopicTemporalMeta.value?.seriesSource || bertopicTemporalMeta.value?.timeSource
+  )
+  const coverageRate = Number(bertopicTemporalMeta.value?.coverageRate || 0)
   if (!bucketCount && !mappedDocs) return '我们对这期间的讨论进行了分析，整理出了核心话题在时序上的变化走势。'
 
-  const baseText = coverageStart && coverageEnd
-    ? `BERTopic 结果当前覆盖 ${coverageStart} 至 ${coverageEnd} 共 ${formatNumber(bucketCount)} 个${aggregationLabel}级时间桶，映射到 ${formatNumber(mappedDocs)} 条讨论。`
-    : `BERTopic 结果共覆盖 ${formatNumber(bucketCount)} 个${aggregationLabel}级时间桶，映射到 ${formatNumber(mappedDocs)} 条讨论。`
-
-  if (coverageStart && coverageEnd && reportStart && reportEnd && (coverageStart > reportStart || coverageEnd < reportEnd)) {
-    return `${baseText} 与报告区间（${reportStart} 至 ${reportEnd}）不一致，请重新运行 BERTopic 后再生成报告。`
+  const fragments = []
+  if (coverageStart && coverageEnd) {
+    fragments.push(`BERTopic 结果当前覆盖 ${coverageStart} 至 ${coverageEnd} 共 ${formatNumber(bucketCount)} 个${aggregationLabel}级时间桶，映射到 ${formatNumber(mappedDocs)} 条讨论。`)
+  } else {
+    fragments.push(`BERTopic 结果共覆盖 ${formatNumber(bucketCount)} 个${aggregationLabel}级时间桶，映射到 ${formatNumber(mappedDocs)} 条讨论。`)
   }
-
-  return baseText
+  if (sourceLabel) {
+    fragments.push(`当前引用 ${sourceLabel}。`)
+  }
+  if (coverageRate > 0) {
+    fragments.push(`时序映射覆盖率 ${formatRate(coverageRate)}。`)
+  }
+  if (coverageStart && coverageEnd && reportStart && reportEnd && (coverageStart > reportStart || coverageEnd < reportEnd)) {
+    fragments.push(`与报告区间（${reportStart} 至 ${reportEnd}）不一致，请重新运行 BERTopic 后再生成报告。`)
+  }
+  return fragments.join('')
 })
 const bertopicInsight = computed(() => String(report.value?.bertopicInsight || '').trim())
 const formattedBertopicInsight = computed(() => {
   if (!bertopicInsight.value) return ''
   return marked.parse(bertopicInsight.value, { mangle: false, headerIds: false })
+})
+const bertopicLeadingThemes = computed(() => {
+  const payloadThemes = Array.isArray(bertopicTemporal.value?.leadingThemes)
+    ? bertopicTemporal.value.leadingThemes.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+  if (payloadThemes.length) return payloadThemes.slice(0, 3)
+  if (bertopicTemporalSeries.value.length) {
+    return bertopicTemporalSeries.value.slice(0, 3).map((item) => item.title)
+  }
+  const stats = new Map()
+  bertopicTimelineNodes.value.forEach((node) => {
+    node.themes.forEach((theme) => {
+      const name = String(theme?.name || '').trim()
+      const value = Number(theme?.value || 0)
+      if (!name || value <= 0) return
+      stats.set(name, (stats.get(name) || 0) + value)
+    })
+  })
+  return [...stats.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name]) => name)
 })
 const highlightPoints = computed(() => (Array.isArray(report.value?.highlightPoints) ? report.value.highlightPoints : []))
 const insightCards = computed(() => (Array.isArray(report.value?.insights) ? report.value.insights : []))
@@ -482,7 +680,7 @@ const hasSentimentData = computed(() => Boolean(sentiment.value))
 const hasContentSplitData = computed(() => Boolean(contentSplit.value))
 const hasKeywordData = computed(() => keywords.value.length > 0)
 const hasThemeData = computed(() => themes.value.length > 0)
-const hasBertopicTimelineData = computed(() => bertopicTimelineNodes.value.length > 0)
+const hasBertopicTimelineData = computed(() => bertopicTimelineNodes.value.length > 0 || bertopicTemporalSeries.value.length > 0)
 
 const channelChartOption = computed(() => {
   const sorted = [...channels.value]
@@ -656,40 +854,37 @@ const themeChartOption = computed(() => {
   }
 })
 
-const bertopicLeadingThemes = computed(() => {
-  const stats = new Map()
-  bertopicTimelineNodes.value.forEach((node) => {
-    node.themes.forEach((theme) => {
-      const name = String(theme?.name || '').trim()
-      const value = Number(theme?.value || 0)
-      if (!name || value <= 0) return
-      stats.set(name, (stats.get(name) || 0) + value)
-    })
-  })
-  return [...stats.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([name]) => name)
-})
-
 const themeActivePoints = computed(() => {
   const rows = bertopicTimelineNodes.value
+  const seriesRows = bertopicTemporalSeries.value
   const leaders = bertopicLeadingThemes.value
-  if (!rows.length || !leaders.length) return []
+  if (!leaders.length) return []
 
   const grouped = []
   for (const themeName of leaders) {
-    const points = []
+    let points = []
     for (const node of rows) {
       if (node.topTheme === themeName) {
         points.push(node)
+      }
+    }
+    if (!points.length) {
+      const matchedSeries = seriesRows.find((item) => item.title === themeName)
+      if (matchedSeries) {
+        points = matchedSeries.points.map((point) => ({
+          date: point.date,
+          label: point.label || point.date,
+          topTheme: themeName,
+          topValue: Number(point.count || 0),
+          total: Number(point.count || 0)
+        }))
       }
     }
     if (points.length) {
       points.sort((a, b) => b.topValue - a.topValue)
       grouped.push({
         theme: themeName,
-        points: points.slice(0, 3) 
+        points: points.slice(0, 3)
       })
     }
   }
@@ -698,9 +893,42 @@ const themeActivePoints = computed(() => {
 
 const bertopicTimelineOption = computed(() => {
   const rows = bertopicTimelineNodes.value
-  const labels = rows.map((node) => node.label || node.date)
-  const totals = rows.map((node) => Number(node.total || 0))
+  const seriesRows = bertopicTemporalSeries.value
   const leaders = bertopicLeadingThemes.value
+  const dateMap = new Map()
+
+  rows.forEach((node) => {
+    if (!node.date) return
+    dateMap.set(node.date, node.label || node.date)
+  })
+  seriesRows.forEach((series) => {
+    series.points.forEach((point) => {
+      if (!point.date || dateMap.has(point.date)) return
+      dateMap.set(point.date, point.label || point.date)
+    })
+  })
+
+  const orderedDates = [...dateMap.keys()].sort((a, b) => {
+    const left = parseDateToken(a)
+    const right = parseDateToken(b)
+    if (left && right) return left.getTime() - right.getTime()
+    if (left) return -1
+    if (right) return 1
+    return a.localeCompare(b)
+  })
+  const labels = orderedDates.map((date) => dateMap.get(date) || date)
+  const totalMap = new Map()
+  rows.forEach((node) => {
+    totalMap.set(node.date, Number(node.total || 0))
+  })
+  if (!rows.length) {
+    seriesRows.forEach((series) => {
+      series.points.forEach((point) => {
+        totalMap.set(point.date, Number(totalMap.get(point.date) || 0) + Number(point.count || 0))
+      })
+    })
+  }
+  const totals = orderedDates.map((date) => Number(totalMap.get(date) || 0))
 
   const leaderSeries = leaders.map((themeName) => ({
     name: themeName,
@@ -708,9 +936,15 @@ const bertopicTimelineOption = computed(() => {
     smooth: true,
     showSymbol: false,
     lineStyle: { width: 2.5 },
-    data: rows.map((node) => {
-      const matched = node.themes.find((theme) => theme.name === themeName)
-      return Number(matched?.value || 0)
+    data: orderedDates.map((date) => {
+      const matchedSeries = seriesRows.find((item) => item.title === themeName)
+      if (matchedSeries) {
+        const matchedPoint = matchedSeries.points.find((point) => point.date === date)
+        return Number(matchedPoint?.count || 0)
+      }
+      const matchedNode = rows.find((node) => node.date === date)
+      const matchedTheme = matchedNode?.themes.find((theme) => theme.name === themeName)
+      return Number(matchedTheme?.value || 0)
     })
   }))
 
@@ -886,6 +1120,26 @@ const buildHtmlDocument = () => {
   const bertopicInsightHtml = formattedBertopicInsight.value
     ? `<div class="prose">${formattedBertopicInsight.value}</div>`
     : '<p class="empty-text">暂无 AI 深度解读。请重新生成报告以补齐该区块。</p>'
+  const bertopicNarrativeHtml = `
+    <div class="narrative-grid">
+      <article class="narrative-card">
+        <p class="narrative-title">时序摘要</p>
+        <p class="narrative-text">${escapeHtml(bertopicTemporalNarrative.value.summary || '暂无结构化时序摘要。')}</p>
+      </article>
+      <article class="narrative-card">
+        <p class="narrative-title">迁移信号</p>
+        ${bertopicTemporalNarrative.value.shiftSignals.length
+          ? `<ul class="bullet-list compact">${bertopicTemporalNarrative.value.shiftSignals.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+          : '<p class="empty-text">暂无明显迁移信号。</p>'}
+      </article>
+      <article class="narrative-card">
+        <p class="narrative-title">关注提醒</p>
+        ${bertopicTemporalNarrative.value.watchpoints.length
+          ? `<ul class="bullet-list compact">${bertopicTemporalNarrative.value.watchpoints.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+          : '<p class="empty-text">暂无额外提醒。</p>'}
+      </article>
+    </div>
+  `
 
   const loadedSuffix = reportState.lastLoaded
     ? ` · 前端读取：${escapeHtml(reportState.lastLoaded)}`
@@ -1013,6 +1267,31 @@ const buildHtmlDocument = () => {
       color: #0f172a;
       font-weight: 700;
       margin-bottom: 10px;
+    }
+    .narrative-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      margin-top: 14px;
+    }
+    .narrative-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      background: #ffffff;
+      padding: 14px;
+    }
+    .narrative-title {
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #64748b;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .narrative-text {
+      color: #334155;
+      font-size: 14px;
+      line-height: 1.75;
     }
     .theme-timeline {
       border: 1px solid #e2e8f0;
@@ -1165,6 +1444,7 @@ const buildHtmlDocument = () => {
         <p class="bertopic-insight-title">AI 深度解读</p>
         ${bertopicInsightHtml}
       </div>
+      ${bertopicNarrativeHtml}
       <div class="bertopic-grid" style="margin-top: 14px;">
         ${renderChartPanel('bertopicTimeline', '主题热度时间轴', '背景浅蓝色区域代表每天的样本总量走势，彩色折线展示了几个核心话题在这些天的讨论热度变化。')}
         <aside class="theme-timeline">

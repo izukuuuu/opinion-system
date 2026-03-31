@@ -197,7 +197,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   Bars3Icon,
@@ -220,8 +220,9 @@ import {
   XMarkIcon
 } from '@heroicons/vue/24/outline'
 import ActiveProjectSwitcher from './components/ActiveProjectSwitcher.vue'
-import AiSidebar from './components/AiSidebar.vue'
 import './assets/colors.css'
+
+const AiSidebar = defineAsyncComponent(() => import('./components/AiSidebar.vue'))
 
 const isClient = typeof window !== 'undefined'
 const SIDEBAR_SCROLLBAR_HIDE_DELAY = 2000
@@ -364,7 +365,7 @@ const navigationGroups = [
         label: '系统设置',
         description: '系统配置与分析设置',
         to: { name: 'settings-databases' },
-        match: ['settings', 'settings-backend', 'settings-databases', 'settings-ai', 'settings-theme', 'settings-archives', 'settings-rag'],
+        match: ['settings', 'settings-backend', 'settings-databases', 'settings-ai', 'settings-netinsight', 'settings-theme', 'settings-archives', 'settings-rag', 'settings-bertopic', 'settings-experimental'],
         icon: Cog6ToothIcon
       }
     ]

@@ -1,34 +1,37 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import HomeView from '../views/HomeView.vue'
-import SystemIntroView from '../views/SystemIntroView.vue'
-import TopicCreationLayout from '../views/topics/TopicCreationLayout.vue'
-import TopicCreationOverview from '../views/topics/TopicCreationOverview.vue'
-import TopicUploadStep from '../views/topics/TopicUploadStep.vue'
-import TopicPreprocessStep from '../views/topics/TopicPreprocessStep.vue'
-import TopicFilterStep from '../views/topics/TopicFilterStep.vue'
-import TopicIngestionStep from '../views/topics/TopicIngestionStep.vue'
-import ProjectDataLayout from '../views/project-data/ProjectDataLayout.vue'
-import ProjectDataLocalView from '../views/project-data/ProjectDataLocalView.vue'
-import ProjectDataRemoteCacheView from '../views/project-data/ProjectDataRemoteCacheView.vue'
-import ProjectBasicAnalysisLayout from '../views/analysis/basic/ProjectBasicAnalysisLayout.vue'
-import ProjectBasicAnalysisOverview from '../views/analysis/basic/ProjectBasicAnalysisOverview.vue'
-import ProjectBasicAnalysisRun from '../views/analysis/basic/ProjectBasicAnalysisRun.vue'
-import ProjectBasicAnalysisResults from '../views/analysis/basic/ProjectBasicAnalysisResults.vue'
-import ContentAnalysisPrompt from '../views/analysis/content/ContentAnalysisPrompt.vue'
-import TopicBertopicLayout from '../views/analysis/topic/TopicBertopicLayout.vue'
-import TopicBertopicOverview from '../views/analysis/topic/TopicBertopicOverview.vue'
-import TopicBertopicRun from '../views/analysis/topic/TopicBertopicRun.vue'
-import TopicBertopicResults from '../views/analysis/topic/TopicBertopicResults.vue'
-import ReportGenerationView from '../views/analysis/ReportGenerationView.vue'
-import DatabaseOverviewView from '../views/DatabaseOverviewView.vue'
-import DatabaseDatasetsView from '../views/DatabaseDatasetsView.vue'
-import SettingsLayout from '../views/settings/SettingsLayout.vue'
-import SettingsDatabasesView from '../views/settings/SettingsDatabasesView.vue'
-import SettingsAiView from '../views/settings/SettingsAiView.vue'
-import SettingsThemeView from '../views/settings/SettingsThemeView.vue'
-import SettingsBackendView from '../views/settings/SettingsBackendView.vue'
-import SettingsArchivesView from '../views/settings/SettingsArchivesView.vue'
-import PlaceholderModuleView from '../views/PlaceholderModuleView.vue'
+
+const HomeView = () => import('../views/HomeView.vue')
+const SystemIntroView = () => import('../views/SystemIntroView.vue')
+const TopicCreationLayout = () => import('../views/topics/TopicCreationLayout.vue')
+const TopicCreationOverview = () => import('../views/topics/TopicCreationOverview.vue')
+const TopicUploadStep = () => import('../views/topics/TopicUploadStep.vue')
+const TopicPreprocessStep = () => import('../views/topics/TopicPreprocessStep.vue')
+const TopicFilterStep = () => import('../views/topics/TopicFilterStep.vue')
+const TopicIngestionStep = () => import('../views/topics/TopicIngestionStep.vue')
+const ProjectDataLayout = () => import('../views/project-data/ProjectDataLayout.vue')
+const ProjectDataLocalView = () => import('../views/project-data/ProjectDataLocalView.vue')
+const ProjectDataRemoteCacheView = () => import('../views/project-data/ProjectDataRemoteCacheView.vue')
+const NetInsightQueueView = () => import('../views/data-acquisition/NetInsightQueueView.vue')
+const ProjectBasicAnalysisLayout = () => import('../views/analysis/basic/ProjectBasicAnalysisLayout.vue')
+const ProjectBasicAnalysisOverview = () => import('../views/analysis/basic/ProjectBasicAnalysisOverview.vue')
+const ProjectBasicAnalysisRun = () => import('../views/analysis/basic/ProjectBasicAnalysisRun.vue')
+const ProjectBasicAnalysisResults = () => import('../views/analysis/basic/ProjectBasicAnalysisResults.vue')
+const ContentAnalysisPrompt = () => import('../views/analysis/content/ContentAnalysisPrompt.vue')
+const TopicBertopicLayout = () => import('../views/analysis/topic/TopicBertopicLayout.vue')
+const TopicBertopicOverview = () => import('../views/analysis/topic/TopicBertopicOverview.vue')
+const TopicBertopicRun = () => import('../views/analysis/topic/TopicBertopicRun.vue')
+const TopicBertopicResults = () => import('../views/analysis/topic/TopicBertopicResults.vue')
+const ReportGenerationView = () => import('../views/analysis/ReportGenerationView.vue')
+const DatabaseOverviewView = () => import('../views/DatabaseOverviewView.vue')
+const DatabaseDatasetsView = () => import('../views/DatabaseDatasetsView.vue')
+const SettingsLayout = () => import('../views/settings/SettingsLayout.vue')
+const SettingsDatabasesView = () => import('../views/settings/SettingsDatabasesView.vue')
+const SettingsAiView = () => import('../views/settings/SettingsAiView.vue')
+const SettingsNetInsightView = () => import('../views/settings/SettingsNetInsightView.vue')
+const SettingsThemeView = () => import('../views/settings/SettingsThemeView.vue')
+const SettingsBackendView = () => import('../views/settings/SettingsBackendView.vue')
+const SettingsArchivesView = () => import('../views/settings/SettingsArchivesView.vue')
+const PlaceholderModuleView = () => import('../views/PlaceholderModuleView.vue')
 
 export const routes = [
   {
@@ -242,10 +245,10 @@ export const routes = [
   {
     path: '/data-acquisition/platform',
     name: 'data-acquisition-platform',
-    component: PlaceholderModuleView,
+    component: NetInsightQueueView,
     meta: {
       title: '平台数据获取',
-      placeholder: '平台数据获取能力规划中，敬请期待。'
+      breadcrumb: 'NetInsight 下载队列'
     }
   },
   {
@@ -400,6 +403,15 @@ export const routes = [
         meta: {
           title: 'AI 服务配置',
           breadcrumb: 'AI 服务配置'
+        }
+      },
+      {
+        path: 'netinsight',
+        name: 'settings-netinsight',
+        component: SettingsNetInsightView,
+        meta: {
+          title: 'NetInsight 配置',
+          breadcrumb: 'NetInsight 配置'
         }
       },
       {

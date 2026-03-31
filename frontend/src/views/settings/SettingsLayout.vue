@@ -32,6 +32,7 @@ import {
   ChevronRightIcon,
   Cog6ToothIcon,
   CircleStackIcon,
+  CloudArrowDownIcon,
   CpuChipIcon,
   ArrowDownTrayIcon,
   ServerStackIcon,
@@ -54,6 +55,12 @@ const navigationItems = [
     label: 'AI 服务配置',
     to: { name: 'settings-ai' },
     icon: CpuChipIcon
+  },
+  {
+    key: 'settings-netinsight',
+    label: 'NetInsight 配置',
+    to: { name: 'settings-netinsight' },
+    icon: CloudArrowDownIcon
   },
   {
     key: 'settings-rag',

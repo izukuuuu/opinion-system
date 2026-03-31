@@ -528,11 +528,12 @@ const formatTimestamp = (value) => {
 
 const formatRowName = (row) => {
   if (!row) return '-'
-  return row.name ?? row.label ?? row.key ?? '未命名'
+  return row.displayName ?? row.name ?? row.label ?? row.key ?? '未命名'
 }
 
 const formatRowValue = (row) => {
   if (!row) return 0
+  if (row.displayValue != null) return row.displayValue
   return row.value ?? row.count ?? row.total ?? 0
 }
 

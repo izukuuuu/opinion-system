@@ -105,3 +105,22 @@ def build_bertopic_insight_prompt(facts: Dict[str, Any]) -> str:
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
+
+
+def build_bertopic_temporal_narrative_prompt(facts: Dict[str, Any]) -> str:
+    schema = {
+        "summary": "1段中文摘要，80-140字，说明主题焦点如何沿时间迁移。",
+        "shiftSignals": ["迁移信号1", "迁移信号2", "迁移信号3"],
+        "watchpoints": ["提醒1", "提醒2"],
+    }
+    return (
+        "请基于 BERTopic 时序事实生成一层更结构化的报告解读。\n"
+        "要求：\n"
+        "1) summary 要概括时间主线、主导主题与变化方式；\n"
+        "2) shiftSignals 聚焦“何时发生切换、由什么主题切到什么主题、强度如何”；\n"
+        "3) watchpoints 聚焦覆盖范围、主题集中度、异常峰值等提醒；\n"
+        "4) 不得编造输入中不存在的日期、数量或事件；\n"
+        "5) 仅输出 JSON。\n\n"
+        f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
+        f"【事实数据】\n{_json_block(facts)}"
+    )

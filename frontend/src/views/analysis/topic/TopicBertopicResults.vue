@@ -181,6 +181,11 @@
           :has-data="sankeyPlotlyHasData" title="原始主题 → 新主题合并关系（桑基图）" description="展示 BERTopic 原始主题与 LLM 新主题之间的合并关系。" />
       </div>
 
+      <div v-if="temporalTimelineHasData" class="chart-panel--tall">
+        <AnalysisChartPanel :option="temporalTimelineOption" :has-data="temporalTimelineHasData" title="主题热度时间轴"
+          :description="temporalTimelineDescription" />
+      </div>
+
       <div v-if="temporalHeatmapHasData" class="chart-panel--tall">
         <PlotlyChartPanel :data="temporalHeatmapData" :layout="temporalHeatmapLayout" :config="temporalHeatmapConfig"
           :has-data="temporalHeatmapHasData" title="主题时序热度图" :description="temporalHeatmapDescription" />
@@ -275,7 +280,7 @@ import AnalysisChartPanel from '@/components/AnalysisChartPanel.vue'
 import PlotlyChartPanel from '@/components/PlotlyChartPanel.vue'
 import { useTopicBertopicView } from '@/composables/useTopicBertopicView'
 import { useActiveProject } from '@/composables/useActiveProject'
-import * as echarts from 'echarts'
+import { echarts } from '@/utils/echarts'
 
 const {
   topicsState,
@@ -598,6 +603,50 @@ const temporalOverview = computed(() => {
   return overview && typeof overview === 'object' ? overview : {}
 })
 
+const parseDateToken = (raw) => {
+  const token = String(raw || '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(token)) return null
+  const dt = new Date(`${token}T00:00:00`)
+  return Number.isNaN(dt.getTime()) ? null : dt
+}
+
+const normalizeTemporalSeriesRows = (rows) => (
+  Array.isArray(rows)
+    ? rows
+      .map((item) => {
+        const title = String(item?.title || item?.name || '').trim()
+        const rawPoints = Array.isArray(item?.points) ? item.points : []
+        const points = rawPoints
+          .map((point) => {
+            const date = String(point?.date || '').trim()
+            return {
+              date,
+              label: String(point?.label || date).trim() || date,
+              count: Number(point?.count || point?.value || 0)
+            }
+          })
+          .filter((point) => point.date && point.count > 0)
+          .sort((a, b) => {
+            const left = parseDateToken(a.date)
+            const right = parseDateToken(b.date)
+            if (left && right) return left.getTime() - right.getTime()
+            if (left) return -1
+            if (right) return 1
+            return a.date.localeCompare(b.date)
+          })
+        if (!title || !points.length) return null
+        return {
+          name: String(item?.name || title).trim() || title,
+          title,
+          totalCount: Number(item?.total_count || item?.totalCount || points.reduce((sum, point) => sum + point.count, 0)),
+          points
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.totalCount - a.totalCount)
+    : []
+)
+
 const temporalHeatmapSource = computed(() => {
   const llmPayload = temporalPayload.value.llm_clusters
   const rawPayload = temporalPayload.value.raw_topics
@@ -619,6 +668,130 @@ const temporalHeatmapSource = computed(() => {
     series: [...rawSeries]
       .sort((a, b) => Number(b?.total_count || 0) - Number(a?.total_count || 0))
       .slice(0, Math.min(15, rawSeries.length))
+  }
+})
+
+const temporalSeriesRows = computed(() => normalizeTemporalSeriesRows(temporalHeatmapSource.value.series))
+const temporalLeadingThemes = computed(() =>
+  temporalSeriesRows.value
+    .slice(0, Math.min(4, temporalSeriesRows.value.length))
+    .map((item) => item.title)
+)
+
+const temporalTimelineDataset = computed(() => {
+  const rows = temporalSeriesRows.value
+  if (!rows.length) {
+    return { dates: [], labels: [], totals: [], themeSeries: [] }
+  }
+
+  const dateMap = new Map()
+  const pointMaps = new Map()
+
+  rows.forEach((series) => {
+    const pointMap = new Map()
+    series.points.forEach((point) => {
+      if (!point.date) return
+      dateMap.set(point.date, point.label || point.date)
+      pointMap.set(point.date, Number(point.count || 0))
+    })
+    pointMaps.set(series.title, pointMap)
+  })
+
+  const dates = [...dateMap.keys()].sort((a, b) => {
+    const left = parseDateToken(a)
+    const right = parseDateToken(b)
+    if (left && right) return left.getTime() - right.getTime()
+    if (left) return -1
+    if (right) return 1
+    return a.localeCompare(b)
+  })
+
+  const themeSeries = temporalLeadingThemes.value.map((themeName) => ({
+    name: themeName,
+    values: dates.map((date) => Number(pointMaps.get(themeName)?.get(date) || 0))
+  }))
+
+  const totals = dates.map((date) =>
+    rows.reduce((sum, series) => sum + Number(pointMaps.get(series.title)?.get(date) || 0), 0)
+  )
+
+  return {
+    dates,
+    labels: dates.map((date) => dateMap.get(date) || date),
+    totals,
+    themeSeries
+  }
+})
+
+const temporalTimelineHasData = computed(() =>
+  temporalTimelineDataset.value.labels.length > 0 && temporalTimelineDataset.value.themeSeries.length > 0
+)
+
+const temporalTimelineDescription = computed(() => {
+  const aggregationLabel = String(temporalOverview.value?.aggregationLabel || '日').trim() || '日'
+  const bucketCount = Number(temporalOverview.value?.bucketCount || temporalTimelineDataset.value.labels.length || 0)
+  const totalMappedDocs = Number(temporalOverview.value?.totalMappedDocs || 0)
+  const scopeLabel = temporalHeatmapSource.value.mode === 'llm' ? 'LLM 新主题' : 'BERTopic 原始主题'
+  const topThemes = temporalLeadingThemes.value.join('、')
+  const base = `按${aggregationLabel}粒度展示 ${scopeLabel} 的主题热度变化，背景面积为各时间桶总样本量，共 ${bucketCount} 个时间桶。`
+  const themeText = topThemes ? ` 当前重点跟踪 ${topThemes}。` : ''
+  if (totalMappedDocs > 0) {
+    return `${base} 覆盖 ${totalMappedDocs.toLocaleString()} 篇映射文档。${themeText}`
+  }
+  return `${base}${themeText}`
+})
+
+const temporalTimelineOption = computed(() => {
+  const dataset = temporalTimelineDataset.value
+  const labels = dataset.labels
+  const totals = dataset.totals
+  const interval = labels.length > 42 ? Math.ceil(labels.length / 12) : 0
+
+  return {
+    color: ['#1d4ed8', '#f97316', '#0ea5e9', '#10b981', '#8b5cf6'],
+    tooltip: { trigger: 'axis' },
+    legend: {
+      top: 4,
+      data: ['样本总量', ...dataset.themeSeries.map((item) => item.name)],
+      textStyle: { color: '#475569', fontSize: 12 }
+    },
+    grid: { left: 56, right: 20, top: 56, bottom: labels.length > 42 ? 72 : 42 },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      boundaryGap: false,
+      axisLabel: { color: '#475569', interval }
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: '#475569' },
+      splitLine: { lineStyle: { color: '#e2e8f0' } }
+    },
+    dataZoom: labels.length > 42
+      ? [
+          { type: 'inside', start: 0, end: 100 },
+          { type: 'slider', start: 0, end: 100, height: 20, bottom: 18 }
+        ]
+      : [],
+    series: [
+      {
+        name: '样本总量',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        data: totals,
+        areaStyle: { color: 'rgba(59, 130, 246, 0.15)' },
+        lineStyle: { width: 0, color: 'rgba(59, 130, 246, 0.3)' }
+      },
+      ...dataset.themeSeries.map((series) => ({
+        name: series.name,
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2.5 },
+        data: series.values
+      }))
+    ]
   }
 })
 

@@ -172,6 +172,16 @@ from src.fluid.api import fluid_bp
 from src.analyze.api import analyze_bp
 from src.topic.api import topic_bp
 from src.report.api import report_bp
+from src.netinsight import cancel_task as cancel_netinsight_task
+from src.netinsight import create_task as create_netinsight_task
+from src.netinsight import delete_task as delete_netinsight_task
+from src.netinsight import ensure_worker_running as ensure_netinsight_worker
+from src.netinsight import get_task as get_netinsight_task
+from src.netinsight import list_tasks as list_netinsight_tasks
+from src.netinsight import load_worker_status as load_netinsight_worker_status
+from src.netinsight import plan_task_from_brief
+from src.netinsight import resolve_task_output_file as resolve_netinsight_task_output_file
+from src.netinsight import retry_task as retry_netinsight_task
 
 app = Flask(__name__)
 app.register_blueprint(fluid_bp, url_prefix='/api/fluid')
@@ -1448,6 +1458,104 @@ def fetch_cache_overview():
     return jsonify(response_payload), status_code
 
 
+@app.get("/api/netinsight/tasks")
+def netinsight_tasks():
+    project = str(request.args.get("project") or "").strip()
+    status = str(request.args.get("status") or "").strip()
+    limit_raw = str(request.args.get("limit") or "").strip()
+    limit = 100
+    if limit_raw:
+        try:
+            limit = int(limit_raw)
+        except ValueError:
+            return error("Invalid 'limit' parameter, expected integer")
+    return success({"data": list_netinsight_tasks(project=project, status=status, limit=limit)})
+
+
+@app.get("/api/netinsight/tasks/<string:task_id>")
+def netinsight_task_detail(task_id: str):
+    try:
+        task = get_netinsight_task(task_id)
+    except LookupError as exc:
+        return error(str(exc), 404)
+    return success({"data": task})
+
+
+@app.get("/api/netinsight/tasks/<string:task_id>/files/<string:file_kind>")
+def netinsight_task_file(task_id: str, file_kind: str):
+    try:
+        file_path = resolve_netinsight_task_output_file(task_id, file_kind)
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except ValueError as exc:
+        return error(str(exc))
+    download_name = f"{task_id}-{file_path.name}"
+    return send_file(file_path, as_attachment=True, download_name=download_name)
+
+
+@app.post("/api/netinsight/tasks/plan")
+def netinsight_task_plan():
+    payload = request.get_json(silent=True) or {}
+    brief = str(payload.get("brief") or payload.get("query") or "").strip()
+    if not brief:
+        return error("Missing required field(s): brief")
+    plan = plan_task_from_brief(brief)
+    return success({"data": plan})
+
+
+@app.post("/api/netinsight/tasks")
+def netinsight_create_task():
+    payload = request.get_json(silent=True) or {}
+    try:
+        task = create_netinsight_task(payload)
+        worker = ensure_netinsight_worker()
+    except ValueError as exc:
+        return error(str(exc))
+    except Exception as exc:
+        LOGGER.exception("Failed to create NetInsight task")
+        return error(f"创建 NetInsight 任务失败: {str(exc)}", 500)
+    return success({"data": {"task": task, "worker": worker}}, status_code=201)
+
+
+@app.post("/api/netinsight/tasks/<string:task_id>/cancel")
+def netinsight_cancel_task(task_id: str):
+    try:
+        task = cancel_netinsight_task(task_id)
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except ValueError as exc:
+        return error(str(exc), 409)
+    return success({"data": task})
+
+
+@app.post("/api/netinsight/tasks/<string:task_id>/retry")
+def netinsight_retry_task(task_id: str):
+    try:
+        task = retry_netinsight_task(task_id)
+        worker = ensure_netinsight_worker()
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except ValueError as exc:
+        return error(str(exc), 409)
+    return success({"data": {"task": task, "worker": worker}}, status_code=201)
+
+
+@app.delete("/api/netinsight/tasks/<string:task_id>")
+def netinsight_delete_task(task_id: str):
+    try:
+        delete_netinsight_task(task_id)
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except ValueError as exc:
+        return error(str(exc), 409)
+    return success({"data": {"deleted": task_id}})
+
+
+@app.get("/api/netinsight/worker")
+def netinsight_worker_status():
+    return success({"data": load_netinsight_worker_status()})
+
+
 @app.put("/api/projects/<string:name>/datasets/<string:dataset_id>/mapping")
 def update_project_dataset_mapping(name: str, dataset_id: str):
     payload = request.get_json(silent=True) or {}
@@ -1725,16 +1833,23 @@ def root():
         "/api/report",
         "/api/report/history",
         "/api/report/regenerate",
+        "/api/netinsight/tasks",
+        "/api/netinsight/tasks/<task_id>/files/<kind>",
+        "/api/netinsight/worker",
         "/api/projects",
         "/api/projects/<name>",
         "/api/projects/<name>/datasets",
         "/api/projects/<name>/fetch-cache",
         "/api/fetch/cache",
+        "/api/settings/netinsight",
         "/api/rag/config",
         "/api/rag/test",
         "/api/rag/embedding/models",
         "/api/settings/rag/prompts",
     ]})
+
+
+register_settings_endpoints(app, PROJECT_MANAGER)
 
 
 def main() -> None:
@@ -2072,5 +2187,4 @@ def export_rag_data():
 
 
 if __name__ == "__main__":
-    register_settings_endpoints(app, PROJECT_MANAGER)
     main()
