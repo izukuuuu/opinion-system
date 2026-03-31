@@ -13,8 +13,15 @@
         class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6"
         @click.self="handleBackdrop"
       >
-        <div class="w-full rounded-3xl bg-surface p-6 shadow-2xl" :class="width">
-          <header class="flex items-start justify-between gap-4 border-b border-soft pb-4">
+        <div
+          class="w-full rounded-3xl bg-surface shadow-2xl"
+          :class="[width, scrollable ? 'flex flex-col' : 'p-6']"
+          :style="scrollable ? 'max-height: 82vh' : ''"
+        >
+          <header
+            class="flex items-start justify-between gap-4 border-b border-soft"
+            :class="scrollable ? 'flex-none px-6 pt-6 pb-4' : 'pb-4'"
+          >
             <div class="space-y-1.5">
               <p v-if="eyebrow" class="text-xs font-semibold uppercase tracking-[0.35em] text-muted">
                 {{ eyebrow }}
@@ -34,7 +41,10 @@
             </button>
           </header>
 
-          <section class="mt-4 space-y-4 text-sm text-secondary">
+          <section
+            class="text-sm text-secondary"
+            :class="scrollable ? 'min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4' : 'mt-4 space-y-4'"
+          >
             <slot name="description">
               <p v-if="description">{{ description }}</p>
             </slot>
@@ -43,7 +53,8 @@
 
           <footer
             v-if="showFooter"
-            class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end sm:gap-4"
+            class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end sm:gap-4"
+            :class="scrollable ? 'flex-none border-t border-soft px-6 py-4' : 'mt-6'"
           >
             <button
               type="button"
@@ -129,6 +140,10 @@ const props = defineProps({
   showFooter: {
     type: Boolean,
     default: true
+  },
+  scrollable: {
+    type: Boolean,
+    default: false
   }
 })
 

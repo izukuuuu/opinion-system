@@ -178,7 +178,7 @@
             </div>
             <h1 class="text-2xl font-semibold text-primary md:text-3xl">{{ pageTitle || '欢迎使用 Opinion System' }}</h1>
           </header>
-          <main class="flex-1 px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+          <main :class="route.meta.fullscreen ? 'flex-1 overflow-hidden' : 'flex-1 px-4 py-8 sm:px-6 lg:px-10 lg:py-10'">
             <RouterView />
           </main>
 

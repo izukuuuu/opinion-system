@@ -248,7 +248,8 @@ export const routes = [
     component: NetInsightQueueView,
     meta: {
       title: '平台数据获取',
-      breadcrumb: 'NetInsight 下载队列'
+      breadcrumb: 'NetInsight 下载队列',
+      fullscreen: true
     }
   },
   {
