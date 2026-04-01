@@ -389,7 +389,7 @@
         <span class="text-slate-400">FAIL <span class="text-rose-500">{{ (taskSummary.failed ?? 0) + (taskSummary.cancelled ?? 0) }}</span></span>
       </div>
       <div class="flex items-center gap-3 font-mono text-[11px] text-slate-400">
-        <span>{{ activeProjectName ? `PROJECT: ${activeProjectName}` : 'NO PROJECT' }}</span>
+        <span>默认不关联项目</span>
         <span :class="worker.running ? 'text-emerald-500' : ''">DAEMON: {{ workerStatusLabel }}</span>
       </div>
     </footer>
@@ -409,7 +409,7 @@
     >
       <template #description>
         <p class="text-sm text-slate-500">
-          简单说一下你想收集什么数据，AI 会帮你把关键词和配置填好。你确认没问题后，点提交就会自动开始抓取。
+          请优先确认关键词、平台与时间范围。辅助说明仅用于智能生成配置，不影响你手动填写后的实际采集内容。
         </p>
       </template>
 
@@ -420,7 +420,7 @@
             <input
               v-model.trim="taskForm.title"
               type="text"
-              placeholder="例如：小米 SU7 舆情追踪"
+              placeholder="例如：小米 SU7 网络舆情监测"
               class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
             />
           </label>
@@ -438,36 +438,13 @@
           </label>
         </div>
 
-        <div class="space-y-3">
-          <div class="flex items-center justify-between gap-3">
-            <label class="text-sm font-medium text-slate-700">想收集什么？</label>
-            <button
-              type="button"
-              class="rounded-full border border-indigo-200 px-4 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="planning || !taskForm.brief.trim()"
-              @click="planTask"
-            >
-              {{ planning ? 'AI 分析中…' : 'AI 一键填写' }}
-            </button>
-          </div>
-          <textarea
-            v-model.trim="taskForm.brief"
-            rows="4"
-            placeholder="例如：监测最近一个月小米 SU7 在微博和新闻网站的舆情，重点关注刹车、事故、交付、退订。"
-            class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-          />
-          <p class="text-xs text-slate-500">
-            随便写，比如"最近一个月微博上小米 SU7 的讨论，重点看事故和刹车"。AI 解析的结果你可以随时手动调整。
-          </p>
-        </div>
-
         <div class="grid gap-4 lg:grid-cols-2">
           <label class="space-y-2 text-sm">
             <span class="font-medium text-slate-700">关键词</span>
             <textarea
               v-model.trim="taskForm.keywordsText"
               rows="5"
-              placeholder="每行一个，或用逗号隔开，例如：小米SU7, 刹车失灵, 事故"
+              placeholder="支持按行输入或使用逗号分隔，例如：小米SU7, 刹车失灵, 事故"
               class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
             />
           </label>
@@ -504,6 +481,26 @@
               </label>
             </div>
           </div>
+        </div>
+
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <label class="text-sm font-medium text-slate-700">辅助说明（可选）</label>
+            <button
+              type="button"
+              class="rounded-full border border-indigo-200 px-4 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="planning || !taskForm.brief.trim()"
+              @click="planTask"
+            >
+              {{ planning ? '生成中…' : '智能生成配置' }}
+            </button>
+          </div>
+          <textarea
+            v-model.trim="taskForm.brief"
+            rows="4"
+            placeholder="可填写监测对象、时间范围、采集平台或重点议题，供系统辅助生成关键词与参数。"
+            class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          />
         </div>
 
         <!-- Advanced options (collapsed by default) -->
