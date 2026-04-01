@@ -3,7 +3,7 @@ AI工具模块
 """
 from .qwen import QwenClient, get_qwen_client
 from .openai_client import OpenAIClient, get_openai_client
-from .langchain_client import call_langchain_chat
+from .langchain_client import call_langchain_chat, call_langchain_with_tools
 
 __all__ = [
     'QwenClient',
@@ -11,4 +11,5 @@ __all__ = [
     'OpenAIClient',
     'get_openai_client',
     'call_langchain_chat',
+    'call_langchain_with_tools',
 ]

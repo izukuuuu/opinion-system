@@ -151,6 +151,120 @@
     </section>
 
     <template v-if="report">
+      <section class="grid gap-6 xl:grid-cols-[1.2fr,1fr,1fr]">
+        <article class="card-surface space-y-4 p-5">
+          <header>
+            <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">解释与研判</p>
+            <h3 class="text-lg font-semibold text-primary">AI 深度研判</h3>
+          </header>
+
+          <p class="text-sm leading-7 text-secondary">
+            {{ deepAnalysis.narrativeSummary || '暂无结构化研判摘要。请重新生成报告以补齐该区块。' }}
+          </p>
+
+          <div v-if="deepAnalysis.eventType || deepAnalysis.domain || deepAnalysis.stage" class="flex flex-wrap gap-2">
+            <span
+              v-if="deepAnalysis.eventType"
+              class="rounded-full border border-brand-soft bg-brand-soft/20 px-3 py-1 text-xs font-semibold text-brand-700"
+            >
+              事件类型 · {{ deepAnalysis.eventType }}
+            </span>
+            <span
+              v-if="deepAnalysis.domain"
+              class="rounded-full border border-soft bg-surface px-3 py-1 text-xs font-semibold text-secondary"
+            >
+              领域 · {{ deepAnalysis.domain }}
+            </span>
+            <span
+              v-if="deepAnalysis.stage"
+              class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700"
+            >
+              阶段 · {{ deepAnalysis.stage }}
+            </span>
+          </div>
+
+          <div v-if="deepAnalysis.indicatorDimensions.length || deepAnalysis.theoryNames.length" class="grid gap-3 md:grid-cols-2">
+            <div v-if="deepAnalysis.indicatorDimensions.length" class="space-y-2">
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">持续观察维度</p>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="dimension in deepAnalysis.indicatorDimensions"
+                  :key="`deep-dimension-${dimension}`"
+                  class="rounded-full border border-soft bg-surface px-3 py-1 text-xs text-secondary"
+                >
+                  {{ dimension }}
+                </span>
+              </div>
+            </div>
+            <div v-if="deepAnalysis.theoryNames.length" class="space-y-2">
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">理论锚点</p>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="theory in deepAnalysis.theoryNames"
+                  :key="`deep-theory-${theory}`"
+                  class="rounded-full border border-soft bg-surface px-3 py-1 text-xs text-secondary"
+                >
+                  {{ theory }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="deepAnalysis.referenceLinks.length" class="space-y-2 border-t border-soft pt-3">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">外部参考入口</p>
+            <div class="space-y-2 text-sm">
+              <a
+                v-for="link in deepAnalysis.referenceLinks"
+                :key="`deep-link-${link.name}-${link.url}`"
+                :href="link.url"
+                target="_blank"
+                rel="noreferrer"
+                class="block rounded-2xl border border-soft bg-surface px-3 py-2 text-secondary transition hover:border-brand-300 hover:text-brand-700"
+              >
+                <span class="font-semibold text-primary">{{ link.name }}</span>
+                <span v-if="link.usage" class="ml-2 text-xs text-muted">{{ link.usage }}</span>
+              </a>
+            </div>
+          </div>
+        </article>
+
+        <article class="card-surface space-y-3 p-5">
+          <header>
+            <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">关键事件</p>
+            <h3 class="text-lg font-semibold text-primary">阶段节点</h3>
+          </header>
+          <ul v-if="deepAnalysis.keyEvents.length" class="space-y-3 text-sm text-secondary">
+            <li
+              v-for="(event, index) in deepAnalysis.keyEvents"
+              :key="`deep-event-${index}`"
+              class="flex gap-2 rounded-2xl border border-soft bg-surface p-3"
+            >
+              <span class="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600"></span>
+              <span>{{ event }}</span>
+            </li>
+          </ul>
+          <p v-else class="text-sm text-muted">暂无关键事件提炼。</p>
+        </article>
+
+        <article class="card-surface space-y-3 p-5">
+          <header>
+            <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">风险提示</p>
+            <h3 class="text-lg font-semibold text-primary">重点风险</h3>
+          </header>
+          <ul v-if="deepAnalysis.keyRisks.length" class="space-y-3 text-sm text-secondary">
+            <li
+              v-for="(risk, index) in deepAnalysis.keyRisks"
+              :key="`deep-risk-${index}`"
+              class="flex gap-2 rounded-2xl border border-soft bg-surface p-3"
+            >
+              <span class="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"></span>
+              <span>{{ risk }}</span>
+            </li>
+          </ul>
+          <p v-else class="text-sm text-muted">暂无重点风险提炼。</p>
+        </article>
+      </section>
+
       <section class="grid gap-6 xl:grid-cols-3">
         <AnalysisChartPanel title="渠道分布" :option="channelChartOption" :has-data="hasChannelData" />
         <AnalysisChartPanel title="情感态度" :option="sentimentChartOption" :has-data="hasSentimentData" />
@@ -395,6 +509,37 @@ const reportMeta = computed(() => ({
   rangeText: report.value?.rangeText || `${reportForm.start || '--'} → ${reportForm.end || '--'}`,
   lastUpdated: report.value?.lastUpdated || '未提供'
 }))
+
+const deepAnalysis = computed(() => {
+  const payload = report.value?.deepAnalysis
+  return {
+    narrativeSummary: String(payload?.narrativeSummary || '').trim(),
+    keyEvents: Array.isArray(payload?.keyEvents)
+      ? payload.keyEvents.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    keyRisks: Array.isArray(payload?.keyRisks)
+      ? payload.keyRisks.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    eventType: String(payload?.eventType || '').trim(),
+    domain: String(payload?.domain || '').trim(),
+    stage: String(payload?.stage || '').trim(),
+    indicatorDimensions: Array.isArray(payload?.indicatorDimensions)
+      ? payload.indicatorDimensions.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    theoryNames: Array.isArray(payload?.theoryNames)
+      ? payload.theoryNames.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    referenceLinks: Array.isArray(payload?.referenceLinks)
+      ? payload.referenceLinks
+        .map((item) => ({
+          name: String(item?.name || '').trim(),
+          url: String(item?.url || '').trim(),
+          usage: String(item?.usage || '').trim()
+        }))
+        .filter((item) => item.name && item.url)
+      : []
+  }
+})
 
 const metrics = computed(() => {
   const data = report.value?.metrics || {}
@@ -1070,6 +1215,63 @@ const buildHtmlDocument = () => {
     </ul>`
     : '<p class="empty-text">暂无阶段说明。</p>'
 
+  const deepTags = [
+    deepAnalysis.value.eventType ? `事件类型：${deepAnalysis.value.eventType}` : '',
+    deepAnalysis.value.domain ? `领域：${deepAnalysis.value.domain}` : '',
+    deepAnalysis.value.stage ? `阶段：${deepAnalysis.value.stage}` : ''
+  ].filter(Boolean)
+  const deepDimensionsHtml = deepAnalysis.value.indicatorDimensions.length
+    ? `<p class="metric-sub">持续观察维度：${escapeHtml(deepAnalysis.value.indicatorDimensions.join('、'))}</p>`
+    : ''
+  const deepTheoryHtml = deepAnalysis.value.theoryNames.length
+    ? `<p class="metric-sub">理论锚点：${escapeHtml(deepAnalysis.value.theoryNames.join('、'))}</p>`
+    : ''
+  const deepLinksHtml = deepAnalysis.value.referenceLinks.length
+    ? `<ul class="bullet-list compact">
+      ${deepAnalysis.value.referenceLinks.map((item) => `
+        <li>
+          <a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer" style="color:#1d4ed8;text-decoration:none;">
+            ${escapeHtml(item.name)}
+          </a>
+          ${item.usage ? ` <span style="color:#64748b;">${escapeHtml(item.usage)}</span>` : ''}
+        </li>
+      `).join('')}
+    </ul>`
+    : ''
+  const deepAnalysisHtml = `
+    <section class="chart-grid-3">
+      <article class="panel">
+        <header class="panel-header">
+          <h3>AI 深度研判</h3>
+          <p class="panel-subtitle">解释与研判</p>
+        </header>
+        <p class="metric-sub" style="font-size:14px; line-height:1.9;">${escapeHtml(deepAnalysis.value.narrativeSummary || '暂无结构化研判摘要。')}</p>
+        ${deepTags.length ? `<p class="metric-sub" style="margin-top:10px;">${escapeHtml(deepTags.join(' · '))}</p>` : ''}
+        ${deepDimensionsHtml}
+        ${deepTheoryHtml}
+        ${deepLinksHtml}
+      </article>
+      <article class="panel">
+        <header class="panel-header">
+          <h3>阶段节点</h3>
+          <p class="panel-subtitle">关键事件</p>
+        </header>
+        ${deepAnalysis.value.keyEvents.length
+          ? `<ul class="bullet-list">${deepAnalysis.value.keyEvents.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+          : '<p class="empty-text">暂无关键事件提炼。</p>'}
+      </article>
+      <article class="panel">
+        <header class="panel-header">
+          <h3>重点风险</h3>
+          <p class="panel-subtitle">风险提示</p>
+        </header>
+        ${deepAnalysis.value.keyRisks.length
+          ? `<ul class="bullet-list">${deepAnalysis.value.keyRisks.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+          : '<p class="empty-text">暂无重点风险提炼。</p>'}
+      </article>
+    </section>
+  `
+
   const highlightHtml = highlightPoints.value.length
     ? `<ul class="bullet-list">
       ${highlightPoints.value.map((point) => `<li>${escapeHtml(point)}</li>`).join('')}
@@ -1433,6 +1635,8 @@ const buildHtmlDocument = () => {
         ${stageContent}
       </article>
     </section>
+
+    ${deepAnalysisHtml}
 
     <section class="panel">
       <header class="panel-header">

@@ -16,9 +16,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..utils.ai import call_langchain_chat
+from ..utils.ai import call_langchain_chat, call_langchain_with_tools
 from ..utils.logging.logging import setup_logger
 from ..utils.setting.paths import bucket, ensure_bucket, get_data_root
+from .knowledge_loader import load_report_knowledge
+from .tools import REPORT_ANALYSIS_TOOLS
 from .data_report import (
     _collect_sections as legacy_collect_sections,
     _compose_llm_input as legacy_compose_llm_input,
@@ -31,6 +33,7 @@ from .structured_prompts import (
     REPORT_SYSTEM_PROMPT,
     build_bertopic_insight_prompt,
     build_bertopic_temporal_narrative_prompt,
+    build_interpretation_prompt,
     build_insights_prompt,
     build_stage_notes_prompt,
     build_title_subtitle_prompt,
@@ -57,7 +60,7 @@ BERTOPIC_FILE_MAP = {
 
 DEFAULT_ANALYZE_FILENAME = "result.json"
 REPORT_CACHE_FILENAME = "report_payload.json"
-REPORT_CACHE_VERSION = 5
+REPORT_CACHE_VERSION = 6
 
 SENTIMENT_POSITIVE = {"positive", "正面", "积极", "pos", "p"}
 SENTIMENT_NEUTRAL = {"neutral", "中性", "客观", "neu"}
@@ -1268,6 +1271,229 @@ def _build_fallback_insights(
     return highlight_points, insights
 
 
+def _infer_event_type(topic_label: str) -> str:
+    text = str(topic_label or "").strip()
+    mapping = [
+        ("品牌危机", ["品牌", "企业", "公司", "产品", "营销", "舆情危机"]),
+        ("突发事故", ["事故", "爆炸", "燃爆", "伤亡", "坠落", "安全"]),
+        ("公共政策", ["政策", "规定", "条例", "办法", "改革", "新规"]),
+        ("教育舆情", ["教育", "学校", "高校", "高考", "教师", "校园"]),
+        ("餐饮消费", ["餐饮", "预制菜", "食品", "外卖", "门店", "火锅"]),
+        ("汽车舆情", ["汽车", "车企", "新能源", "智驾", "充电宝"]),
+        ("平台争议", ["平台", "社交媒体", "微博", "抖音", "小红书", "电商"]),
+    ]
+    for label, keywords in mapping:
+        if any(keyword in text for keyword in keywords):
+            return label
+    return "社会事件"
+
+
+def _infer_domain(topic_label: str) -> str:
+    text = str(topic_label or "").strip()
+    mapping = [
+        ("教育", ["教育", "学校", "高校", "高考", "校园"]),
+        ("汽车", ["汽车", "车企", "新能源", "智驾", "SU7"]),
+        ("餐饮", ["餐饮", "预制菜", "火锅", "外卖", "门店"]),
+        ("互联网", ["平台", "微博", "抖音", "小红书", "APP", "应用"]),
+        ("消费", ["品牌", "产品", "消费者", "售后"]),
+        ("公共治理", ["政策", "监管", "执法", "通报", "回应"]),
+    ]
+    for label, keywords in mapping:
+        if any(keyword in text for keyword in keywords):
+            return label
+    return ""
+
+
+def _infer_stage_from_timeline(
+    timeline: List[Dict[str, Any]],
+    sentiment: Dict[str, int],
+) -> str:
+    if not timeline:
+        return "观察期"
+    values = [_parse_int(item.get("value")) for item in timeline]
+    if not values:
+        return "观察期"
+    peak_value = max(values)
+    peak_index = values.index(peak_value)
+    last_value = values[-1]
+    sentiment_total = max(1, sum(max(0, _parse_int(value)) for value in sentiment.values()))
+    negative_rate = sentiment.get("negative", 0) / sentiment_total
+
+    if len(values) == 1:
+        return "爆发期" if peak_value > 0 else "观察期"
+    if peak_index >= len(values) - 1:
+        return "爆发期"
+    if last_value <= peak_value * 0.35:
+        return "回落期"
+    if negative_rate >= 0.38:
+        return "对抗期"
+    return "扩散期"
+
+
+def _select_theory_names(
+    *,
+    timeline: List[Dict[str, Any]],
+    channels: List[Dict[str, Any]],
+    sentiment: Dict[str, int],
+    content_split: Dict[str, int],
+    knowledge_context: Dict[str, Any],
+) -> List[str]:
+    theory_hints = [
+        str(item).strip()
+        for item in (knowledge_context.get("theoryHints") or [])
+        if str(item or "").strip()
+    ]
+    available = set(theory_hints)
+    if not available:
+        available = {
+            "生命周期规律",
+            "议程设置规律",
+            "沉默螺旋规律",
+            "框架理论",
+            "风险传播理论",
+            "社会燃烧规律",
+        }
+
+    sentiment_total = max(1, sum(max(0, _parse_int(value)) for value in sentiment.values()))
+    negative_rate = sentiment.get("negative", 0) / sentiment_total
+    content_total = max(1, content_split.get("factual", 0) + content_split.get("opinion", 0))
+    opinion_ratio = content_split.get("opinion", 0) / content_total
+
+    candidates: List[str] = []
+    if len(timeline) >= 3:
+        candidates.append("生命周期规律")
+    if channels:
+        candidates.append("议程设置规律")
+    if negative_rate >= 0.28:
+        candidates.append("风险传播理论")
+    if opinion_ratio >= 0.45:
+        candidates.append("框架理论")
+    if negative_rate >= 0.42:
+        candidates.append("沉默螺旋规律")
+
+    picked: List[str] = []
+    for name in candidates:
+        if name in available and name not in picked:
+            picked.append(name)
+        if len(picked) >= 3:
+            break
+    return picked
+
+
+def _build_fallback_deep_analysis(
+    *,
+    topic_label: str,
+    metrics: Dict[str, Any],
+    channels: List[Dict[str, Any]],
+    timeline: List[Dict[str, Any]],
+    sentiment: Dict[str, int],
+    content_split: Dict[str, int],
+    keywords: List[Dict[str, Any]],
+    themes: List[Dict[str, Any]],
+    main_finding: str,
+    knowledge_context: Dict[str, Any],
+) -> Dict[str, Any]:
+    top_channels = "、".join(
+        f"{str(item.get('name') or '').strip()}({ _parse_int(item.get('value')) })"
+        for item in channels[:3]
+        if str(item.get("name") or "").strip()
+    ) or "暂无明显头部渠道"
+    top_keywords = "、".join(
+        str(item.get("term") or "").strip()
+        for item in keywords[:5]
+        if str(item.get("term") or "").strip()
+    ) or "暂无高频关键词"
+    top_themes = "、".join(
+        str(item.get("name") or "").strip()
+        for item in themes[:4]
+        if str(item.get("name") or "").strip()
+    ) or "暂无稳定主题"
+
+    stage = _infer_stage_from_timeline(timeline, sentiment)
+    event_type = _infer_event_type(topic_label)
+    domain = _infer_domain(topic_label)
+
+    peak = metrics.get("peak") if isinstance(metrics.get("peak"), dict) else {}
+    peak_date = str(peak.get("date") or "峰值日").strip()
+    peak_value = _parse_int(peak.get("value"))
+    total_volume = _parse_int(metrics.get("totalVolume"))
+
+    sentiment_total = max(1, sentiment.get("positive", 0) + sentiment.get("neutral", 0) + sentiment.get("negative", 0))
+    negative_rate = sentiment.get("negative", 0) / sentiment_total
+    content_total = max(1, content_split.get("factual", 0) + content_split.get("opinion", 0))
+    opinion_ratio = content_split.get("opinion", 0) / content_total
+
+    narrative_summary = (
+        f"{topic_label}在本轮监测周期内呈现明显的阶段性传播特征，"
+        f"整体处于{stage}。全周期累计声量约 {total_volume}，"
+        f"并在 {peak_date} 达到峰值 {peak_value}。"
+        f"渠道关注主要集中在 {top_channels}，讨论焦点围绕 {top_themes} 展开。"
+    )
+    if main_finding:
+        narrative_summary += f" 综合既有分析结果，核心判断为：{main_finding}"
+    else:
+        narrative_summary += f" 从关键词与主题看，核心争议集中在 {top_keywords} 等议题。"
+
+    key_events: List[str] = []
+    if timeline:
+        first_item = timeline[0]
+        peak_item = max(timeline, key=lambda item: item.get("value", 0))
+        last_item = timeline[-1]
+        key_events.append(
+            f"{str(first_item.get('date') or '').strip()}进入观察窗口，相关讨论开始持续出现。"
+        )
+        key_events.append(
+            f"{str(peak_item.get('date') or '').strip()}达到声量峰值 { _parse_int(peak_item.get('value')) }，成为传播拐点。"
+        )
+        if str(last_item.get("date") or "").strip() != str(peak_item.get("date") or "").strip():
+            key_events.append(
+                f"{str(last_item.get('date') or '').strip()}后讨论进入{stage}，需关注长尾扩散与次生议题。"
+            )
+
+    key_risks: List[str] = []
+    if negative_rate >= 0.3:
+        key_risks.append(
+            f"负向情绪占比约 {round(negative_rate * 100, 1)}%，若回应节奏失衡，可能进一步放大对立情绪。"
+        )
+    if opinion_ratio >= 0.45:
+        key_risks.append(
+            f"观点类内容占比约 {round(opinion_ratio * 100, 1)}%，说明讨论已不止于事实复述，存在议题泛化风险。"
+        )
+    if channels and len(channels) >= 1:
+        dominant_channel = channels[0]
+        dominant_ratio = _parse_int(dominant_channel.get("value")) / max(1, total_volume)
+        if dominant_ratio >= 0.45:
+            key_risks.append(
+                f"{str(dominant_channel.get('name') or '').strip()}承载主要声量，单平台情绪波动可能显著改变整体走势。"
+            )
+    if not key_risks:
+        key_risks.append("当前主要风险来自热点切换后的次生议题外溢，需持续跟踪话题迁移。")
+
+    indicator_dimensions = ["count", "timeline", "channel", "sentiment", "theme"]
+    if opinion_ratio >= 0.4:
+        indicator_dimensions.append("frame")
+    indicator_dimensions = indicator_dimensions[:6]
+
+    theory_names = _select_theory_names(
+        timeline=timeline,
+        channels=channels,
+        sentiment=sentiment,
+        content_split=content_split,
+        knowledge_context=knowledge_context,
+    )
+
+    return {
+        "narrativeSummary": narrative_summary.strip(),
+        "keyEvents": key_events[:5],
+        "keyRisks": key_risks[:5],
+        "eventType": event_type,
+        "domain": domain,
+        "stage": stage,
+        "indicatorDimensions": indicator_dimensions,
+        "theoryNames": theory_names[:3],
+    }
+
+
 def _build_fallback_bertopic_insight(
     *,
     topic_label: str,
@@ -1467,6 +1693,13 @@ def _truncate_text(value: str, max_chars: int) -> str:
     return text[:max_chars].rstrip() + "\n...[内容已截断]"
 
 
+def _truncate_inline_text(value: str, max_chars: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "..."
+
+
 def _build_legacy_report_context(
     *,
     topic_identifier: str,
@@ -1535,7 +1768,12 @@ def _build_legacy_report_context(
     }
 
 
-def _call_langchain_json(user_prompt: str, *, max_tokens: int = 1800) -> Optional[Dict[str, Any]]:
+def _call_langchain_json(
+    user_prompt: str,
+    *,
+    max_tokens: int = 1800,
+    model_role: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     raw_text = _safe_async_call(
         call_langchain_chat(
             [
@@ -1543,6 +1781,7 @@ def _call_langchain_json(user_prompt: str, *, max_tokens: int = 1800) -> Optiona
                 {"role": "user", "content": user_prompt},
             ],
             task="report",
+            model_role=model_role,
             temperature=0.2,
             max_tokens=max_tokens,
         )
@@ -1557,6 +1796,44 @@ def _call_langchain_json(user_prompt: str, *, max_tokens: int = 1800) -> Optiona
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _call_langchain_json_with_tools(
+    user_prompt: str,
+    *,
+    tools: List[Any],
+    max_tokens: int = 1800,
+    model_role: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    result = _safe_async_call(
+        call_langchain_with_tools(
+            [
+                {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            tools=tools,
+            task="report",
+            model_role=model_role,
+            temperature=0.2,
+            max_tokens=max_tokens,
+        )
+    )
+    if not isinstance(result, dict):
+        return None, {"tool_calls": [], "tool_results": [], "content": ""}
+
+    raw_text = str(result.get("content") or "").strip()
+    if not raw_text:
+        return None, result
+    candidate = _extract_json_text(raw_text)
+    if not candidate:
+        return None, result
+    try:
+        payload = json.loads(candidate)
+    except Exception:
+        return None, result
+    if not isinstance(payload, dict):
+        return None, result
+    return payload, result
 
 
 def _load_main_finding(analyze_root: Path) -> str:
@@ -1914,6 +2191,142 @@ def _build_report_payload(
         topic_label=topic_label,
         date_folder=analyze_root.name,
     )
+    knowledge_context = load_report_knowledge(topic_label or topic_identifier)
+    methodology_context_text = _truncate_text(str(knowledge_context.get("summary") or ""), 6000)
+    reference_snippets = [
+        {
+            "title": str(item.get("title") or "").strip(),
+            "snippet": _truncate_inline_text(str(item.get("snippet") or "").strip(), 280),
+        }
+        for item in (knowledge_context.get("referenceSnippets") or [])
+        if isinstance(item, dict) and str(item.get("snippet") or "").strip()
+    ][:4]
+    reference_links = [
+        {
+            "name": str(item.get("name") or "").strip(),
+            "url": str(item.get("url") or "").strip(),
+            "usage": str(item.get("usage") or "").strip(),
+        }
+        for item in (knowledge_context.get("referenceLinks") or [])
+        if isinstance(item, dict) and str(item.get("name") or "").strip() and str(item.get("url") or "").strip()
+    ][:4]
+    theory_hints = [
+        str(item).strip()
+        for item in (knowledge_context.get("theoryHints") or [])
+        if str(item or "").strip()
+    ][:4]
+    dynamic_theories = [
+        str(item).strip()
+        for item in (knowledge_context.get("dynamicTheories") or [])
+        if str(item or "").strip()
+    ][:4]
+    expert_notes = [
+        {
+            "title": str(item.get("title") or "").strip(),
+            "snippet": _truncate_inline_text(str(item.get("snippet") or "").strip(), 280),
+        }
+        for item in (knowledge_context.get("expertNotes") or [])
+        if isinstance(item, dict) and str(item.get("snippet") or "").strip()
+    ][:4]
+
+    deep_analysis = _build_fallback_deep_analysis(
+        topic_label=topic_label,
+        metrics=metrics,
+        channels=channels,
+        timeline=timeline,
+        sentiment=sentiment,
+        content_split=content_split,
+        keywords=keywords,
+        themes=themes,
+        main_finding=main_finding,
+        knowledge_context=knowledge_context,
+    )
+    deep_analysis_source = "fallback"
+    interpretation_facts = {
+        "topic": topic_label,
+        "time_range": {"start": start, "end": end},
+        "metrics": metrics,
+        "channels": channels[:8],
+        "timeline": [
+            {
+                "date": str(item.get("raw_date") or item.get("date") or "").strip(),
+                "label": str(item.get("date") or "").strip(),
+                "value": _parse_int(item.get("value")),
+            }
+            for item in timeline
+        ],
+        "sentiment": sentiment,
+        "content_split": content_split,
+        "keywords": keywords[:10],
+        "themes": themes[:8],
+        "bertopic_overview": bertopic_overview,
+        "bertopic_hotspots": bertopic_hotspots_payload[:8],
+        "main_finding": main_finding,
+        "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
+        "legacy_report_text": legacy_context.get("full_text_short", ""),
+        "methodology_context": methodology_context_text,
+        "reference_snippets": reference_snippets,
+        "reference_links": reference_links,
+        "expert_notes": expert_notes,
+        "dynamic_theories": dynamic_theories,
+        "theory_hints": theory_hints,
+    }
+    deep_analysis_tool_trace: Dict[str, Any] = {"tool_calls": [], "tool_results": [], "content": ""}
+    deep_analysis_payload, deep_analysis_tool_trace = _call_langchain_json_with_tools(
+        build_interpretation_prompt(interpretation_facts),
+        tools=REPORT_ANALYSIS_TOOLS,
+        max_tokens=1800,
+        model_role="tools",
+    )
+    if deep_analysis_payload is None:
+        deep_analysis_payload = _call_langchain_json(
+            build_interpretation_prompt(interpretation_facts),
+            max_tokens=1800,
+            model_role="tools",
+        )
+    if isinstance(deep_analysis_payload, dict):
+        narrative_summary_candidate = str(deep_analysis_payload.get("narrativeSummary") or "").strip()
+        event_type_candidate = str(deep_analysis_payload.get("eventType") or "").strip()
+        domain_candidate = str(deep_analysis_payload.get("domain") or "").strip()
+        stage_candidate = str(deep_analysis_payload.get("stage") or "").strip()
+        indicator_dimensions_candidate = deep_analysis_payload.get("indicatorDimensions")
+        theory_names_candidate = deep_analysis_payload.get("theoryNames")
+        key_events_candidate = deep_analysis_payload.get("keyEvents")
+        key_risks_candidate = deep_analysis_payload.get("keyRisks")
+
+        if narrative_summary_candidate:
+            deep_analysis["narrativeSummary"] = narrative_summary_candidate
+            deep_analysis_source = "llm"
+        if event_type_candidate:
+            deep_analysis["eventType"] = event_type_candidate
+        if domain_candidate:
+            deep_analysis["domain"] = domain_candidate
+        if stage_candidate:
+            deep_analysis["stage"] = stage_candidate
+        if isinstance(key_events_candidate, list):
+            parsed_key_events = [str(item).strip() for item in key_events_candidate if str(item or "").strip()]
+            if parsed_key_events:
+                deep_analysis["keyEvents"] = parsed_key_events[:5]
+                deep_analysis_source = "llm"
+        if isinstance(key_risks_candidate, list):
+            parsed_key_risks = [str(item).strip() for item in key_risks_candidate if str(item or "").strip()]
+            if parsed_key_risks:
+                deep_analysis["keyRisks"] = parsed_key_risks[:5]
+                deep_analysis_source = "llm"
+        if isinstance(indicator_dimensions_candidate, list):
+            parsed_dimensions = [str(item).strip() for item in indicator_dimensions_candidate if str(item or "").strip()]
+            if parsed_dimensions:
+                deep_analysis["indicatorDimensions"] = parsed_dimensions[:6]
+        if isinstance(theory_names_candidate, list):
+            parsed_theories = [str(item).strip() for item in theory_names_candidate if str(item or "").strip()]
+            if parsed_theories:
+                deep_analysis["theoryNames"] = parsed_theories[:3]
+
+    deep_analysis["referenceSnippets"] = reference_snippets
+    deep_analysis["referenceLinks"] = reference_links
+    deep_analysis["expertNotes"] = expert_notes
+    deep_analysis["dynamicTheories"] = dynamic_theories
+    deep_analysis["source"] = deep_analysis_source
 
     report_facts = {
         "topic": topic_label,
@@ -1934,6 +2347,22 @@ def _build_report_payload(
             "series_source": bertopic_temporal_meta.get("seriesSource"),
         },
         "main_finding": main_finding,
+        "deep_analysis": {
+            "narrativeSummary": deep_analysis.get("narrativeSummary"),
+            "keyEvents": deep_analysis.get("keyEvents"),
+            "keyRisks": deep_analysis.get("keyRisks"),
+            "eventType": deep_analysis.get("eventType"),
+            "domain": deep_analysis.get("domain"),
+            "stage": deep_analysis.get("stage"),
+            "indicatorDimensions": deep_analysis.get("indicatorDimensions"),
+            "theoryNames": deep_analysis.get("theoryNames"),
+        },
+        "methodology_context": methodology_context_text,
+        "reference_snippets": reference_snippets,
+        "reference_links": reference_links,
+        "expert_notes": expert_notes,
+        "dynamic_theories": dynamic_theories,
+        "theory_hints": theory_hints,
         "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
         "legacy_report_text": legacy_context.get("full_text_short", ""),
     }
@@ -1989,6 +2418,19 @@ def _build_report_payload(
         "bertopic_hotspots": bertopic_hotspots_payload[:10],
         "bertopic_timeline": bertopic_timeline_for_llm,
         "bertopic_series_summary": bertopic_series_summary,
+        "deep_analysis": {
+            "narrativeSummary": deep_analysis.get("narrativeSummary"),
+            "keyEvents": deep_analysis.get("keyEvents"),
+            "keyRisks": deep_analysis.get("keyRisks"),
+            "stage": deep_analysis.get("stage"),
+            "theoryNames": deep_analysis.get("theoryNames"),
+        },
+        "methodology_context": methodology_context_text,
+        "reference_snippets": reference_snippets,
+        "reference_links": reference_links,
+        "expert_notes": expert_notes,
+        "dynamic_theories": dynamic_theories,
+        "theory_hints": theory_hints,
         "main_finding": main_finding,
         "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
         "legacy_report_text": legacy_context.get("full_text_short", ""),
@@ -2002,6 +2444,19 @@ def _build_report_payload(
         "bertopic_hotspots": bertopic_hotspots_payload[:8],
         "bertopic_switches": bertopic_switches_for_llm[:8],
         "bertopic_series_summary": bertopic_series_summary,
+        "deep_analysis": {
+            "narrativeSummary": deep_analysis.get("narrativeSummary"),
+            "keyEvents": deep_analysis.get("keyEvents"),
+            "keyRisks": deep_analysis.get("keyRisks"),
+            "stage": deep_analysis.get("stage"),
+            "theoryNames": deep_analysis.get("theoryNames"),
+        },
+        "methodology_context": methodology_context_text,
+        "reference_snippets": reference_snippets,
+        "reference_links": reference_links,
+        "expert_notes": expert_notes,
+        "dynamic_theories": dynamic_theories,
+        "theory_hints": theory_hints,
         "main_finding": main_finding,
         "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
         "legacy_report_text": legacy_context.get("full_text_short", ""),
@@ -2017,6 +2472,7 @@ def _build_report_payload(
     bertopic_insight_payload = _call_langchain_json(
         build_bertopic_insight_prompt(bertopic_insight_facts),
         max_tokens=1800,
+        model_role="report",
     )
     if isinstance(bertopic_insight_payload, dict):
         bertopic_insight_candidate = str(
@@ -2044,6 +2500,7 @@ def _build_report_payload(
     bertopic_temporal_narrative_payload = _call_langchain_json(
         build_bertopic_temporal_narrative_prompt(bertopic_temporal_narrative_facts),
         max_tokens=1200,
+        model_role="report",
     )
     if isinstance(bertopic_temporal_narrative_payload, dict):
         summary_candidate = str(bertopic_temporal_narrative_payload.get("summary") or "").strip()
@@ -2064,9 +2521,17 @@ def _build_report_payload(
                 bertopic_temporal_narrative_source = "llm"
 
     title = f"{topic_label}舆情分析报告"
-    subtitle = main_finding or "基于结构化统计结果自动生成，覆盖声量、趋势、态度与主题。"
+    subtitle = (
+        main_finding
+        or _truncate_inline_text(str(deep_analysis.get("narrativeSummary") or "").strip(), 90)
+        or "基于结构化统计结果自动生成，覆盖声量、趋势、态度与主题。"
+    )
 
-    title_payload = _call_langchain_json(build_title_subtitle_prompt(topic_label, report_facts), max_tokens=500)
+    title_payload = _call_langchain_json(
+        build_title_subtitle_prompt(topic_label, report_facts),
+        max_tokens=500,
+        model_role="main",
+    )
     if isinstance(title_payload, dict):
         title_candidate = str(title_payload.get("title") or "").strip()
         subtitle_candidate = str(title_payload.get("subtitle") or "").strip()
@@ -2076,7 +2541,11 @@ def _build_report_payload(
             subtitle = subtitle_candidate
 
     stage_notes = _build_fallback_stage_notes(timeline)
-    stage_payload = _call_langchain_json(build_stage_notes_prompt(report_facts), max_tokens=1400)
+    stage_payload = _call_langchain_json(
+        build_stage_notes_prompt(report_facts),
+        max_tokens=1400,
+        model_role="report",
+    )
     if isinstance(stage_payload, dict) and isinstance(stage_payload.get("stageNotes"), list):
         parsed_notes = []
         for idx, item in enumerate(stage_payload.get("stageNotes") or []):
@@ -2102,7 +2571,18 @@ def _build_report_payload(
             stage_notes = parsed_notes[:3]
 
     highlight_points, insights = _build_fallback_insights(channels, timeline, sentiment, keywords, themes, main_finding)
-    insights_payload = _call_langchain_json(build_insights_prompt(report_facts), max_tokens=2200)
+    if str(deep_analysis.get("narrativeSummary") or "").strip():
+        highlight_points[-1] = _truncate_inline_text(str(deep_analysis.get("narrativeSummary") or "").strip(), 120)
+    if isinstance(deep_analysis.get("keyRisks"), list):
+        risk_items = [str(item).strip() for item in (deep_analysis.get("keyRisks") or []) if str(item or "").strip()]
+        if risk_items:
+            insights[-1]["points"] = risk_items[:3]
+            insights[-1]["headline"] = "建议优先围绕高风险点配置回应策略"
+    insights_payload = _call_langchain_json(
+        build_insights_prompt(report_facts),
+        max_tokens=2200,
+        model_role="report",
+    )
     if isinstance(insights_payload, dict):
         points_payload = insights_payload.get("highlight_points")
         if isinstance(points_payload, list):
@@ -2137,6 +2617,12 @@ def _build_report_payload(
                 insights = parsed_cards[:6]
 
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if bertopic_insight_source == "fallback" and str(deep_analysis.get("narrativeSummary") or "").strip():
+        bertopic_insight = (
+            f"**总体研判**：{str(deep_analysis.get('narrativeSummary') or '').strip()}\n\n"
+            f"{bertopic_insight}"
+        ).strip()
+
     return {
         "title": title,
         "subtitle": subtitle,
@@ -2156,6 +2642,7 @@ def _build_report_payload(
         "bertopicTemporal": bertopic_temporal_payload,
         "bertopicInsight": bertopic_insight,
         "bertopicTemporalNarrative": bertopic_temporal_narrative,
+        "deepAnalysis": deep_analysis,
         "stageNotes": stage_notes,
         "highlightPoints": highlight_points,
         "insights": insights,
@@ -2167,6 +2654,15 @@ def _build_report_payload(
             "bertopic_context": bertopic_context.get("meta") if isinstance(bertopic_context, dict) else {},
             "bertopic_insight_source": bertopic_insight_source,
             "bertopic_temporal_narrative_source": bertopic_temporal_narrative_source,
+            "deep_analysis_source": deep_analysis_source,
+            "deep_analysis_tool_trace": {
+                "tool_call_count": len(deep_analysis_tool_trace.get("tool_calls") or []),
+                "tool_calls": deep_analysis_tool_trace.get("tool_calls") or [],
+                "model": deep_analysis_tool_trace.get("model") or "",
+                "provider": deep_analysis_tool_trace.get("provider") or "",
+                "model_role": deep_analysis_tool_trace.get("model_role") or "",
+            },
+            "knowledge_context": knowledge_context.get("meta") if isinstance(knowledge_context, dict) else {},
             "legacy_context": {
                 "sections_source_topic": legacy_context.get("sections_topic") or "",
                 "manual_source_topic": legacy_context.get("manual_topic") or "",
