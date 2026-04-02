@@ -70,11 +70,15 @@ def load_filter_summary_data(topic: str, date: str) -> Dict[str, Any]:
         "kept_rows": int(payload.get("kept_rows") or 0),
         "discarded_rows": int(payload.get("discarded_rows") or 0),
         "token_usage": int(payload.get("token_usage") or 0),
+        "source": str(payload.get("source") or "").strip(),
         "relevant_samples": payload.get("relevant_samples")
         if isinstance(payload.get("relevant_samples"), list)
         else [],
         "irrelevant_samples": payload.get("irrelevant_samples")
         if isinstance(payload.get("irrelevant_samples"), list)
+        else [],
+        "recent_records": payload.get("recent_records")
+        if isinstance(payload.get("recent_records"), list)
         else [],
         "completed": bool(payload.get("completed")),
         "updated_at": payload.get("updated_at"),
@@ -150,18 +154,27 @@ def collect_filter_status(topic: str, date: str) -> Dict[str, Any]:
         })
 
     summary = load_filter_summary_data(topic, date)
-    if not summary["total_rows"]:
+    if summary["total_rows"]:
+        total_rows = max(total_rows, int(summary["total_rows"]))
+    else:
         summary["total_rows"] = total_rows
-    if not summary["kept_rows"]:
+    if summary["kept_rows"]:
+        kept_rows = max(kept_rows, int(summary["kept_rows"]))
+    else:
         summary["kept_rows"] = kept_rows
     summary["discarded_rows"] = max(summary["total_rows"] - summary["kept_rows"], 0)
 
+    summary_recent = summary.get("recent_records") or []
+    if isinstance(summary_recent, list):
+        combined_recent.extend(item for item in summary_recent if isinstance(item, dict))
     combined_recent.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
     recent_records = combined_recent[:_RECENT_RECORD_LIMIT]
     relevant_samples = (summary.get("relevant_samples") or [])[:_RELEVANT_SAMPLE_LIMIT]
     irrelevant_samples = (summary.get("irrelevant_samples") or [])[:_IRRELEVANT_SAMPLE_LIMIT]
 
     token_usage = int(summary.get("token_usage") or 0)
+    if summary.get("completed") and total_rows:
+        completed_rows = max(completed_rows, total_rows)
 
     progress_overview = {
         "total": total_rows,
@@ -178,6 +191,7 @@ def collect_filter_status(topic: str, date: str) -> Dict[str, Any]:
         "topic": topic,
         "date": date,
         "running": running,
+        "source": summary.get("source") or "",
         "channels": channels,
         "recent_records": recent_records,
         "summary": summary,

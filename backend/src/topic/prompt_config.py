@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any, Dict
 
 import yaml
@@ -33,6 +34,7 @@ DEFAULT_PREFILTER_QUERY_HINT = ""
 DEFAULT_PREFILTER_NEGATIVE_HINT = ""
 DEFAULT_PROJECT_STOPWORDS: list[str] = []
 DEFAULT_GLOBAL_FILTERS = ["明星八卦", "广告推广", "抽奖转发", "求职招聘"]
+_TERM_SPLIT_PATTERN = re.compile(r"[\s,，;；]+")
 
 DEFAULT_RECLUSTER_SYSTEM_PROMPT = (
     "你是一个专业的文本分析专家，擅长对主题进行归纳、命名和聚类。"
@@ -171,7 +173,8 @@ def _normalise_text_lines(raw: Any) -> list[str]:
 
     lines: list[str] = []
     seen: set[str] = set()
-    for item in source.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+    normalised_source = source.replace("\r\n", "\n").replace("\r", "\n").replace("\u3000", " ")
+    for item in _TERM_SPLIT_PATTERN.split(normalised_source):
         value = str(item or "").strip().lstrip("\ufeff")
         if not value or value in seen:
             continue

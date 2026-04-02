@@ -16,3 +16,8 @@
 - API supports `mode=fast|research`.
 - `fast` mode includes lightweight evidence fetch.
 - `research` mode enables heavier research branch (and optional playwright fallback if installed).
+
+## Frontend Writing Guardrails
+- Frontend copy must not expose backend implementation details such as config file paths, YAML filenames, storage keys, internal field names, or server-side directory structure.
+- When frontend needs to describe shared configuration, use user-facing language like “共享配置” or “项目排除词设置”, not backend terms like `settings.project_stopwords` or `backend/configs/...`.
+- If a page needs technical traceability for debugging, keep it in logs or developer tools, not primary user-facing UI copy.

@@ -165,7 +165,7 @@ def build_bertopic_temporal_narrative_prompt(facts: Dict[str, Any]) -> str:
         "要求：\n"
         "1) summary 要概括时间主线、主导主题与变化方式；\n"
         "2) shiftSignals 聚焦“何时发生切换、由什么主题切到什么主题、强度如何”；\n"
-        "3) watchpoints 聚焦覆盖范围、主题集中度、异常峰值等提醒；\n"
+        "3) watchpoints 聚焦主题集中度、异常峰值与解读边界等提醒，不讨论覆盖率或子集构成；\n"
         "4) 可吸收 section_agent_analysis 中的迁移判断与风险边界；\n"
         "5) 如事实中包含 skill_context，可吸收其中关于切换信号和监测提醒的写作取向；\n"
         "6) 可吸收 deep_analysis / methodology_context 的风险视角，但不得脱离 BERTopic 事实；\n"
@@ -202,4 +202,32 @@ def build_interpretation_prompt(facts: Dict[str, Any]) -> str:
         "10) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实与上下文】\n{_json_block(facts)}"
+    )
+
+
+def build_review_verdict_prompt(facts: Dict[str, Any]) -> str:
+    schema = {
+        "status": "pass 或 needs_review",
+        "verdict": "80-160字，说明当前报告是否证据充分、哪里需要人工复核。",
+        "confidenceLabel": "高 / 中 / 低",
+        "issues": ["最多4条，使用 snake_case，例如 low_evidence_coverage。"],
+        "evidenceCoverage": 0.75,
+        "corroboratedCoverage": 0.5,
+        "officialSourceCoverage": 0.3,
+        "requiresManualReview": False,
+        "focusAreas": ["最多3条，需要进一步人工核验的重点。"],
+    }
+    return (
+        "请作为报告复核 reviewer，对当前结构化报告进行最后一轮证据性审查。\n"
+        "要求：\n"
+        "1) 重点检查关键结论是否有事实支撑，是否存在过度推断；\n"
+        "2) 如果总体文字解读缺失、关键结论缺少直接证据、建议动作依赖未验证假设，必须明确指出；\n"
+        "3) 不要把 BERTopic 覆盖率、主题子集构成、时序映射比例当作报告生成阶段的风险项；\n"
+        "4) status 只能是 pass 或 needs_review；\n"
+        "5) issues 使用短的 snake_case 标签，focusAreas 用中文短句；\n"
+        "6) evidenceCoverage / corroboratedCoverage / officialSourceCoverage 用 0-1 小数表示；\n"
+        "7) requiresManualReview 只有在确实需要人工复核时才写 true；\n"
+        "8) 仅输出 JSON。\n\n"
+        f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
+        f"【事实数据】\n{_json_block(facts)}"
     )

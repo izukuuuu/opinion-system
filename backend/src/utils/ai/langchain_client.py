@@ -207,6 +207,7 @@ async def call_langchain_chat(
     max_tokens: Optional[int] = None,
     timeout: Optional[float] = None,
     max_retries: Optional[int] = None,
+    event_callback: Optional[Any] = None,
 ) -> Optional[str]:
     """
     Attempt to call chat model via LangChain.
@@ -234,7 +235,13 @@ async def call_langchain_chat(
         if llm is None:
             return None
         response = await llm.ainvoke(lc_messages)
-        return _coerce_response_content(getattr(response, "content", ""))
+        content = _coerce_response_content(getattr(response, "content", ""))
+        if content and callable(event_callback):
+            try:
+                event_callback({"type": "final_text", "text": content})
+            except Exception:
+                pass
+        return content
     except Exception:
         return None
 
@@ -251,6 +258,7 @@ async def call_langchain_with_tools(
     timeout: Optional[float] = None,
     max_retries: Optional[int] = None,
     max_tool_rounds: int = 3,
+    event_callback: Optional[Any] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Attempt a lightweight tool-augmented LangChain chat loop.
@@ -296,6 +304,7 @@ async def call_langchain_with_tools(
             max_tokens=max_tokens,
             timeout=timeout,
             max_retries=max_retries,
+            event_callback=event_callback,
         )
         if not fallback:
             return None
@@ -326,8 +335,14 @@ async def call_langchain_with_tools(
         history.append(response)
         raw_tool_calls = getattr(response, "tool_calls", None) or []
         if not raw_tool_calls:
+            content = _coerce_response_content(getattr(response, "content", ""))
+            if content and callable(event_callback):
+                try:
+                    event_callback({"type": "final_text", "text": content})
+                except Exception:
+                    pass
             return {
-                "content": _coerce_response_content(getattr(response, "content", "")),
+                "content": content,
                 "tool_calls": tool_calls_trace,
                 "tool_results": tool_results_trace,
                 "model": client_cfg["model"],
@@ -347,6 +362,18 @@ async def call_langchain_with_tools(
                     "id": tool_call_id,
                 }
             )
+            if callable(event_callback):
+                try:
+                    event_callback(
+                        {
+                            "type": "tool_call",
+                            "tool_name": tool_name,
+                            "tool_args": tool_args,
+                            "tool_call_id": tool_call_id,
+                        }
+                    )
+                except Exception:
+                    pass
 
             if tool_obj is None:
                 output = json.dumps({"error": f"tool not found: {tool_name}"}, ensure_ascii=False)
@@ -367,6 +394,18 @@ async def call_langchain_with_tools(
                     "output": output,
                 }
             )
+            if callable(event_callback):
+                try:
+                    event_callback(
+                        {
+                            "type": "tool_result",
+                            "tool_name": tool_name,
+                            "tool_call_id": tool_call_id,
+                            "output": output,
+                        }
+                    )
+                except Exception:
+                    pass
             history.append(
                 ToolMessage(
                     content=output,
@@ -386,8 +425,14 @@ async def call_langchain_with_tools(
             "provider": client_cfg["provider"],
             "model_role": client_cfg.get("model_role", ""),
         }
+    final_content = _coerce_response_content(getattr(final_response, "content", ""))
+    if final_content and callable(event_callback):
+        try:
+            event_callback({"type": "final_text", "text": final_content})
+        except Exception:
+            pass
     return {
-        "content": _coerce_response_content(getattr(final_response, "content", "")),
+        "content": final_content,
         "tool_calls": tool_calls_trace,
         "tool_results": tool_results_trace,
         "model": client_cfg["model"],

@@ -1,27 +1,15 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useApiBase } from './useApiBase'
-import {
-  normaliseArchiveRecords,
-  normaliseRecord,
-  splitFolderRange as sharedSplitFolderRange,
-  normalizeArchiveResponse
-} from './useArchiveHistory'
+import { normaliseRecord, splitFolderRange as sharedSplitFolderRange } from './useArchiveHistory'
+import { buildAnalysisSections } from '../utils/analysisSections'
 
 const MAX_HISTORY = 24
-const { callApi } = useApiBase()
+const TASK_STORAGE_PREFIX = 'opinion-system:report-task'
+const TASK_POLL_INTERVAL = 2000
+const { callApi, ensureApiBase } = useApiBase()
 
-const topicsState = reactive({
-  loading: false,
-  error: '',
-  options: []
-})
-
-const reportForm = reactive({
-  topic: '',
-  start: '',
-  end: ''
-})
-
+const topicsState = reactive({ loading: false, error: '', options: [] })
+const reportForm = reactive({ topic: '', start: '', end: '', mode: 'fast' })
 const availableRange = reactive({
   loading: false,
   error: '',
@@ -31,14 +19,8 @@ const availableRange = reactive({
   start: '',
   end: ''
 })
-
-const reportState = reactive({
-  loading: false,
-  regenerating: false,
-  error: '',
-  lastLoaded: ''
-})
-
+const reportState = reactive({ loading: false, regenerating: false, error: '', lastLoaded: '' })
+const analysisState = reactive({ loading: false, error: '', lastLoaded: '', topic: '', start: '', end: '' })
 const progressState = reactive({
   loading: false,
   polling: false,
@@ -51,26 +33,76 @@ const progressState = reactive({
   message: '',
   updatedAt: ''
 })
-
-const historyState = reactive({
+const historyState = reactive({ loading: false, error: '', topic: '' })
+const taskState = reactive({
   loading: false,
+  creating: false,
+  streaming: false,
+  reconnecting: false,
+  usingPollingFallback: false,
   error: '',
-  topic: ''
+  id: '',
+  reused: false,
+  topic: '',
+  topicIdentifier: '',
+  start: '',
+  end: '',
+  mode: 'fast',
+  status: 'idle',
+  phase: '',
+  percentage: 0,
+  message: '',
+  updatedAt: '',
+  startedAt: '',
+  finishedAt: '',
+  workerPid: 0,
+  childPid: 0,
+  cancelRequested: false,
+  trust: {},
+  artifacts: {},
+  agents: [],
+  events: [],
+  lastEventId: 0
 })
 
 const reportHistory = ref([])
 const selectedHistoryId = ref('')
 const reportData = ref(null)
+const analysisData = ref(null)
 const progressLogs = ref([])
-
 const topicOptions = computed(() => topicsState.options)
+const analysisSections = computed(() => buildAnalysisSections(analysisData.value?.functions))
+const analysisAiSummary = computed(() => analysisData.value?.ai_summary || null)
+const taskEvents = computed(() => taskState.events)
+const activeTask = computed(() => (taskState.id ? {
+  id: taskState.id,
+  status: taskState.status,
+  phase: taskState.phase,
+  percentage: taskState.percentage,
+  message: taskState.message,
+  trust: taskState.trust,
+  artifacts: taskState.artifacts,
+  agents: taskState.agents,
+  events: taskState.events
+} : null))
+const taskStageList = [
+  { id: 'prepare', label: '准备数据' },
+  { id: 'analyze', label: '基础分析' },
+  { id: 'explain', label: '总体解读' },
+  { id: 'interpret', label: '综合研判' },
+  { id: 'write', label: '报告编排' },
+  { id: 'review', label: '复核裁判' },
+  { id: 'persist', label: '写入结果' }
+]
 
 let initialized = false
 let rangeRequestId = 0
 let historyRequestId = 0
 let progressRequestId = 0
-let progressPollToken = 0
 let progressPollTimer = null
+let taskPollTimer = null
+let taskReconnectTimer = null
+let taskStream = null
 let suppressTopicWatcher = false
 
 export const useReportGeneration = () => {
@@ -78,19 +110,26 @@ export const useReportGeneration = () => {
     initialized = true
     initializeStore()
   }
-
   return {
     topicsState,
     topicOptions,
     reportForm,
     availableRange,
     reportState,
+    analysisState,
     progressState,
     historyState,
+    taskState,
     reportHistory,
     selectedHistoryId,
     reportData,
+    analysisData,
+    analysisSections,
+    analysisAiSummary,
     progressLogs,
+    taskEvents,
+    activeTask,
+    taskStageList,
     changeTopic,
     loadTopics,
     loadAvailableRange,
@@ -98,15 +137,20 @@ export const useReportGeneration = () => {
     loadHistory,
     loadReport,
     regenerateReport,
+    createReportTask,
+    loadReportTask,
+    openReportTaskStream,
+    closeReportTaskStream,
+    cancelReportTask,
+    retryReportTask,
+    resumeLastReportTask,
     applyHistorySelection
   }
 }
 
 function initializeStore() {
   loadTopics()
-
   watch(topicOptions, ensureTopicSelection, { immediate: true })
-
   watch(
     () => reportForm.topic,
     async (topic, previous) => {
@@ -114,16 +158,17 @@ function initializeStore() {
       const trimmed = String(topic || '').trim()
       if (!trimmed) {
         resetRangeState()
+        resetAnalysisState()
         resetProgressState()
+        resetTaskState()
         reportHistory.value = []
         selectedHistoryId.value = ''
         reportData.value = null
         return
       }
-      if (trimmed === String(previous || '').trim()) {
-        return
-      }
+      if (trimmed === String(previous || '').trim()) return
       reportData.value = null
+      analysisData.value = null
       reportForm.start = ''
       reportForm.end = ''
       selectedHistoryId.value = ''
@@ -132,21 +177,36 @@ function initializeStore() {
   )
 }
 
-const ensureTopicSelection = () => {
-  if (!topicOptions.value.length) return
+function ensureTopicSelection() {
+  if (!topicOptions.value.length) return false
   const current = String(reportForm.topic || '').trim()
-  if (current && topicOptions.value.includes(current)) {
-    return false
-  }
+  if (current && topicOptions.value.includes(current)) return false
   reportForm.topic = topicOptions.value[0]
   return true
 }
 
-const changeTopic = (value) => {
+function changeTopic(value) {
   reportForm.topic = String(value || '').trim()
 }
 
-const resetRangeState = () => {
+function currentTimeString() {
+  return new Date().toLocaleString('zh-CN', { hour12: false })
+}
+
+function normalizeRange(range) {
+  const topic = String(range?.topic || reportForm.topic || '').trim()
+  const start = String(range?.start || reportForm.start || '').trim()
+  const end = String(range?.end || reportForm.end || '').trim() || start
+  const mode = String(range?.mode || reportForm.mode || 'fast').trim() || 'fast'
+  return { topic, start, end, mode }
+}
+
+function hasCompleteRange(range) {
+  const normalized = normalizeRange(range)
+  return Boolean(normalized.topic && normalized.start && normalized.end)
+}
+
+function resetRangeState() {
   rangeRequestId += 1
   availableRange.loading = false
   availableRange.error = ''
@@ -157,9 +217,18 @@ const resetRangeState = () => {
   availableRange.end = ''
 }
 
-const resetProgressState = () => {
+function resetAnalysisState() {
+  analysisState.loading = false
+  analysisState.error = ''
+  analysisState.lastLoaded = ''
+  analysisState.topic = ''
+  analysisState.start = ''
+  analysisState.end = ''
+  analysisData.value = null
+}
+
+function resetProgressState() {
   progressRequestId += 1
-  progressPollToken += 1
   progressState.loading = false
   progressState.polling = false
   progressState.error = ''
@@ -171,37 +240,60 @@ const resetProgressState = () => {
   progressState.message = ''
   progressState.updatedAt = ''
   progressLogs.value = []
-  if (progressPollTimer !== null && typeof window !== 'undefined') {
+  if (progressPollTimer && typeof window !== 'undefined') {
     window.clearTimeout(progressPollTimer)
   }
   progressPollTimer = null
 }
 
-const applyRangeToForm = () => {
-  if (!availableRange.start) return
-  const start = availableRange.start
-  const end = availableRange.end || start
-  reportForm.start = start
-  reportForm.end = end
+function resetTaskState() {
+  closeReportTaskStream()
+  stopTaskPolling()
+  taskState.loading = false
+  taskState.creating = false
+  taskState.streaming = false
+  taskState.reconnecting = false
+  taskState.usingPollingFallback = false
+  taskState.error = ''
+  taskState.id = ''
+  taskState.reused = false
+  taskState.topic = ''
+  taskState.topicIdentifier = ''
+  taskState.start = ''
+  taskState.end = ''
+  taskState.mode = 'fast'
+  taskState.status = 'idle'
+  taskState.phase = ''
+  taskState.percentage = 0
+  taskState.message = ''
+  taskState.updatedAt = ''
+  taskState.startedAt = ''
+  taskState.finishedAt = ''
+  taskState.workerPid = 0
+  taskState.childPid = 0
+  taskState.cancelRequested = false
+  taskState.trust = {}
+  taskState.artifacts = {}
+  taskState.agents = []
+  taskState.events = []
+  taskState.lastEventId = 0
 }
 
-const loadAvailableRange = async (topicOverride = '', { force = false } = {}) => {
+function applyRangeToForm() {
+  if (!availableRange.start) return
+  reportForm.start = availableRange.start
+  reportForm.end = availableRange.end || availableRange.start
+}
+
+async function loadAvailableRange(topicOverride = '', { force = false } = {}) {
   const topic = String(topicOverride || reportForm.topic || '').trim()
   if (!topic) {
     resetRangeState()
     return
   }
-
-  if (
-    !force &&
-    topic === availableRange.topic &&
-    availableRange.start &&
-    !availableRange.loading &&
-    !availableRange.error
-  ) {
+  if (!force && topic === availableRange.topic && availableRange.start && !availableRange.loading && !availableRange.error) {
     return
   }
-
   const requestId = ++rangeRequestId
   availableRange.loading = true
   availableRange.error = ''
@@ -210,7 +302,6 @@ const loadAvailableRange = async (topicOverride = '', { force = false } = {}) =>
   availableRange.topic = topic
   availableRange.start = ''
   availableRange.end = ''
-
   try {
     const params = new URLSearchParams({ topic })
     const response = await callApi(`/api/report/availability?${params.toString()}`, { method: 'GET' })
@@ -223,25 +314,7 @@ const loadAvailableRange = async (topicOverride = '', { force = false } = {}) =>
     availableRange.hasAnalyzeHistory = Boolean(data?.has_analyze_history)
   } catch (error) {
     if (requestId !== rangeRequestId) return
-    try {
-      const params = new URLSearchParams({ topic })
-      const response = await callApi(`/api/fetch/availability?${params.toString()}`, { method: 'GET' })
-      if (requestId !== rangeRequestId) return
-      const range = response?.data?.range || {}
-      availableRange.start = String(range.start || '').trim()
-      availableRange.end = String(range.end || '').trim() || availableRange.start
-      availableRange.notice = availableRange.start
-        ? '当前专题暂无基础分析结果，点击“生成”时会先自动补跑 analyze。'
-        : ''
-      availableRange.hasAnalyzeHistory = false
-      availableRange.error = ''
-    } catch (fallbackError) {
-      availableRange.error = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
-      availableRange.start = ''
-      availableRange.end = ''
-      availableRange.notice = ''
-      availableRange.hasAnalyzeHistory = false
-    }
+    availableRange.error = error instanceof Error ? error.message : String(error)
   } finally {
     if (requestId === rangeRequestId) {
       availableRange.loading = false
@@ -249,7 +322,7 @@ const loadAvailableRange = async (topicOverride = '', { force = false } = {}) =>
   }
 }
 
-const loadTopics = async () => {
+async function loadTopics() {
   const previousTopic = String(reportForm.topic || '').trim()
   topicsState.loading = true
   topicsState.error = ''
@@ -259,9 +332,7 @@ const loadTopics = async () => {
       body: JSON.stringify({ include_counts: false })
     })
     const databases = response?.data?.databases || []
-    topicsState.options = databases
-      .map((db) => String(db?.name || '').trim())
-      .filter((name, index, arr) => name && arr.indexOf(name) === index)
+    topicsState.options = databases.map((db) => String(db?.name || '').trim()).filter((name, index, arr) => name && arr.indexOf(name) === index)
     const topicChanged = ensureTopicSelection()
     const currentTopic = String(reportForm.topic || '').trim()
     if (!topicChanged && currentTopic && currentTopic === previousTopic) {
@@ -272,17 +343,18 @@ const loadTopics = async () => {
     topicsState.options = []
     reportForm.topic = ''
     resetRangeState()
+    resetAnalysisState()
     resetProgressState()
+    resetTaskState()
   } finally {
     topicsState.loading = false
   }
 }
 
-// Delegate to the shared implementations from useArchiveHistory.js
 const splitFolderRange = sharedSplitFolderRange
 const normaliseHistoryRecord = (record, defaults = {}) => normaliseRecord(record, defaults)
 
-const loadHistory = async (topicOverride = '') => {
+async function loadHistory(topicOverride = '') {
   const topic = String(topicOverride || reportForm.topic || '').trim()
   if (!topic) {
     historyState.loading = false
@@ -292,67 +364,47 @@ const loadHistory = async (topicOverride = '') => {
     selectedHistoryId.value = ''
     return
   }
-
   const requestId = ++historyRequestId
   historyState.loading = true
   historyState.error = ''
   historyState.topic = topic
-
   try {
     const params = new URLSearchParams({ topic })
     const response = await callApi(`/api/report/history?${params.toString()}`, { method: 'GET' })
     if (requestId !== historyRequestId) return
-    const records = response?.records || response?.data?.records || []
+    const records = response?.records || []
     const defaults = {
       topic: String(response?.topic || topic).trim(),
       topic_identifier: String(response?.topic_identifier || topic).trim()
     }
-    const normalized = records
-      .map((record) => normaliseHistoryRecord(record, defaults))
-      .filter(Boolean)
-      .slice(0, MAX_HISTORY)
-
+    const normalized = records.map((record) => normaliseHistoryRecord(record, defaults)).filter(Boolean).slice(0, MAX_HISTORY)
     reportHistory.value = normalized
-
     if (!normalized.length) {
       selectedHistoryId.value = ''
       historyState.error = '暂无报告记录，请先生成报告。'
       return
     }
-
     const previousSelectedId = selectedHistoryId.value
     const exists = normalized.some((record) => record.id === selectedHistoryId.value)
-    if (!exists) {
-      selectedHistoryId.value = normalized[0].id
-    }
-    const shouldSyncForm =
-      topic === String(reportForm.topic || '').trim() &&
-      (
-        !String(reportForm.start || '').trim() ||
-        !String(reportForm.end || reportForm.start || '').trim() ||
-        previousSelectedId !== selectedHistoryId.value
-      )
-    if (shouldSyncForm) {
-      syncFormWithSelectedHistory()
-    }
+    if (!exists) selectedHistoryId.value = normalized[0].id
+    const shouldSyncForm = topic === String(reportForm.topic || '').trim() && (!String(reportForm.start || '').trim() || previousSelectedId !== selectedHistoryId.value)
+    if (shouldSyncForm) syncFormWithSelectedHistory()
   } catch (error) {
     if (requestId !== historyRequestId) return
     historyState.error = error instanceof Error ? error.message : String(error)
     reportHistory.value = []
     selectedHistoryId.value = ''
   } finally {
-    if (requestId === historyRequestId) {
-      historyState.loading = false
-    }
+    if (requestId === historyRequestId) historyState.loading = false
   }
 }
 
-const getSelectedHistoryRecord = () => {
+function getSelectedHistoryRecord() {
   if (!reportHistory.value.length) return null
   return reportHistory.value.find((item) => item.id === selectedHistoryId.value) || reportHistory.value[0] || null
 }
 
-const syncFormWithSelectedHistory = () => {
+function syncFormWithSelectedHistory() {
   const selected = getSelectedHistoryRecord()
   if (!selected) return false
   reportForm.start = selected.start
@@ -360,41 +412,22 @@ const syncFormWithSelectedHistory = () => {
   return true
 }
 
-const normalizeRange = (range) => {
-  const topic = String(range?.topic || reportForm.topic || '').trim()
-  const start = String(range?.start || reportForm.start || '').trim()
-  const end = String(range?.end || reportForm.end || '').trim() || start
-  return { topic, start, end }
-}
-
-const hasCompleteRange = (range) => {
-  const normalized = normalizeRange(range)
-  return Boolean(normalized.topic && normalized.start && normalized.end)
-}
-
-const hydrateRangeFromCurrentTopic = async () => {
+async function hydrateRangeFromCurrentTopic() {
   const topic = String(reportForm.topic || '').trim()
   if (!topic) return normalizeRange(reportForm)
-
   if (!reportHistory.value.length || historyState.topic !== topic) {
     await loadHistory(topic)
   }
-
   let hydrated = syncFormWithSelectedHistory()
   if (!hydrated && (availableRange.topic !== topic || !availableRange.start)) {
     await loadAvailableRange(topic)
   }
-  if (!hydrated) {
-    applyRangeToForm()
-  }
-
+  if (!hydrated) applyRangeToForm()
   return normalizeRange(reportForm)
 }
 
-const currentTimeString = () => new Date().toLocaleString('zh-CN', { hour12: false })
-
-const normaliseProgressLogs = (steps) =>
-  (Array.isArray(steps) ? steps : []).map((step, index) => ({
+function normaliseProgressLogs(steps) {
+  return (Array.isArray(steps) ? steps : []).map((step, index) => ({
     id: String(step?.id || `report-progress-${index}`),
     label: String(step?.label || `步骤 ${index + 1}`),
     message: String(step?.message || '').trim(),
@@ -402,169 +435,394 @@ const normaliseProgressLogs = (steps) =>
     progress: typeof step?.progress === 'number' ? step.progress : Number(step?.progress || 0),
     time: String(step?.time || '').trim()
   }))
-
-const stopProgressPolling = () => {
-  progressPollToken += 1
-  progressState.polling = false
-  if (progressPollTimer !== null && typeof window !== 'undefined') {
-    window.clearTimeout(progressPollTimer)
-  }
-  progressPollTimer = null
 }
 
-const scheduleProgressPoll = (range, token) => {
-  if (typeof window === 'undefined') return
-  progressPollTimer = window.setTimeout(async () => {
-    if (token !== progressPollToken) return
-    await loadProgress(range, { silent: true })
-    if (token !== progressPollToken) return
-    scheduleProgressPoll(range, token)
-  }, 1500)
+function applyProgressPayload(data, fallbackRange = {}) {
+  const range = normalizeRange(fallbackRange)
+  const summary = data?.summary || {}
+  const state = data?.state || {}
+  progressLogs.value = normaliseProgressLogs(data?.steps)
+  progressState.topic = String(data?.topic || range.topic).trim()
+  progressState.start = String(data?.range?.start || range.start).trim()
+  progressState.end = String(data?.range?.end || range.end).trim() || progressState.start
+  progressState.stage = String(state?.stage || '').trim()
+  progressState.status = String(summary?.status || state?.status || 'pending').trim() || 'pending'
+  progressState.message = String(summary?.message || state?.message || '').trim()
+  progressState.updatedAt = String(state?.updated_at || '').trim()
 }
 
-const startProgressPolling = (range) => {
-  const normalized = normalizeRange(range || reportForm)
-  if (!hasCompleteRange(normalized)) return
-  stopProgressPolling()
-  progressState.polling = true
-  const token = ++progressPollToken
-  void loadProgress(normalized, { silent: true })
-  scheduleProgressPoll(normalized, token)
-}
-
-const loadProgress = async (rangeOverride = null, { silent = false } = {}) => {
+async function loadProgress(rangeOverride = null, { silent = false } = {}) {
   const resolvedRange = normalizeRange(rangeOverride || reportForm)
-  const { topic, start, end } = resolvedRange
-  if (!topic || !start || !end) {
-    if (!silent) {
-      resetProgressState()
-    }
+  if (!hasCompleteRange(resolvedRange)) {
+    if (!silent) resetProgressState()
     return null
   }
-
   const requestId = ++progressRequestId
-  if (!silent) {
-    progressState.loading = true
-  }
+  if (!silent) progressState.loading = true
   progressState.error = ''
-
   try {
-    const params = new URLSearchParams({ topic, start, end })
+    const params = new URLSearchParams({ topic: resolvedRange.topic, start: resolvedRange.start, end: resolvedRange.end })
     const response = await callApi(`/api/report/progress?${params.toString()}`, { method: 'GET' })
     if (requestId !== progressRequestId) return null
     const data = response?.data || {}
-    const summary = data?.summary || {}
-    const state = data?.state || {}
-    progressLogs.value = normaliseProgressLogs(data?.steps)
-    progressState.topic = String(data?.topic || topic).trim()
-    progressState.start = String(data?.range?.start || start).trim()
-    progressState.end = String(data?.range?.end || end).trim() || progressState.start
-    progressState.stage = String(state?.stage || '').trim()
-    progressState.status = String(summary?.status || state?.status || 'pending').trim() || 'pending'
-    progressState.message = String(summary?.message || state?.message || '').trim()
-    progressState.updatedAt = String(state?.updated_at || '').trim()
+    applyProgressPayload(data, resolvedRange)
     return data
   } catch (error) {
     if (requestId !== progressRequestId) return null
     progressState.error = error instanceof Error ? error.message : String(error)
-    if (!silent) {
-      progressLogs.value = []
-    }
+    if (!silent) progressLogs.value = []
     return null
   } finally {
-    if (requestId === progressRequestId && !silent) {
-      progressState.loading = false
-    }
+    if (requestId === progressRequestId && !silent) progressState.loading = false
   }
 }
 
-const loadReport = async (rangeOverride = null) => {
+async function loadAnalyzeResults(rangeOverride = null, { silent = false } = {}) {
+  const resolvedRange = normalizeRange(rangeOverride || reportForm)
+  if (!hasCompleteRange(resolvedRange)) {
+    if (!silent) resetAnalysisState()
+    return null
+  }
+  if (!silent) analysisState.loading = true
+  analysisState.error = ''
+  try {
+    const params = new URLSearchParams({ topic: resolvedRange.topic, start: resolvedRange.start, end: resolvedRange.end })
+    const response = await callApi(`/api/analyze/results?${params.toString()}`, { method: 'GET' })
+    analysisData.value = response || null
+    analysisState.topic = resolvedRange.topic
+    analysisState.start = resolvedRange.start
+    analysisState.end = resolvedRange.end
+    analysisState.lastLoaded = currentTimeString()
+    return response || null
+  } catch (error) {
+    analysisData.value = null
+    analysisState.topic = resolvedRange.topic
+    analysisState.start = resolvedRange.start
+    analysisState.end = resolvedRange.end
+    analysisState.error = error instanceof Error ? error.message : String(error)
+    return null
+  } finally {
+    if (!silent) analysisState.loading = false
+  }
+}
+
+async function loadReport(rangeOverride = null) {
   const resolvedRange = rangeOverride ? normalizeRange(rangeOverride) : await hydrateRangeFromCurrentTopic()
-  const { topic, start, end } = resolvedRange
-  if (!topic || !start || !end) {
+  if (!hasCompleteRange(resolvedRange)) {
     reportState.error = availableRange.notice || 'Topic / Start / End 为必填'
     return null
   }
-
   reportState.loading = true
   reportState.error = ''
+  analysisState.error = ''
+  analysisState.loading = true
   try {
-    const params = new URLSearchParams({ topic, start, end })
-    const response = await callApi(`/api/report?${params.toString()}`, { method: 'GET' })
-    const payload = response?.data || null
-    if (!payload || typeof payload !== 'object') {
-      throw new Error('报告接口返回为空')
-    }
+    const params = new URLSearchParams({ topic: resolvedRange.topic, start: resolvedRange.start, end: resolvedRange.end })
+    const [reportResponse] = await Promise.all([
+      callApi(`/api/report?${params.toString()}`, { method: 'GET' }),
+      loadAnalyzeResults(resolvedRange, { silent: true })
+    ])
+    const payload = reportResponse?.data || null
+    if (!payload || typeof payload !== 'object') throw new Error('报告接口返回为空')
     reportData.value = payload
     reportState.lastLoaded = currentTimeString()
-    reportForm.topic = topic
-    reportForm.start = start
-    reportForm.end = end
-    await loadHistory(topic)
-    const matched = reportHistory.value.find((item) => item.start === start && item.end === end)
-    if (matched) {
-      selectedHistoryId.value = matched.id
-    }
-    await loadProgress({ topic, start, end }, { silent: true })
+    reportForm.topic = resolvedRange.topic
+    reportForm.start = resolvedRange.start
+    reportForm.end = resolvedRange.end
+    await loadHistory(resolvedRange.topic)
+    const matched = reportHistory.value.find((item) => item.start === resolvedRange.start && item.end === resolvedRange.end)
+    if (matched) selectedHistoryId.value = matched.id
+    await loadProgress(resolvedRange, { silent: true })
     return payload
   } catch (error) {
     reportData.value = null
+    analysisData.value = null
     const message = error instanceof Error ? error.message : String(error)
     reportState.error = message.includes('未找到分析结果目录')
-      ? '当前专题暂无基础分析结果，请点击“生成”，系统会先自动补跑 analyze 再生成报告。'
+      ? '当前专题暂无基础分析结果，请前往“运行报告”，系统会先自动补跑基础分析再生成报告。'
       : message
-    await loadProgress({ topic, start, end }, { silent: true })
+    await loadProgress(resolvedRange, { silent: true })
     return null
   } finally {
     reportState.loading = false
+    analysisState.loading = false
   }
 }
 
-const regenerateReport = async () => {
-  const { topic, start, end } = hasCompleteRange(reportForm)
-    ? normalizeRange(reportForm)
+async function regenerateReport() {
+  return createReportTask()
+}
+
+function buildTaskStorageKey(range = reportForm) {
+  const normalized = normalizeRange(range)
+  return `${TASK_STORAGE_PREFIX}:${normalized.topic}:${normalized.start}:${normalized.end}:${normalized.mode}`
+}
+
+function persistTaskKey(task) {
+  if (typeof window === 'undefined' || !task?.id) return
+  try {
+    window.localStorage.setItem(buildTaskStorageKey(task), String(task.id))
+    window.localStorage.setItem(`${TASK_STORAGE_PREFIX}:last`, String(task.id))
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function readPersistedTaskId(range = reportForm) {
+  if (typeof window === 'undefined') return ''
+  try {
+    return String(window.localStorage.getItem(buildTaskStorageKey(range)) || '').trim()
+  } catch {
+    return ''
+  }
+}
+
+function clearTaskReconnectTimer() {
+  if (taskReconnectTimer && typeof window !== 'undefined') {
+    window.clearTimeout(taskReconnectTimer)
+  }
+  taskReconnectTimer = null
+}
+
+function stopTaskPolling() {
+  if (taskPollTimer && typeof window !== 'undefined') {
+    window.clearTimeout(taskPollTimer)
+  }
+  taskPollTimer = null
+}
+
+function mergeTaskEvents(incoming = []) {
+  const map = new Map((Array.isArray(taskState.events) ? taskState.events : []).map((item) => [Number(item?.event_id || item?.eventId || 0), item]))
+  for (const item of Array.isArray(incoming) ? incoming : []) {
+    const eventId = Number(item?.event_id || item?.eventId || 0)
+    if (!eventId) continue
+    map.set(eventId, {
+      ...item,
+      event_id: eventId
+    })
+  }
+  const merged = [...map.values()].sort((a, b) => Number(a?.event_id || 0) - Number(b?.event_id || 0))
+  taskState.events = merged.slice(-180)
+  taskState.lastEventId = Number(taskState.events[taskState.events.length - 1]?.event_id || taskState.lastEventId || 0)
+}
+
+function applyTaskSnapshot(task, { reused = false } = {}) {
+  if (!task || typeof task !== 'object') return
+  taskState.id = String(task.id || '').trim()
+  taskState.reused = reused
+  taskState.topic = String(task.topic || '').trim()
+  taskState.topicIdentifier = String(task.topic_identifier || '').trim()
+  taskState.start = String(task.start || '').trim()
+  taskState.end = String(task.end || '').trim() || taskState.start
+  taskState.mode = String(task.mode || 'fast').trim() || 'fast'
+  taskState.status = String(task.status || 'idle').trim() || 'idle'
+  taskState.phase = String(task.phase || '').trim()
+  taskState.percentage = Number(task.percentage || 0)
+  taskState.message = String(task.message || '').trim()
+  taskState.updatedAt = String(task.updated_at || '').trim()
+  taskState.startedAt = String(task.started_at || '').trim()
+  taskState.finishedAt = String(task.finished_at || '').trim()
+  taskState.workerPid = Number(task.worker_pid || 0)
+  taskState.childPid = Number(task.child_pid || 0)
+  taskState.cancelRequested = Boolean(task.cancel_requested)
+  taskState.trust = task.trust && typeof task.trust === 'object' ? task.trust : {}
+  taskState.artifacts = task.artifacts && typeof task.artifacts === 'object' ? task.artifacts : {}
+  taskState.agents = Array.isArray(task.agents) ? task.agents : []
+  mergeTaskEvents(task.recent_events || [])
+  persistTaskKey(taskState)
+  applyProgressPayload({
+    topic: taskState.topic,
+    range: { start: taskState.start, end: taskState.end },
+    state: { stage: taskState.phase, status: taskState.status, message: taskState.message, updated_at: taskState.updatedAt },
+    summary: { status: taskState.status === 'completed' ? 'ok' : (['queued', 'running'].includes(taskState.status) ? 'running' : 'error'), message: taskState.message },
+    steps: buildProgressStepsFromTask()
+  }, taskState)
+}
+
+function buildProgressStepsFromTask() {
+  const currentIndex = taskStageList.findIndex((item) => item.id === taskState.phase)
+  return taskStageList.map((item, index) => ({
+    id: item.id,
+    label: item.label,
+    status: index < currentIndex ? 'ok' : (item.id === taskState.phase ? (taskState.status === 'completed' ? 'ok' : (taskState.status === 'failed' ? 'error' : 'running')) : 'pending'),
+    message: item.id === taskState.phase ? taskState.message : '',
+    progress: item.id === taskState.phase ? taskState.percentage : (index < currentIndex ? 100 : 0),
+    time: taskState.updatedAt
+  }))
+}
+
+function closeReportTaskStream() {
+  clearTaskReconnectTimer()
+  if (taskStream) {
+    taskStream.close()
+    taskStream = null
+  }
+  taskState.streaming = false
+}
+
+function scheduleTaskPolling() {
+  stopTaskPolling()
+  if (!taskState.id || ['completed', 'failed', 'cancelled'].includes(taskState.status)) return
+  if (typeof window === 'undefined') return
+  taskPollTimer = window.setTimeout(async () => {
+    await loadReportTask(taskState.id, { silent: true })
+    scheduleTaskPolling()
+  }, TASK_POLL_INTERVAL)
+}
+
+async function openReportTaskStream(taskId = taskState.id, { force = false } = {}) {
+  const resolvedTaskId = String(taskId || '').trim()
+  if (!resolvedTaskId) return
+  if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+    taskState.usingPollingFallback = true
+    scheduleTaskPolling()
+    return
+  }
+  if (taskStream && !force) return
+  closeReportTaskStream()
+  stopTaskPolling()
+  taskState.usingPollingFallback = false
+  const apiBase = await ensureApiBase()
+  const since = taskState.lastEventId ? `?since_id=${encodeURIComponent(String(taskState.lastEventId))}` : ''
+  const endpoint = `${apiBase}/report/tasks/${encodeURIComponent(resolvedTaskId)}/stream${since}`
+  const es = new EventSource(endpoint)
+  taskStream = es
+  taskState.streaming = true
+  es.addEventListener('heartbeat', () => {
+    taskState.reconnecting = false
+  })
+  es.addEventListener('done', async () => {
+    closeReportTaskStream()
+    await loadReportTask(resolvedTaskId, { silent: true })
+  })
+  es.onmessage = () => {
+    // ignore unnamed messages
+  }
+  const handleEvent = async (event) => {
+    try {
+      const payload = JSON.parse(event.data)
+      mergeTaskEvents([payload])
+      await loadReportTask(resolvedTaskId, { silent: true })
+    } catch {
+      // ignore parse errors
+    }
+  }
+  ;['task.created', 'phase.started', 'phase.progress', 'agent.started', 'agent.memo', 'tool.called', 'tool.result', 'review.verdict', 'artifact.ready', 'task.completed', 'task.failed', 'task.cancelled'].forEach((eventName) => {
+    es.addEventListener(eventName, handleEvent)
+  })
+  es.onerror = () => {
+    closeReportTaskStream()
+    taskState.reconnecting = true
+    taskState.usingPollingFallback = false
+    if (typeof window !== 'undefined' && !['completed', 'failed', 'cancelled'].includes(taskState.status)) {
+      taskReconnectTimer = window.setTimeout(() => {
+        void openReportTaskStream(resolvedTaskId, { force: true })
+      }, 1500)
+    }
+  }
+}
+
+async function loadReportTask(taskId = taskState.id, { silent = false, reused = false } = {}) {
+  const resolvedTaskId = String(taskId || '').trim()
+  if (!resolvedTaskId) return null
+  if (!silent) taskState.loading = true
+  taskState.error = ''
+  try {
+    const response = await callApi(`/api/report/tasks/${encodeURIComponent(resolvedTaskId)}`, { method: 'GET' })
+    const task = response?.task || null
+    if (task && typeof task === 'object') {
+      applyTaskSnapshot(task, { reused })
+      if (taskState.status === 'completed' && hasCompleteRange(taskState)) {
+        await loadHistory(taskState.topic)
+      }
+    }
+    return task
+  } catch (error) {
+    taskState.error = error instanceof Error ? error.message : String(error)
+    return null
+  } finally {
+    if (!silent) taskState.loading = false
+  }
+}
+
+async function createReportTask(rangeOverride = null) {
+  const resolvedRange = hasCompleteRange(rangeOverride || reportForm)
+    ? normalizeRange(rangeOverride || reportForm)
     : await hydrateRangeFromCurrentTopic()
-  if (!topic || !start || !end) {
+  if (!hasCompleteRange(resolvedRange)) {
     reportState.error = availableRange.notice || 'Topic / Start / End 为必填'
     return null
   }
-
-  reportState.regenerating = true
+  taskState.creating = true
+  taskState.error = ''
   reportState.error = ''
-  startProgressPolling({ topic, start, end })
   try {
-    const response = await callApi('/api/report/regenerate', {
+    const response = await callApi('/api/report/tasks', {
       method: 'POST',
-      body: JSON.stringify({
-        topic,
-        start,
-        end
-      })
+      body: JSON.stringify(resolvedRange)
     })
-    const payload = response?.data || null
-    if (!payload || typeof payload !== 'object') {
-      throw new Error('报告重生成接口返回为空')
-    }
-    reportData.value = payload
-    reportState.lastLoaded = currentTimeString()
-    await loadHistory(topic)
-    const matched = reportHistory.value.find((item) => item.start === start && item.end === end)
-    if (matched) {
-      selectedHistoryId.value = matched.id
-    }
-    await loadProgress({ topic, start, end }, { silent: true })
-    return payload
+    const task = response?.task || null
+    if (!task || typeof task !== 'object') throw new Error('任务创建接口返回为空')
+    applyTaskSnapshot(task, { reused: Boolean(response?.reused) })
+    reportForm.topic = resolvedRange.topic
+    reportForm.start = resolvedRange.start
+    reportForm.end = resolvedRange.end
+    reportForm.mode = resolvedRange.mode
+    await openReportTaskStream(task.id, { force: true })
+    if (taskState.usingPollingFallback) scheduleTaskPolling()
+    return task
   } catch (error) {
-    reportState.error = error instanceof Error ? error.message : String(error)
-    await loadProgress({ topic, start, end }, { silent: true })
+    taskState.error = error instanceof Error ? error.message : String(error)
+    reportState.error = taskState.error
     return null
   } finally {
-    stopProgressPolling()
-    reportState.regenerating = false
+    taskState.creating = false
   }
 }
 
-const applyHistorySelection = async (historyId, { shouldLoad = true } = {}) => {
+async function cancelReportTask(taskId = taskState.id) {
+  const resolvedTaskId = String(taskId || '').trim()
+  if (!resolvedTaskId) return null
+  try {
+    const response = await callApi(`/api/report/tasks/${encodeURIComponent(resolvedTaskId)}/cancel`, { method: 'POST' })
+    const task = response?.task || null
+    if (task) applyTaskSnapshot(task)
+    return task
+  } catch (error) {
+    taskState.error = error instanceof Error ? error.message : String(error)
+    return null
+  }
+}
+
+async function retryReportTask(taskId = taskState.id) {
+  const resolvedTaskId = String(taskId || '').trim()
+  if (!resolvedTaskId) return null
+  try {
+    const response = await callApi(`/api/report/tasks/${encodeURIComponent(resolvedTaskId)}/retry`, { method: 'POST' })
+    const task = response?.task || null
+    if (task) {
+      applyTaskSnapshot(task)
+      await openReportTaskStream(task.id, { force: true })
+    }
+    return task
+  } catch (error) {
+    taskState.error = error instanceof Error ? error.message : String(error)
+    return null
+  }
+}
+
+async function resumeLastReportTask(rangeOverride = null) {
+  const resolvedRange = normalizeRange(rangeOverride || reportForm)
+  const taskId = readPersistedTaskId(resolvedRange)
+  if (!taskId) return null
+  const task = await loadReportTask(taskId, { silent: true })
+  if (!task || ['completed', 'failed', 'cancelled'].includes(String(task.status || ''))) return task
+  await openReportTaskStream(taskId, { force: true })
+  if (taskState.usingPollingFallback) scheduleTaskPolling()
+  return task
+}
+
+async function applyHistorySelection(historyId, { shouldLoad = true } = {}) {
   const record = reportHistory.value.find((item) => item.id === historyId)
   if (!record) return
   selectedHistoryId.value = record.id
@@ -573,25 +831,22 @@ const applyHistorySelection = async (historyId, { shouldLoad = true } = {}) => {
   reportForm.end = record.end
   suppressTopicWatcher = false
   if (shouldLoad) {
-    await loadReport({
-      topic: reportForm.topic,
-      start: record.start,
-      end: record.end
-    })
+    await loadReport({ topic: reportForm.topic, start: record.start, end: record.end, mode: reportForm.mode })
   }
 }
 
-const refreshTopicContext = async (topic) => {
+async function refreshTopicContext(topic) {
   await loadAvailableRange(topic)
   await loadHistory(topic)
   const synced = syncFormWithSelectedHistory()
-  if (!synced) {
-    applyRangeToForm()
-  }
+  if (!synced) applyRangeToForm()
   const nextRange = normalizeRange(reportForm)
   if (hasCompleteRange(nextRange)) {
     await loadProgress(nextRange, { silent: true })
+    await resumeLastReportTask(nextRange)
   } else {
+    resetAnalysisState()
     resetProgressState()
+    resetTaskState()
   }
 }

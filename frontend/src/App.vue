@@ -317,8 +317,9 @@ const navigationGroups = [
       },
       {
         label: '报告解读',
-        description: '报告解读与导出',
-        to: { name: 'report-generation' },
+        description: '运行报告与查看结果',
+        to: { name: 'report-generation-run' },
+        match: ['report-generation-run', 'report-generation-view'],
         icon: DocumentTextIcon
       }
     ]

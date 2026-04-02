@@ -2,7 +2,7 @@
   <div class="space-y-6 pb-12">
     <section class="card-surface space-y-5 p-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="text-xl font-semibold text-primary">报告解读</h2>
+        <h2 class="text-xl font-semibold text-primary">查看报告</h2>
         <div class="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -12,6 +12,14 @@
           >
             <ArrowPathIcon class="h-4 w-4" :class="topicsState.loading ? 'animate-spin' : ''" />
             {{ topicsState.loading ? '同步中…' : '刷新专题' }}
+          </button>
+          <button
+            type="button"
+            class="btn-secondary inline-flex items-center gap-2"
+            @click="goToRunPage"
+          >
+            <PlayCircleIcon class="h-4 w-4" />
+            前往运行页
           </button>
           <button
             type="button"
@@ -82,20 +90,11 @@
           <button
             type="button"
             class="btn-secondary inline-flex items-center gap-2"
-            :disabled="reportState.loading || reportState.regenerating"
+            :disabled="reportState.loading"
             @click="loadReport()"
           >
             <ArrowPathIcon class="h-4 w-4" :class="reportState.loading ? 'animate-spin' : ''" />
             {{ reportState.loading ? '读取中…' : '读取报告' }}
-          </button>
-          <button
-            type="button"
-            class="btn-primary inline-flex items-center gap-2"
-            :disabled="reportState.loading || reportState.regenerating"
-            @click="handleGenerateAction()"
-          >
-            <SparklesIcon class="h-4 w-4" :class="isPrimaryActionRunning ? 'animate-pulse' : ''" />
-            {{ primaryActionText }}
           </button>
           <button
             type="button"
@@ -112,37 +111,6 @@
       <div v-if="reportState.error" class="rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-sm text-danger">
         {{ reportState.error }}
       </div>
-    </section>
-
-    <section class="card-surface space-y-4 p-6">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div class="space-y-1">
-          <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">执行进度</p>
-          <p class="text-sm text-secondary">
-            {{ progressSummaryText }}
-            <span v-if="progressState.polling" class="ml-2 animate-pulse text-brand-600">同步中…</span>
-          </p>
-          <p v-if="progressState.updatedAt" class="text-xs text-muted">
-            最近同步：{{ progressState.updatedAt }}
-          </p>
-        </div>
-        <button
-          type="button"
-          class="btn-secondary inline-flex items-center gap-2"
-          :disabled="progressState.loading || !reportForm.topic || !reportForm.start"
-          @click="handleRefreshProgress"
-        >
-          <ArrowPathIcon class="h-4 w-4" :class="progressState.loading ? 'animate-spin' : ''" />
-          {{ progressState.loading ? '同步中…' : '刷新进度' }}
-        </button>
-      </div>
-
-      <AnalysisLogList
-        :logs="progressLogs"
-        empty-label="当前区间暂无执行中的报告任务。点击“生成”后会在这里展示 analyze 与报告研判进度。"
-      />
-
-      <p v-if="progressState.error" class="text-xs text-danger">{{ progressState.error }}</p>
     </section>
 
     <section v-if="report" class="card-surface space-y-6 p-6">
@@ -183,6 +151,133 @@
     </section>
 
     <template v-if="report">
+      <section class="card-surface space-y-5 p-6">
+        <header class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="space-y-1">
+              <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">基础分析总览</p>
+              <h3 class="text-lg font-semibold text-primary">基础分析已压缩进报告结构</h3>
+            </div>
+            <p class="text-xs text-muted">
+              <span v-if="analysisState.loading">基础分析结果加载中…</span>
+              <span v-else-if="analysisState.lastLoaded">图表读取：{{ analysisState.lastLoaded }}</span>
+              <span v-else>图表来自 `/api/analyze/results`</span>
+            </p>
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <article
+              v-for="item in sourceReadinessItems"
+              :key="item.id"
+              class="rounded-2xl border p-4"
+              :class="item.ready ? 'border-brand-soft bg-brand-soft/10' : 'border-soft bg-surface'"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-sm font-semibold text-primary">{{ item.label }}</p>
+                <span
+                  class="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                  :class="item.ready ? 'bg-brand-soft/40 text-brand-700' : 'bg-surface-muted text-muted'"
+                >
+                  {{ item.ready ? '已接入' : '待补齐/缺失' }}
+                </span>
+              </div>
+              <p class="mt-2 text-xs leading-6 text-secondary">{{ item.detail }}</p>
+            </article>
+          </div>
+
+          <div v-if="analysisMainFinding" class="rounded-2xl border border-brand-soft bg-brand-soft/10 px-4 py-4">
+            <div class="flex items-start gap-3">
+              <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                <SparklesIcon class="h-4 w-4" />
+              </span>
+              <div class="space-y-1.5">
+                <p class="text-xs font-semibold uppercase tracking-[0.25em] text-brand-700">AI 主要发现</p>
+                <p class="text-sm leading-7 text-primary">{{ analysisMainFinding.summary }}</p>
+                <p v-if="analysisMainFinding.sourceFunctions.length" class="text-xs text-muted">
+                  依据模块：{{ analysisMainFinding.sourceFunctions.join('、') }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div v-if="analysisState.loading" class="rounded-2xl border border-dashed border-soft bg-surface px-4 py-8 text-center text-sm text-muted">
+          正在读取基础分析图表…
+        </div>
+        <div v-else-if="analysisState.error" class="rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-sm text-danger">
+          {{ analysisState.error }}
+        </div>
+        <div v-else-if="analysisOverviewCards.length" class="grid gap-4 xl:grid-cols-2">
+          <article
+            v-for="card in analysisOverviewCards"
+            :key="card.name"
+            :id="card.anchorId"
+            class="rounded-2xl border border-soft bg-surface p-5"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <span class="flex h-10 w-10 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
+                  <component :is="getAnalysisSectionIcon(card.name)" class="h-5 w-5" />
+                </span>
+                <div>
+                  <h4 class="text-base font-semibold text-primary">{{ card.label }}</h4>
+                  <p class="text-sm text-secondary">{{ card.description }}</p>
+                </div>
+              </div>
+              <span
+                class="rounded-full border px-3 py-1 text-xs font-semibold"
+                :class="getNarrativeSourceClass(card.source)"
+              >
+                {{ getNarrativeSourceLabel(card.source) }}
+              </span>
+            </div>
+
+            <p class="mt-4 text-sm leading-7 text-primary">
+              {{ card.summary || '暂无综合摘要。' }}
+            </p>
+
+            <AnalysisChartPanel
+              class="mt-4"
+              :title="card.primaryTarget.title"
+              :description="card.primaryTarget.subtitle"
+              :option="card.primaryTarget.option"
+              :has-data="card.primaryTarget.hasData"
+            />
+
+            <div class="mt-4 grid gap-4 lg:grid-cols-[0.95fr,1.05fr]">
+              <div class="rounded-2xl border border-soft">
+                <table class="min-w-full text-sm">
+                  <thead class="bg-surface-muted text-xs uppercase tracking-wide text-muted">
+                    <tr>
+                      <th class="px-3 py-2 text-left">名称</th>
+                      <th class="px-3 py-2 text-left">数值</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(row, index) in card.rows"
+                      :key="`${card.name}-${index}`"
+                      class="border-t border-soft text-secondary"
+                    >
+                      <td class="px-3 py-2">{{ formatRowName(row) }}</td>
+                      <td class="px-3 py-2">{{ formatRowValue(row) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="rounded-2xl border border-soft bg-surface-muted/60 p-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">综合解读</p>
+                <p class="mt-3 text-sm leading-7 text-secondary">
+                  {{ card.explainText || card.summary || '暂无综合解读。' }}
+                </p>
+              </div>
+            </div>
+          </article>
+        </div>
+        <p v-else class="text-sm text-muted">当前报告对应区间暂无基础分析图表，请先执行 analyze。</p>
+      </section>
+
       <section class="grid gap-6 xl:grid-cols-[1.2fr,1fr,1fr]">
         <article class="card-surface space-y-4 p-5">
           <header>
@@ -442,6 +537,118 @@
         <AnalysisChartPanel title="主题分布" :option="themeChartOption" :has-data="hasThemeData" />
       </section>
 
+      <section class="card-surface space-y-5 p-6">
+        <header class="space-y-2">
+          <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">原始依据</p>
+          <h3 class="text-lg font-semibold text-primary">旧版报告依据</h3>
+          <p class="text-sm text-secondary">
+            该区块用于承接旧版 `report.py` 链路中的文字解读、检索增强段落和长文结果，便于追溯报告结论的原始依据。
+          </p>
+        </header>
+
+        <div
+          v-if="!sourceReadiness.explainReady"
+          class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
+        >
+          当前区间还没有补齐总体文字解读，报告页先展示 AI 摘要和统计结果；下方仅列出当前可用的旧版依据。
+        </div>
+
+        <div v-if="legacyContext.sections.length" class="grid gap-4 xl:grid-cols-2">
+          <article
+            v-for="section in legacyContext.sections"
+            :id="section.anchorId"
+            :key="section.anchorId"
+            class="rounded-2xl border border-soft bg-surface p-5"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{{ section.label }}</p>
+                <h4 class="mt-1 text-base font-semibold text-primary">{{ section.sourceLabel || '文字解读段落' }}</h4>
+              </div>
+              <span class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+                {{ getNarrativeSourceLabel(section.source) }}
+              </span>
+            </div>
+            <p class="mt-4 whitespace-pre-line text-sm leading-7 text-secondary">{{ section.text }}</p>
+          </article>
+        </div>
+
+        <div v-if="legacyContext.fullText || legacyContext.manualText" class="grid gap-4 xl:grid-cols-2">
+          <details v-if="legacyContext.fullText" class="rounded-2xl border border-soft bg-surface p-4">
+            <summary class="cursor-pointer text-sm font-semibold text-primary">查看 legacy report 长文</summary>
+            <pre class="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-sm leading-7 text-secondary">{{ legacyContext.fullText }}</pre>
+          </details>
+          <details v-if="legacyContext.manualText" class="rounded-2xl border border-soft bg-surface p-4">
+            <summary class="cursor-pointer text-sm font-semibold text-primary">查看人工补充文本</summary>
+            <pre class="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-sm leading-7 text-secondary">{{ legacyContext.manualText }}</pre>
+          </details>
+        </div>
+
+        <p v-if="!hasLegacyContextContent" class="text-sm text-muted">当前报告未找到可展示的旧版 explain / report 上下文。</p>
+      </section>
+
+      <section class="card-surface space-y-5 p-6">
+        <header class="space-y-2">
+          <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">结论挖掘</p>
+          <h3 class="text-lg font-semibold text-primary">从基础分析、文字解读与结构化研判中回收可执行结论</h3>
+        </header>
+
+        <div v-if="hasConclusionMiningContent" class="space-y-5">
+          <div class="rounded-2xl border border-brand-soft bg-brand-soft/10 px-5 py-4">
+            <p class="text-xs font-semibold uppercase tracking-[0.25em] text-brand-700">执行摘要</p>
+            <p class="mt-2 text-sm leading-7 text-primary">
+              {{ conclusionMining.executiveSummary || '暂无执行摘要。' }}
+            </p>
+            <div v-if="conclusionMining.supportingModules.length" class="mt-3 flex flex-wrap gap-2">
+              <a
+                v-for="module in conclusionMining.supportingModules"
+                :key="`conclusion-summary-${module.anchorId}`"
+                class="rounded-full border border-brand-soft bg-white px-3 py-1 text-xs font-semibold text-brand-700 transition hover:border-brand-300"
+                :href="`#${module.anchorId}`"
+              >
+                依据模块：{{ module.label }}
+              </a>
+            </div>
+          </div>
+
+          <div class="grid gap-4 xl:grid-cols-3">
+            <article
+              v-for="group in conclusionGroups"
+              :key="group.key"
+              class="rounded-2xl border border-soft bg-surface p-5"
+            >
+              <header class="space-y-1 border-b border-soft pb-3">
+                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{{ group.title }}</p>
+                <p class="text-sm text-secondary">{{ group.subtitle }}</p>
+              </header>
+
+              <div v-if="group.items.length" class="mt-4 space-y-4">
+                <article
+                  v-for="item in group.items"
+                  :key="item.id"
+                  class="rounded-2xl border border-soft bg-surface-muted px-4 py-3"
+                >
+                  <p v-if="item.headline" class="text-sm font-semibold text-primary">{{ item.headline }}</p>
+                  <p class="mt-1 text-sm leading-7 text-secondary">{{ item.text }}</p>
+                  <div v-if="item.supportingModules.length" class="mt-3 flex flex-wrap gap-2">
+                    <a
+                      v-for="module in item.supportingModules"
+                      :key="`${item.id}-${module.anchorId}`"
+                      class="rounded-full border border-soft bg-surface px-2.5 py-1 text-[11px] font-semibold text-secondary transition hover:border-brand-300 hover:text-brand-700"
+                      :href="`#${module.anchorId}`"
+                    >
+                      {{ module.label }}
+                    </a>
+                  </div>
+                </article>
+              </div>
+              <p v-else class="mt-4 text-sm text-muted">{{ group.emptyText }}</p>
+            </article>
+          </div>
+        </div>
+        <p v-else class="text-sm text-muted">当前报告未提炼出新的结论挖掘结果。</p>
+      </section>
+
       <section class="card-surface space-y-4 p-6">
         <header class="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -473,23 +680,32 @@
     </template>
 
     <section v-else class="card-surface p-6 text-sm text-muted">
-      请先选择专题与时间范围，然后点击“读取报告”或“生成”。
+      请先选择专题与时间范围，然后点击“读取报告”。
     </section>
   </div>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
+  ChartBarIcon,
+  ChartPieIcon,
   ClockIcon,
-  SparklesIcon
+  GlobeAltIcon,
+  HashtagIcon,
+  MegaphoneIcon,
+  PlayCircleIcon,
+  SparklesIcon,
+  UsersIcon
 } from '@heroicons/vue/24/outline'
 import { marked } from 'marked'
 import AnalysisChartPanel from '../../components/AnalysisChartPanel.vue'
-import AnalysisLogList from '../../components/analysis/AnalysisLogList.vue'
 import { useReportGeneration } from '../../composables/useReportGeneration'
+
+const router = useRouter()
 
 const {
   topicsState,
@@ -497,21 +713,36 @@ const {
   reportForm,
   availableRange,
   reportState,
-  progressState,
+  analysisState,
   historyState,
   reportHistory,
   selectedHistoryId,
   reportData,
-  progressLogs,
+  analysisSections,
+  analysisAiSummary,
   loadTopics,
-  loadProgress,
   loadHistory,
   loadReport,
-  regenerateReport,
   applyHistorySelection
 } = useReportGeneration()
 
 const exporting = ref(false)
+
+const analysisSectionIconMap = {
+  attitude: ChartBarIcon,
+  classification: ChartPieIcon,
+  geography: GlobeAltIcon,
+  keywords: HashtagIcon,
+  publishers: UsersIcon,
+  trends: MegaphoneIcon,
+  volume: MegaphoneIcon
+}
+
+const conclusionGroupMeta = [
+  { key: 'conclusions', title: '核心结论', subtitle: '聚合页面亮点与重点判断。', emptyText: '暂无核心结论。' },
+  { key: 'recommendations', title: '行动建议', subtitle: '从传播节奏与重点模块提炼后续动作。', emptyText: '暂无行动建议。' },
+  { key: 'risks', title: '风险提示', subtitle: '需要持续观察或提前预警的信号。', emptyText: '暂无重点风险。' }
+]
 
 const clampRate = (value) => {
   const numeric = Number(value)
@@ -527,23 +758,6 @@ const formatNumber = (value) => {
 }
 
 const report = computed(() => (reportData.value && typeof reportData.value === 'object' ? reportData.value : null))
-const hasCurrentRangeHistory = computed(() => {
-  const start = String(reportForm.start || '').trim()
-  const end = String(reportForm.end || '').trim() || start
-  if (!start || !end) return false
-  return reportHistory.value.some((record) => record.start === start && record.end === end)
-})
-const isPrimaryActionRunning = computed(() => reportState.regenerating)
-const primaryActionText = computed(() => {
-  if (isPrimaryActionRunning.value) return '生成中…'
-  return hasCurrentRangeHistory.value ? '重新生成' : '生成'
-})
-const progressSummaryText = computed(() => {
-  if (progressState.error) return progressState.error
-  if (progressState.message) return progressState.message
-  if (reportState.regenerating) return '系统正在自动检查 analyze 并生成报告。'
-  return '当前区间暂无执行中的报告任务。'
-})
 
 const reportMeta = computed(() => ({
   title: report.value?.title || `${reportForm.topic || '专题'}舆情分析报告`,
@@ -551,6 +765,19 @@ const reportMeta = computed(() => ({
   rangeText: report.value?.rangeText || `${reportForm.start || '--'} → ${reportForm.end || '--'}`,
   lastUpdated: report.value?.lastUpdated || '未提供'
 }))
+
+const analysisMainFinding = computed(() => {
+  const payload = analysisAiSummary.value?.main_finding
+  if (!payload || typeof payload !== 'object') return null
+  const summary = String(payload?.summary || '').trim()
+  if (!summary) return null
+  return {
+    summary,
+    sourceFunctions: Array.isArray(payload?.source_functions)
+      ? payload.source_functions.map((item) => String(item || '').trim()).filter(Boolean)
+      : []
+  }
+})
 
 const deepAnalysis = computed(() => {
   const payload = report.value?.deepAnalysis
@@ -610,6 +837,233 @@ const keywords = computed(() => (Array.isArray(report.value?.keywords) ? report.
 const themes = computed(() => (Array.isArray(report.value?.themes) ? report.value.themes : []))
 const sentiment = computed(() => report.value?.sentiment || { positive: 0, neutral: 0, negative: 0 })
 const contentSplit = computed(() => report.value?.contentSplit || { factual: 0, opinion: 0 })
+const moduleNarratives = computed(() => (
+  Array.isArray(report.value?.moduleNarratives)
+    ? report.value.moduleNarratives
+      .map((item) => ({
+        id: String(item?.id || '').trim(),
+        label: String(item?.label || '').trim(),
+        description: String(item?.description || '').trim(),
+        summary: String(item?.summary || '').trim(),
+        explainText: String(item?.explainText || '').trim(),
+        source: String(item?.source || 'fallback').trim() || 'fallback',
+        anchorId: String(item?.anchorId || `module-narrative-${item?.id || ''}`).trim(),
+        hasAiSummary: Boolean(item?.hasAiSummary),
+        hasExplain: Boolean(item?.hasExplain)
+      }))
+      .filter((item) => item.id && item.label)
+    : []
+))
+const legacyContext = computed(() => {
+  const payload = report.value?.legacyContext
+  const sections = Array.isArray(payload?.sections)
+    ? payload.sections
+      .map((item) => ({
+        id: String(item?.id || '').trim(),
+        label: String(item?.label || item?.sourceLabel || '').trim(),
+        sourceLabel: String(item?.sourceLabel || '').trim(),
+        text: String(item?.text || '').trim(),
+        source: String(item?.source || 'legacy_rag').trim() || 'legacy_rag',
+        anchorId: `legacy-section-${String(item?.id || '').trim()}`
+      }))
+      .filter((item) => item.id && item.label && item.text)
+    : []
+  return {
+    sections,
+    fullText: String(payload?.fullText || '').trim(),
+    manualText: String(payload?.manualText || '').trim(),
+    hasManualText: Boolean(payload?.hasManualText),
+    hasLegacyReportText: Boolean(payload?.hasLegacyReportText),
+    sectionsCount: Number(payload?.sectionsCount || sections.length || 0),
+    sourceTopic: String(payload?.sourceTopic || '').trim()
+  }
+})
+const conclusionMining = computed(() => {
+  const payload = report.value?.conclusionMining
+  const normalizeModules = (rows) => (
+    Array.isArray(rows)
+      ? rows
+        .map((item) => ({
+          id: String(item?.id || '').trim(),
+          label: String(item?.label || '').trim(),
+          anchorId: String(item?.anchorId || `module-narrative-${item?.id || ''}`).trim()
+        }))
+        .filter((item) => item.id && item.label)
+      : []
+  )
+  const normalizeItems = (rows) => (
+    Array.isArray(rows)
+      ? rows
+        .map((item, index) => ({
+          id: String(item?.id || `conclusion-item-${index + 1}`).trim(),
+          text: String(item?.text || '').trim(),
+          headline: String(item?.headline || '').trim(),
+          supportingModules: normalizeModules(item?.supportingModules)
+        }))
+        .filter((item) => item.text)
+      : []
+  )
+  return {
+    executiveSummary: String(payload?.executiveSummary || '').trim(),
+    conclusions: normalizeItems(payload?.conclusions),
+    recommendations: normalizeItems(payload?.recommendations),
+    risks: normalizeItems(payload?.risks),
+    supportingModules: normalizeModules(payload?.supportingModules)
+  }
+})
+const sourceReadiness = computed(() => {
+  const payload = report.value?.sourceReadiness
+  return {
+    analyzeReady: Boolean(payload?.analyzeReady),
+    aiSummaryReady: Boolean(payload?.aiSummaryReady),
+    explainReady: Boolean(payload?.explainReady),
+    legacyContextReady: Boolean(payload?.legacyContextReady)
+  }
+})
+
+const sourceReadinessItems = computed(() => ([
+  {
+    id: 'analyze',
+    label: '基础分析',
+    ready: sourceReadiness.value.analyzeReady,
+    detail: sourceReadiness.value.analyzeReady ? '7 个基础分析模块可直接复用。' : '基础分析结果尚未准备完成。'
+  },
+  {
+    id: 'ai-summary',
+    label: 'AI 摘要',
+    ready: sourceReadiness.value.aiSummaryReady,
+    detail: sourceReadiness.value.aiSummaryReady ? '模块摘要可用于快速解读。' : '当前缺少 AI 摘要，将仅展示统计结果。'
+  },
+  {
+    id: 'explain',
+    label: '总体文字解读',
+    ready: sourceReadiness.value.explainReady,
+    detail: sourceReadiness.value.explainReady ? '总体文字解读已接入报告。' : '总体文字解读待补齐，当前先结合 AI 摘要和统计结果展示。'
+  },
+  {
+    id: 'legacy-context',
+    label: '原始依据',
+    ready: sourceReadiness.value.legacyContextReady,
+    detail: sourceReadiness.value.legacyContextReady ? '已收集旧 report 段落与长文依据。' : '旧 report 上下文暂不可用。'
+  }
+]))
+
+const conclusionGroups = computed(() => conclusionGroupMeta.map((group) => ({
+  ...group,
+  items: Array.isArray(conclusionMining.value?.[group.key]) ? conclusionMining.value[group.key] : []
+})))
+
+const hasLegacyContextContent = computed(() => Boolean(
+  legacyContext.value.sections.length ||
+  legacyContext.value.fullText ||
+  legacyContext.value.manualText
+))
+
+const hasConclusionMiningContent = computed(() => Boolean(
+  conclusionMining.value.executiveSummary ||
+  conclusionGroups.value.some((group) => group.items.length) ||
+  conclusionMining.value.supportingModules.length
+))
+
+const getAnalysisSectionIcon = (sectionName) => analysisSectionIconMap[sectionName] || ChartPieIcon
+
+const formatRowName = (row) => {
+  if (!row) return '-'
+  return row.displayName ?? row.name ?? row.label ?? row.key ?? '未命名'
+}
+
+const formatRowValue = (row) => {
+  if (!row) return 0
+  if (row.displayValue != null) return row.displayValue
+  return row.value ?? row.count ?? row.total ?? 0
+}
+
+const getNarrativeSourceLabel = (source) => ({
+  'ai_summary+legacy_rag': 'AI 摘要 + 文字解读',
+  ai_summary: 'AI 摘要',
+  legacy_rag: '文字解读',
+  snapshot: '统计快照',
+  fallback: 'AI/统计补位'
+}[String(source || '').trim()] || 'AI/统计补位')
+
+const getNarrativeSourceClass = (source) => {
+  const key = String(source || '').trim()
+  if (key === 'ai_summary+legacy_rag') return 'border-brand-soft bg-brand-soft/20 text-brand-700'
+  if (key === 'ai_summary') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (key === 'legacy_rag') return 'border-sky-200 bg-sky-50 text-sky-700'
+  if (key === 'snapshot') return 'border-amber-200 bg-amber-50 text-amber-700'
+  return 'border-soft bg-surface text-secondary'
+}
+
+const hasOverallTarget = (target) => {
+  const rawTarget = String(target?.target || '').trim().toLowerCase()
+  const title = String(target?.title || '').trim()
+  return rawTarget === 'overall' || rawTarget === 'all' || title.endsWith('总体')
+}
+
+const createEmptyAnalysisTarget = (section) => ({
+  target: '__empty__',
+  title: `${section?.label || '模块'} · 代表图`,
+  subtitle: '当前模块暂无可用图表。',
+  option: {},
+  hasData: false,
+  rows: []
+})
+
+const pickPrimaryTarget = (section) => {
+  const targets = Array.isArray(section?.targets) ? section.targets : []
+  if (!targets.length) return createEmptyAnalysisTarget(section)
+
+  const hasDataTargets = targets.filter((target) => Boolean(target?.hasData))
+  if (section?.name === 'trends') {
+    return (
+      hasDataTargets.find((target) => target?.target === '__trend_flow__') ||
+      hasDataTargets.find((target) => target?.target === '__trend_share__') ||
+      hasDataTargets.find((target) => hasOverallTarget(target)) ||
+      hasDataTargets[0] ||
+      targets[0]
+    )
+  }
+
+  return (
+    hasDataTargets.find((target) => hasOverallTarget(target)) ||
+    hasDataTargets[0] ||
+    targets[0]
+  )
+}
+
+const buildSnapshotSummary = (rows, label) => {
+  const normalizedRows = Array.isArray(rows) ? rows.filter(Boolean).slice(0, 3) : []
+  if (!normalizedRows.length) {
+    return `${label || '当前模块'}暂无可直接复用的统计快照。`
+  }
+  const fragments = normalizedRows.map((row) => `${formatRowName(row)} ${formatRowValue(row)}`)
+  return `${label || '当前模块'}的代表性指标为：${fragments.join('；')}。`
+}
+
+const analysisOverviewCards = computed(() => {
+  const narrativeMap = new Map(moduleNarratives.value.map((item) => [item.id, item]))
+
+  return analysisSections.value.map((section) => {
+    const narrative = narrativeMap.get(section.name) || null
+    const primaryTarget = pickPrimaryTarget(section)
+    const rows = Array.isArray(primaryTarget?.rows) ? primaryTarget.rows.slice(0, 6) : []
+    const summary = String(narrative?.summary || '').trim() || buildSnapshotSummary(rows, section.label)
+    const explainText = String(narrative?.explainText || '').trim() || summary
+
+    return {
+      name: section.name,
+      label: section.label,
+      description: section.description,
+      source: narrative?.source || 'fallback',
+      summary,
+      explainText,
+      anchorId: String(narrative?.anchorId || `module-narrative-${section.name}`).trim(),
+      primaryTarget,
+      rows
+    }
+  })
+})
 
 const stageNotes = computed(() => (Array.isArray(report.value?.stageNotes) ? report.value.stageNotes : []))
 const parseDateToken = (raw) => {
@@ -1190,17 +1644,7 @@ const handleRefreshHistory = async () => {
   await loadHistory(topic)
 }
 
-const handleRefreshProgress = async () => {
-  const topic = String(reportForm.topic || '').trim()
-  const start = String(reportForm.start || '').trim()
-  const end = String(reportForm.end || '').trim() || start
-  if (!topic || !start || !end) return
-  await loadProgress({ topic, start, end })
-}
-
-const handleGenerateAction = async () => {
-  await regenerateReport()
-}
+const goToRunPage = () => router.push({ name: 'report-generation-run' })
 
 const escapeHtml = (value) => String(value || '')
   .replace(/&/g, '&amp;')
@@ -1212,43 +1656,88 @@ const escapeHtml = (value) => String(value || '')
 const buildHtmlDocument = () => {
   if (!report.value) return ''
 
-  const chartOptions = {
-    channel: channelChartOption.value,
-    sentiment: sentimentChartOption.value,
-    contentSplit: contentSplitOption.value,
-    trend: trendChartOption.value,
-    bertopicTimeline: bertopicTimelineOption.value,
-    keyword: keywordChartOption.value,
-    theme: themeChartOption.value
+  const chartOptions = {}
+  const chartRuntime = []
+  const registerChart = (optionKey, option, hasData) => {
+    chartOptions[optionKey] = option || {}
+    chartRuntime.push({
+      id: `chart-${optionKey}`,
+      optionKey,
+      hasData: Boolean(hasData)
+    })
   }
 
-  const chartState = {
-    channel: hasChannelData.value,
-    sentiment: hasSentimentData.value,
-    contentSplit: hasContentSplitData.value,
-    trend: hasTrendData.value,
-    bertopicTimeline: hasBertopicTimelineData.value,
-    keyword: hasKeywordData.value,
-    theme: hasThemeData.value
+  registerChart('channel', channelChartOption.value, hasChannelData.value)
+  registerChart('sentiment', sentimentChartOption.value, hasSentimentData.value)
+  registerChart('contentSplit', contentSplitOption.value, hasContentSplitData.value)
+  registerChart('trend', trendChartOption.value, hasTrendData.value)
+  registerChart('bertopicTimeline', bertopicTimelineOption.value, hasBertopicTimelineData.value)
+  registerChart('keyword', keywordChartOption.value, hasKeywordData.value)
+  registerChart('theme', themeChartOption.value, hasThemeData.value)
+
+  const analysisOverviewEntries = analysisOverviewCards.value.map((card) => {
+    const optionKey = `analysis-overview-${card.name}`
+    registerChart(optionKey, card.primaryTarget?.option, card.primaryTarget?.hasData)
+    return {
+      ...card,
+      optionKey,
+      chartId: `chart-${optionKey}`
+    }
+  })
+
+  const renderChartPanel = (optionKey, title, description = '') => {
+    const runtime = chartRuntime.find((item) => item.optionKey === optionKey)
+    return `
+      <article class="panel chart-panel">
+        <header class="panel-header">
+          <h3>${escapeHtml(title)}</h3>
+          ${description ? `<p class="panel-subtitle">${escapeHtml(description)}</p>` : ''}
+        </header>
+        ${runtime?.hasData
+          ? `<div id="${escapeHtml(runtime.id)}" class="chart"></div>`
+          : '<div class="chart-empty">暂无可视化数据</div>'}
+      </article>
+    `
   }
 
-  const chartRuntime = Object.entries(chartState).map(([optionKey, hasData]) => ({
-    id: `chart-${optionKey}`,
-    optionKey,
-    hasData
-  }))
+  const renderTable = (rows) => {
+    if (!Array.isArray(rows) || !rows.length) {
+      return '<p class="empty-text" style="margin-top:12px;">暂无表格数据。</p>'
+    }
+    return `
+      <div class="table-shell">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>数值</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${escapeHtml(formatRowName(row))}</td>
+                <td>${escapeHtml(formatRowValue(row))}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `
+  }
 
-  const renderChartPanel = (optionKey, title, description = '') => `
-    <article class="panel chart-panel">
-      <header class="panel-header">
-        <h3>${escapeHtml(title)}</h3>
-        ${description ? `<p class="panel-subtitle">${escapeHtml(description)}</p>` : ''}
-      </header>
-      ${chartState[optionKey]
-    ? `<div id="chart-${optionKey}" class="chart"></div>`
-    : '<div class="chart-empty">暂无可视化数据</div>'}
-    </article>
-  `
+  const renderModuleLinks = (modules, prefix = '') => {
+    if (!Array.isArray(modules) || !modules.length) return ''
+    return `
+      <div class="chip-row">
+        ${modules.map((module) => `
+          <a class="anchor-chip" href="#${escapeHtml(module.anchorId || '')}">
+            ${prefix}${escapeHtml(module.label || module.id || '')}
+          </a>
+        `).join('')}
+      </div>
+    `
+  }
 
   const stageContent = stageNotes.value.length
     ? `<ul class="stage-list">
@@ -1264,6 +1753,71 @@ const buildHtmlDocument = () => {
       `).join('')}
     </ul>`
     : '<p class="empty-text">暂无阶段说明。</p>'
+
+  const readinessHtml = `
+    <div class="readiness-grid">
+      ${sourceReadinessItems.value.map((item) => `
+        <article class="readiness-card ${item.ready ? 'is-ready' : ''}">
+          <div class="readiness-head">
+            <p>${escapeHtml(item.label)}</p>
+            <span>${item.ready ? '已接入' : '待补齐/缺失'}</span>
+          </div>
+          <p class="readiness-detail">${escapeHtml(item.detail)}</p>
+        </article>
+      `).join('')}
+    </div>
+  `
+
+  const analysisMainFindingHtml = analysisMainFinding.value
+    ? `
+      <div class="callout">
+        <p class="callout-kicker">AI 主要发现</p>
+        <p class="callout-text">${escapeHtml(analysisMainFinding.value.summary)}</p>
+        ${analysisMainFinding.value.sourceFunctions.length
+          ? `<p class="callout-meta">依据模块：${escapeHtml(analysisMainFinding.value.sourceFunctions.join('、'))}</p>`
+          : ''}
+      </div>
+    `
+    : ''
+
+  const renderNarrativeSource = (source) => escapeHtml(getNarrativeSourceLabel(source))
+  const analysisOverviewHtml = analysisOverviewEntries.length
+    ? `<div class="analysis-overview-grid">
+      ${analysisOverviewEntries.map((card) => `
+        <article class="analysis-overview-card" id="${escapeHtml(card.anchorId)}">
+          <div class="card-head">
+            <div>
+              <p class="insight-title">${escapeHtml(card.label)}</p>
+              <p class="insight-headline">${escapeHtml(card.description || '')}</p>
+            </div>
+            <span class="source-pill">${renderNarrativeSource(card.source)}</span>
+          </div>
+          <p class="narrative-text" style="margin-top:12px;">${escapeHtml(card.summary || '暂无综合摘要。')}</p>
+          ${card.primaryTarget?.hasData
+            ? `
+              <div class="sub-block">
+                <p class="sub-block-title">${escapeHtml(card.primaryTarget.title || '代表图')}</p>
+                ${card.primaryTarget.subtitle ? `<p class="panel-subtitle">${escapeHtml(card.primaryTarget.subtitle)}</p>` : ''}
+                <div id="${escapeHtml(card.chartId)}" class="chart chart-sm"></div>
+              </div>
+            `
+            : `
+              <div class="sub-block">
+                <p class="sub-block-title">${escapeHtml(card.primaryTarget?.title || '代表图')}</p>
+                <div class="chart-empty chart-sm">暂无可视化数据</div>
+              </div>
+            `}
+          <div class="analysis-overview-bottom">
+            ${renderTable(card.rows)}
+            <div class="narrative-card">
+              <p class="narrative-title">综合解读</p>
+              <p class="narrative-text">${escapeHtml(card.explainText || card.summary || '暂无综合解读。')}</p>
+            </div>
+          </div>
+        </article>
+      `).join('')}
+    </div>`
+    : '<section class="panel"><p class="empty-text">暂无基础分析图表。</p></section>'
 
   const deepTags = [
     deepAnalysis.value.eventType ? `事件类型：${deepAnalysis.value.eventType}` : '',
@@ -1322,50 +1876,26 @@ const buildHtmlDocument = () => {
     </section>
   `
 
-  const highlightHtml = highlightPoints.value.length
-    ? `<ul class="bullet-list">
-      ${highlightPoints.value.map((point) => `<li>${escapeHtml(point)}</li>`).join('')}
-    </ul>`
-    : '<p class="empty-text">暂无洞察亮点。</p>'
-
-  const insightHtml = insightCards.value.length
-    ? `<div class="insight-grid">
-      ${insightCards.value.map((insight) => {
-    const points = Array.isArray(insight.points) ? insight.points : []
-    const pointHtml = points.length
-      ? `<ul class="bullet-list compact">${points.map((point) => `<li>${escapeHtml(point)}</li>`).join('')}</ul>`
-      : '<p class="empty-text">暂无补充要点。</p>'
-    return `
-          <article class="insight-card">
-            <p class="insight-title">${escapeHtml(insight.title)}</p>
-            <p class="insight-headline">${escapeHtml(insight.headline)}</p>
-            ${pointHtml}
-          </article>
-        `
-  }).join('')}
-    </div>`
-    : '<p class="empty-text">暂无重点结论。</p>'
-
   const themeTimelineHtml = themeActivePoints.value.length
     ? `<ul class="theme-group-list">
       ${themeActivePoints.value.map((group) => {
-    const points = Array.isArray(group.points) ? group.points : []
-    const pointsHtml = points.map((node) => `
-            <article class="theme-point">
-              <div class="theme-point-head">
-                <p>${escapeHtml(node.label)}</p>
-                <span>热度 ${escapeHtml(formatNumber(node.topValue))}</span>
-              </div>
-              <p class="theme-point-meta">当日总样本数 ${escapeHtml(formatNumber(node.total))}</p>
-            </article>
-          `).join('')
-    return `
+        const points = Array.isArray(group.points) ? group.points : []
+        const pointsHtml = points.map((node) => `
+          <article class="theme-point">
+            <div class="theme-point-head">
+              <p>${escapeHtml(node.label)}</p>
+              <span>热度 ${escapeHtml(formatNumber(node.topValue))}</span>
+            </div>
+            <p class="theme-point-meta">当日总样本数 ${escapeHtml(formatNumber(node.total))}</p>
+          </article>
+        `).join('')
+        return `
           <li class="theme-group">
             <p class="theme-name">${escapeHtml(group.theme)}</p>
             <div class="theme-point-list">${pointsHtml}</div>
           </li>
         `
-  }).join('')}
+      }).join('')}
     </ul>`
     : '<p class="empty-text">暂无核心主题时间线数据。</p>'
 
@@ -1393,8 +1923,94 @@ const buildHtmlDocument = () => {
     </div>
   `
 
+  const legacySectionsHtml = legacyContext.value.sections.length
+    ? `<div class="evidence-grid">
+      ${legacyContext.value.sections.map((section) => `
+        <article class="panel" id="${escapeHtml(section.anchorId)}">
+          <header class="panel-header">
+            <h3>${escapeHtml(section.label)}</h3>
+            <p class="panel-subtitle">${escapeHtml(section.sourceLabel || '文字解读段落')}</p>
+          </header>
+          <span class="source-pill">${escapeHtml(getNarrativeSourceLabel(section.source))}</span>
+          <p class="evidence-text">${escapeHtml(section.text)}</p>
+        </article>
+      `).join('')}
+    </div>`
+    : '<p class="empty-text">当前报告未找到可展示的旧版 explain / report 段落。</p>'
+
+  const legacyLongformHtml = (legacyContext.value.fullText || legacyContext.value.manualText)
+    ? `<div class="chart-grid-2" style="margin-top:14px;">
+      ${legacyContext.value.fullText ? `
+        <details class="panel">
+          <summary class="details-summary">查看 legacy report 长文</summary>
+          <pre class="evidence-pre">${escapeHtml(legacyContext.value.fullText)}</pre>
+        </details>
+      ` : ''}
+      ${legacyContext.value.manualText ? `
+        <details class="panel">
+          <summary class="details-summary">查看人工补充文本</summary>
+          <pre class="evidence-pre">${escapeHtml(legacyContext.value.manualText)}</pre>
+        </details>
+      ` : ''}
+    </div>`
+    : ''
+
+  const conclusionHtml = hasConclusionMiningContent.value
+    ? `
+      <div class="callout">
+        <p class="callout-kicker">执行摘要</p>
+        <p class="callout-text">${escapeHtml(conclusionMining.value.executiveSummary || '暂无执行摘要。')}</p>
+        ${renderModuleLinks(conclusionMining.value.supportingModules, '依据模块：')}
+      </div>
+      <div class="insight-grid" style="margin-top:14px;">
+        ${conclusionGroups.value.map((group) => `
+          <article class="insight-card">
+            <p class="insight-title">${escapeHtml(group.title)}</p>
+            <p class="panel-subtitle">${escapeHtml(group.subtitle)}</p>
+            ${group.items.length
+              ? group.items.map((item) => `
+                <div class="sub-block">
+                  ${item.headline ? `<p class="sub-block-title">${escapeHtml(item.headline)}</p>` : ''}
+                  <p class="narrative-text">${escapeHtml(item.text)}</p>
+                  ${renderModuleLinks(item.supportingModules)}
+                </div>
+              `).join('')
+              : `<p class="empty-text" style="margin-top:12px;">${escapeHtml(group.emptyText)}</p>`}
+          </article>
+        `).join('')}
+      </div>
+    `
+    : '<p class="empty-text">当前报告未提炼出新的结论挖掘结果。</p>'
+
+  const highlightHtml = highlightPoints.value.length
+    ? `<ul class="bullet-list">
+      ${highlightPoints.value.map((point) => `<li>${escapeHtml(point)}</li>`).join('')}
+    </ul>`
+    : '<p class="empty-text">暂无洞察亮点。</p>'
+
+  const insightHtml = insightCards.value.length
+    ? `<div class="insight-grid">
+      ${insightCards.value.map((insight) => {
+        const points = Array.isArray(insight.points) ? insight.points : []
+        const pointHtml = points.length
+          ? `<ul class="bullet-list compact">${points.map((point) => `<li>${escapeHtml(point)}</li>`).join('')}</ul>`
+          : '<p class="empty-text">暂无补充要点。</p>'
+        return `
+          <article class="insight-card">
+            <p class="insight-title">${escapeHtml(insight.title)}</p>
+            <p class="insight-headline">${escapeHtml(insight.headline)}</p>
+            ${pointHtml}
+          </article>
+        `
+      }).join('')}
+    </div>`
+    : '<p class="empty-text">暂无重点结论。</p>'
+
   const loadedSuffix = reportState.lastLoaded
     ? ` · 前端读取：${escapeHtml(reportState.lastLoaded)}`
+    : ''
+  const analysisLoadedSuffix = analysisState.lastLoaded
+    ? ` · 图表读取：${escapeHtml(analysisState.lastLoaded)}`
     : ''
 
   const chartJson = JSON.stringify(chartOptions)
@@ -1459,8 +2075,21 @@ const buildHtmlDocument = () => {
     .metric-sub { margin-top: 6px; color: #334155; font-size: 13px; }
     .chart-grid-3 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .chart-grid-2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+    .analysis-overview-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+    .analysis-overview-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 18px;
+      background: #ffffff;
+      padding: 18px;
+    }
+    .analysis-overview-bottom {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
     .split-grid { display: grid; gap: 16px; }
     .bertopic-grid { display: grid; gap: 16px; }
+    .evidence-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
     .panel-header { margin-bottom: 12px; }
     .panel-header h3 {
       font-size: 18px;
@@ -1475,6 +2104,7 @@ const buildHtmlDocument = () => {
       line-height: 1.5;
     }
     .chart { width: 100%; height: 360px; }
+    .chart.chart-sm { height: 320px; }
     .chart-empty {
       height: 360px;
       border-radius: 14px;
@@ -1485,6 +2115,76 @@ const buildHtmlDocument = () => {
       justify-content: center;
       color: #64748b;
       font-size: 14px;
+    }
+    .chart-empty.chart-sm { height: 320px; }
+    .readiness-grid {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .readiness-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      background: #ffffff;
+      padding: 14px;
+    }
+    .readiness-card.is-ready {
+      border-color: #bfdbfe;
+      background: #eff6ff;
+    }
+    .readiness-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .readiness-head p {
+      color: #0f172a;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .readiness-head span {
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #475569;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 8px;
+    }
+    .readiness-card.is-ready .readiness-head span {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+    .readiness-detail {
+      margin-top: 8px;
+      color: #334155;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .callout {
+      border: 1px solid #bfdbfe;
+      border-radius: 18px;
+      background: #eff6ff;
+      padding: 16px;
+    }
+    .callout-kicker {
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #1d4ed8;
+      font-weight: 700;
+    }
+    .callout-text {
+      margin-top: 8px;
+      color: #0f172a;
+      font-size: 14px;
+      line-height: 1.85;
+    }
+    .callout-meta {
+      margin-top: 8px;
+      color: #64748b;
+      font-size: 12px;
     }
     .stage-list, .theme-group-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
     .stage-item {
@@ -1610,6 +2310,103 @@ const buildHtmlDocument = () => {
       font-weight: 700;
       line-height: 1.5;
     }
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .source-pill, .meta-chip, .anchor-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px solid #cbd5e1;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .source-pill {
+      background: #f8fafc;
+      color: #334155;
+    }
+    .meta-chip {
+      background: #f8fafc;
+      color: #475569;
+    }
+    .anchor-chip {
+      text-decoration: none;
+      background: #ffffff;
+      color: #1d4ed8;
+      border-color: #bfdbfe;
+    }
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .sub-block {
+      margin-top: 12px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 12px;
+    }
+    .sub-block-title {
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .table-shell {
+      margin-top: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .data-table th {
+      text-align: left;
+      background: #f8fafc;
+      color: #64748b;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 10px 12px;
+    }
+    .data-table td {
+      padding: 10px 12px;
+      border-top: 1px solid #e2e8f0;
+      color: #334155;
+      vertical-align: top;
+    }
+    .evidence-text {
+      margin-top: 12px;
+      color: #334155;
+      font-size: 14px;
+      line-height: 1.85;
+      white-space: pre-wrap;
+    }
+    .details-summary {
+      cursor: pointer;
+      color: #0f172a;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .evidence-pre {
+      margin-top: 12px;
+      max-height: 340px;
+      overflow: auto;
+      white-space: pre-wrap;
+      color: #334155;
+      font-size: 13px;
+      line-height: 1.85;
+    }
     .empty-text { color: #64748b; font-size: 14px; line-height: 1.75; }
     .prose { color: #334155; line-height: 1.75; font-size: 14px; }
     .prose :first-child { margin-top: 0; }
@@ -1625,6 +2422,7 @@ const buildHtmlDocument = () => {
       color: #1e3a8a;
     }
     @media (min-width: 1120px) {
+      .analysis-overview-bottom { grid-template-columns: 0.95fr 1.05fr; }
       .split-grid { grid-template-columns: 1.6fr 1fr; }
       .bertopic-grid { grid-template-columns: 1.6fr 1fr; }
     }
@@ -1666,6 +2464,19 @@ const buildHtmlDocument = () => {
           <p class="metric-value">报道 ${escapeHtml(formatRate(metrics.value.factualRatio))}</p>
           <p class="metric-sub">观点 ${escapeHtml(formatRate(metrics.value.opinionRatio))}</p>
         </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <p class="section-kicker">基础分析总览</p>
+      <h2 class="panel-header" style="margin-bottom:0;">
+        <span style="display:block;font-size:20px;color:#0f172a;font-weight:700;">基础分析已压缩进报告结构</span>
+        <span class="panel-subtitle">每个模块保留一张代表图，并直接结合摘要与综合解读。图表读取来自 /api/analyze/results${analysisLoadedSuffix}</span>
+      </h2>
+      ${readinessHtml}
+      ${analysisMainFindingHtml}
+      <div style="margin-top:16px;">
+        ${analysisOverviewHtml}
       </div>
     </section>
 
@@ -1714,6 +2525,26 @@ const buildHtmlDocument = () => {
     <section class="chart-grid-2">
       ${renderChartPanel('keyword', '关键词热度')}
       ${renderChartPanel('theme', '主题分布')}
+    </section>
+
+    <section class="panel">
+      <header class="panel-header">
+        <h3>原始依据</h3>
+        <p class="panel-subtitle">旧版 report 的文字解读段落与长文上下文。</p>
+      </header>
+      ${!sourceReadiness.value.explainReady
+        ? '<div class="callout"><p class="callout-text">当前区间还没有补齐总体文字解读，导出报告先展示 AI 摘要和统计结果；下方仅列出当前可用的旧版依据。</p></div>'
+        : ''}
+      ${legacySectionsHtml}
+      ${legacyLongformHtml}
+    </section>
+
+    <section class="panel">
+      <header class="panel-header">
+        <h3>结论挖掘</h3>
+        <p class="panel-subtitle">从基础分析、文字解读与结构化研判中回收可执行结论。</p>
+      </header>
+      ${conclusionHtml}
     </section>
 
     <section class="panel">

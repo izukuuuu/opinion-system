@@ -100,6 +100,27 @@ def _write_filter_summary(topic: str, date: str, summary: Dict[str, Any]) -> Non
         print(f"保存筛选汇总失败: {exc}")
 
 
+def _clear_filter_outputs(topic: str, date: str) -> None:
+    """Remove previous filter artifacts when starting a fresh run."""
+
+    try:
+        filter_dir = ensure_bucket("filter", topic, date)
+        for path in filter_dir.glob("*.jsonl"):
+            try:
+                path.unlink()
+            except OSError:
+                continue
+        for filename in ("_summary.json", "_preclean_report.json"):
+            summary_path = filter_dir / filename
+            if summary_path.exists():
+                try:
+                    summary_path.unlink()
+                except OSError:
+                    continue
+    except Exception as exc:  # pragma: no cover - best effort cleanup
+        print(f"清理筛选结果失败: {exc}")
+
+
 def _save_partial_results(topic: str, date: str, channel: str, results_df: pd.DataFrame) -> None:
     """
     保存部分结果到JSONL文件
@@ -329,6 +350,15 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
     if not files:
         log_error(logger, f"未找到清洗数据: {clean_dir}", "Filter")
         return False
+
+    channels = [fp.stem for fp in files if fp.stem != "all"]
+    has_resume_state = any(
+        (PROGRESS_CACHE_DIR / f"{topic}_{date}_{channel}_progress.json").exists()
+        for channel in channels
+    )
+    if not has_resume_state:
+        _clear_filter_outputs(topic, date)
+        log_success(logger, "未检测到断点续传状态，已清空旧的 Filter 产物", "Filter")
 
     # 初始化客户端
     if provider == "openai":
@@ -637,6 +667,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
                             "irrelevant_samples": aggregated_irrelevant_samples[:20],
                             "token_usage": total_tokens,
                             "completed": False,
+                            "source": "ai-filter",
                         },
                     )
 
@@ -731,6 +762,7 @@ async def run_filter_async(topic: str, date: str, logger=None) -> bool:
         "irrelevant_samples": aggregated_irrelevant_samples[:20],
         "token_usage": total_tokens,
         "completed": all_channels_fully_completed,
+        "source": "ai-filter",
     }
     _write_filter_summary(topic, date, summary_payload)
 

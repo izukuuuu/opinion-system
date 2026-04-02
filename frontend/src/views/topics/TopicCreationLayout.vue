@@ -75,7 +75,7 @@ const steps = [
     label: '筛选',
     to: { name: 'topic-create-filter' },
     icon: AdjustmentsHorizontalIcon,
-    description: 'AI 剔除无关内容'
+    description: '预清洗 / AI筛选 / 后清洗'
   },
   {
     key: 'ingest',

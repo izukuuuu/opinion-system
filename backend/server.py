@@ -99,16 +99,18 @@ from server_support.ops import _execute_operation, _log_with_context
 
 
 def _resolve_filter_status_inputs(
-    topic_param: str, project_param: str, date_param: str
+    topic_param: str, project_param: str, dataset_id_param: str, date_param: str
 ) -> Tuple[str, str, Optional[str]]:
-    if not topic_param and not project_param:
-        raise ValueError("Missing required field(s): topic or project")
+    if not topic_param and not project_param and not dataset_id_param:
+        raise ValueError("Missing required field(s): topic/project/dataset_id")
 
     resolution_payload: Dict[str, Any] = {}
     if topic_param:
         resolution_payload["topic"] = topic_param
     if project_param:
         resolution_payload["project"] = project_param
+    if dataset_id_param:
+        resolution_payload["dataset_id"] = dataset_id_param
 
     topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
     resolved_date, fallback_from = resolve_stage_processing_date(topic_identifier, "filter", date_param or None)
@@ -458,13 +460,14 @@ def chat_ai():
 
     # Load Knowledge Base
     kb_content = []
-    kb_dir = BACKEND_DIR / "knowledge_base"
+    kb_dir = BACKEND_DIR / "knowledge_base" / "assistant"
     if kb_dir.exists():
-        for md_file in kb_dir.glob("*.md"):
+        for md_file in sorted(kb_dir.rglob("*.md")):
             try:
                 content = md_file.read_text(encoding="utf-8")
                 if content.strip():
-                    kb_content.append(f"--- {md_file.name} ---\n{content}")
+                    relative_name = md_file.relative_to(kb_dir).as_posix()
+                    kb_content.append(f"--- {relative_name} ---\n{content}")
             except Exception as e:
                 LOGGER.error(f"Failed to read KB file {md_file}: {e}")
 
@@ -662,11 +665,12 @@ def upsert_content_prompt():
 def filter_status():
     topic_param = str(request.args.get("topic", "") or "").strip()
     project_param = str(request.args.get("project", "") or "").strip()
+    dataset_id_param = str(request.args.get("dataset_id", "") or "").strip()
     date_param = str(request.args.get("date", "") or "").strip()
 
     try:
         topic_identifier, resolved_date, fallback_from = _resolve_filter_status_inputs(
-            topic_param, project_param, date_param
+            topic_param, project_param, dataset_id_param, date_param
         )
     except ValueError as exc:
         return error(str(exc))
@@ -679,12 +683,13 @@ def filter_status():
 def filter_status_stream():
     topic_param = str(request.args.get("topic", "") or "").strip()
     project_param = str(request.args.get("project", "") or "").strip()
+    dataset_id_param = str(request.args.get("dataset_id", "") or "").strip()
     date_param = str(request.args.get("date", "") or "").strip()
     interval_param = str(request.args.get("interval", "") or "").strip()
 
     try:
         topic_identifier, resolved_date, fallback_from = _resolve_filter_status_inputs(
-            topic_param, project_param, date_param
+            topic_param, project_param, dataset_id_param, date_param
         )
     except ValueError as exc:
         return error(str(exc))
@@ -848,6 +853,47 @@ def filter_endpoint():
     return jsonify(response_payload), 202
 
 
+@app.post("/api/filter/preclean")
+def filter_preclean_endpoint():
+    payload = request.get_json(silent=True) or {}
+    try:
+        topic_identifier, date, display_name, log_project = prepare_pipeline_args(
+            payload,
+            PROJECT_MANAGER,
+            allow_missing_date=True,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    from src.filter import run_keyword_preclean  # type: ignore
+
+    try:
+        resolved_date, fallback_from = resolve_stage_processing_date(topic_identifier, "filter", date or None)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    response, code = _execute_operation(
+        "filter-preclean",
+        run_keyword_preclean,
+        topic_identifier,
+        resolved_date,
+        log_context={
+            "project": log_project,
+            "params": {
+                "date": resolved_date,
+                "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
+            },
+        },
+    )
+    if fallback_from and response.get("status") == "ok":
+        metadata = response.setdefault("context", {})
+        metadata["resolved_date"] = resolved_date
+        metadata["requested_date"] = fallback_from
+    return jsonify(response), code
+
+
 @app.post("/api/upload")
 def upload_endpoint():
     payload = request.get_json(silent=True) or {}
@@ -1001,6 +1047,58 @@ def delete_database_endpoint(database_name: str):
         return success({"message": f"Database '{db_name}' deleted successfully"})
     else:
         return error(f"Failed to delete database '{db_name}'", status_code=500)
+
+
+@app.post("/api/database/postclean")
+def database_postclean_endpoint():
+    payload = request.get_json(silent=True) or {}
+    topic = str(payload.get("topic") or "").strip()
+    project = str(payload.get("project") or "").strip()
+    dataset_id = str(payload.get("dataset_id") or "").strip()
+    database = str(payload.get("database") or "").strip()
+    raw_tables = payload.get("tables")
+
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+    if not database:
+        return jsonify({"status": "error", "message": "Missing required field(s): database"}), 400
+
+    try:
+        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(
+            {
+                "topic": topic,
+                "project": project,
+                "dataset_id": dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    tables: Optional[List[str]] = None
+    if isinstance(raw_tables, list):
+        tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
+
+    from src.filter import run_database_postclean  # type: ignore
+
+    response, code = _execute_operation(
+        "database-postclean",
+        run_database_postclean,
+        topic_identifier,
+        database,
+        tables=tables,
+        log_context={
+            "project": log_project,
+            "params": {
+                "database": database,
+                "tables": tables or [],
+                "source": "api",
+                "topic": display_name,
+                "bucket": topic_identifier,
+            },
+        },
+    )
+    return jsonify(response), code
 
 
 @app.post("/api/fetch")

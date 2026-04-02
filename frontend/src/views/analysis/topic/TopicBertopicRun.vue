@@ -495,9 +495,9 @@
           </div>
 
           <div class="flex flex-wrap items-center gap-4 text-xs text-secondary">
-            <span>配置文件：{{ bertopicPromptState.path || 'configs/prompt/topic_bertopic/<topic>.yaml' }}</span>
-            <span>存储字段：settings.project_stopwords</span>
             <span>当前行数：{{ projectStopwordCount }}</span>
+            <span>仅对当前专题生效</span>
+            <span>保存后可直接参与 BERTopic 分析</span>
           </div>
 
           <textarea v-model="bertopicPromptState.projectStopwordsText" rows="12"

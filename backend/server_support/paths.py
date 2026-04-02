@@ -14,7 +14,7 @@ DATA_PROJECTS_ROOT = BACKEND_DIR / "data" / "projects"
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 FILTER_PROMPT_DIR = CONFIGS_DIR / "prompt" / "filter"
 CONTENT_PROMPT_DIR = CONFIGS_DIR / "prompt" / "contentanalysis"
-FILTER_PROGRESS_DIR = SRC_DIR / "filter"
+FILTER_PROGRESS_DIR = SRC_DIR / "filter" / "cache"
 FILTER_SUMMARY_FILENAME = "_summary.json"
 
 __all__ = [

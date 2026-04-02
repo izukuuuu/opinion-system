@@ -21,6 +21,8 @@ const TopicBertopicLayout = () => import('../views/analysis/topic/TopicBertopicL
 const TopicBertopicOverview = () => import('../views/analysis/topic/TopicBertopicOverview.vue')
 const TopicBertopicRun = () => import('../views/analysis/topic/TopicBertopicRun.vue')
 const TopicBertopicResults = () => import('../views/analysis/topic/TopicBertopicResults.vue')
+const ReportGenerationLayout = () => import('../views/analysis/ReportGenerationLayout.vue')
+const ReportGenerationRun = () => import('../views/analysis/ReportGenerationRun.vue')
 const ReportGenerationView = () => import('../views/analysis/ReportGenerationView.vue')
 const DatabaseOverviewView = () => import('../views/DatabaseOverviewView.vue')
 const DatabaseDatasetsView = () => import('../views/DatabaseDatasetsView.vue')
@@ -175,12 +177,31 @@ export const routes = [
   },
   {
     path: '/analysis/report',
-    name: 'report-generation',
-    component: ReportGenerationView,
-    meta: {
-      title: '报告解读',
-      breadcrumb: '报告解读'
-    }
+    component: ReportGenerationLayout,
+    children: [
+      {
+        path: '',
+        redirect: { name: 'report-generation-run' }
+      },
+      {
+        path: 'run',
+        name: 'report-generation-run',
+        component: ReportGenerationRun,
+        meta: {
+          title: '报告生成 · 运行',
+          breadcrumb: '运行报告'
+        }
+      },
+      {
+        path: 'view',
+        name: 'report-generation-view',
+        component: ReportGenerationView,
+        meta: {
+          title: '报告解读 · 查看结果',
+          breadcrumb: '查看报告'
+        }
+      }
+    ]
   },
   {
     path: '/analysis/interpretation',

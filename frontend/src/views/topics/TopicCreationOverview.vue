@@ -119,7 +119,7 @@ const stages = [
     index: 3,
     title: '筛选数据',
     subtitle: 'Filter',
-    description: '配置 AI 提示词模板，智能筛选出与专题高度相关的高价值内容。',
+    description: '先做零 token 预清洗，再按需启用 AI 筛选，最后可对数据库执行后清洗。',
     route: { name: 'topic-create-filter' },
     icon: AdjustmentsHorizontalIcon
   },

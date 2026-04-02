@@ -1,0 +1,21 @@
+
+> opinion-system-frontend@0.2.0 dev
+> vite --host 127.0.0.1 --port 5173
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m1178[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
+[2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
+[2m21:16:57[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mtmp_codex_export_report.html[22m
+[2m21:16:57[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mtmp_codex_export_report.html[22m
+[2m21:18:02[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mtmp_codex_export_report.html[22m
+[2m21:24:37[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/router/index.js[22m
+[2m21:24:50[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue, /src/assets/main.css[22m
+[2m21:28:21[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/composables/useReportGeneration.js[22m
+[2m22:20:54[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/composables/useReportGeneration.js[22m
+[2m22:23:25[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/composables/useReportGeneration.js[22m
+[2m00:57:38[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/topics/TopicFilterStep.vue, /src/assets/main.css[22m
+[2m00:59:14[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/topics/TopicFilterStep.vue, /src/assets/main.css[22m
+[2m01:01:34[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/topics/TopicFilterStep.vue, /src/assets/main.css[22m
+[2m01:01:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/analysis/topic/TopicBertopicRun.vue, /src/assets/main.css[22m
