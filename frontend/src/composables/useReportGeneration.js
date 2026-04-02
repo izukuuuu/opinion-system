@@ -25,6 +25,8 @@ const reportForm = reactive({
 const availableRange = reactive({
   loading: false,
   error: '',
+  notice: '',
+  hasAnalyzeHistory: false,
   topic: '',
   start: '',
   end: ''
@@ -37,6 +39,19 @@ const reportState = reactive({
   lastLoaded: ''
 })
 
+const progressState = reactive({
+  loading: false,
+  polling: false,
+  error: '',
+  topic: '',
+  start: '',
+  end: '',
+  stage: '',
+  status: 'pending',
+  message: '',
+  updatedAt: ''
+})
+
 const historyState = reactive({
   loading: false,
   error: '',
@@ -46,12 +61,16 @@ const historyState = reactive({
 const reportHistory = ref([])
 const selectedHistoryId = ref('')
 const reportData = ref(null)
+const progressLogs = ref([])
 
 const topicOptions = computed(() => topicsState.options)
 
 let initialized = false
 let rangeRequestId = 0
 let historyRequestId = 0
+let progressRequestId = 0
+let progressPollToken = 0
+let progressPollTimer = null
 let suppressTopicWatcher = false
 
 export const useReportGeneration = () => {
@@ -66,13 +85,16 @@ export const useReportGeneration = () => {
     reportForm,
     availableRange,
     reportState,
+    progressState,
     historyState,
     reportHistory,
     selectedHistoryId,
     reportData,
+    progressLogs,
     changeTopic,
     loadTopics,
     loadAvailableRange,
+    loadProgress,
     loadHistory,
     loadReport,
     regenerateReport,
@@ -92,6 +114,7 @@ function initializeStore() {
       const trimmed = String(topic || '').trim()
       if (!trimmed) {
         resetRangeState()
+        resetProgressState()
         reportHistory.value = []
         selectedHistoryId.value = ''
         reportData.value = null
@@ -127,9 +150,31 @@ const resetRangeState = () => {
   rangeRequestId += 1
   availableRange.loading = false
   availableRange.error = ''
+  availableRange.notice = ''
+  availableRange.hasAnalyzeHistory = false
   availableRange.topic = ''
   availableRange.start = ''
   availableRange.end = ''
+}
+
+const resetProgressState = () => {
+  progressRequestId += 1
+  progressPollToken += 1
+  progressState.loading = false
+  progressState.polling = false
+  progressState.error = ''
+  progressState.topic = ''
+  progressState.start = ''
+  progressState.end = ''
+  progressState.stage = ''
+  progressState.status = 'pending'
+  progressState.message = ''
+  progressState.updatedAt = ''
+  progressLogs.value = []
+  if (progressPollTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(progressPollTimer)
+  }
+  progressPollTimer = null
 }
 
 const applyRangeToForm = () => {
@@ -160,22 +205,43 @@ const loadAvailableRange = async (topicOverride = '', { force = false } = {}) =>
   const requestId = ++rangeRequestId
   availableRange.loading = true
   availableRange.error = ''
+  availableRange.notice = ''
+  availableRange.hasAnalyzeHistory = false
   availableRange.topic = topic
   availableRange.start = ''
   availableRange.end = ''
 
   try {
     const params = new URLSearchParams({ topic })
-    const response = await callApi(`/api/fetch/availability?${params.toString()}`, { method: 'GET' })
+    const response = await callApi(`/api/report/availability?${params.toString()}`, { method: 'GET' })
     if (requestId !== rangeRequestId) return
-    const range = response?.data?.range || {}
+    const data = response?.data || {}
+    const range = data?.range || {}
     availableRange.start = String(range.start || '').trim()
     availableRange.end = String(range.end || '').trim() || availableRange.start
+    availableRange.notice = String(data?.message || '').trim()
+    availableRange.hasAnalyzeHistory = Boolean(data?.has_analyze_history)
   } catch (error) {
     if (requestId !== rangeRequestId) return
-    availableRange.error = error instanceof Error ? error.message : String(error)
-    availableRange.start = ''
-    availableRange.end = ''
+    try {
+      const params = new URLSearchParams({ topic })
+      const response = await callApi(`/api/fetch/availability?${params.toString()}`, { method: 'GET' })
+      if (requestId !== rangeRequestId) return
+      const range = response?.data?.range || {}
+      availableRange.start = String(range.start || '').trim()
+      availableRange.end = String(range.end || '').trim() || availableRange.start
+      availableRange.notice = availableRange.start
+        ? '当前专题暂无基础分析结果，点击“生成”时会先自动补跑 analyze。'
+        : ''
+      availableRange.hasAnalyzeHistory = false
+      availableRange.error = ''
+    } catch (fallbackError) {
+      availableRange.error = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+      availableRange.start = ''
+      availableRange.end = ''
+      availableRange.notice = ''
+      availableRange.hasAnalyzeHistory = false
+    }
   } finally {
     if (requestId === rangeRequestId) {
       availableRange.loading = false
@@ -206,6 +272,7 @@ const loadTopics = async () => {
     topicsState.options = []
     reportForm.topic = ''
     resetRangeState()
+    resetProgressState()
   } finally {
     topicsState.loading = false
   }
@@ -326,11 +393,96 @@ const hydrateRangeFromCurrentTopic = async () => {
 
 const currentTimeString = () => new Date().toLocaleString('zh-CN', { hour12: false })
 
+const normaliseProgressLogs = (steps) =>
+  (Array.isArray(steps) ? steps : []).map((step, index) => ({
+    id: String(step?.id || `report-progress-${index}`),
+    label: String(step?.label || `步骤 ${index + 1}`),
+    message: String(step?.message || '').trim(),
+    status: String(step?.status || 'pending').trim() || 'pending',
+    progress: typeof step?.progress === 'number' ? step.progress : Number(step?.progress || 0),
+    time: String(step?.time || '').trim()
+  }))
+
+const stopProgressPolling = () => {
+  progressPollToken += 1
+  progressState.polling = false
+  if (progressPollTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(progressPollTimer)
+  }
+  progressPollTimer = null
+}
+
+const scheduleProgressPoll = (range, token) => {
+  if (typeof window === 'undefined') return
+  progressPollTimer = window.setTimeout(async () => {
+    if (token !== progressPollToken) return
+    await loadProgress(range, { silent: true })
+    if (token !== progressPollToken) return
+    scheduleProgressPoll(range, token)
+  }, 1500)
+}
+
+const startProgressPolling = (range) => {
+  const normalized = normalizeRange(range || reportForm)
+  if (!hasCompleteRange(normalized)) return
+  stopProgressPolling()
+  progressState.polling = true
+  const token = ++progressPollToken
+  void loadProgress(normalized, { silent: true })
+  scheduleProgressPoll(normalized, token)
+}
+
+const loadProgress = async (rangeOverride = null, { silent = false } = {}) => {
+  const resolvedRange = normalizeRange(rangeOverride || reportForm)
+  const { topic, start, end } = resolvedRange
+  if (!topic || !start || !end) {
+    if (!silent) {
+      resetProgressState()
+    }
+    return null
+  }
+
+  const requestId = ++progressRequestId
+  if (!silent) {
+    progressState.loading = true
+  }
+  progressState.error = ''
+
+  try {
+    const params = new URLSearchParams({ topic, start, end })
+    const response = await callApi(`/api/report/progress?${params.toString()}`, { method: 'GET' })
+    if (requestId !== progressRequestId) return null
+    const data = response?.data || {}
+    const summary = data?.summary || {}
+    const state = data?.state || {}
+    progressLogs.value = normaliseProgressLogs(data?.steps)
+    progressState.topic = String(data?.topic || topic).trim()
+    progressState.start = String(data?.range?.start || start).trim()
+    progressState.end = String(data?.range?.end || end).trim() || progressState.start
+    progressState.stage = String(state?.stage || '').trim()
+    progressState.status = String(summary?.status || state?.status || 'pending').trim() || 'pending'
+    progressState.message = String(summary?.message || state?.message || '').trim()
+    progressState.updatedAt = String(state?.updated_at || '').trim()
+    return data
+  } catch (error) {
+    if (requestId !== progressRequestId) return null
+    progressState.error = error instanceof Error ? error.message : String(error)
+    if (!silent) {
+      progressLogs.value = []
+    }
+    return null
+  } finally {
+    if (requestId === progressRequestId && !silent) {
+      progressState.loading = false
+    }
+  }
+}
+
 const loadReport = async (rangeOverride = null) => {
   const resolvedRange = rangeOverride ? normalizeRange(rangeOverride) : await hydrateRangeFromCurrentTopic()
   const { topic, start, end } = resolvedRange
   if (!topic || !start || !end) {
-    reportState.error = 'Topic / Start / End 为必填'
+    reportState.error = availableRange.notice || 'Topic / Start / End 为必填'
     return null
   }
 
@@ -353,10 +505,15 @@ const loadReport = async (rangeOverride = null) => {
     if (matched) {
       selectedHistoryId.value = matched.id
     }
+    await loadProgress({ topic, start, end }, { silent: true })
     return payload
   } catch (error) {
     reportData.value = null
-    reportState.error = error instanceof Error ? error.message : String(error)
+    const message = error instanceof Error ? error.message : String(error)
+    reportState.error = message.includes('未找到分析结果目录')
+      ? '当前专题暂无基础分析结果，请点击“生成”，系统会先自动补跑 analyze 再生成报告。'
+      : message
+    await loadProgress({ topic, start, end }, { silent: true })
     return null
   } finally {
     reportState.loading = false
@@ -368,12 +525,13 @@ const regenerateReport = async () => {
     ? normalizeRange(reportForm)
     : await hydrateRangeFromCurrentTopic()
   if (!topic || !start || !end) {
-    reportState.error = 'Topic / Start / End 为必填'
+    reportState.error = availableRange.notice || 'Topic / Start / End 为必填'
     return null
   }
 
   reportState.regenerating = true
   reportState.error = ''
+  startProgressPolling({ topic, start, end })
   try {
     const response = await callApi('/api/report/regenerate', {
       method: 'POST',
@@ -394,11 +552,14 @@ const regenerateReport = async () => {
     if (matched) {
       selectedHistoryId.value = matched.id
     }
+    await loadProgress({ topic, start, end }, { silent: true })
     return payload
   } catch (error) {
     reportState.error = error instanceof Error ? error.message : String(error)
+    await loadProgress({ topic, start, end }, { silent: true })
     return null
   } finally {
+    stopProgressPolling()
     reportState.regenerating = false
   }
 }
@@ -426,5 +587,11 @@ const refreshTopicContext = async (topic) => {
   const synced = syncFormWithSelectedHistory()
   if (!synced) {
     applyRangeToForm()
+  }
+  const nextRange = normalizeRange(reportForm)
+  if (hasCompleteRange(nextRange)) {
+    await loadProgress(nextRange, { silent: true })
+  } else {
+    resetProgressState()
   }
 }

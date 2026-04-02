@@ -1,11 +1,10 @@
 """
-Report knowledge loader adapted from ``cache/sona``.
+Report knowledge loader for built-in report methodology assets.
 
 The current structured report pipeline is not an agent workflow, but it can still
 reuse the strongest part of Sona's design: methodology-aware context assembly.
-This module merges local methodology docs, topic-targeted reference snippets, and
-optional invocations of ``cache/sona/tools/舆情智库.py`` into a compact payload
-that downstream prompts can consume.
+This module reads knowledge assets that are maintained inside
+``backend/knowledge_base/report/sona_feature_analysis``.
 """
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ from urllib.parse import quote
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SONA_ROOT = REPO_ROOT / "cache" / "sona"
+SONA_ROOT = REPO_ROOT / "backend" / "knowledge_base" / "report" / "sona_feature_analysis"
 SONA_TOOL_FILE = SONA_ROOT / "tools" / "舆情智库.py"
 SONA_METHOD_DIR = SONA_ROOT / "舆情深度分析"
 SONA_REFERENCE_DIR = SONA_METHOD_DIR / "references"
@@ -666,6 +665,9 @@ def load_report_knowledge(topic: Optional[str] = None) -> Dict[str, Any]:
         "expertNotes": expert_notes[:4],
         "theoryHints": theory_hints,
         "meta": {
+            "knowledgeRoot": str(SONA_ROOT),
+            "methodDir": str(SONA_METHOD_DIR),
+            "toolFile": str(SONA_TOOL_FILE),
             "sonaRoot": str(SONA_ROOT),
             "toolAvailable": bool(module),
             "referenceCount": len(reference_hits),

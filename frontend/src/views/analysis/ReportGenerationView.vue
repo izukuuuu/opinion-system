@@ -76,13 +76,14 @@
           建议范围：{{ availableRange.start || '--' }} → {{ availableRange.end || '--' }}
           <span v-if="availableRange.loading" class="ml-2 animate-pulse">检查中…</span>
           <span v-else-if="availableRange.error" class="ml-2 text-danger">{{ availableRange.error }}</span>
+          <span v-else-if="availableRange.notice" class="ml-2 text-amber-600">{{ availableRange.notice }}</span>
         </p>
         <div class="flex flex-wrap items-center gap-2">
           <button
             type="button"
             class="btn-secondary inline-flex items-center gap-2"
             :disabled="reportState.loading || reportState.regenerating"
-            @click="loadReport"
+            @click="loadReport()"
           >
             <ArrowPathIcon class="h-4 w-4" :class="reportState.loading ? 'animate-spin' : ''" />
             {{ reportState.loading ? '读取中…' : '读取报告' }}
@@ -91,7 +92,7 @@
             type="button"
             class="btn-primary inline-flex items-center gap-2"
             :disabled="reportState.loading || reportState.regenerating"
-            @click="handleGenerateAction"
+            @click="handleGenerateAction()"
           >
             <SparklesIcon class="h-4 w-4" :class="isPrimaryActionRunning ? 'animate-pulse' : ''" />
             {{ primaryActionText }}
@@ -111,6 +112,37 @@
       <div v-if="reportState.error" class="rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-sm text-danger">
         {{ reportState.error }}
       </div>
+    </section>
+
+    <section class="card-surface space-y-4 p-6">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="space-y-1">
+          <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">执行进度</p>
+          <p class="text-sm text-secondary">
+            {{ progressSummaryText }}
+            <span v-if="progressState.polling" class="ml-2 animate-pulse text-brand-600">同步中…</span>
+          </p>
+          <p v-if="progressState.updatedAt" class="text-xs text-muted">
+            最近同步：{{ progressState.updatedAt }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="btn-secondary inline-flex items-center gap-2"
+          :disabled="progressState.loading || !reportForm.topic || !reportForm.start"
+          @click="handleRefreshProgress"
+        >
+          <ArrowPathIcon class="h-4 w-4" :class="progressState.loading ? 'animate-spin' : ''" />
+          {{ progressState.loading ? '同步中…' : '刷新进度' }}
+        </button>
+      </div>
+
+      <AnalysisLogList
+        :logs="progressLogs"
+        empty-label="当前区间暂无执行中的报告任务。点击“生成”后会在这里展示 analyze 与报告研判进度。"
+      />
+
+      <p v-if="progressState.error" class="text-xs text-danger">{{ progressState.error }}</p>
     </section>
 
     <section v-if="report" class="card-surface space-y-6 p-6">
@@ -456,6 +488,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { marked } from 'marked'
 import AnalysisChartPanel from '../../components/AnalysisChartPanel.vue'
+import AnalysisLogList from '../../components/analysis/AnalysisLogList.vue'
 import { useReportGeneration } from '../../composables/useReportGeneration'
 
 const {
@@ -464,11 +497,14 @@ const {
   reportForm,
   availableRange,
   reportState,
+  progressState,
   historyState,
   reportHistory,
   selectedHistoryId,
   reportData,
+  progressLogs,
   loadTopics,
+  loadProgress,
   loadHistory,
   loadReport,
   regenerateReport,
@@ -501,6 +537,12 @@ const isPrimaryActionRunning = computed(() => reportState.regenerating)
 const primaryActionText = computed(() => {
   if (isPrimaryActionRunning.value) return '生成中…'
   return hasCurrentRangeHistory.value ? '重新生成' : '生成'
+})
+const progressSummaryText = computed(() => {
+  if (progressState.error) return progressState.error
+  if (progressState.message) return progressState.message
+  if (reportState.regenerating) return '系统正在自动检查 analyze 并生成报告。'
+  return '当前区间暂无执行中的报告任务。'
 })
 
 const reportMeta = computed(() => ({
@@ -1146,6 +1188,14 @@ const handleRefreshHistory = async () => {
   const topic = String(reportForm.topic || '').trim()
   if (!topic) return
   await loadHistory(topic)
+}
+
+const handleRefreshProgress = async () => {
+  const topic = String(reportForm.topic || '').trim()
+  const start = String(reportForm.start || '').trim()
+  const end = String(reportForm.end || '').trim() || start
+  if (!topic || !start || !end) return
+  await loadProgress({ topic, start, end })
 }
 
 const handleGenerateAction = async () => {

@@ -21,6 +21,41 @@ def _json_block(data: Dict[str, Any]) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def build_section_agent_system_prompt(section_name: str, focus: str = "") -> str:
+    focus_text = str(focus or "").strip()
+    prompt = (
+        f"{REPORT_SYSTEM_PROMPT}"
+        f"你当前负责报告中的“{section_name}”部分。"
+        "请先完成本段内部研判，再输出可直接写入报告的最终 JSON。"
+        "你可以吸收上游 deep_analysis、section_agent_analysis、方法论和参考材料中的判断，"
+        "但不得把推测、外部线索或常识脑补写成事实。"
+    )
+    if focus_text:
+        prompt += f"本段职责：{focus_text}"
+    return prompt
+
+
+def build_section_agent_analysis_prompt(section_name: str, section_goal: str, facts: Dict[str, Any]) -> str:
+    schema = {
+        "judgement": "80-160字，说明这一部分最值得强调的主线判断。",
+        "evidence": ["最多4条，概括支撑该判断的事实依据或已知线索。"],
+        "watchpoints": ["最多3条，指出本段撰写时需要规避的误读、风险或边界。"],
+        "angle": "一句话，说明这一部分最终输出应采用的叙述角度。",
+    }
+    return (
+        f"请先作为“{section_name}”分段研判 agent，基于事实生成一份内部分析备忘录。\n"
+        "要求：\n"
+        "1) judgement 必须是可复用的段落主线，不得空泛；\n"
+        "2) evidence 只能来自输入事实、已知方法论、参考资料或上游结构化研判；\n"
+        "3) watchpoints 要指出写作边界、潜在偏差或需要重点提醒的风险；\n"
+        "4) angle 要给出最终段落的叙述角度，例如“强调传播节奏”“突出风险迁移”“压缩成编辑摘要”；\n"
+        f"5) section_goal: {section_goal or '围绕本部分目标做事实归纳与表达设计'}；\n"
+        "6) 仅输出 JSON。\n\n"
+        f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
+        f"【事实数据】\n{_json_block(facts)}"
+    )
+
+
 def build_title_subtitle_prompt(topic: str, facts: Dict[str, Any]) -> str:
     schema = {
         "title": f"{topic}舆情分析报告",
@@ -31,9 +66,11 @@ def build_title_subtitle_prompt(topic: str, facts: Dict[str, Any]) -> str:
         "要求：\n"
         "1) title 使用正式报告名称；\n"
         "2) subtitle 需覆盖传播节奏或舆情态势；\n"
-        "3) 如事实中包含 deep_analysis / methodology_context / reference_snippets / dynamic_theories，可用于增强表达；\n"
-        "4) 如事实中包含 legacy_rag_sections 或 legacy_report_text，可用于增强表达；\n"
-        "5) 仅输出 JSON。\n\n"
+        "3) 如事实中包含 section_agent_analysis，可优先吸收其中的主线判断与叙述角度；\n"
+        "4) 如事实中包含 skill_context，可吸收其中的标题写作约束与全篇主线要求；\n"
+        "5) 如事实中包含 deep_analysis / methodology_context / reference_snippets / dynamic_theories，可用于增强表达；\n"
+        "6) 如事实中包含 legacy_rag_sections 或 legacy_report_text，可用于增强表达；\n"
+        "7) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -57,9 +94,11 @@ def build_stage_notes_prompt(facts: Dict[str, Any]) -> str:
         "1) 按时间先后输出 stageNotes；\n"
         "2) badge 固定为 P1/P2/P3；\n"
         "3) 不得杜撰输入中不存在的具体数值；\n"
-        "4) 可结合 deep_analysis.keyEvents / deep_analysis.stage / theory_hints 强化阶段解读；\n"
-        "5) 可结合 legacy_rag_sections / legacy_report_text 强化阶段解读；\n"
-        "6) 仅输出 JSON。\n\n"
+        "4) 可结合 section_agent_analysis 的 judgement / evidence / angle 强化阶段划分；\n"
+        "5) 如事实中包含 skill_context，可吸收其中对传播阶段划分的偏好与边界；\n"
+        "6) 可结合 deep_analysis.keyEvents / deep_analysis.stage / theory_hints 强化阶段解读；\n"
+        "7) 可结合 legacy_rag_sections / legacy_report_text 强化阶段解读；\n"
+        "8) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -85,9 +124,11 @@ def build_insights_prompt(facts: Dict[str, Any]) -> str:
         + "；\n"
         "2) 每张卡片 points 建议 3-5 条；\n"
         "3) 建议类内容应可执行且避免空话；\n"
-        "4) deep_analysis / methodology_context / reference_snippets / expert_notes 可作为研判背景；\n"
-        "5) legacy_rag_sections / legacy_report_text 可作为证据性背景；\n"
-        "6) 仅输出 JSON。\n\n"
+        "4) 可吸收 section_agent_analysis 的 judgement / watchpoints，使卡片更有主线和边界感；\n"
+        "5) 如事实中包含 skill_context，可吸收其中的结论压缩方式和建议表达约束；\n"
+        "6) deep_analysis / methodology_context / reference_snippets / expert_notes 可作为研判背景；\n"
+        "7) legacy_rag_sections / legacy_report_text 可作为证据性背景；\n"
+        "8) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -103,9 +144,11 @@ def build_bertopic_insight_prompt(facts: Dict[str, Any]) -> str:
         "1) 明确描述关注焦点如何迁移，不要逐日流水账；\n"
         "2) 点出长期主题与爆发主题，并结合时间节点解释原因；\n"
         "3) 仅基于输入事实，不得编造日期、数量或事件；\n"
-        "4) deep_analysis 与 theory_hints 可作为背景，但仍要以 BERTopic 时序事实为核心；\n"
-        "5) 输出语言口语化但专业，避免空话；\n"
-        "6) 只输出 JSON。\n\n"
+        "4) 可吸收 section_agent_analysis 中对主题迁移主线的判断，但仍要以 BERTopic 时序事实为核心；\n"
+        "5) 如事实中包含 skill_context，可吸收其中对主题迁移解读的偏好；\n"
+        "6) deep_analysis 与 theory_hints 可作为背景；\n"
+        "7) 输出语言口语化但专业，避免空话；\n"
+        "8) 只输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -123,9 +166,11 @@ def build_bertopic_temporal_narrative_prompt(facts: Dict[str, Any]) -> str:
         "1) summary 要概括时间主线、主导主题与变化方式；\n"
         "2) shiftSignals 聚焦“何时发生切换、由什么主题切到什么主题、强度如何”；\n"
         "3) watchpoints 聚焦覆盖范围、主题集中度、异常峰值等提醒；\n"
-        "4) 可吸收 deep_analysis / methodology_context 的风险视角，但不得脱离 BERTopic 事实；\n"
-        "5) 不得编造输入中不存在的日期、数量或事件；\n"
-        "6) 仅输出 JSON。\n\n"
+        "4) 可吸收 section_agent_analysis 中的迁移判断与风险边界；\n"
+        "5) 如事实中包含 skill_context，可吸收其中关于切换信号和监测提醒的写作取向；\n"
+        "6) 可吸收 deep_analysis / methodology_context 的风险视角，但不得脱离 BERTopic 事实；\n"
+        "7) 不得编造输入中不存在的日期、数量或事件；\n"
+        "8) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -149,10 +194,12 @@ def build_interpretation_prompt(facts: Dict[str, Any]) -> str:
         "2) keyEvents 与 keyRisks 必须与 metrics / timeline / sentiment / themes 一致；\n"
         "3) eventType / domain / stage 可以谨慎归纳，但不得脱离 topic 与事实；\n"
         "4) indicatorDimensions 至少给出 4 条，体现后续应持续观察的分析维度；\n"
-        "5) theoryNames 优先使用 methodology_context、dynamic_theories、theory_hints、reference_snippets 中真实可映射的理论；\n"
-        "6) 如参考资料中存在 expert_notes，可吸收其中的研判视角，但不得把外部线索当成事实本身；\n"
-        "7) 如存在 reference_links，只能把它们视为进一步核验入口，不得凭链接内容编造新事实；\n"
-        "8) 仅输出 JSON。\n\n"
+        "5) 如存在 section_agent_analysis，可吸收其中的 judgement / evidence / watchpoints，但仍需回到事实本身；\n"
+        "6) 如存在 skill_context，可吸收其中对研判结构、分段重点和方法论使用方式的约束；\n"
+        "7) theoryNames 优先使用 methodology_context、dynamic_theories、theory_hints、reference_snippets 中真实可映射的理论；\n"
+        "8) 如参考资料中存在 expert_notes，可吸收其中的研判视角，但不得把外部线索当成事实本身；\n"
+        "9) 如存在 reference_links，只能把它们视为进一步核验入口，不得凭链接内容编造新事实；\n"
+        "10) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实与上下文】\n{_json_block(facts)}"
     )

@@ -12,14 +12,16 @@ import asyncio
 import json
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..utils.ai import call_langchain_chat, call_langchain_with_tools
-from ..utils.logging.logging import setup_logger
+from ..utils.logging.logging import log_module_start, log_success, setup_logger
 from ..utils.setting.paths import bucket, ensure_bucket, get_data_root
 from .knowledge_loader import load_report_knowledge
+from .skills import load_report_skill_context
 from .tools import REPORT_ANALYSIS_TOOLS
 from .data_report import (
     _collect_sections as legacy_collect_sections,
@@ -31,6 +33,8 @@ from .data_report import (
 )
 from .structured_prompts import (
     REPORT_SYSTEM_PROMPT,
+    build_section_agent_analysis_prompt,
+    build_section_agent_system_prompt,
     build_bertopic_insight_prompt,
     build_bertopic_temporal_narrative_prompt,
     build_interpretation_prompt,
@@ -60,7 +64,7 @@ BERTOPIC_FILE_MAP = {
 
 DEFAULT_ANALYZE_FILENAME = "result.json"
 REPORT_CACHE_FILENAME = "report_payload.json"
-REPORT_CACHE_VERSION = 6
+REPORT_CACHE_VERSION = 7
 
 SENTIMENT_POSITIVE = {"positive", "正面", "积极", "pos", "p"}
 SENTIMENT_NEUTRAL = {"neutral", "中性", "客观", "neu"}
@@ -1714,6 +1718,11 @@ def _build_legacy_report_context(
     2) explain/*/总体/*_rag_enhanced.json + 原提示词链路产出整文
     """
     logger = setup_logger(f"ReportStructured_{topic_identifier}", date_folder)
+    log_module_start(
+        logger,
+        "ReportStructured",
+        f"生成结构化报告 {topic_label or topic_identifier} {date_folder}",
+    )
     topic_candidates: List[str] = []
     for candidate in [topic_identifier, topic_label]:
         value = str(candidate or "").strip()
@@ -1773,11 +1782,12 @@ def _call_langchain_json(
     *,
     max_tokens: int = 1800,
     model_role: Optional[str] = None,
+    system_prompt: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     raw_text = _safe_async_call(
         call_langchain_chat(
             [
-                {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                {"role": "system", "content": str(system_prompt or REPORT_SYSTEM_PROMPT)},
                 {"role": "user", "content": user_prompt},
             ],
             task="report",
@@ -1804,11 +1814,12 @@ def _call_langchain_json_with_tools(
     tools: List[Any],
     max_tokens: int = 1800,
     model_role: Optional[str] = None,
+    system_prompt: Optional[str] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     result = _safe_async_call(
         call_langchain_with_tools(
             [
-                {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                {"role": "system", "content": str(system_prompt or REPORT_SYSTEM_PROMPT)},
                 {"role": "user", "content": user_prompt},
             ],
             tools=tools,
@@ -1834,6 +1845,284 @@ def _call_langchain_json_with_tools(
     if not isinstance(payload, dict):
         return None, result
     return payload, result
+
+
+@dataclass
+class SectionAgentSpec:
+    name: str
+    focus: str
+    prompt_builder: Callable[[Dict[str, Any]], str]
+    model_role: Optional[str] = None
+    max_tokens: int = 1800
+    tools: Optional[List[Any]] = None
+    analysis_goal: str = ""
+    analysis_max_tokens: int = 900
+    analysis_model_role: Optional[str] = None
+
+
+def _normalize_section_agent_analysis(payload: Any) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    evidence = payload.get("evidence")
+    watchpoints = payload.get("watchpoints")
+    normalized = {
+        "judgement": str(payload.get("judgement") or "").strip(),
+        "evidence": [
+            str(item).strip()
+            for item in (evidence or [])
+            if str(item or "").strip()
+        ][:4]
+        if isinstance(evidence, list)
+        else [],
+        "watchpoints": [
+            str(item).strip()
+            for item in (watchpoints or [])
+            if str(item or "").strip()
+        ][:3]
+        if isinstance(watchpoints, list)
+        else [],
+        "angle": str(payload.get("angle") or "").strip(),
+    }
+    if not any(
+        [
+            normalized["judgement"],
+            normalized["evidence"],
+            normalized["watchpoints"],
+            normalized["angle"],
+        ]
+    ):
+        return {}
+    return normalized
+
+
+def _build_tool_results_preview(results: Any) -> List[Dict[str, Any]]:
+    if not isinstance(results, list):
+        return []
+    previews: List[Dict[str, Any]] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        previews.append(
+            {
+                "name": str(item.get("name") or "").strip(),
+                "id": str(item.get("id") or "").strip(),
+                "output_preview": _truncate_text(str(item.get("output") or "").strip(), 600),
+            }
+        )
+    return previews
+
+
+def _run_section_agent(
+    spec: SectionAgentSpec,
+    facts: Dict[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    section_facts = dict(facts or {})
+    system_prompt = build_section_agent_system_prompt(spec.name, spec.focus)
+    analysis_payload: Dict[str, Any] = {}
+    analysis_source = "none"
+    if spec.analysis_goal:
+        analysis_payload = _normalize_section_agent_analysis(
+            _call_langchain_json(
+                build_section_agent_analysis_prompt(spec.name, spec.analysis_goal, section_facts),
+                max_tokens=spec.analysis_max_tokens,
+                model_role=spec.analysis_model_role or spec.model_role,
+                system_prompt=system_prompt,
+            )
+        )
+        if analysis_payload:
+            analysis_source = "llm"
+            section_facts["section_agent_analysis"] = analysis_payload
+
+    tool_trace: Dict[str, Any] = {"tool_calls": [], "tool_results": [], "content": ""}
+    if spec.tools:
+        payload, tool_trace = _call_langchain_json_with_tools(
+            spec.prompt_builder(section_facts),
+            tools=spec.tools,
+            max_tokens=spec.max_tokens,
+            model_role=spec.model_role,
+            system_prompt=system_prompt,
+        )
+    else:
+        payload = _call_langchain_json(
+            spec.prompt_builder(section_facts),
+            max_tokens=spec.max_tokens,
+            model_role=spec.model_role,
+            system_prompt=system_prompt,
+        )
+
+    trace = {
+        "section": spec.name,
+        "focus": spec.focus,
+        "source": "llm" if isinstance(payload, dict) else "fallback",
+        "model_role": spec.model_role or "",
+        "used_tools": bool(spec.tools),
+        "analysis_source": analysis_source,
+        "analysis": analysis_payload,
+        "tool_call_count": len(tool_trace.get("tool_calls") or []),
+        "tool_calls": tool_trace.get("tool_calls") or [],
+        "tool_results": _build_tool_results_preview(tool_trace.get("tool_results")),
+        "model": tool_trace.get("model") or "",
+        "provider": tool_trace.get("provider") or "",
+    }
+    return payload, trace
+
+
+def _merge_deep_analysis_payload(
+    fallback: Dict[str, Any],
+    payload: Any,
+) -> Tuple[Dict[str, Any], str]:
+    merged = dict(fallback or {})
+    source = "fallback"
+    if not isinstance(payload, dict):
+        return merged, source
+
+    narrative_summary_candidate = str(payload.get("narrativeSummary") or "").strip()
+    event_type_candidate = str(payload.get("eventType") or "").strip()
+    domain_candidate = str(payload.get("domain") or "").strip()
+    stage_candidate = str(payload.get("stage") or "").strip()
+    indicator_dimensions_candidate = payload.get("indicatorDimensions")
+    theory_names_candidate = payload.get("theoryNames")
+    key_events_candidate = payload.get("keyEvents")
+    key_risks_candidate = payload.get("keyRisks")
+
+    if narrative_summary_candidate:
+        merged["narrativeSummary"] = narrative_summary_candidate
+        source = "llm"
+    if event_type_candidate:
+        merged["eventType"] = event_type_candidate
+    if domain_candidate:
+        merged["domain"] = domain_candidate
+    if stage_candidate:
+        merged["stage"] = stage_candidate
+    if isinstance(key_events_candidate, list):
+        parsed_key_events = [str(item).strip() for item in key_events_candidate if str(item or "").strip()]
+        if parsed_key_events:
+            merged["keyEvents"] = parsed_key_events[:5]
+            source = "llm"
+    if isinstance(key_risks_candidate, list):
+        parsed_key_risks = [str(item).strip() for item in key_risks_candidate if str(item or "").strip()]
+        if parsed_key_risks:
+            merged["keyRisks"] = parsed_key_risks[:5]
+            source = "llm"
+    if isinstance(indicator_dimensions_candidate, list):
+        parsed_dimensions = [str(item).strip() for item in indicator_dimensions_candidate if str(item or "").strip()]
+        if parsed_dimensions:
+            merged["indicatorDimensions"] = parsed_dimensions[:6]
+    if isinstance(theory_names_candidate, list):
+        parsed_theories = [str(item).strip() for item in theory_names_candidate if str(item or "").strip()]
+        if parsed_theories:
+            merged["theoryNames"] = parsed_theories[:3]
+    return merged, source
+
+
+def _extract_bertopic_insight_from_payload(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    candidate = str(
+        payload.get("insight_markdown")
+        or payload.get("insight")
+        or payload.get("summary")
+        or ""
+    ).strip()
+    return candidate or None
+
+
+def _merge_bertopic_temporal_narrative_payload(
+    fallback: Dict[str, Any],
+    payload: Any,
+) -> Tuple[Dict[str, Any], str]:
+    merged = dict(fallback or {})
+    source = "fallback"
+    if not isinstance(payload, dict):
+        return merged, source
+
+    summary_candidate = str(payload.get("summary") or "").strip()
+    shift_signals_candidate = payload.get("shiftSignals")
+    watchpoints_candidate = payload.get("watchpoints")
+    if summary_candidate:
+        merged["summary"] = summary_candidate
+        source = "llm"
+    if isinstance(shift_signals_candidate, list):
+        parsed_shift_signals = [str(item).strip() for item in shift_signals_candidate if str(item or "").strip()]
+        if parsed_shift_signals:
+            merged["shiftSignals"] = parsed_shift_signals[:4]
+            source = "llm"
+    if isinstance(watchpoints_candidate, list):
+        parsed_watchpoints = [str(item).strip() for item in watchpoints_candidate if str(item or "").strip()]
+        if parsed_watchpoints:
+            merged["watchpoints"] = parsed_watchpoints[:3]
+            source = "llm"
+    return merged, source
+
+
+def _extract_title_subtitle_from_payload(payload: Any) -> Tuple[str, str]:
+    if not isinstance(payload, dict):
+        return "", ""
+    return (
+        str(payload.get("title") or "").strip(),
+        str(payload.get("subtitle") or "").strip(),
+    )
+
+
+def _extract_stage_notes_from_payload(payload: Any) -> List[Dict[str, Any]]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("stageNotes"), list):
+        return []
+    parsed_notes = []
+    for idx, item in enumerate(payload.get("stageNotes") or []):
+        if not isinstance(item, dict):
+            continue
+        title_value = str(item.get("title") or "").strip()
+        range_value = str(item.get("range") or "").strip()
+        delta_value = str(item.get("delta") or "").strip()
+        highlight_value = str(item.get("highlight") or "").strip()
+        badge = str(item.get("badge") or f"P{idx + 1}").strip() or f"P{idx + 1}"
+        if not (title_value and highlight_value):
+            continue
+        parsed_notes.append(
+            {
+                "title": title_value,
+                "range": range_value or "未提供",
+                "delta": delta_value or "波动明显",
+                "highlight": highlight_value,
+                "badge": badge,
+            }
+        )
+    return parsed_notes[:3]
+
+
+def _extract_insights_from_payload(payload: Any) -> Tuple[List[str], List[Dict[str, Any]]]:
+    parsed_points: List[str] = []
+    parsed_cards: List[Dict[str, Any]] = []
+    if not isinstance(payload, dict):
+        return parsed_points, parsed_cards
+
+    points_payload = payload.get("highlight_points")
+    if isinstance(points_payload, list):
+        parsed_points = [str(item).strip() for item in points_payload if str(item or "").strip()][:4]
+
+    cards_payload = payload.get("insights")
+    if isinstance(cards_payload, list):
+        for item in cards_payload:
+            if not isinstance(item, dict):
+                continue
+            title_value = str(item.get("title") or "").strip()
+            headline_value = str(item.get("headline") or "").strip()
+            points_value = item.get("points")
+            if not title_value:
+                continue
+            points_list: List[str] = []
+            if isinstance(points_value, list):
+                points_list = [str(point).strip() for point in points_value if str(point or "").strip()]
+            if not points_list:
+                points_list = ["暂无补充要点"]
+            parsed_cards.append(
+                {
+                    "title": title_value,
+                    "headline": headline_value or "结构化摘要",
+                    "points": points_list[:5],
+                }
+            )
+    return parsed_points, parsed_cards[:6]
 
 
 def _load_main_finding(analyze_root: Path) -> str:
@@ -2192,6 +2481,7 @@ def _build_report_payload(
         date_folder=analyze_root.name,
     )
     knowledge_context = load_report_knowledge(topic_label or topic_identifier)
+    skill_context = load_report_skill_context(topic_label or topic_identifier)
     methodology_context_text = _truncate_text(str(knowledge_context.get("summary") or ""), 6000)
     reference_snippets = [
         {
@@ -2228,6 +2518,8 @@ def _build_report_payload(
         for item in (knowledge_context.get("expertNotes") or [])
         if isinstance(item, dict) and str(item.get("snippet") or "").strip()
     ][:4]
+
+    section_agents_meta: Dict[str, Any] = {}
 
     deep_analysis = _build_fallback_deep_analysis(
         topic_label=topic_label,
@@ -2270,57 +2562,33 @@ def _build_report_payload(
         "expert_notes": expert_notes,
         "dynamic_theories": dynamic_theories,
         "theory_hints": theory_hints,
+        "skill_context": skill_context,
     }
-    deep_analysis_tool_trace: Dict[str, Any] = {"tool_calls": [], "tool_results": [], "content": ""}
-    deep_analysis_payload, deep_analysis_tool_trace = _call_langchain_json_with_tools(
-        build_interpretation_prompt(interpretation_facts),
-        tools=REPORT_ANALYSIS_TOOLS,
-        max_tokens=1800,
-        model_role="tools",
+    deep_analysis_payload, deep_analysis_trace = _run_section_agent(
+        SectionAgentSpec(
+            name="解释与研判",
+            focus="负责综合指标、时间线、情感、主题与方法论，输出事件叙事骨架、关键风险和观察维度。",
+            prompt_builder=build_interpretation_prompt,
+            model_role="tools",
+            max_tokens=1800,
+            tools=REPORT_ANALYSIS_TOOLS,
+        ),
+        interpretation_facts,
     )
     if deep_analysis_payload is None:
         deep_analysis_payload = _call_langchain_json(
             build_interpretation_prompt(interpretation_facts),
             max_tokens=1800,
             model_role="tools",
+            system_prompt=build_section_agent_system_prompt(
+                "解释与研判",
+                "负责综合指标、时间线、情感、主题与方法论，输出事件叙事骨架、关键风险和观察维度。",
+            ),
         )
-    if isinstance(deep_analysis_payload, dict):
-        narrative_summary_candidate = str(deep_analysis_payload.get("narrativeSummary") or "").strip()
-        event_type_candidate = str(deep_analysis_payload.get("eventType") or "").strip()
-        domain_candidate = str(deep_analysis_payload.get("domain") or "").strip()
-        stage_candidate = str(deep_analysis_payload.get("stage") or "").strip()
-        indicator_dimensions_candidate = deep_analysis_payload.get("indicatorDimensions")
-        theory_names_candidate = deep_analysis_payload.get("theoryNames")
-        key_events_candidate = deep_analysis_payload.get("keyEvents")
-        key_risks_candidate = deep_analysis_payload.get("keyRisks")
-
-        if narrative_summary_candidate:
-            deep_analysis["narrativeSummary"] = narrative_summary_candidate
-            deep_analysis_source = "llm"
-        if event_type_candidate:
-            deep_analysis["eventType"] = event_type_candidate
-        if domain_candidate:
-            deep_analysis["domain"] = domain_candidate
-        if stage_candidate:
-            deep_analysis["stage"] = stage_candidate
-        if isinstance(key_events_candidate, list):
-            parsed_key_events = [str(item).strip() for item in key_events_candidate if str(item or "").strip()]
-            if parsed_key_events:
-                deep_analysis["keyEvents"] = parsed_key_events[:5]
-                deep_analysis_source = "llm"
-        if isinstance(key_risks_candidate, list):
-            parsed_key_risks = [str(item).strip() for item in key_risks_candidate if str(item or "").strip()]
-            if parsed_key_risks:
-                deep_analysis["keyRisks"] = parsed_key_risks[:5]
-                deep_analysis_source = "llm"
-        if isinstance(indicator_dimensions_candidate, list):
-            parsed_dimensions = [str(item).strip() for item in indicator_dimensions_candidate if str(item or "").strip()]
-            if parsed_dimensions:
-                deep_analysis["indicatorDimensions"] = parsed_dimensions[:6]
-        if isinstance(theory_names_candidate, list):
-            parsed_theories = [str(item).strip() for item in theory_names_candidate if str(item or "").strip()]
-            if parsed_theories:
-                deep_analysis["theoryNames"] = parsed_theories[:3]
+        deep_analysis_trace["source"] = "llm" if isinstance(deep_analysis_payload, dict) else "fallback"
+    deep_analysis, deep_analysis_source = _merge_deep_analysis_payload(deep_analysis, deep_analysis_payload)
+    deep_analysis_trace["source"] = deep_analysis_source
+    section_agents_meta["deep_analysis"] = deep_analysis_trace
 
     deep_analysis["referenceSnippets"] = reference_snippets
     deep_analysis["referenceLinks"] = reference_links
@@ -2363,6 +2631,7 @@ def _build_report_payload(
         "expert_notes": expert_notes,
         "dynamic_theories": dynamic_theories,
         "theory_hints": theory_hints,
+        "skill_context": skill_context,
         "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
         "legacy_report_text": legacy_context.get("full_text_short", ""),
     }
@@ -2431,6 +2700,7 @@ def _build_report_payload(
         "expert_notes": expert_notes,
         "dynamic_theories": dynamic_theories,
         "theory_hints": theory_hints,
+        "skill_context": skill_context,
         "main_finding": main_finding,
         "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
         "legacy_report_text": legacy_context.get("full_text_short", ""),
@@ -2457,6 +2727,7 @@ def _build_report_payload(
         "expert_notes": expert_notes,
         "dynamic_theories": dynamic_theories,
         "theory_hints": theory_hints,
+        "skill_context": skill_context,
         "main_finding": main_finding,
         "legacy_rag_sections": legacy_context.get("sections_text_short", ""),
         "legacy_report_text": legacy_context.get("full_text_short", ""),
@@ -2469,21 +2740,23 @@ def _build_report_payload(
         bertopic_nodes=bertopic_nodes_payload,
     )
     bertopic_insight_source = "fallback"
-    bertopic_insight_payload = _call_langchain_json(
-        build_bertopic_insight_prompt(bertopic_insight_facts),
-        max_tokens=1800,
-        model_role="report",
+    bertopic_insight_payload, bertopic_insight_trace = _run_section_agent(
+        SectionAgentSpec(
+            name="BERTopic主题演化解读",
+            focus="负责把 BERTopic 时间线转成业务方可读的主题迁移判断，说明长期主题、爆发主题和切换原因。",
+            prompt_builder=build_bertopic_insight_prompt,
+            model_role="report",
+            max_tokens=1800,
+            analysis_goal="先判断主题演化的主线、关键切换节点、哪些主题是长期背景、哪些主题是短时爆发。",
+        ),
+        bertopic_insight_facts,
     )
-    if isinstance(bertopic_insight_payload, dict):
-        bertopic_insight_candidate = str(
-            bertopic_insight_payload.get("insight_markdown")
-            or bertopic_insight_payload.get("insight")
-            or bertopic_insight_payload.get("summary")
-            or ""
-        ).strip()
-        if bertopic_insight_candidate:
-            bertopic_insight = bertopic_insight_candidate
-            bertopic_insight_source = "llm"
+    bertopic_insight_candidate = _extract_bertopic_insight_from_payload(bertopic_insight_payload)
+    if bertopic_insight_candidate:
+        bertopic_insight = bertopic_insight_candidate
+        bertopic_insight_source = "llm"
+    bertopic_insight_trace["source"] = bertopic_insight_source
+    section_agents_meta["bertopic_insight"] = bertopic_insight_trace
 
     bertopic_temporal_narrative = _build_fallback_bertopic_temporal_narrative(
         topic_label=topic_label,
@@ -2497,28 +2770,27 @@ def _build_report_payload(
         leading_themes=bertopic_leading_themes_payload,
     )
     bertopic_temporal_narrative_source = "fallback"
-    bertopic_temporal_narrative_payload = _call_langchain_json(
-        build_bertopic_temporal_narrative_prompt(bertopic_temporal_narrative_facts),
-        max_tokens=1200,
-        model_role="report",
+    bertopic_temporal_narrative_payload, bertopic_temporal_trace = _run_section_agent(
+        SectionAgentSpec(
+            name="BERTopic时序研判",
+            focus="负责把 BERTopic 时间序列压缩成结构化迁移摘要、切换信号和监测提醒。",
+            prompt_builder=build_bertopic_temporal_narrative_prompt,
+            model_role="report",
+            max_tokens=1200,
+            analysis_goal="先概括时间主线、主题切换强度、覆盖率问题和异常峰值风险，再生成最终结构化解读。",
+        ),
+        bertopic_temporal_narrative_facts,
     )
-    if isinstance(bertopic_temporal_narrative_payload, dict):
-        summary_candidate = str(bertopic_temporal_narrative_payload.get("summary") or "").strip()
-        shift_signals_candidate = bertopic_temporal_narrative_payload.get("shiftSignals")
-        watchpoints_candidate = bertopic_temporal_narrative_payload.get("watchpoints")
-        if summary_candidate:
-            bertopic_temporal_narrative["summary"] = summary_candidate
-            bertopic_temporal_narrative_source = "llm"
-        if isinstance(shift_signals_candidate, list):
-            parsed_shift_signals = [str(item).strip() for item in shift_signals_candidate if str(item or "").strip()]
-            if parsed_shift_signals:
-                bertopic_temporal_narrative["shiftSignals"] = parsed_shift_signals[:4]
-                bertopic_temporal_narrative_source = "llm"
-        if isinstance(watchpoints_candidate, list):
-            parsed_watchpoints = [str(item).strip() for item in watchpoints_candidate if str(item or "").strip()]
-            if parsed_watchpoints:
-                bertopic_temporal_narrative["watchpoints"] = parsed_watchpoints[:3]
-                bertopic_temporal_narrative_source = "llm"
+    bertopic_temporal_narrative, bertopic_temporal_narrative_source = _merge_bertopic_temporal_narrative_payload(
+        bertopic_temporal_narrative,
+        bertopic_temporal_narrative_payload,
+    )
+    bertopic_temporal_trace["source"] = bertopic_temporal_narrative_source
+    section_agents_meta["bertopic_temporal_narrative"] = bertopic_temporal_trace
+
+    report_facts_with_bertopic = dict(report_facts)
+    report_facts_with_bertopic["bertopic_insight"] = bertopic_insight
+    report_facts_with_bertopic["bertopic_temporal_narrative"] = bertopic_temporal_narrative
 
     title = f"{topic_label}舆情分析报告"
     subtitle = (
@@ -2527,48 +2799,23 @@ def _build_report_payload(
         or "基于结构化统计结果自动生成，覆盖声量、趋势、态度与主题。"
     )
 
-    title_payload = _call_langchain_json(
-        build_title_subtitle_prompt(topic_label, report_facts),
-        max_tokens=500,
-        model_role="main",
-    )
-    if isinstance(title_payload, dict):
-        title_candidate = str(title_payload.get("title") or "").strip()
-        subtitle_candidate = str(title_payload.get("subtitle") or "").strip()
-        if title_candidate:
-            title = title_candidate
-        if subtitle_candidate:
-            subtitle = subtitle_candidate
-
     stage_notes = _build_fallback_stage_notes(timeline)
-    stage_payload = _call_langchain_json(
-        build_stage_notes_prompt(report_facts),
-        max_tokens=1400,
-        model_role="report",
+    stage_payload, stage_trace = _run_section_agent(
+        SectionAgentSpec(
+            name="传播节奏阶段说明",
+            focus="负责按时间切分传播阶段，解释每一段的触发原因、节奏变化和阶段风险。",
+            prompt_builder=build_stage_notes_prompt,
+            model_role="report",
+            max_tokens=1400,
+            analysis_goal="先判断时间线应如何分段，每段最核心的驱动因素与风险边界是什么。",
+        ),
+        report_facts_with_bertopic,
     )
-    if isinstance(stage_payload, dict) and isinstance(stage_payload.get("stageNotes"), list):
-        parsed_notes = []
-        for idx, item in enumerate(stage_payload.get("stageNotes") or []):
-            if not isinstance(item, dict):
-                continue
-            title_value = str(item.get("title") or "").strip()
-            range_value = str(item.get("range") or "").strip()
-            delta_value = str(item.get("delta") or "").strip()
-            highlight_value = str(item.get("highlight") or "").strip()
-            badge = str(item.get("badge") or f"P{idx + 1}").strip() or f"P{idx + 1}"
-            if not (title_value and highlight_value):
-                continue
-            parsed_notes.append(
-                {
-                    "title": title_value,
-                    "range": range_value or "未提供",
-                    "delta": delta_value or "波动明显",
-                    "highlight": highlight_value,
-                    "badge": badge,
-                }
-            )
-        if parsed_notes:
-            stage_notes = parsed_notes[:3]
+    parsed_stage_notes = _extract_stage_notes_from_payload(stage_payload)
+    if parsed_stage_notes:
+        stage_notes = parsed_stage_notes
+    stage_trace["source"] = "llm" if parsed_stage_notes else "fallback"
+    section_agents_meta["stage_notes"] = stage_trace
 
     highlight_points, insights = _build_fallback_insights(channels, timeline, sentiment, keywords, themes, main_finding)
     if str(deep_analysis.get("narrativeSummary") or "").strip():
@@ -2578,43 +2825,49 @@ def _build_report_payload(
         if risk_items:
             insights[-1]["points"] = risk_items[:3]
             insights[-1]["headline"] = "建议优先围绕高风险点配置回应策略"
-    insights_payload = _call_langchain_json(
-        build_insights_prompt(report_facts),
-        max_tokens=2200,
-        model_role="report",
+    insights_facts = dict(report_facts_with_bertopic)
+    insights_facts["stage_notes"] = stage_notes
+    insights_payload, insights_trace = _run_section_agent(
+        SectionAgentSpec(
+            name="洞察亮点与重点结论",
+            focus="负责把统计结果、深度研判和 BERTopic 迁移信息压缩成亮点列表与六张结论卡片。",
+            prompt_builder=build_insights_prompt,
+            model_role="report",
+            max_tokens=2200,
+            analysis_goal="先判断最值得强调的结论主线、建议优先级和应规避的空话，再生成卡片。",
+        ),
+        insights_facts,
     )
-    if isinstance(insights_payload, dict):
-        points_payload = insights_payload.get("highlight_points")
-        if isinstance(points_payload, list):
-            parsed_points = [str(item).strip() for item in points_payload if str(item or "").strip()]
-            if parsed_points:
-                highlight_points = parsed_points[:4]
+    parsed_points, parsed_cards = _extract_insights_from_payload(insights_payload)
+    if parsed_points:
+        highlight_points = parsed_points
+    if parsed_cards:
+        insights = parsed_cards
+    insights_trace["source"] = "llm" if parsed_points or parsed_cards else "fallback"
+    section_agents_meta["insights"] = insights_trace
 
-        cards_payload = insights_payload.get("insights")
-        if isinstance(cards_payload, list):
-            parsed_cards: List[Dict[str, Any]] = []
-            for item in cards_payload:
-                if not isinstance(item, dict):
-                    continue
-                title_value = str(item.get("title") or "").strip()
-                headline_value = str(item.get("headline") or "").strip()
-                points_value = item.get("points")
-                if not title_value:
-                    continue
-                points_list = []
-                if isinstance(points_value, list):
-                    points_list = [str(point).strip() for point in points_value if str(point or "").strip()]
-                if not points_list:
-                    points_list = ["暂无补充要点"]
-                parsed_cards.append(
-                    {
-                        "title": title_value,
-                        "headline": headline_value or "结构化摘要",
-                        "points": points_list[:5],
-                    }
-                )
-            if parsed_cards:
-                insights = parsed_cards[:6]
+    title_facts = dict(report_facts_with_bertopic)
+    title_facts["stage_notes"] = stage_notes
+    title_facts["highlight_points"] = highlight_points
+    title_facts["insights"] = insights
+    title_payload, title_trace = _run_section_agent(
+        SectionAgentSpec(
+            name="标题与副标题",
+            focus="负责以编辑视角压缩整份报告的主线、阶段态势和风险重点，输出可直接展示的标题与副标题。",
+            prompt_builder=lambda facts: build_title_subtitle_prompt(topic_label, facts),
+            model_role="main",
+            max_tokens=500,
+            analysis_goal="先判断整份报告最值得被标题化的主线、传播态势和表达边界，再生成标题与副标题。",
+        ),
+        title_facts,
+    )
+    title_candidate, subtitle_candidate = _extract_title_subtitle_from_payload(title_payload)
+    if title_candidate:
+        title = title_candidate
+    if subtitle_candidate:
+        subtitle = subtitle_candidate
+    title_trace["source"] = "llm" if title_candidate or subtitle_candidate else "fallback"
+    section_agents_meta["title_subtitle"] = title_trace
 
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
     if bertopic_insight_source == "fallback" and str(deep_analysis.get("narrativeSummary") or "").strip():
@@ -2622,6 +2875,15 @@ def _build_report_payload(
             f"**总体研判**：{str(deep_analysis.get('narrativeSummary') or '').strip()}\n\n"
             f"{bertopic_insight}"
         ).strip()
+
+    log_success(
+        logger,
+        (
+            f"结构化报告组装完成 | 深度研判:{deep_analysis_source} "
+            f"| BERTopic:{bertopic_insight_source}/{bertopic_temporal_narrative_source}"
+        ),
+        "ReportStructured",
+    )
 
     return {
         "title": title,
@@ -2652,17 +2914,23 @@ def _build_report_payload(
             "analyze_root": str(analyze_root),
             "theme_source": theme_source,
             "bertopic_context": bertopic_context.get("meta") if isinstance(bertopic_context, dict) else {},
+            "title_source": section_agents_meta.get("title_subtitle", {}).get("source") or "fallback",
+            "stage_notes_source": section_agents_meta.get("stage_notes", {}).get("source") or "fallback",
+            "insights_source": section_agents_meta.get("insights", {}).get("source") or "fallback",
             "bertopic_insight_source": bertopic_insight_source,
             "bertopic_temporal_narrative_source": bertopic_temporal_narrative_source,
             "deep_analysis_source": deep_analysis_source,
             "deep_analysis_tool_trace": {
-                "tool_call_count": len(deep_analysis_tool_trace.get("tool_calls") or []),
-                "tool_calls": deep_analysis_tool_trace.get("tool_calls") or [],
-                "model": deep_analysis_tool_trace.get("model") or "",
-                "provider": deep_analysis_tool_trace.get("provider") or "",
-                "model_role": deep_analysis_tool_trace.get("model_role") or "",
+                "tool_call_count": len(deep_analysis_trace.get("tool_calls") or []),
+                "tool_calls": deep_analysis_trace.get("tool_calls") or [],
+                "tool_results": deep_analysis_trace.get("tool_results") or [],
+                "model": deep_analysis_trace.get("model") or "",
+                "provider": deep_analysis_trace.get("provider") or "",
+                "model_role": deep_analysis_trace.get("model_role") or "",
             },
+            "section_agents": section_agents_meta,
             "knowledge_context": knowledge_context.get("meta") if isinstance(knowledge_context, dict) else {},
+            "skill_context": skill_context,
             "legacy_context": {
                 "sections_source_topic": legacy_context.get("sections_topic") or "",
                 "manual_source_topic": legacy_context.get("manual_topic") or "",
@@ -2724,9 +2992,12 @@ def generate_report_payload(
         end=end_text,
         analyze_root=analyze_root,
     )
+    logger = setup_logger(f"ReportStructured_{topic_identifier}", folder)
     try:
         with cache_path.open("w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
+        log_success(logger, f"报告缓存写入成功: {cache_path}", "ReportStructured")
     except Exception:
         pass
+    log_success(logger, "模块执行完成", "ReportStructured")
     return payload
