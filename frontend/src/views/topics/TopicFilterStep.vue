@@ -25,7 +25,7 @@
             </div>
             <p class="text-sm text-primary">
               项目 <span class="font-semibold">{{ projectSummaryLabel }}</span>
-              <span class="text-secondary"> · 数据集 {{ datasetSummaryLabel }} · Clean 存档 {{ cleanArchiveSummaryLabel }}</span>
+              <span class="text-secondary"> · 数据集 {{ datasetSummaryLabel }} · 处理范围 {{ cleanArchiveSummaryLabel }}</span>
             </p>
           </div>
           <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -57,7 +57,7 @@
             <span class="h-4 w-1 rounded-full bg-brand-500" />
             <h2 class="text-base font-bold text-primary">筛选范围与排除词设置</h2>
           </div>
-          <p class="pl-3 text-sm text-secondary">选择项目与 Clean 存档，配置排除词后保存即可用于预清洗与后清洗。</p>
+          <p class="pl-3 text-sm text-secondary">选择项目与处理范围后，就可以统一维护排除词；保存后，预清洗和后清洗都会使用。</p>
         </div>
         <button
           type="button"
@@ -74,7 +74,7 @@
         <div class="space-y-4 rounded-3xl border border-soft bg-surface-muted/60 p-5">
           <div>
             <h3 class="text-base font-semibold text-primary">筛选范围</h3>
-            <p class="mt-1 text-sm text-secondary">指定项目、数据集和目标 Clean 存档。</p>
+            <p class="mt-1 text-sm text-secondary">指定项目、数据集和当前处理范围。</p>
           </div>
 
           <label class="space-y-2">
@@ -101,7 +101,7 @@
 
           <label class="space-y-2">
             <span class="flex items-center justify-between gap-3">
-              <span class="text-xs font-semibold text-muted">Clean 存档</span>
+              <span class="text-xs font-semibold text-muted">处理范围</span>
               <button
                 type="button"
                 class="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
@@ -112,16 +112,27 @@
               </button>
             </span>
             <div v-if="cleanArchivesState.loading" class="rounded-2xl border border-soft bg-white px-4 py-3 text-sm text-secondary">
-              正在同步可用的 Clean 存档…
+              正在同步可用范围…
             </div>
             <select v-else v-model="selectedCleanDate" class="input" :disabled="!cleanArchiveOptions.length">
-              <option value="" disabled>{{ cleanArchiveOptions.length ? '请选择 Clean 存档' : '暂无 Clean 存档' }}</option>
+              <option value="" disabled>{{ cleanArchiveOptions.length ? '请选择处理范围' : '暂无可用范围' }}</option>
               <option v-for="option in cleanArchiveOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
               </option>
             </select>
             <p v-if="cleanArchivesState.error" class="text-xs text-danger">{{ cleanArchivesState.error }}</p>
-            <p v-else class="text-xs text-secondary">{{ scopeHelperText }}</p>
+            <div v-else class="space-y-2">
+              <p class="text-xs text-secondary">{{ scopeHelperText }}</p>
+              <button
+                v-if="showPreprocessCta"
+                type="button"
+                class="inline-flex items-center gap-2 text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+                @click="goToPreprocess"
+              >
+                <ArrowUpRightIcon class="h-3.5 w-3.5" />
+                前往数据预处理
+              </button>
+            </div>
           </label>
         </div>
 
@@ -130,44 +141,23 @@
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 class="text-base font-semibold text-primary">排除词设置</h3>
-                <p class="mt-1 text-sm text-secondary">输入关键词，命中则自动丢弃。随时保存，预清洗和后清洗均会使用。</p>
-              </div>
-              <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
-                <button
-                  type="button"
-                  class="btn-secondary inline-flex items-center gap-2"
-                  :disabled="sharedPromptState.loading || !currentProjectName"
-                  @click="loadSharedPromptConfig"
-                >
-                  <ArrowPathIcon class="h-4 w-4" :class="sharedPromptState.loading ? 'animate-spin' : ''" />
-                  重新读取
-                </button>
+                <p class="mt-1 text-sm text-secondary">项目级共享词表。你可以在弹窗里查看高频词建议，并维护需要排除的词。</p>
               </div>
             </div>
 
-            <label class="mt-4 block space-y-2">
-              <span class="text-xs font-semibold text-muted">排除词</span>
-              <p class="text-xs text-secondary">支持换行、空格、逗号（，）或分号（；）分隔。</p>
-            </label>
-            <textarea
-              v-model="sharedPromptState.projectStopwordsText"
-              rows="10"
-              class="input mt-2 min-h-[16rem] resize-y"
-              placeholder="例如：油烟机 抽油烟机 厨电 方太 老板电器 ..."
-            />
-
-              <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-soft bg-white px-4 py-4">
               <div class="space-y-1">
-                <p class="text-xs text-secondary">已解析 {{ parsedNoiseTerms.length }} 个词条</p>
-                <p class="text-xs text-secondary">全专题共享，修改后需手动保存。</p>
+                <p class="text-xs text-muted">当前词条</p>
+                <p class="text-2xl font-semibold text-primary">{{ parsedNoiseTerms.length }}</p>
+                <p class="text-xs text-secondary">可在弹窗内手动维护，也可以直接加入建议词。</p>
               </div>
               <button
                 type="button"
-                class="btn-primary"
-                :disabled="sharedPromptState.saving || !canSaveSharedPrompt"
-                @click="saveSharedPromptConfig"
+                class="btn-primary inline-flex items-center gap-2"
+                :disabled="!currentProjectName"
+                @click="openStopwordModal('pre')"
               >
-                {{ sharedPromptState.saving ? '保存中…' : '保存排除词' }}
+                打开排除词弹窗
               </button>
             </div>
             <p v-if="sharedPromptState.error" class="mt-3 text-xs text-danger">{{ sharedPromptState.error }}</p>
@@ -176,18 +166,18 @@
             <div class="mt-4 rounded-2xl border border-soft bg-white p-4">
               <div class="flex items-center justify-between gap-3">
                 <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">词条预览</p>
-                <span class="text-xs text-secondary">命中即丢弃</span>
+                <span class="text-xs text-secondary">{{ parsedNoiseTerms.length ? '命中即丢弃' : '打开弹窗开始维护' }}</span>
               </div>
-              <div v-if="parsedNoiseTerms.length" class="mt-3 flex max-h-52 flex-wrap gap-2 overflow-y-auto">
+              <div v-if="previewNoiseTerms.length" class="mt-3 flex max-h-52 flex-wrap gap-2 overflow-y-auto">
                 <span
-                  v-for="term in parsedNoiseTerms"
+                  v-for="term in previewNoiseTerms"
                   :key="`noise-term-${term}`"
                   class="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700"
                 >
                   {{ term }}
                 </span>
               </div>
-              <p v-else class="mt-3 text-sm text-secondary">当前还没有排除词。建议先保存排除词，再执行预清洗。</p>
+              <p v-else class="mt-3 text-sm text-secondary">当前还没有排除词。建议先补充后再执行预清洗。</p>
             </div>
           </div>
         </div>
@@ -222,17 +212,26 @@
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">预清洗</p>
             <h3 class="mt-2 text-base font-semibold text-primary">先做预清洗</h3>
-            <p class="mt-2 text-sm text-secondary">适合先快速剔除明显噪声，不消耗 token。会直接生成当前 Filter 结果。</p>
+            <p class="mt-2 text-sm text-secondary">适合先快速剔除明显噪声，不消耗 token。完成后会生成当前筛选结果。</p>
           </div>
           <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <div class="rounded-2xl border border-soft bg-white px-4 py-3"><p class="text-xs text-muted">适用场景</p><p class="mt-1 text-sm font-semibold text-primary">先排明显噪声</p></div>
-            <div class="rounded-2xl border border-soft bg-white px-4 py-3"><p class="text-xs text-muted">执行前提</p><p class="mt-1 text-sm font-semibold text-primary">{{ canRunPreclean ? '已可执行' : '需先选好 Clean 存档' }}</p></div>
+            <div class="rounded-2xl border border-soft bg-white px-4 py-3"><p class="text-xs text-muted">执行前提</p><p class="mt-1 text-sm font-semibold text-primary">{{ canRunPreclean ? '已可执行' : '需先选好处理范围' }}</p></div>
             <div class="rounded-2xl border border-soft bg-white px-4 py-3"><p class="text-xs text-muted">排除词</p><p class="mt-1 text-sm font-semibold text-primary">{{ parsedNoiseTerms.length }} 个</p></div>
           </div>
           <div class="flex min-h-[3rem] flex-wrap items-center gap-3">
             <button type="button" class="btn-primary inline-flex items-center gap-2" :disabled="!canRunPreclean || precleanState.running" @click="runPreclean">
               <SparklesIcon class="h-4 w-4" />
               {{ precleanState.running ? '预清洗执行中…' : '先做预清洗' }}
+            </button>
+            <button
+              v-if="showPreprocessCta && !canRunPreclean"
+              type="button"
+              class="btn-secondary inline-flex items-center gap-2"
+              @click="goToPreprocess"
+            >
+              <ArrowUpRightIcon class="h-4 w-4" />
+              去做数据预处理
             </button>
             <p v-if="precleanState.message" class="text-xs" :class="precleanState.success === false ? 'text-danger' : 'text-secondary'">
               {{ precleanState.message }}
@@ -242,7 +241,16 @@
 
         <div class="rounded-3xl border border-soft bg-surface-muted/60 p-5">
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">执行提示</p>
-          <p class="mt-3 text-sm text-secondary">预清洗会按照当前排除词，直接过滤 `title + contents + hit_words`。完成后去下方“结果与记录”查看输出。</p>
+          <p class="mt-3 text-sm text-secondary">预清洗会按照当前排除词，直接过滤明显噪声内容。完成后可在下方“结果与记录”查看输出。</p>
+          <button
+            v-if="showPreprocessCta && !canRunPreclean"
+            type="button"
+            class="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+            @click="goToPreprocess"
+          >
+            <ArrowUpRightIcon class="h-3.5 w-3.5" />
+            当前还没有可用范围，前往数据预处理
+          </button>
         </div>
       </div>
 
@@ -295,14 +303,14 @@
 
           <div class="rounded-2xl border border-soft bg-white px-4 py-3">
             <p class="text-xs text-muted">执行前提</p>
-            <p class="mt-1 text-sm font-semibold text-primary">{{ canRunAiFilter ? '已可执行' : '需先选好 Clean 存档' }}</p>
+            <p class="mt-1 text-sm font-semibold text-primary">{{ canRunAiFilter ? '已可执行' : '需先选好处理范围' }}</p>
             <p class="mt-1 text-xs text-secondary">目标日期 {{ selectedCleanDate || cleanArchivesState.latest || '—' }}</p>
           </div>
 
           <div class="rounded-2xl border border-soft bg-white px-4 py-3">
             <p class="text-xs text-muted">执行提示</p>
             <p class="mt-1 text-sm font-semibold text-primary">{{ statusState.running ? '任务运行中' : '空闲' }}</p>
-            <p class="mt-1 text-xs text-secondary">会直接覆盖当前 Filter 结果来源。</p>
+            <p class="mt-1 text-xs text-secondary">会直接更新当前筛选结果。</p>
           </div>
 
           <button type="button" class="btn-primary inline-flex w-full items-center justify-center gap-2" :disabled="!canRunAiFilter || aiRunState.running" @click="runAiFilter">
@@ -320,7 +328,7 @@
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-rose-500">后清洗</p>
             <h3 class="mt-2 text-base font-semibold text-primary">清理数据库噪声</h3>
-            <p class="mt-2 text-sm text-secondary">只在你确认 Filter 结果之后再做。将直接删除数据库记录，无法撤销。</p>
+            <p class="mt-2 text-sm text-secondary">只在你确认当前筛选结果之后再做。将直接删除数据库记录，无法撤销。</p>
           </div>
 
           <div class="rounded-3xl border border-rose-200 bg-white px-4 py-3 text-sm text-rose-700">
@@ -362,13 +370,32 @@
             <TrashIcon class="h-4 w-4" />
             {{ postcleanState.running ? '后清洗执行中…' : '清理数据库噪声' }}
           </button>
+          <div v-if="postcleanState.running" class="rounded-2xl border border-soft bg-white px-4 py-3 text-xs text-secondary">
+            <p class="font-semibold text-primary">正在处理</p>
+            <p class="mt-1">当前表：{{ postcleanState.progress.current_table || '准备中' }}</p>
+            <p class="mt-1">进度：{{ postcleanState.progress.completed_tables || 0 }} / {{ postcleanState.progress.total_tables || 0 }} · {{ postcleanState.progress.percentage || 0 }}%</p>
+            <p class="mt-1">最近更新：{{ formatTimestamp(postcleanState.lastHeartbeat) || '—' }}</p>
+          </div>
           <p v-if="postcleanState.message" class="text-xs" :class="postcleanState.success === false ? 'text-danger' : 'text-secondary'">
             {{ postcleanState.message }}
           </p>
         </div>
 
         <div class="rounded-3xl border border-soft bg-surface-muted/60 p-5">
-          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">审计结果</p>
+          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">处理结果</p>
+          <div v-if="postcleanState.logs.length" class="mt-4 rounded-2xl border border-soft bg-slate-950 px-4 py-4">
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">处理记录</p>
+            <div class="mt-3 max-h-56 space-y-2 overflow-y-auto">
+              <article
+                v-for="(log, index) in postcleanState.logs"
+                :key="`postclean-log-${index}`"
+                class="rounded-xl bg-slate-900/80 px-3 py-2"
+              >
+                <p class="text-[11px] text-slate-400">{{ formatTimestamp(log.ts) || '—' }} · {{ log.event || 'progress' }}</p>
+                <p class="mt-1 text-xs leading-5" :class="log.level === 'error' ? 'text-rose-300' : 'text-slate-200'">{{ log.message || '—' }}</p>
+              </article>
+            </div>
+          </div>
           <div v-if="postcleanState.lastResult" class="mt-4 space-y-3">
             <div class="rounded-2xl border border-soft bg-white px-4 py-3">
               <p class="text-xs text-muted">审计报告</p>
@@ -394,6 +421,7 @@
               </article>
             </div>
           </div>
+          <p v-else-if="postcleanState.running" class="mt-4 text-sm text-secondary">后清洗任务正在运行，审计结果会在完成后自动展示。</p>
           <p v-else class="mt-4 text-sm text-secondary">尚未执行后清洗。</p>
         </div>
       </div>
@@ -436,6 +464,15 @@
       <div v-if="showResultEmptyState" class="rounded-3xl border border-dashed border-soft px-5 py-8 text-center">
         <p class="text-base font-semibold text-primary">{{ resultEmptyTitle }}</p>
         <p class="mt-2 text-sm text-secondary">{{ resultEmptyDescription }}</p>
+        <button
+          v-if="showPreprocessCta"
+          type="button"
+          class="btn-secondary mt-4 inline-flex items-center gap-2"
+          @click="goToPreprocess"
+        >
+          <ArrowUpRightIcon class="h-4 w-4" />
+          去做数据预处理
+        </button>
       </div>
 
       <p v-else-if="statusState.message" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -501,21 +538,203 @@
         </div>
       </div>
     </section>
+
+    <AppModal
+      v-model="stopwordModalOpen"
+      title="项目排除词设置"
+      description="左侧查看系统整理的高频词建议，右侧维护项目排除词。保存后，预清洗和后清洗都会使用。"
+      width="max-w-6xl"
+      :show-footer="false"
+      scrollable
+    >
+      <div class="space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="inline-flex rounded-2xl border border-soft bg-surface-muted/70 p-1 gap-0.5">
+            <button
+              v-for="option in stopwordStageOptions"
+              :key="option.value"
+              type="button"
+              class="rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-150"
+              :class="stopwordSuggestionStage === option.value ? 'bg-white text-brand-700 ring-1 ring-brand-100' : 'text-secondary hover:text-primary hover:bg-white/50'"
+              @click="stopwordSuggestionStage = option.value; seedStopwordSuggestionDate(); loadStopwordSuggestionStatus()"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <select
+              v-model="currentStopwordSuggestionDate"
+              class="input min-w-[16rem]"
+              :disabled="stopwordSuggestionArchivesState.loading || !stopwordSuggestionArchiveOptions.length"
+              @change="loadStopwordSuggestionStatus"
+            >
+              <option value="" disabled>{{ stopwordSuggestionArchiveOptions.length ? '选择存档范围' : '暂无可用存档' }}</option>
+              <option v-for="option in stopwordSuggestionArchiveOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+            <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="stopwordSuggestionArchivesState.loading" @click="loadStopwordSuggestionArchives">
+              <ArrowPathIcon class="h-4 w-4" :class="stopwordSuggestionArchivesState.loading ? 'animate-spin' : ''" />
+              刷新存档
+            </button>
+            <button type="button" class="btn-primary" :disabled="stopwordSuggestionState.starting || !stopwordSuggestionCanRun" @click="startStopwordSuggestionTask(true)">
+              {{ stopwordSuggestionState.starting ? '启动中…' : '开始统计词频' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="grid gap-4 xl:grid-cols-[1.02fr,1.18fr]">
+          <div class="rounded-3xl border border-soft bg-surface-muted/60 p-5">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">文档高频词</p>
+                <h3 class="mt-2 text-base font-semibold text-primary">{{ stopwordSuggestionTitle }}</h3>
+                <p class="mt-2 text-sm text-secondary">{{ stopwordSuggestionTask?.message || '选择一个存档后启动统计。' }}</p>
+              </div>
+              <div class="relative flex h-20 w-20 items-center justify-center">
+                <svg class="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 80 80" aria-hidden="true">
+                  <circle
+                    cx="40"
+                    cy="40"
+                    :r="stopwordSuggestionRingRadius"
+                    fill="none"
+                    stroke="var(--color-surface-muted)"
+                    :stroke-width="stopwordSuggestionRingStroke"
+                  />
+                  <circle
+                    v-if="stopwordSuggestionShowProgress"
+                    cx="40"
+                    cy="40"
+                    :r="stopwordSuggestionRingRadius"
+                    fill="none"
+                    stroke="rgb(var(--color-brand-600) / 1)"
+                    :stroke-width="stopwordSuggestionRingStroke"
+                    stroke-linecap="round"
+                    :stroke-dasharray="stopwordSuggestionRingDasharray"
+                  />
+                </svg>
+                <div class="relative z-10 flex h-12 w-12 items-center justify-center rounded-full bg-surface text-sm font-semibold text-primary">
+                  {{ Math.round(stopwordSuggestionPercentage) }}%
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 grid gap-3 sm:grid-cols-2">
+              <div class="rounded-2xl border border-soft bg-white px-4 py-3">
+                <p class="text-xs text-muted">统计范围</p>
+                <p class="mt-1 text-sm font-semibold text-primary">{{ stopwordSuggestionSourceLabel }}</p>
+              </div>
+              <div class="rounded-2xl border border-soft bg-white px-4 py-3">
+                <p class="text-xs text-muted">文档进度</p>
+                <p class="mt-1 text-sm font-semibold text-primary">{{ stopwordSuggestionSummary.processed_docs || 0 }} / {{ stopwordSuggestionSummary.total_docs || 0 }}</p>
+              </div>
+            </div>
+
+            <p v-if="stopwordSuggestionArchivesState.error" class="mt-3 text-xs text-danger">{{ stopwordSuggestionArchivesState.error }}</p>
+            <p v-if="stopwordSuggestionState.error" class="mt-2 text-xs text-danger">{{ stopwordSuggestionState.error }}</p>
+
+            <div class="mt-4 space-y-2">
+              <div v-if="stopwordSuggestionTerms.length" class="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+                <button
+                  v-for="item in stopwordSuggestionTerms"
+                  :key="`suggestion-${item.term}`"
+                  type="button"
+                  class="flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition disabled:cursor-default"
+                  :class="isNoiseTermSelected(item.term)
+                    ? 'border-rose-200 bg-rose-50/70'
+                    : 'border-soft bg-white hover:border-brand-soft hover:bg-brand-50/60'"
+                  :disabled="isNoiseTermSelected(item.term)"
+                  @click="appendNoiseTerm(item.term)"
+                >
+                  <div>
+                    <p class="text-sm font-semibold" :class="isNoiseTermSelected(item.term) ? 'text-rose-700' : 'text-primary'">{{ item.term }}</p>
+                    <p class="mt-1 text-xs" :class="isNoiseTermSelected(item.term) ? 'text-rose-500' : 'text-secondary'">文档频次 {{ item.doc_count }} · 总词频 {{ item.total_count }}</p>
+                  </div>
+                  <span
+                    class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
+                    :class="isNoiseTermSelected(item.term) ? 'bg-rose-100 text-rose-600' : 'bg-brand-50 text-brand-600'"
+                  >
+                    {{ isNoiseTermSelected(item.term) ? '已排除' : '追加' }}
+                  </span>
+                </button>
+              </div>
+              <div v-else class="rounded-2xl border border-dashed border-soft bg-white px-4 py-6 text-sm text-secondary">
+                {{ stopwordSuggestionRunning ? '词频统计执行中，结果会自动刷新。' : '还没有词频建议，点击“开始统计词频”即可生成。' }}
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-3xl border border-soft bg-surface-muted/60 p-5">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">项目排除词</p>
+                <p class="mt-2 text-sm text-secondary">支持换行、空格、逗号（，）或分号（；）分隔，修改后会自动保存。</p>
+              </div>
+            </div>
+
+            <div class="mt-4 flex gap-2">
+              <input v-model.trim="manualNoiseTerm" type="text" class="input flex-1" placeholder="输入一个词后回车或点击追加" @keydown.enter.prevent="appendManualNoiseTerm" />
+              <button type="button" class="btn-secondary" @click="appendManualNoiseTerm">追加</button>
+            </div>
+
+            <textarea
+              v-model="sharedPromptState.projectStopwordsText"
+              rows="12"
+              class="input mt-4 min-h-[14rem] resize-y"
+              placeholder="例如：油烟机 抽油烟机 厨电 方太 老板电器 ..."
+            />
+
+            <div class="mt-4 rounded-2xl border border-soft bg-white p-4">
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">已解析词条</p>
+                <span class="text-xs text-secondary">{{ parsedNoiseTerms.length }} 个</span>
+              </div>
+              <div v-if="parsedNoiseTerms.length" class="mt-3 flex max-h-52 flex-wrap gap-2 overflow-y-auto">
+                <div
+                  v-for="term in parsedNoiseTerms"
+                  :key="`modal-noise-term-${term}`"
+                  class="inline-flex items-center gap-1 rounded-full bg-brand-50 py-1 pl-3 pr-1 text-xs font-medium text-brand-700"
+                >
+                  <span>{{ term }}</span>
+                  <button
+                    type="button"
+                    class="inline-flex h-5 w-5 items-center justify-center rounded-full text-brand-600 transition hover:bg-brand-100 hover:text-brand-700"
+                    :aria-label="`移除 ${term}`"
+                    @click="removeNoiseTerm(term)"
+                  >
+                    <XMarkIcon class="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+              <p v-else class="mt-3 text-sm text-secondary">当前还没有排除词，可以手动输入，也可以从左侧建议里点选追加。</p>
+            </div>
+            <p v-if="sharedPromptState.error" class="mt-3 text-xs text-danger">{{ sharedPromptState.error }}</p>
+            <p v-else-if="sharedPromptState.saving" class="mt-3 text-xs text-secondary">正在自动保存…</p>
+            <p v-else-if="sharedPromptState.success" class="mt-3 text-xs text-emerald-600">{{ sharedPromptState.success }}</p>
+          </div>
+        </div>
+      </div>
+    </AppModal>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   AdjustmentsHorizontalIcon,
   ArrowPathIcon,
+  ArrowUpRightIcon,
   SparklesIcon,
-  TrashIcon
+  TrashIcon,
+  XMarkIcon
 } from '@heroicons/vue/24/outline'
+import AppModal from '../../components/AppModal.vue'
 import { useApiBase } from '../../composables/useApiBase'
 import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
 
 const { callApi } = useApiBase()
+const router = useRouter()
 const {
   projectOptions,
   projectsLoading,
@@ -527,6 +746,7 @@ const {
 
 const SPLIT_PATTERN = /[\s,，;；]+/
 const POLL_INTERVAL = 2000
+const SHARED_PROMPT_AUTOSAVE_DELAY = 800
 
 const datasets = ref([])
 const datasetsLoading = ref(false)
@@ -540,6 +760,29 @@ const cleanArchivesState = reactive({
   latest: ''
 })
 const selectedCleanDate = ref('')
+const stopwordModalOpen = ref(false)
+const manualNoiseTerm = ref('')
+const stopwordSuggestionStage = ref('pre')
+const stopwordSuggestionDateByStage = reactive({
+  pre: '',
+  post: ''
+})
+const stopwordSuggestionArchivesState = reactive({
+  loading: false,
+  error: '',
+  archives: {
+    fetch: [],
+    clean: [],
+    filter: []
+  }
+})
+const stopwordSuggestionState = reactive({
+  loading: false,
+  starting: false,
+  error: '',
+  task: null,
+  worker: {}
+})
 
 const sharedPromptState = reactive({
   loading: false,
@@ -550,6 +793,9 @@ const sharedPromptState = reactive({
   rawPayload: null,
   projectStopwordsText: ''
 })
+let sharedPromptAutosaveTimer = null
+let sharedPromptAutosaveSuspend = false
+let sharedPromptLastSavedText = ''
 
 const aiTemplateState = reactive({
   loading: false,
@@ -568,10 +814,20 @@ const postcleanState = reactive({
   databases: [],
   database: '',
   tablesText: '',
+  activeTables: [],
   running: false,
   success: null,
   message: '',
-  lastResult: null
+  lastResult: null,
+  lastHeartbeat: '',
+  logs: [],
+  progress: {
+    total_tables: 0,
+    completed_tables: 0,
+    deleted_rows: 0,
+    current_table: '',
+    percentage: 0
+  }
 })
 
 const precleanState = reactive({
@@ -616,6 +872,8 @@ const statusState = reactive({
 const statusLoading = ref(false)
 const activeTab = ref('preclean')
 const statusTimer = ref(null)
+const postcleanTimer = ref(null)
+const stopwordSuggestionTimer = ref(null)
 
 const currentProjectName = computed(() => String(selectedProjectName.value || '').trim())
 const datasetOptions = computed(() =>
@@ -631,9 +889,9 @@ const databaseOptions = computed(() =>
   (postcleanState.databases || []).map((item) => ({ value: item.name, label: item.name }))
 )
 const parsedNoiseTerms = computed(() => splitDelimitedText(sharedPromptState.projectStopwordsText))
+const parsedNoiseTermSet = computed(() => new Set(parsedNoiseTerms.value))
 const parsedCategories = computed(() => splitDelimitedText(aiTemplateState.categoriesText))
 const selectedTables = computed(() => splitDelimitedText(postcleanState.tablesText))
-const canSaveSharedPrompt = computed(() => Boolean(currentProjectName.value))
 const canSaveAiTemplate = computed(() => Boolean(currentProjectName.value && aiTemplateState.theme.trim() && parsedCategories.value.length))
 const canRunPreclean = computed(() => Boolean(currentProjectName.value && (selectedCleanDate.value || cleanArchivesState.latest)))
 const canRunAiFilter = computed(() => Boolean(currentProjectName.value && (selectedCleanDate.value || cleanArchivesState.latest)))
@@ -642,7 +900,7 @@ const filterSourceLabel = computed(() => {
   const source = statusState.source || statusState.summary.source || ''
   if (source === 'keyword-preclean') return '预清洗结果'
   if (source === 'ai-filter') return 'AI 筛选结果'
-  return '尚未生成 Filter 结果'
+  return '尚未生成筛选结果'
 })
 const filterSourceTone = computed(() => {
   const source = statusState.source || statusState.summary.source || ''
@@ -657,9 +915,10 @@ const datasetSummaryLabel = computed(() => {
   return datasetOptions.value.find((item) => item.id === selectedDatasetId.value)?.label || selectedDatasetId.value
 })
 const cleanArchiveSummaryLabel = computed(() => statusDateLabel.value)
+const showPreprocessCta = computed(() => Boolean(currentProjectName.value && !cleanArchivesState.loading && !cleanArchiveOptions.value.length))
 const recommendedActionLabel = computed(() => {
   if (!currentProjectName.value) return '先选择项目'
-  if (!selectedCleanDate.value && !cleanArchivesState.latest) return '先完成预处理并生成 Clean 存档'
+  if (!selectedCleanDate.value && !cleanArchivesState.latest) return '先完成预处理并生成可用范围'
   if (!parsedNoiseTerms.value.length) return '建议先保存排除词，再做预清洗'
   if (!statusState.summary.total_rows) return '先做预清洗'
   if ((statusState.source || statusState.summary.source || '') === 'keyword-preclean') return '如需进一步细筛，可运行 AI 筛选'
@@ -667,9 +926,9 @@ const recommendedActionLabel = computed(() => {
   return '先做预清洗'
 })
 const scopeHelperText = computed(() => {
-  if (!currentProjectName.value) return '先选择项目，再读取对应的 Clean 存档。'
+  if (!currentProjectName.value) return '先选择项目，再读取对应的处理范围。'
   if (cleanArchivesState.error) return cleanArchivesState.error
-  if (!cleanArchiveOptions.value.length) return '当前还没有可用的 Clean 存档，请先完成预处理。'
+  if (!cleanArchiveOptions.value.length) return '当前还没有可用的处理范围，请先完成预处理。'
   return `当前默认使用 ${statusDateLabel.value} 作为筛选输入。`
 })
 const showResultEmptyState = computed(() => {
@@ -680,13 +939,13 @@ const showResultEmptyState = computed(() => {
 })
 const resultEmptyTitle = computed(() => {
   if (!currentProjectName.value) return '先选择项目'
-  if (!selectedCleanDate.value && !cleanArchivesState.latest) return '先生成 Clean 存档'
+  if (!selectedCleanDate.value && !cleanArchivesState.latest) return '先生成可用范围'
   if (!parsedNoiseTerms.value.length) return '还没有可用的筛选结果'
-  return '当前还没有 Filter 结果'
+  return '当前还没有筛选结果'
 })
 const resultEmptyDescription = computed(() => {
-  if (!currentProjectName.value) return '选定项目后，页面会自动读取数据集、排除词和可用的 Clean 存档。'
-  if (!selectedCleanDate.value && !cleanArchivesState.latest) return '先完成预处理，生成 Clean 存档后，再回来执行预清洗或 AI 筛选。'
+  if (!currentProjectName.value) return '选定项目后，页面会自动读取数据集、排除词和可用的处理范围。'
+  if (!selectedCleanDate.value && !cleanArchivesState.latest) return '先完成预处理，准备好可用范围后，再回来执行预清洗或 AI 筛选。'
   if (!parsedNoiseTerms.value.length) return '建议先保存排除词，再执行预清洗。完成后，这里会汇总结果来源、记录和样本。'
   return '建议先做预清洗；如果需要更细的判断，再运行 AI 筛选。'
 })
@@ -698,6 +957,78 @@ const aiConfigLabel = computed(() => {
   return `${provider} · ${model} · QPS ${qps} · Batch ${batch}`
 })
 const aiTemplatePreview = computed(() => buildFilterTemplatePreview(aiTemplateState.theme, parsedCategories.value))
+const stopwordStageOptions = [
+  { value: 'pre', label: '预处理词频' },
+  { value: 'post', label: '后处理词频' }
+]
+const currentStopwordSuggestionDate = computed({
+  get: () => stopwordSuggestionDateByStage[stopwordSuggestionStage.value] || '',
+  set: (value) => {
+    stopwordSuggestionDateByStage[stopwordSuggestionStage.value] = String(value || '')
+  }
+})
+const stopwordSuggestionArchiveOptions = computed(() => {
+  const priorities = stopwordSuggestionStage.value === 'pre'
+    ? ['clean', 'fetch']
+    : ['filter', 'clean', 'fetch']
+  const merged = new Map()
+  priorities.forEach((layer) => {
+    const items = Array.isArray(stopwordSuggestionArchivesState.archives[layer])
+      ? stopwordSuggestionArchivesState.archives[layer]
+      : []
+    items.forEach((item) => {
+      const date = String(item?.date || '').trim()
+      if (!date) return
+      const existing = merged.get(date) || { value: date, labels: [], rank: priorities.indexOf(layer) }
+      existing.labels.push(layer.toUpperCase())
+      existing.rank = Math.min(existing.rank, priorities.indexOf(layer))
+      merged.set(date, existing)
+    })
+  })
+  return Array.from(merged.values())
+    .sort((a, b) => a.rank - b.rank || String(b.value).localeCompare(String(a.value)))
+    .map((item) => ({
+      value: item.value,
+      label: `${item.value} · ${Array.from(new Set(item.labels)).join(' / ')}`
+    }))
+})
+const stopwordSuggestionTask = computed(() => (
+  stopwordSuggestionState.task && typeof stopwordSuggestionState.task === 'object'
+    ? stopwordSuggestionState.task
+    : null
+))
+const stopwordSuggestionTerms = computed(() => {
+  const terms = stopwordSuggestionTask.value?.result?.terms
+  return Array.isArray(terms) ? terms : []
+})
+const stopwordSuggestionSummary = computed(() => {
+  const summary = stopwordSuggestionTask.value?.summary
+  return summary && typeof summary === 'object' ? summary : {}
+})
+const stopwordSuggestionStatus = computed(() => String(stopwordSuggestionTask.value?.status || 'idle'))
+const stopwordSuggestionPercentage = computed(() => Number(stopwordSuggestionTask.value?.percentage || 0))
+const stopwordSuggestionSourceLabel = computed(() => {
+  const source = String(stopwordSuggestionSummary.value?.source_layer || stopwordSuggestionTask.value?.source_layer || '').toLowerCase()
+  if (source === 'filter') return '当前筛选结果'
+  if (source === 'clean') return '预处理结果'
+  if (source === 'fetch') return '原始抓取结果'
+  return '待生成'
+})
+const stopwordSuggestionCanRun = computed(() => Boolean(currentProjectName.value && currentStopwordSuggestionDate.value))
+const stopwordSuggestionRunning = computed(() => ['queued', 'running'].includes(stopwordSuggestionStatus.value))
+const stopwordSuggestionTitle = computed(() => (
+  stopwordSuggestionRunning.value ? '后台统计中' : '词频建议'
+))
+const stopwordSuggestionRingRadius = 30
+const stopwordSuggestionRingStroke = 8
+const stopwordSuggestionRingCircumference = 2 * Math.PI * stopwordSuggestionRingRadius
+const stopwordSuggestionShowProgress = computed(() => stopwordSuggestionPercentage.value > 0)
+const stopwordSuggestionRingDasharray = computed(() => {
+  const percentage = Math.max(0, Math.min(100, stopwordSuggestionPercentage.value))
+  const filled = stopwordSuggestionRingCircumference * (percentage / 100)
+  return `${filled} ${stopwordSuggestionRingCircumference}`
+})
+const previewNoiseTerms = computed(() => parsedNoiseTerms.value.slice(0, 12))
 const tabOptions = [
   { value: 'preclean', label: '预清洗' },
   { value: 'ai', label: 'AI 筛选' },
@@ -714,6 +1045,9 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopStatusPolling()
+  stopPostcleanPolling()
+  stopStopwordSuggestionPolling()
+  clearSharedPromptAutosave()
 })
 
 watch(
@@ -721,13 +1055,25 @@ watch(
   async (value, previous) => {
     if (value === previous) return
     stopStatusPolling()
+    clearSharedPromptAutosave()
+    sharedPromptLastSavedText = ''
+    sharedPromptAutosaveSuspend = false
     clearLocalMessages()
     datasets.value = []
     selectedDatasetId.value = ''
     cleanArchivesState.items = []
     cleanArchivesState.latest = ''
     selectedCleanDate.value = ''
+    stopwordSuggestionDateByStage.pre = ''
+    stopwordSuggestionDateByStage.post = ''
+    stopwordSuggestionState.task = null
+    stopwordSuggestionState.worker = {}
+    stopwordSuggestionArchivesState.archives = { fetch: [], clean: [], filter: [] }
+    stopwordSuggestionArchivesState.error = ''
+    stopwordModalOpen.value = false
+    stopStopwordSuggestionPolling()
     resetStatusState()
+    resetPostcleanState()
     if (!value) return
     await refreshProjectContext()
   }
@@ -737,10 +1083,18 @@ watch(
   () => selectedDatasetId.value,
   async (value, previous) => {
     if (value === previous) return
+    clearSharedPromptAutosave()
     clearLocalMessages()
     cleanArchivesState.items = []
     cleanArchivesState.latest = ''
     selectedCleanDate.value = ''
+    stopwordSuggestionDateByStage.pre = ''
+    stopwordSuggestionDateByStage.post = ''
+    stopwordSuggestionState.task = null
+    stopwordSuggestionState.worker = {}
+    stopwordSuggestionArchivesState.archives = { fetch: [], clean: [], filter: [] }
+    stopwordSuggestionArchivesState.error = ''
+    stopStopwordSuggestionPolling()
     resetStatusState()
     if (!currentProjectName.value) return
     await Promise.all([loadSharedPromptConfig(), loadCleanArchives(), loadStatus()])
@@ -756,9 +1110,61 @@ watch(
   }
 )
 
+watch(
+  () => sharedPromptState.projectStopwordsText,
+  (value, previous) => {
+    if (value === previous) return
+    sharedPromptState.error = ''
+    sharedPromptState.success = ''
+    scheduleSharedPromptAutosave()
+  }
+)
+
+watch(
+  () => postcleanState.database,
+  async (value, previous) => {
+    if (value === previous) return
+    resetPostcleanState()
+    if (!currentProjectName.value || !value) return
+    await loadPostcleanStatus({ silent: true })
+  }
+)
+
+watch(stopwordModalOpen, async (open) => {
+  if (!open) {
+    stopStopwordSuggestionPolling()
+    manualNoiseTerm.value = ''
+    return
+  }
+  await Promise.all([loadSharedPromptConfig(), loadStopwordSuggestionArchives()])
+  seedStopwordSuggestionDate()
+  await loadStopwordSuggestionStatus()
+  if (stopwordSuggestionRunning.value) {
+    startStopwordSuggestionPolling()
+  }
+})
+
 async function refreshProjectContext() {
   await Promise.all([loadDatasets(), loadAiTemplateConfig(), loadSharedPromptConfig(), loadCleanArchives()])
   await loadStatus()
+}
+
+function goToPreprocess() {
+  router.push({ name: 'topic-create-preprocess' })
+}
+
+function openStopwordModal(stage = 'pre') {
+  stopwordSuggestionStage.value = stage === 'post' ? 'post' : 'pre'
+  stopwordModalOpen.value = true
+}
+
+function seedStopwordSuggestionDate() {
+  if (!stopwordSuggestionDateByStage.pre) {
+    stopwordSuggestionDateByStage.pre = selectedCleanDate.value || cleanArchivesState.latest || stopwordSuggestionArchiveOptions.value[0]?.value || ''
+  }
+  if (!stopwordSuggestionDateByStage.post) {
+    stopwordSuggestionDateByStage.post = stopwordSuggestionArchiveOptions.value[0]?.value || selectedCleanDate.value || cleanArchivesState.latest || ''
+  }
 }
 
 async function loadDatasets() {
@@ -814,6 +1220,31 @@ async function loadCleanArchives({ force = false } = {}) {
   }
 }
 
+async function loadStopwordSuggestionArchives() {
+  if (!currentProjectName.value) return
+  stopwordSuggestionArchivesState.loading = true
+  stopwordSuggestionArchivesState.error = ''
+  try {
+    const params = new URLSearchParams()
+    params.set('layers', 'fetch,clean,filter')
+    if (selectedDatasetId.value) {
+      params.set('dataset_id', selectedDatasetId.value)
+    }
+    const response = await callApi(`/api/projects/${encodeURIComponent(currentProjectName.value)}/archives?${params.toString()}`)
+    const archives = response.archives || {}
+    stopwordSuggestionArchivesState.archives = {
+      fetch: Array.isArray(archives.fetch) ? archives.fetch : [],
+      clean: Array.isArray(archives.clean) ? archives.clean : [],
+      filter: Array.isArray(archives.filter) ? archives.filter : []
+    }
+  } catch (error) {
+    stopwordSuggestionArchivesState.archives = { fetch: [], clean: [], filter: [] }
+    stopwordSuggestionArchivesState.error = error instanceof Error ? error.message : '读取词频存档失败'
+  } finally {
+    stopwordSuggestionArchivesState.loading = false
+  }
+}
+
 async function loadSharedPromptConfig() {
   if (!currentProjectName.value) return
   sharedPromptState.loading = true
@@ -827,22 +1258,107 @@ async function loadSharedPromptConfig() {
     }
     const response = await callApi(`/api/topic/bertopic/prompt?${params.toString()}`)
     const payload = response.data || {}
-    sharedPromptState.rawPayload = payload
-    sharedPromptState.path = payload.path || ''
-    sharedPromptState.projectStopwordsText = normaliseTextBlock(
+    const nextText = normaliseTextBlock(
       payload.project_stopwords ?? payload.projectStopwords ?? payload.project_stopwords_text ?? ''
     )
+    sharedPromptAutosaveSuspend = true
+    sharedPromptState.rawPayload = payload
+    sharedPromptState.path = payload.path || ''
+    sharedPromptState.projectStopwordsText = nextText
+    sharedPromptLastSavedText = nextText
   } catch (error) {
     sharedPromptState.rawPayload = null
     sharedPromptState.path = ''
     sharedPromptState.error = error instanceof Error ? error.message : '读取共享词表失败'
   } finally {
     sharedPromptState.loading = false
+    sharedPromptAutosaveSuspend = false
   }
+}
+
+async function loadStopwordSuggestionStatus() {
+  if (!currentProjectName.value) return
+  stopwordSuggestionState.loading = true
+  stopwordSuggestionState.error = ''
+  try {
+    const params = new URLSearchParams()
+    params.set('project', currentProjectName.value)
+    params.set('stage', stopwordSuggestionStage.value)
+    if (selectedDatasetId.value) {
+      params.set('dataset_id', selectedDatasetId.value)
+    }
+    if (currentStopwordSuggestionDate.value) {
+      params.set('date', currentStopwordSuggestionDate.value)
+    }
+    const response = await callApi(`/api/filter/stopwords/suggestions?${params.toString()}`)
+    const payload = response.data || {}
+    stopwordSuggestionState.task = payload.task || null
+    stopwordSuggestionState.worker = payload.worker || {}
+    if (payload.date && !currentStopwordSuggestionDate.value) {
+      currentStopwordSuggestionDate.value = String(payload.date)
+    }
+    if (stopwordSuggestionRunning.value) {
+      startStopwordSuggestionPolling()
+    } else {
+      stopStopwordSuggestionPolling()
+    }
+  } catch (error) {
+    stopwordSuggestionState.task = null
+    stopwordSuggestionState.worker = {}
+    stopwordSuggestionState.error = error instanceof Error ? error.message : '读取词频任务状态失败'
+    stopStopwordSuggestionPolling()
+  } finally {
+    stopwordSuggestionState.loading = false
+  }
+}
+
+async function startStopwordSuggestionTask(force = true) {
+  if (!stopwordSuggestionCanRun.value) return
+  stopwordSuggestionState.starting = true
+  stopwordSuggestionState.error = ''
+  try {
+    await callApi('/api/filter/stopwords/suggestions', {
+      method: 'POST',
+      body: JSON.stringify({
+        project: currentProjectName.value,
+        dataset_id: selectedDatasetId.value || undefined,
+        date: currentStopwordSuggestionDate.value || undefined,
+        stage: stopwordSuggestionStage.value,
+        force
+      })
+    })
+    await loadStopwordSuggestionStatus()
+    startStopwordSuggestionPolling()
+  } catch (error) {
+    stopwordSuggestionState.error = error instanceof Error ? error.message : '启动词频统计失败'
+  } finally {
+    stopwordSuggestionState.starting = false
+  }
+}
+
+function appendNoiseTerm(term) {
+  const nextTerms = splitDelimitedText(`${sharedPromptState.projectStopwordsText}\n${term}`)
+  sharedPromptState.projectStopwordsText = nextTerms.join('\n')
+}
+
+function isNoiseTermSelected(term) {
+  return parsedNoiseTermSet.value.has(String(term || '').trim())
+}
+
+function removeNoiseTerm(term) {
+  sharedPromptState.projectStopwordsText = parsedNoiseTerms.value.filter((item) => item !== term).join('\n')
+}
+
+function appendManualNoiseTerm() {
+  const value = String(manualNoiseTerm.value || '').trim()
+  if (!value) return
+  appendNoiseTerm(value)
+  manualNoiseTerm.value = ''
 }
 
 async function saveSharedPromptConfig() {
   if (!currentProjectName.value) return
+  clearSharedPromptAutosave()
   sharedPromptState.saving = true
   sharedPromptState.error = ''
   sharedPromptState.success = ''
@@ -887,12 +1403,32 @@ async function saveSharedPromptConfig() {
     sharedPromptState.projectStopwordsText = normaliseTextBlock(
       refreshed.project_stopwords ?? payload.project_stopwords
     )
-    sharedPromptState.success = '共享黑名单词表已保存。'
+    sharedPromptLastSavedText = sharedPromptState.projectStopwordsText
+    sharedPromptState.success = '已自动保存。'
   } catch (error) {
     sharedPromptState.error = error instanceof Error ? error.message : '保存共享词表失败'
   } finally {
     sharedPromptState.saving = false
   }
+}
+
+function clearSharedPromptAutosave() {
+  if (sharedPromptAutosaveTimer) {
+    clearTimeout(sharedPromptAutosaveTimer)
+    sharedPromptAutosaveTimer = null
+  }
+}
+
+function scheduleSharedPromptAutosave() {
+  if (!currentProjectName.value || sharedPromptAutosaveSuspend) return
+  if (sharedPromptState.projectStopwordsText === sharedPromptLastSavedText) return
+  clearSharedPromptAutosave()
+  sharedPromptAutosaveTimer = setTimeout(() => {
+    sharedPromptAutosaveTimer = null
+    if (!currentProjectName.value || sharedPromptState.loading || sharedPromptState.saving) return
+    if (sharedPromptState.projectStopwordsText === sharedPromptLastSavedText) return
+    saveSharedPromptConfig()
+  }, SHARED_PROMPT_AUTOSAVE_DELAY)
 }
 
 async function loadAiTemplateConfig() {
@@ -957,6 +1493,9 @@ async function loadDatabaseOptions() {
     postcleanState.databases = Array.isArray(payload.databases) ? payload.databases : []
     if (!postcleanState.database && postcleanState.databases.length) {
       postcleanState.database = postcleanState.databases[0].name || ''
+    }
+    if (currentProjectName.value && postcleanState.database) {
+      await loadPostcleanStatus({ silent: true })
     }
   } catch (error) {
     postcleanState.message = error instanceof Error ? error.message : '读取数据库列表失败'
@@ -1064,7 +1603,7 @@ async function runAiFilter() {
       selectedCleanDate.value = payload.date
     }
     aiRunState.success = true
-    aiRunState.message = response.message || 'AI 筛选任务已提交。'
+    aiRunState.message = response.message || 'AI 筛选已开始，结果会自动刷新。'
     await loadStatus()
     startStatusPolling()
   } catch (error) {
@@ -1084,6 +1623,7 @@ async function runPostclean() {
   postcleanState.running = true
   postcleanState.success = null
   postcleanState.message = ''
+  postcleanState.activeTables = [...selectedTables.value]
   try {
     const response = await callApi('/api/database/postclean', {
       method: 'POST',
@@ -1091,19 +1631,112 @@ async function runPostclean() {
         project: currentProjectName.value,
         dataset_id: selectedDatasetId.value || undefined,
         database: postcleanState.database,
-        tables: selectedTables.value.length ? selectedTables.value : undefined
+        tables: postcleanState.activeTables.length ? postcleanState.activeTables : undefined
       })
     })
     const payload = response.data || {}
-    postcleanState.lastResult = payload
-    postcleanState.success = true
-    postcleanState.message = `后清洗完成，共删除 ${payload.deleted_rows || 0} 条记录。`
+    applyPostcleanPayload(payload)
+    postcleanState.success = null
+    postcleanState.message = response.status === 'accepted'
+      ? (payload.message || '后清洗已开始，处理进度会自动刷新。')
+      : (payload.message || '后清洗已开始。')
+    startPostcleanPolling()
   } catch (error) {
     postcleanState.success = false
     postcleanState.message = error instanceof Error ? error.message : '执行后清洗失败'
   } finally {
-    postcleanState.running = false
+    if (!postcleanState.running) {
+      stopPostcleanPolling()
+    }
   }
+}
+
+async function loadPostcleanStatus({ silent = false } = {}) {
+  if (!currentProjectName.value || !postcleanState.database) return null
+  const params = new URLSearchParams()
+  params.set('project', currentProjectName.value)
+  if (selectedDatasetId.value) {
+    params.set('dataset_id', selectedDatasetId.value)
+  }
+  params.set('database', postcleanState.database)
+  const queryTables = postcleanState.activeTables.length ? postcleanState.activeTables : selectedTables.value
+  queryTables.forEach((table) => params.append('tables', table))
+  try {
+    const response = await callApi(`/api/database/postclean/status?${params.toString()}`)
+    const payload = response.data || {}
+    applyPostcleanPayload(payload)
+    if (payload.status === 'running') {
+      startPostcleanPolling()
+    }
+    if (payload.status === 'completed' || payload.status === 'error' || payload.status === 'idle') {
+      stopPostcleanPolling()
+    }
+    if (!silent && payload.status === 'error' && payload.message) {
+      postcleanState.message = payload.message
+      postcleanState.success = false
+    }
+    return payload
+  } catch (error) {
+    if (!silent) {
+      postcleanState.message = error instanceof Error ? error.message : '读取后清洗状态失败'
+      postcleanState.success = false
+    }
+    return null
+  }
+}
+
+function applyPostcleanPayload(payload) {
+  if (!payload || typeof payload !== 'object') return
+  postcleanState.activeTables = Array.isArray(payload.tables)
+    ? payload.tables.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+  postcleanState.running = payload.status === 'running'
+  if (payload.status === 'completed') {
+    postcleanState.success = true
+  } else if (payload.status === 'error') {
+    postcleanState.success = false
+  }
+  postcleanState.lastHeartbeat = String(payload.last_heartbeat || '')
+  postcleanState.logs = Array.isArray(payload.logs) ? payload.logs : []
+  postcleanState.progress = {
+    total_tables: payload.progress?.total_tables || 0,
+    completed_tables: payload.progress?.completed_tables || 0,
+    deleted_rows: payload.progress?.deleted_rows || 0,
+    current_table: payload.progress?.current_table || '',
+    percentage: payload.progress?.percentage || 0
+  }
+  if (payload.message) {
+    postcleanState.message = String(payload.message)
+  }
+  if (payload.result && typeof payload.result === 'object') {
+    postcleanState.lastResult = payload.result
+  }
+}
+
+function startPostcleanPolling() {
+  if (typeof window === 'undefined' || postcleanTimer.value) return
+  postcleanTimer.value = window.setInterval(() => {
+    loadPostcleanStatus({ silent: true })
+  }, POLL_INTERVAL)
+}
+
+function stopPostcleanPolling() {
+  if (typeof window === 'undefined' || !postcleanTimer.value) return
+  window.clearInterval(postcleanTimer.value)
+  postcleanTimer.value = null
+}
+
+function startStopwordSuggestionPolling() {
+  if (typeof window === 'undefined' || stopwordSuggestionTimer.value) return
+  stopwordSuggestionTimer.value = window.setInterval(() => {
+    loadStopwordSuggestionStatus()
+  }, POLL_INTERVAL)
+}
+
+function stopStopwordSuggestionPolling() {
+  if (typeof window === 'undefined' || !stopwordSuggestionTimer.value) return
+  window.clearInterval(stopwordSuggestionTimer.value)
+  stopwordSuggestionTimer.value = null
 }
 
 function startStatusPolling() {
@@ -1143,6 +1776,24 @@ function resetStatusState() {
   statusState.recentRecords = []
   statusState.relevantSamples = []
   statusState.irrelevantSamples = []
+}
+
+function resetPostcleanState() {
+  stopPostcleanPolling()
+  postcleanState.activeTables = []
+  postcleanState.running = false
+  postcleanState.success = null
+  postcleanState.message = ''
+  postcleanState.lastResult = null
+  postcleanState.lastHeartbeat = ''
+  postcleanState.logs = []
+  postcleanState.progress = {
+    total_tables: 0,
+    completed_tables: 0,
+    deleted_rows: 0,
+    current_table: '',
+    percentage: 0
+  }
 }
 
 function clearLocalMessages() {

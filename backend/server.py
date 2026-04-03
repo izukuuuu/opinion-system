@@ -7,6 +7,7 @@ import re
 import sys
 import time
 import os
+import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -78,6 +79,10 @@ from server_support import (  # type: ignore
     DATA_PROJECTS_ROOT,
     mark_filter_job_running,
     mark_filter_job_finished,
+    create_postclean_job,
+    get_postclean_job,
+    heartbeat_postclean_job,
+    update_postclean_job,
     get_default_rag_config,
 )
 from server_support.router_prompts.utils import (
@@ -90,6 +95,10 @@ from server_support.hot_overview import (
     list_hot_overview_history,
     rollback_hot_overview_revision,
     reclassify_hot_overview,
+)
+from server_support.stopword_suggestions import (
+    build_status_payload as build_stopword_suggestion_status_payload,
+    create_or_reuse_task as create_stopword_suggestion_task,
 )
 
 PROJECT_MANAGER = get_project_manager()
@@ -132,6 +141,41 @@ def _build_filter_status_payload(
     return status_payload
 
 
+def _resolve_stopword_suggestion_inputs(
+    topic_param: str,
+    project_param: str,
+    dataset_id_param: str,
+    date_param: str,
+    stage_param: str,
+) -> Tuple[str, str, str]:
+    if not topic_param and not project_param and not dataset_id_param:
+        raise ValueError("Missing required field(s): topic/project/dataset_id")
+
+    resolution_payload: Dict[str, Any] = {}
+    if topic_param:
+        resolution_payload["topic"] = topic_param
+    if project_param:
+        resolution_payload["project"] = project_param
+    if dataset_id_param:
+        resolution_payload["dataset_id"] = dataset_id_param
+
+    topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
+    stage = stage_param if stage_param in {"pre", "post"} else "pre"
+    date_value = str(date_param or "").strip()
+    if date_value:
+        return topic_identifier, date_value, stage
+
+    priorities = ("clean", "fetch") if stage == "pre" else ("filter", "clean", "fetch")
+    for layer in priorities:
+        archives = collect_layer_archives(topic_identifier, layer)
+        for archive in archives:
+            candidate = str((archive or {}).get("date") or "").strip()
+            if candidate:
+                return topic_identifier, candidate, stage
+
+    raise ValueError("未找到可用的数据存档，请先拉取数据或完成预处理。")
+
+
 def _submit_filter_job(
     run_callable: Callable[[str, str, Optional[Any]], Any],
     *,
@@ -170,6 +214,125 @@ def _submit_filter_job(
     return FILTER_EXECUTOR.submit(_job)
 
 
+def _submit_postclean_job(
+    *,
+    topic_identifier: str,
+    database: str,
+    tables: Optional[List[str]],
+    log_project: str,
+    display_name: str,
+) -> concurrent.futures.Future:
+    def _job():
+        stop_event = threading.Event()
+
+        def _heartbeat_loop():
+            while not stop_event.wait(2.0):
+                heartbeat_postclean_job(topic_identifier, database, tables)
+
+        def _on_progress(event: str, message: str, payload: Dict[str, Any]) -> None:
+            progress_payload = {
+                "total_tables": int(payload.get("total_tables") or 0),
+                "completed_tables": int(payload.get("completed_tables") or 0),
+                "deleted_rows": int(payload.get("deleted_rows") or 0),
+                "current_table": str(payload.get("table") or "").strip(),
+                "percentage": int(payload.get("percentage") or 0),
+            }
+            update_postclean_job(
+                topic_identifier,
+                database,
+                tables,
+                message=message,
+                progress=progress_payload,
+                log_message=message,
+                log_event=event,
+                log_level="error" if event == "task.failed" else "info",
+            )
+
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            name=f"postclean-heartbeat-{topic_identifier}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
+        try:
+            from src.filter import run_database_postclean  # type: ignore
+
+            result = run_database_postclean(
+                topic_identifier,
+                database,
+                tables=tables,
+                progress_callback=_on_progress,
+            )
+            success = evaluate_success(result)
+            _log_with_context(
+                "database-postclean",
+                success,
+                {
+                    "project": log_project,
+                    "params": {
+                        "database": database,
+                        "tables": tables or [],
+                        "source": "api",
+                        "topic": display_name,
+                        "bucket": topic_identifier,
+                    },
+                },
+            )
+            serialised = serialise_result(result)
+            update_postclean_job(
+                topic_identifier,
+                database,
+                tables,
+                status="completed" if success else "error",
+                message=(
+                    f"后清洗完成，共删除 {int(serialised.get('deleted_rows') or 0)} 条记录。"
+                    if success and isinstance(serialised, dict)
+                    else str((serialised or {}).get("message") if isinstance(serialised, dict) else serialised or "后清洗失败")
+                ),
+                progress={"percentage": 100 if success else 0},
+                result=serialised,
+                log_message=(
+                    f"后清洗完成，共删除 {int(serialised.get('deleted_rows') or 0)} 条记录。"
+                    if success and isinstance(serialised, dict)
+                    else str((serialised or {}).get("message") if isinstance(serialised, dict) else serialised or "后清洗失败")
+                ),
+                log_event="task.completed" if success else "task.failed",
+                log_level="info" if success else "error",
+            )
+        except Exception as exc:  # pragma: no cover
+            LOGGER.exception("Postclean job failed for %s@%s", topic_identifier, database)
+            detail = str(exc)
+            _log_with_context(
+                "database-postclean",
+                False,
+                {
+                    "project": log_project,
+                    "params": {
+                        "database": database,
+                        "tables": tables or [],
+                        "source": "api",
+                        "topic": display_name,
+                        "bucket": topic_identifier,
+                    },
+                },
+            )
+            update_postclean_job(
+                topic_identifier,
+                database,
+                tables,
+                status="error",
+                message=detail,
+                log_message=detail,
+                log_event="task.failed",
+                log_level="error",
+            )
+        finally:
+            stop_event.set()
+            heartbeat_postclean_job(topic_identifier, database, tables)
+
+    return POSTCLEAN_EXECUTOR.submit(_job)
+
+
 from src.fluid.api import fluid_bp
 from src.analyze.api import analyze_bp
 from src.topic.api import topic_bp
@@ -204,6 +367,7 @@ LLM_CONFIG_NAME = "llm"
 FILTER_STATUS_STREAM_INTERVAL = 1.0
 FILTER_STATUS_STREAM_TIMEOUT = 300.0
 FILTER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+POSTCLEAN_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 
 def _resolve_runtime_binding() -> Tuple[str, int]:
@@ -306,6 +470,25 @@ def status():
             "backend": CONFIG.get("backend", {}),
         },
     })
+
+
+@app.get("/api/system/background-tasks")
+def system_background_tasks():
+    active_only_raw = str(request.args.get("active_only") or "1").strip().lower()
+    active_only = active_only_raw not in {"0", "false", "no", "off"}
+    try:
+        limit = max(1, min(int(request.args.get("limit") or 20), 50))
+    except ValueError:
+        return error("Field 'limit' must be an integer", 400)
+
+    try:
+        from server_support.background_tasks import collect_background_task_payload
+
+        payload = collect_background_task_payload(active_only=active_only, limit=limit)
+    except Exception as exc:
+        LOGGER.exception("Failed to collect background tasks")
+        return error(f"读取后台任务状态失败: {str(exc)}", 500)
+    return success({"data": payload})
 
 
 @app.get("/api/config")
@@ -600,6 +783,77 @@ def upsert_filter_template():
         return error(str(exc))
 
     return success({"data": data})
+
+
+@app.get("/api/filter/stopwords/suggestions")
+def get_filter_stopword_suggestions():
+    topic_param = str(request.args.get("topic", "") or "").strip()
+    project_param = str(request.args.get("project", "") or "").strip()
+    dataset_id_param = str(request.args.get("dataset_id", "") or "").strip()
+    date_param = str(request.args.get("date", "") or "").strip()
+    stage_param = str(request.args.get("stage", "") or "").strip().lower()
+
+    try:
+        topic_identifier, resolved_date, stage = _resolve_stopword_suggestion_inputs(
+            topic_param,
+            project_param,
+            dataset_id_param,
+            date_param,
+            stage_param,
+        )
+    except ValueError as exc:
+        return error(str(exc))
+
+    payload = build_stopword_suggestion_status_payload(
+        topic_identifier,
+        resolved_date,
+        stage=stage,
+    )
+    return success({"data": payload})
+
+
+@app.post("/api/filter/stopwords/suggestions")
+def create_filter_stopword_suggestion_task():
+    payload = request.get_json(silent=True) or {}
+    topic_param = str(payload.get("topic") or "").strip()
+    project_param = str(payload.get("project") or "").strip()
+    dataset_id_param = str(payload.get("dataset_id") or "").strip()
+    date_param = str(payload.get("date") or "").strip()
+    stage_param = str(payload.get("stage") or "").strip().lower()
+    force_value = payload.get("force")
+    top_k_value = payload.get("top_k", payload.get("limit", 120))
+
+    try:
+        topic_identifier, resolved_date, stage = _resolve_stopword_suggestion_inputs(
+            topic_param,
+            project_param,
+            dataset_id_param,
+            date_param,
+            stage_param,
+        )
+    except ValueError as exc:
+        return error(str(exc))
+
+    force = bool(force_value) if isinstance(force_value, bool) else str(force_value or "").strip().lower() in {"1", "true", "yes", "on"}
+    try:
+        task = create_stopword_suggestion_task(
+            topic_identifier,
+            resolved_date,
+            top_k=int(top_k_value or 120),
+            stage=stage,
+            force=force,
+        )
+    except Exception as exc:
+        LOGGER.exception("Failed to create stopword suggestion task")
+        return error(str(exc), 500)
+
+    response_payload = {
+        "topic_identifier": topic_identifier,
+        "date": resolved_date,
+        "stage": stage,
+        "task": task,
+    }
+    return success({"data": response_payload}, status_code=202)
 
 
 @app.get("/api/content/prompt")
@@ -1079,26 +1333,77 @@ def database_postclean_endpoint():
     if isinstance(raw_tables, list):
         tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
 
-    from src.filter import run_database_postclean  # type: ignore
+    existing = get_postclean_job(topic_identifier, database, tables)
+    if existing and existing.get("status") == "running":
+        return jsonify({
+            "status": "accepted",
+            "operation": "database-postclean",
+            "reused": True,
+            "data": existing,
+        }), 202
 
-    response, code = _execute_operation(
-        "database-postclean",
-        run_database_postclean,
-        topic_identifier,
-        database,
+    payload = create_postclean_job(topic_identifier, database, tables)
+    _submit_postclean_job(
+        topic_identifier=topic_identifier,
+        database=database,
         tables=tables,
-        log_context={
-            "project": log_project,
-            "params": {
-                "database": database,
-                "tables": tables or [],
-                "source": "api",
-                "topic": display_name,
-                "bucket": topic_identifier,
-            },
-        },
+        log_project=log_project,
+        display_name=display_name,
     )
-    return jsonify(response), code
+    return jsonify({
+        "status": "accepted",
+        "operation": "database-postclean",
+        "reused": False,
+        "data": payload,
+    }), 202
+
+
+@app.get("/api/database/postclean/status")
+def database_postclean_status_endpoint():
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    database = str(request.args.get("database") or "").strip()
+    raw_tables = request.args.getlist("tables")
+
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+    if not database:
+        return jsonify({"status": "error", "message": "Missing required field(s): database"}), 400
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(
+            {
+                "topic": topic,
+                "project": project,
+                "dataset_id": dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
+    payload = get_postclean_job(topic_identifier, database, tables) or {
+        "topic": topic_identifier,
+        "database": database,
+        "tables": tables,
+        "status": "idle",
+        "message": "",
+        "started_at": "",
+        "updated_at": "",
+        "last_heartbeat": "",
+        "progress": {
+            "total_tables": 0,
+            "completed_tables": 0,
+            "deleted_rows": 0,
+            "current_table": "",
+            "percentage": 0,
+        },
+        "logs": [],
+        "result": None,
+    }
+    return jsonify({"status": "ok", "operation": "database-postclean-status", "data": payload}), 200
 
 
 @app.post("/api/fetch")

@@ -35,101 +35,20 @@
       </div>
     </section>
 
-    <!-- Navigation Cards -->
-    <section class="space-y-8">
-      <header class="space-y-3 px-2">
-        <h2 class="text-lg font-bold text-primary">专题筹备流程</h2>
-        <p class="text-base text-secondary max-w-3xl">
-          按照顺序完成数据准备，每一步都会生成独立的存档，方便随时回溯与调整。
-        </p>
-      </header>
-
-      <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-        <article v-for="stage in stages" :key="stage.title"
-          class="group relative flex flex-col justify-between card-surface p-6 transition-all hover:bg-surface-soft hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
-          @click="router.push(stage.route)">
-          <!-- Decorative Background Number -->
-          <div
-            class="absolute -right-4 -top-6 text-[120px] font-bold leading-none text-brand-600 opacity-10 select-none group-hover:text-brand-600 group-hover:opacity-20 group-hover:translate-x-2 transition-all duration-500">
-            {{ stage.index }}
-          </div>
-
-          <div class="relative space-y-4">
-            <div
-              class="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100 group-hover:text-brand-700">
-              <component :is="stage.icon" class="h-7 w-7" />
-            </div>
-
-            <div class="space-y-2">
-              <h3 class="text-lg font-bold text-primary group-hover:text-brand-900 transition-colors">{{ stage.title }}
-              </h3>
-              <p class="text-sm font-medium text-brand-600/80 uppercase tracking-wider">{{ stage.subtitle }}</p>
-            </div>
-
-            <p class="text-sm leading-relaxed text-secondary group-hover:text-primary/90 transition-colors">
-              {{ stage.description }}
-            </p>
-          </div>
-
-          <div
-            class="relative mt-6 flex items-center gap-2 text-sm font-semibold text-brand-600 opacity-0 -translate-x-2 transition-all group-hover:opacity-100 group-hover:translate-x-0">
-            <span>前往配置</span>
-            <ArrowRightIcon class="h-4 w-4" />
-          </div>
-        </article>
-      </div>
-    </section>
+    <TopicPreparationWorkflow />
   </div>
 </template>
 
 <script setup>
 import { useRouter } from 'vue-router'
 import {
-  ArrowRightIcon,
-  CloudArrowUpIcon,
-  FunnelIcon,
-  AdjustmentsHorizontalIcon,
-  ArrowTrendingUpIcon
+  CloudArrowUpIcon
 } from '@heroicons/vue/24/outline'
+import TopicPreparationWorkflow from '../../components/topics/TopicPreparationWorkflow.vue'
 
 const router = useRouter()
 
 const goToUpload = () => {
   router.push({ name: 'topic-create-upload' })
 }
-
-const stages = [
-  {
-    index: 1,
-    title: '上传原始数据',
-    subtitle: 'Upload',
-    description: '将获取到的 Excel/CSV 专题素材上传至系统，自动生成标准化存档。',
-    route: { name: 'topic-create-upload' },
-    icon: CloudArrowUpIcon
-  },
-  {
-    index: 2,
-    title: '数据预处理',
-    subtitle: 'Preprocess',
-    description: '执行 Merge 与 Clean，清洗数据并补齐字段，为分析做好准备。',
-    route: { name: 'topic-create-preprocess' },
-    icon: FunnelIcon
-  },
-  {
-    index: 3,
-    title: '筛选数据',
-    subtitle: 'Filter',
-    description: '先做零 token 预清洗，再按需启用 AI 筛选，最后可对数据库执行后清洗。',
-    route: { name: 'topic-create-filter' },
-    icon: AdjustmentsHorizontalIcon
-  },
-  {
-    index: 4,
-    title: '入库',
-    subtitle: 'Ingest',
-    description: '将清洗筛选后的最终数据写入数据库，供后续深度分析使用。',
-    route: { name: 'topic-create-ingest' },
-    icon: ArrowTrendingUpIcon
-  },
-]
 </script>

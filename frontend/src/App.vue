@@ -69,6 +69,7 @@
           </div>
           <div class="ml-auto flex items-center gap-2 shrink-0">
             <ActiveProjectSwitcher v-if="showGlobalProjectSwitcher" :show-label="false" />
+            <BackgroundTaskIndicator />
             <button type="button"
               class="flex h-9 w-9 items-center justify-center rounded-lg border border-soft bg-white text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
               :class="{ 'bg-brand-soft text-brand-700 border-brand-soft': isAiSidebarOpen }"
@@ -148,6 +149,7 @@
             <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
           </div>
           <div class="ml-auto flex items-center gap-2">
+            <BackgroundTaskIndicator />
             <button type="button"
               class="hidden lg:flex h-8 w-8 items-center justify-center rounded-lg border border-soft bg-white/50 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
               :class="{ 'bg-brand-soft text-brand-700 border-brand-soft': isAiSidebarOpen }"
@@ -168,6 +170,7 @@
               <p class="text-sm font-semibold uppercase tracking-[0.3em] text-muted">舆情监测系统</p>
               <div class="hidden lg:flex items-center gap-3">
                 <ActiveProjectSwitcher v-if="showGlobalProjectSwitcher" />
+                <BackgroundTaskIndicator />
                 <button type="button"
                   class="flex h-9 w-9 items-center justify-center rounded-lg border border-soft bg-white text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
                   :class="{ 'bg-brand-soft text-brand-700 border-brand-soft': isAiSidebarOpen }"
@@ -220,6 +223,7 @@ import {
   XMarkIcon
 } from '@heroicons/vue/24/outline'
 import ActiveProjectSwitcher from './components/ActiveProjectSwitcher.vue'
+import BackgroundTaskIndicator from './components/BackgroundTaskIndicator.vue'
 import './assets/colors.css'
 
 const AiSidebar = defineAsyncComponent(() => import('./components/AiSidebar.vue'))

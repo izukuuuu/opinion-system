@@ -82,30 +82,29 @@
         </p>
       </div>
 
-      <div class="grid gap-5 md:grid-cols-2">
-        <article v-for="step in steps" :key="step.title" class="card-surface p-6 transition-all">
-          <div class="flex items-start gap-4">
-            <div
-              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft/50 text-lg font-black text-brand-600 border border-brand-soft">
-              {{ step.index }}
-            </div>
-            <div class="space-y-3">
-              <div class="space-y-0.5">
-                <h3 class="text-lg font-bold text-primary">{{ step.title }}</h3>
-                <p class="text-[11px] font-medium text-brand-600/70">{{ step.subtitle }}</p>
+      <div class="topic-prep-workflow">
+        <div class="topic-prep-workflow__grid topic-prep-workflow__grid--compact">
+          <article v-for="step in steps" :key="step.title" class="topic-prep-workflow__card">
+            <div class="topic-prep-workflow__index">{{ step.index }}</div>
+            <div class="topic-prep-workflow__body">
+              <div class="topic-prep-workflow__meta topic-prep-workflow__meta--tight">
+                <h3 class="topic-prep-workflow__step-title">{{ step.title }}</h3>
+                <p class="topic-prep-workflow__step-subtitle">{{ step.subtitle }}</p>
               </div>
-              <p class="text-sm leading-relaxed text-secondary/80">
+              <p class="topic-prep-workflow__step-description">
                 {{ step.description }}
               </p>
-              <button type="button"
-                class="inline-flex items-center gap-1 text-sm font-bold text-brand-600 transition hover:underline group"
-                @click="router.push(step.route)">
-                前往分执行分析
-                <ArrowSmallRightIcon class="h-4 w-4" />
-              </button>
             </div>
-          </div>
-        </article>
+            <button
+              type="button"
+              class="topic-prep-workflow__action opacity-100 translate-x-0"
+              @click="router.push(step.route)"
+            >
+              前往执行分析
+              <ArrowSmallRightIcon class="topic-prep-workflow__action-icon" />
+            </button>
+          </article>
+        </div>
       </div>
     </section>
 
@@ -288,6 +287,8 @@
 </template>
 
 <script setup>
+import '../../../assets/topic-preparation-workflow.css'
+
 import { useRouter } from 'vue-router'
 import {
   ArrowSmallRightIcon,

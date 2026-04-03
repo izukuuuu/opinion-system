@@ -7,7 +7,7 @@ import re
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import pandas as pd
 from sqlalchemy import inspect, text
@@ -318,27 +318,53 @@ def run_keyword_preclean(topic: str, date: str, logger=None) -> Dict[str, Any]:
 
 
 def _quote_identifier(dialect_name: str, name: str) -> str:
-    if dialect_name == "mysql":
+    if _is_mysql_dialect(dialect_name):
         return f"`{name.replace('`', '``')}`"
     return f'"{name.replace(chr(34), chr(34) * 2)}"'
 
 
+def _normalise_dialect_name(dialect_name: str) -> str:
+    return str(dialect_name or "").strip().lower()
+
+
+def _is_mysql_dialect(dialect_name: str) -> bool:
+    return _normalise_dialect_name(dialect_name).startswith("mysql")
+
+
+def _is_postgresql_dialect(dialect_name: str) -> bool:
+    return _normalise_dialect_name(dialect_name).startswith("postgres")
+
+
+def _linebreak_char_fn(dialect_name: str) -> str:
+    return "CHAR" if _is_mysql_dialect(dialect_name) else "CHR"
+
+
+def _concat_text_expressions(dialect_name: str, expressions: Sequence[str]) -> str:
+    if _is_mysql_dialect(dialect_name):
+        return f"CONCAT({', '.join(expressions)})"
+    return "(" + " || ".join(expressions) + ")"
+
+
+def _like_escape_clause(dialect_name: str) -> str:
+    if _is_postgresql_dialect(dialect_name):
+        return r" ESCAPE '\'"
+    if _is_mysql_dialect(dialect_name):
+        return r" ESCAPE '\\'"
+    return ""
+
+
 def _normalised_column_expr(dialect_name: str, column_name: str) -> str:
     quoted = _quote_identifier(dialect_name, column_name)
+    char_fn = _linebreak_char_fn(dialect_name)
     return (
         f"LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE({quoted}, ''), ' ', ''), "
-        f"CHAR(10), ''), CHAR(13), ''), CHAR(9), ''))"
-        if dialect_name == "mysql"
-        else f"LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE({quoted}, ''), ' ', ''), "
-        f"CHR(10), ''), CHR(13), ''), CHR(9), ''))"
+        f"{char_fn}(10), ''), {char_fn}(13), ''), {char_fn}(9), ''))"
     )
 
 
 def _combined_text_expr(dialect_name: str, columns: Sequence[str]) -> str:
     expressions = [_normalised_column_expr(dialect_name, column) for column in columns]
-    if dialect_name == "mysql":
-        return f"CONCAT({', '.join(expressions)})"
-    return "(" + " || ".join(expressions) + ")"
+    return _concat_text_expressions(dialect_name, expressions)
 
 
 def _escape_like_term(term: str) -> str:
@@ -347,12 +373,13 @@ def _escape_like_term(term: str) -> str:
 
 def _build_match_condition(dialect_name: str, columns: Sequence[str], terms: Sequence[str]) -> tuple[str, Dict[str, Any]]:
     combined_expr = _combined_text_expr(dialect_name, columns)
+    escape_clause = _like_escape_clause(dialect_name)
     params: Dict[str, Any] = {}
     clauses: List[str] = []
     for idx, term in enumerate(terms):
         param_name = f"term_{idx}"
         params[param_name] = f"%{_escape_like_term(term)}%"
-        clauses.append(f"{combined_expr} LIKE :{param_name} ESCAPE '\\\\'")
+        clauses.append(f"{combined_expr} LIKE :{param_name}{escape_clause}")
     return " OR ".join(clauses) if clauses else "1=0", params
 
 
@@ -362,6 +389,7 @@ def run_database_postclean(
     *,
     tables: Optional[Sequence[str]] = None,
     logger=None,
+    progress_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Hard-delete rows in a database whose business fields hit shared blacklist terms."""
 
@@ -372,6 +400,13 @@ def run_database_postclean(
     if logger is None:
         logger = setup_logger(topic, "postclean")
     log_module_start(logger, "DatabasePostclean")
+
+    def _emit(event: str, message: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        if progress_callback:
+            try:
+                progress_callback(event, message, payload or {})
+            except Exception:
+                pass
 
     terms_payload = load_shared_noise_terms(topic)
     terms = list(terms_payload.get("terms") or [])
@@ -409,8 +444,30 @@ def run_database_postclean(
 
             report_tables: List[Dict[str, Any]] = []
             total_deleted_rows = 0
+            total_tables = len(table_names)
+            completed_tables = 0
+
+            _emit(
+                "phase.started",
+                f"后清洗 worker 已启动，准备扫描 {total_tables} 张表。",
+                {
+                    "total_tables": total_tables,
+                    "completed_tables": completed_tables,
+                    "deleted_rows": total_deleted_rows,
+                },
+            )
 
             for table_name in table_names:
+                _emit(
+                    "table.started",
+                    f"开始检查数据表 {table_name}。",
+                    {
+                        "table": table_name,
+                        "total_tables": total_tables,
+                        "completed_tables": completed_tables,
+                        "deleted_rows": total_deleted_rows,
+                    },
+                )
                 column_names = {
                     str(column.get("name") or "").strip()
                     for column in inspector.get_columns(table_name)
@@ -429,6 +486,18 @@ def run_database_postclean(
                             "deleted_rows": 0,
                         }
                     )
+                    completed_tables += 1
+                    _emit(
+                        "table.skipped",
+                        f"{table_name} 跳过：缺少 title / contents / hit_words 列。",
+                        {
+                            "table": table_name,
+                            "total_tables": total_tables,
+                            "completed_tables": completed_tables,
+                            "deleted_rows": total_deleted_rows,
+                            "percentage": round(completed_tables / max(1, total_tables) * 100),
+                        },
+                    )
                     continue
 
                 if not terms:
@@ -439,6 +508,18 @@ def run_database_postclean(
                             "deleted_rows": 0,
                             "matched_columns": matched_columns,
                         }
+                    )
+                    completed_tables += 1
+                    _emit(
+                        "table.completed",
+                        f"{table_name} 检查完成，当前未配置排除词，未删除记录。",
+                        {
+                            "table": table_name,
+                            "total_tables": total_tables,
+                            "completed_tables": completed_tables,
+                            "deleted_rows": total_deleted_rows,
+                            "percentage": round(completed_tables / max(1, total_tables) * 100),
+                        },
                     )
                     continue
 
@@ -462,15 +543,30 @@ def run_database_postclean(
                         "deleted_rows": deleted_rows,
                     }
                 )
+                completed_tables += 1
                 log_success(
                     logger,
                     f"{target_database}.{table_name} 后清洗完成 | 命中:{matched_rows}, 删除:{deleted_rows}",
                     "DatabasePostclean",
                 )
+                _emit(
+                    "table.completed",
+                    f"{table_name} 检查完成，命中 {matched_rows} 条，删除 {deleted_rows} 条。",
+                    {
+                        "table": table_name,
+                        "matched_rows": matched_rows,
+                        "deleted_rows": total_deleted_rows,
+                        "table_deleted_rows": deleted_rows,
+                        "total_tables": total_tables,
+                        "completed_tables": completed_tables,
+                        "percentage": round(completed_tables / max(1, total_tables) * 100),
+                    },
+                )
 
     except Exception as exc:
         detail = f"数据库后清洗失败: {exc}"
         log_error(logger, detail, "DatabasePostclean")
+        _emit("task.failed", detail, {})
         return {"status": "error", "message": detail}
     finally:
         if engine is not None:
@@ -494,6 +590,18 @@ def run_database_postclean(
         "tables": report_tables,
     }
     _write_json(report_path, report_payload)
+
+    _emit(
+        "task.completed",
+        f"后清洗完成，共删除 {total_deleted_rows} 条记录。",
+        {
+            "deleted_rows": total_deleted_rows,
+            "total_tables": len(report_tables),
+            "completed_tables": len(report_tables),
+            "percentage": 100,
+            "report_path": get_relative_path(report_path),
+        },
+    )
 
     return {
         "status": "ok",

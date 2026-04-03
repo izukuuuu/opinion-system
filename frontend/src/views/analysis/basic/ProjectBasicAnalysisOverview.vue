@@ -1,52 +1,119 @@
 <template>
   <div class="space-y-6 pb-12">
-    <AnalysisPageHero
-      eyebrow="基础分析模块"
-      title="专题基础分析"
-      description="面向专题数据的标准分析工作流，聚焦趋势、情感、发布者与地域分布等核心指标，帮助团队快速完成基础洞察。"
-      :tags="activeDimensions"
-      :primary-action="primaryAction"
-      :secondary-action="secondaryAction"
-      :highlights="heroHighlights"
-    />
+    <section class="relative overflow-hidden rounded-3xl border border-soft bg-surface p-1">
+      <div
+        class="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-brand-600 via-brand-700 to-indigo-900 px-6 py-10 text-white sm:px-10 sm:py-12"
+      >
+        <div class="absolute inset-0 overflow-hidden opacity-20 pointer-events-none">
+          <div class="absolute -top-1/4 -left-1/4 h-[400px] w-[400px] rounded-full bg-white/30 blur-[100px]"></div>
+          <div class="absolute -bottom-1/4 -right-1/4 h-[300px] w-[300px] rounded-full bg-brand-400 blur-[80px]"></div>
+        </div>
 
-    <AnalysisSectionCard
-      title="分析流程"
-      description="从配置任务到查看结果，基础分析保持统一的三段式工作流。"
-    >
-      <div id="workflow-section" class="grid gap-4 md:grid-cols-2">
-        <article
-          v-for="step in steps"
-          :key="step.title"
-          class="rounded-[1.6rem] border border-soft bg-surface-muted p-5 transition hover:border-brand-soft hover:bg-brand-soft-muted"
-        >
-          <div class="flex items-start gap-4">
-            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-soft text-base font-semibold text-secondary">
-              {{ step.index }}
-            </div>
-            <div class="space-y-3">
-              <div class="space-y-1">
-                <h3 class="text-lg font-semibold text-primary">{{ step.title }}</h3>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.25em] text-muted">
-                  {{ step.subtitle }}
-                </p>
+        <div class="relative z-10 grid gap-8 lg:grid-cols-2 lg:items-center">
+          <div class="space-y-6">
+            <div class="space-y-2">
+              <div
+                class="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-brand-100 backdrop-blur-md"
+              >
+                Basic Analysis Module
               </div>
-              <p class="text-sm leading-6 text-secondary">
-                {{ step.description }}
+              <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
+                专题基础分析
+              </h1>
+              <p class="max-w-xl text-base font-medium leading-relaxed text-brand-50/80">
+                面向专题数据的标准分析工作流，聚焦趋势、情感、发布者与地域分布等核心指标，帮助团队快速完成基础洞察。
               </p>
+            </div>
+
+            <div class="flex flex-wrap gap-2 text-[10px]">
+              <span
+                v-for="tag in activeDimensions"
+                :key="tag"
+                class="rounded-full border border-white/5 bg-white/10 px-3 py-1 font-semibold text-white backdrop-blur-sm"
+              >
+                {{ tag }}
+              </span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3 pt-2">
               <button
                 type="button"
-                class="inline-flex items-center gap-1 text-sm font-semibold text-secondary transition hover:text-primary"
-                @click="router.push(step.route)"
+                class="group inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-brand-800 transition-all active:scale-95"
+                @click="goToRun"
               >
-                <span>前往执行</span>
-                <ArrowSmallRightIcon class="h-4 w-4" />
+                <PlayIcon class="h-4 w-4 fill-current" />
+                <span class="text-sm font-bold">立即配置分析任务</span>
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-5 py-2.5 text-sm text-white transition-all"
+                @click="scrollToProcess"
+              >
+                <InformationCircleIcon class="h-4 w-4" />
+                <span>工作流说明</span>
               </button>
             </div>
           </div>
+
+          <div class="hidden lg:block">
+            <div class="relative rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
+              <h3 class="mb-3 text-xs font-bold text-brand-200">核心分析能力 (Core Capabilities)</h3>
+              <ul class="space-y-2.5 text-[13px] text-white/70">
+                <li class="flex items-start gap-3">
+                  <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
+                  <span>声量趋势与异常峰值识别，快速定位传播拐点</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
+                  <span>情感、地域、发布者等多维统计统一输出</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
+                  <span>AI 摘要联动图表结果，辅助团队快速形成判断</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow-section" class="topic-prep-workflow">
+      <header class="topic-prep-workflow__header px-0">
+        <h2 class="topic-prep-workflow__title">分析流程</h2>
+        <p class="topic-prep-workflow__description">
+          从配置任务到查看结果，基础分析保持统一的三段式工作流。
+        </p>
+      </header>
+
+      <div class="topic-prep-workflow__grid topic-prep-workflow__grid--compact">
+        <article
+          v-for="step in steps"
+          :key="step.title"
+          class="topic-prep-workflow__card"
+        >
+          <div class="topic-prep-workflow__index">{{ step.index }}</div>
+          <div class="topic-prep-workflow__body">
+            <div class="topic-prep-workflow__meta topic-prep-workflow__meta--tight">
+              <h3 class="topic-prep-workflow__step-title">{{ step.title }}</h3>
+              <p class="topic-prep-workflow__step-subtitle topic-prep-workflow__step-subtitle--muted text-[11px] tracking-[0.25em]">
+                {{ step.subtitle }}
+              </p>
+            </div>
+            <p class="topic-prep-workflow__step-description">{{ step.description }}</p>
+          </div>
+          <button
+            type="button"
+            class="topic-prep-workflow__action opacity-100 translate-x-0"
+            @click="router.push(step.route)"
+          >
+            <span>前往执行</span>
+            <ArrowSmallRightIcon class="topic-prep-workflow__action-icon" />
+          </button>
         </article>
       </div>
-    </AnalysisSectionCard>
+    </section>
 
     <AnalysisSectionCard
       title="分析解读示例"
@@ -125,7 +192,8 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import '../../../assets/topic-preparation-workflow.css'
+
 import { useRouter } from 'vue-router'
 import {
   ArrowSmallRightIcon,
@@ -138,7 +206,6 @@ import {
   SparklesIcon,
   TagIcon
 } from '@heroicons/vue/24/solid'
-import AnalysisPageHero from '../../../components/analysis/AnalysisPageHero.vue'
 import AnalysisSectionCard from '../../../components/analysis/AnalysisSectionCard.vue'
 
 const router = useRouter()
@@ -154,26 +221,6 @@ const scrollToProcess = () => {
 
 const activeDimensions = ['地域分析', '关键词', '趋势洞察', '发布者画像', '情感分析', '声量概览', '话题分类']
 const activeDimensionIds = ['Attitude', 'Classification', 'Geography', 'Keywords', 'Publishers', 'Trends', 'Volume']
-
-const primaryAction = computed(() => ({
-  label: '立即配置分析任务',
-  icon: PlayIcon,
-  variant: 'primary',
-  onClick: goToRun
-}))
-
-const secondaryAction = computed(() => ({
-  label: '了解工作流',
-  icon: InformationCircleIcon,
-  variant: 'secondary',
-  onClick: scrollToProcess
-}))
-
-const heroHighlights = [
-  { title: '声量峰值识别', description: '定位异常时间点与传播高峰。' },
-  { title: '多维度特征统计', description: '统一输出趋势、地域、情感、发布者等结果。' },
-  { title: 'AI 结果摘要', description: '自动汇总主要发现并与图表对应展示。' }
-]
 
 const steps = [
   {

@@ -49,6 +49,12 @@ from .filter_jobs import (
     mark_filter_job_running,
 )
 from .filter_progress import collect_filter_status
+from .postclean_jobs import (
+    create_postclean_job,
+    get_postclean_job,
+    heartbeat_postclean_job,
+    update_postclean_job,
+)
 from .filter_templates import (
     load_filter_template_config,
     persist_filter_template_config,
@@ -139,10 +145,14 @@ __all__ = [
     "update_dataset_source_references",
     # Filter helpers
     "collect_filter_status",
+    "create_postclean_job",
+    "get_postclean_job",
+    "heartbeat_postclean_job",
     "is_filter_job_running",
     "load_filter_template_config",
     "mark_filter_job_finished",
     "mark_filter_job_running",
+    "update_postclean_job",
     "persist_filter_template_config",
     # Paths
     "BACKEND_DIR",

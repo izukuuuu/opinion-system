@@ -14,7 +14,7 @@
         @click.self="handleBackdrop"
       >
         <div
-          class="w-full rounded-3xl bg-surface shadow-2xl"
+          class="w-full overflow-hidden rounded-3xl bg-surface shadow-2xl"
           :class="[width, scrollable ? 'flex flex-col' : 'p-6']"
           :style="scrollable ? 'max-height: 82vh' : ''"
         >
@@ -37,7 +37,7 @@
               @click="handleCancel"
               aria-label="关闭"
             >
-              ✕
+              <XMarkIcon class="h-5 w-5" />
             </button>
           </header>
 
@@ -83,6 +83,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { XMarkIcon } from '@heroicons/vue/24/outline'
 
 const props = defineProps({
   modelValue: {
