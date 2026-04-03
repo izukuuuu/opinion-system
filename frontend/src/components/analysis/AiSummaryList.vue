@@ -3,7 +3,7 @@
     <article
       v-for="item in items"
       :key="item.id"
-      class="flex h-full flex-col rounded-2xl border border-soft bg-white/80 p-3 shadow-sm transition hover:border-brand-soft"
+      class="flex h-full flex-col rounded-2xl border border-soft bg-white/80 p-3 transition hover:border-brand-soft"
     >
       <header class="flex items-center gap-2 text-sm text-primary">
         <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">

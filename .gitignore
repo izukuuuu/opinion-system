@@ -41,3 +41,6 @@ scripts/
 # Temp
 .tmp/
 .tmp-*/
+
+# Logs
+*.log

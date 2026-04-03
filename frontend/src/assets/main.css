@@ -118,4 +118,225 @@
     @apply focus:ring-2 focus:ring-brand-500 focus:ring-offset-1;
     @apply disabled:cursor-not-allowed disabled:opacity-50;
   }
+
+  .analysis-shell {
+    @apply space-y-6;
+  }
+
+  .analysis-shell__header {
+    @apply flex flex-wrap items-center justify-between gap-3 text-sm text-secondary;
+  }
+
+  .analysis-shell__badge {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold text-secondary;
+    background-color: rgb(var(--color-brand-100) / 0.8);
+  }
+
+  .analysis-shell__breadcrumb {
+    @apply flex items-center gap-2;
+  }
+
+  .analysis-shell__back {
+    @apply inline-flex items-center gap-1 self-start rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition;
+  }
+
+  .analysis-shell__back:hover {
+    border-color: rgb(var(--color-brand-200) / 1);
+    color: var(--color-text-primary);
+  }
+
+  .analysis-shell__body {
+    @apply flex flex-col gap-6 pb-20 lg:flex-row lg:items-start lg:pb-0;
+  }
+
+  .analysis-content {
+    @apply min-w-0 flex-1 space-y-6;
+  }
+
+  .analysis-hero {
+    @apply relative overflow-hidden rounded-[2rem] border border-soft px-6 py-8 sm:px-8 sm:py-10 lg:px-10;
+    background:
+      linear-gradient(135deg, var(--color-surface) 0%, rgb(var(--color-brand-100) / 0.72) 52%, rgb(var(--color-accent-50) / 0.92) 100%);
+  }
+
+  .analysis-hero__backdrop {
+    @apply pointer-events-none absolute inset-0 opacity-100;
+    background:
+      radial-gradient(circle at top left, rgb(var(--color-brand-200) / 0.42), transparent 28%),
+      radial-gradient(circle at bottom right, rgb(var(--color-accent-100) / 0.5), transparent 30%);
+  }
+
+  .analysis-hero__grid {
+    @apply relative z-10 grid gap-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)] lg:items-center;
+  }
+
+  .analysis-hero__eyebrow {
+    @apply inline-flex items-center rounded-full border border-soft px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] text-secondary;
+    background-color: rgb(255 255 255 / 0.8);
+  }
+
+  .analysis-hero__title {
+    @apply text-3xl font-semibold tracking-tight text-primary sm:text-4xl lg:text-[2.8rem];
+  }
+
+  .analysis-hero__description {
+    @apply max-w-2xl text-sm leading-7 sm:text-base;
+    color: var(--color-text-secondary);
+  }
+
+  .analysis-hero__action {
+    @apply inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition;
+  }
+
+  .analysis-hero__action--primary {
+    @apply text-white;
+    background-color: rgb(var(--color-brand-500) / 1);
+  }
+
+  .analysis-hero__action--primary:hover {
+    background-color: rgb(var(--color-brand-600) / 1);
+  }
+
+  .analysis-hero__action--secondary {
+    @apply border border-soft text-secondary;
+    background-color: rgb(255 255 255 / 0.8);
+  }
+
+  .analysis-hero__action--secondary:hover {
+    color: var(--color-text-primary);
+  }
+
+  .analysis-hero__panel {
+    @apply rounded-[1.75rem] border border-soft p-5 backdrop-blur;
+    background-color: rgb(255 255 255 / 0.96);
+  }
+
+  .analysis-hero__panel-eyebrow {
+    @apply mb-4 text-[11px] font-semibold uppercase tracking-[0.3em];
+    color: var(--color-text-muted);
+  }
+
+  .analysis-hero__highlight {
+    @apply flex items-start gap-3;
+  }
+
+  .analysis-hero__highlight-dot {
+    @apply mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full;
+    background-color: rgb(var(--color-brand-400) / 1);
+  }
+
+  .analysis-page-header {
+    @apply rounded-3xl border border-soft bg-surface px-5 py-5 sm:px-6;
+  }
+
+  .analysis-page-header__main {
+    @apply flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between;
+  }
+
+  .analysis-page-header__eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.32em] text-muted;
+  }
+
+  .analysis-page-header__title {
+    @apply text-2xl font-semibold tracking-tight text-primary sm:text-[1.9rem];
+  }
+
+  .analysis-page-header__description {
+    @apply max-w-3xl text-sm leading-6 text-secondary sm:text-base;
+  }
+
+  .analysis-meta-list {
+    @apply mt-5 grid gap-3 border-t border-soft pt-5 sm:grid-cols-2 xl:grid-cols-3;
+  }
+
+  .analysis-meta-list__item {
+    @apply flex items-start gap-3 rounded-2xl border border-soft px-4 py-3;
+    background-color: rgb(226 233 241 / 0.6);
+  }
+
+  .analysis-meta-list__icon {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl text-secondary;
+    background-color: rgb(var(--color-brand-100) / 0.7);
+  }
+
+  .analysis-meta-list__label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.28em] text-muted;
+  }
+
+  .analysis-meta-list__value {
+    @apply text-sm font-semibold text-primary;
+  }
+
+  .analysis-section-card {
+    @apply rounded-3xl border border-soft bg-surface p-5 sm:p-6;
+  }
+
+  .analysis-section-card--soft {
+    background-color: rgb(226 233 241 / 0.45);
+  }
+
+  .analysis-section-card--emphasis {
+    @apply border-brand-soft;
+    background-color: rgb(var(--color-brand-100) / 0.25);
+  }
+
+  .analysis-section-card__header {
+    @apply flex flex-col gap-4 border-b border-soft pb-4 lg:flex-row lg:items-start lg:justify-between;
+  }
+
+  .analysis-section-card__title {
+    @apply text-lg font-semibold text-primary;
+  }
+
+  .analysis-section-card__description {
+    @apply text-sm leading-6 text-secondary;
+  }
+
+  .analysis-section-card__body {
+    @apply pt-5;
+  }
+
+  .analysis-toolbar {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .analysis-toolbar__action {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border px-3.5 py-2 text-sm font-semibold transition;
+  }
+
+  .analysis-toolbar__action--primary {
+    @apply border-transparent text-white;
+    background-color: rgb(var(--color-brand-500) / 1);
+  }
+
+  .analysis-toolbar__action--primary:hover {
+    background-color: rgb(var(--color-brand-600) / 1);
+  }
+
+  .analysis-toolbar__action--secondary {
+    @apply border-soft bg-white text-secondary;
+  }
+
+  .analysis-toolbar__action--secondary:hover {
+    border-color: rgb(var(--color-brand-200) / 1);
+    color: var(--color-text-primary);
+  }
+
+  .analysis-toolbar__action--ghost {
+    @apply border-transparent bg-transparent px-2.5 text-secondary;
+  }
+
+  .analysis-toolbar__action--ghost:hover {
+    background-color: rgb(var(--color-brand-100) / 0.6);
+    color: var(--color-text-primary);
+  }
+
+  .analysis-chip {
+    @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold;
+  }
+
+  .analysis-chip--hero {
+    @apply border border-soft text-secondary;
+    background-color: rgb(255 255 255 / 0.92);
+  }
 }

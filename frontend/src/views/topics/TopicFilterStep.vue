@@ -1,45 +1,50 @@
 <template>
   <div class="space-y-6 pb-12">
     <header class="flex flex-wrap items-center justify-between gap-4">
-      <div class="space-y-1">
-        <h1 class="text-xl font-bold tracking-tight text-primary">筛选数据</h1>
-        <p class="text-sm text-secondary">先确认筛选范围，再执行预清洗或 AI 筛选；数据库后清洗放在最后单独处理。</p>
-      </div>
-      <div class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-        <AdjustmentsHorizontalIcon class="h-4 w-4" />
-        <span>Filter</span>
+      <div class="space-y-1.5">
+        <div class="flex items-center gap-3">
+          <h1 class="text-xl font-bold tracking-tight text-primary">筛选数据</h1>
+          <div class="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-brand-500 to-brand-600 px-3 py-1 text-[11px] font-semibold text-white">
+            <AdjustmentsHorizontalIcon class="h-3.5 w-3.5" />
+            <span>Filter</span>
+          </div>
+        </div>
+        <p class="text-sm text-secondary">选定范围后，依次执行预清洗或 AI 筛选；后清洗单独在第三个标签页进行。</p>
       </div>
     </header>
 
-    <section class="sticky top-3 z-10 rounded-3xl border border-brand-100 bg-white/90 px-5 py-4 backdrop-blur">
-      <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div class="space-y-2">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700">当前任务</span>
-            <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="filterSourceTone">{{ filterSourceLabel }}</span>
-            <span class="text-xs text-secondary">优先动作：{{ recommendedActionLabel }}</span>
+    <section class="sticky top-[4.25rem] z-10 overflow-hidden rounded-3xl border border-brand-100/80 bg-white/95 backdrop-blur-md lg:top-[3.25rem]">
+      <div class="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-brand-400 via-brand-500 to-indigo-400" />
+      <div class="px-4 py-3 lg:px-5 lg:py-4">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div class="space-y-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700">当前任务</span>
+              <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="filterSourceTone">{{ filterSourceLabel }}</span>
+              <span class="text-xs text-secondary">优先动作：<span class="font-medium text-secondary">{{ recommendedActionLabel }}</span></span>
+            </div>
+            <p class="text-sm text-primary">
+              项目 <span class="font-semibold">{{ projectSummaryLabel }}</span>
+              <span class="text-secondary"> · 数据集 {{ datasetSummaryLabel }} · Clean 存档 {{ cleanArchiveSummaryLabel }}</span>
+            </p>
           </div>
-          <p class="text-sm text-primary">
-            项目 <span class="font-semibold">{{ projectSummaryLabel }}</span>
-            <span class="text-secondary"> · 数据集 {{ datasetSummaryLabel }} · Clean 存档 {{ cleanArchiveSummaryLabel }}</span>
-          </p>
-        </div>
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <div class="rounded-2xl bg-surface-muted/60 px-3 py-2">
-            <p class="text-[11px] text-muted">总条数</p>
-            <p class="mt-1 text-sm font-semibold text-primary">{{ statusState.summary.total_rows || 0 }}</p>
-          </div>
-          <div class="rounded-2xl bg-surface-muted/60 px-3 py-2">
-            <p class="text-[11px] text-muted">保留</p>
-            <p class="mt-1 text-sm font-semibold text-emerald-700">{{ statusState.summary.kept_rows || 0 }}</p>
-          </div>
-          <div class="rounded-2xl bg-surface-muted/60 px-3 py-2">
-            <p class="text-[11px] text-muted">Token</p>
-            <p class="mt-1 text-sm font-semibold text-primary">{{ formatInteger(statusState.summary.token_usage || 0) }}</p>
-          </div>
-          <div class="rounded-2xl bg-surface-muted/60 px-3 py-2">
-            <p class="text-[11px] text-muted">更新时间</p>
-            <p class="mt-1 text-sm font-semibold text-primary">{{ formatTimestamp(statusState.summary.updated_at) || '—' }}</p>
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div class="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2">
+              <p class="text-[10px] font-medium uppercase tracking-wide text-muted">总条数</p>
+              <p class="mt-0.5 text-sm font-bold text-primary">{{ statusState.summary.total_rows || 0 }}</p>
+            </div>
+            <div class="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+              <p class="text-[10px] font-medium uppercase tracking-wide text-emerald-600/70">保留</p>
+              <p class="mt-0.5 text-sm font-bold text-emerald-700">{{ statusState.summary.kept_rows || 0 }}</p>
+            </div>
+            <div class="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2">
+              <p class="text-[10px] font-medium uppercase tracking-wide text-indigo-500/70">Token</p>
+              <p class="mt-0.5 text-sm font-bold text-indigo-700">{{ formatInteger(statusState.summary.token_usage || 0) }}</p>
+            </div>
+            <div class="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2">
+              <p class="text-[10px] font-medium uppercase tracking-wide text-muted">更新时间</p>
+              <p class="mt-0.5 text-sm font-bold text-primary">{{ formatTimestamp(statusState.summary.updated_at) || '—' }}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -47,9 +52,12 @@
 
     <section class="card-surface space-y-5 p-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-lg font-semibold text-primary">筛选范围与排除词设置</h2>
-          <p class="text-sm text-secondary">先确认本次筛选范围，再维护排除词。排除词保存后，可直接用于预清洗和后清洗。</p>
+        <div class="space-y-0.5">
+          <div class="flex items-center gap-2">
+            <span class="h-4 w-1 rounded-full bg-brand-500" />
+            <h2 class="text-base font-bold text-primary">筛选范围与排除词设置</h2>
+          </div>
+          <p class="pl-3 text-sm text-secondary">选择项目与 Clean 存档，配置排除词后保存即可用于预清洗与后清洗。</p>
         </div>
         <button
           type="button"
@@ -66,7 +74,7 @@
         <div class="space-y-4 rounded-3xl border border-soft bg-surface-muted/60 p-5">
           <div>
             <h3 class="text-base font-semibold text-primary">筛选范围</h3>
-            <p class="mt-1 text-sm text-secondary">这里决定本次筛选作用在哪个项目、哪个数据集、哪个 Clean 存档。</p>
+            <p class="mt-1 text-sm text-secondary">指定项目、数据集和目标 Clean 存档。</p>
           </div>
 
           <label class="space-y-2">
@@ -122,7 +130,7 @@
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 class="text-base font-semibold text-primary">排除词设置</h3>
-                <p class="mt-1 text-sm text-secondary">命中即丢弃，可随时保存。高级来源关系保留在次级说明里。</p>
+                <p class="mt-1 text-sm text-secondary">输入关键词，命中则自动丢弃。随时保存，预清洗和后清洗均会使用。</p>
               </div>
               <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
                 <button
@@ -139,7 +147,7 @@
 
             <label class="mt-4 block space-y-2">
               <span class="text-xs font-semibold text-muted">排除词</span>
-              <p class="text-xs text-secondary">支持换行、空格、逗号、中文逗号、分号。</p>
+              <p class="text-xs text-secondary">支持换行、空格、逗号（，）或分号（；）分隔。</p>
             </label>
             <textarea
               v-model="sharedPromptState.projectStopwordsText"
@@ -150,8 +158,8 @@
 
               <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
               <div class="space-y-1">
-                <p class="text-xs text-secondary">已解析 {{ parsedNoiseTerms.length }} 个词条。</p>
-                <p class="text-xs text-secondary">这里维护的是当前专题共享使用的排除词设置。</p>
+                <p class="text-xs text-secondary">已解析 {{ parsedNoiseTerms.length }} 个词条</p>
+                <p class="text-xs text-secondary">全专题共享，修改后需手动保存。</p>
               </div>
               <button
                 type="button"
@@ -188,17 +196,20 @@
 
     <section class="card-surface space-y-5 p-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-lg font-semibold text-primary">执行筛选</h2>
-          <p class="text-sm text-secondary">操作区只负责执行动作，不承载结果详情。结果统一在下方查看。</p>
+        <div class="space-y-0.5">
+          <div class="flex items-center gap-2">
+            <span class="h-4 w-1 rounded-full bg-brand-500" />
+            <h2 class="text-base font-bold text-primary">执行筛选</h2>
+          </div>
+          <p class="pl-3 text-sm text-secondary">在此执行筛选操作，结果详情请在下方"结果与记录"中查看。</p>
         </div>
-        <div class="inline-flex rounded-full border border-soft bg-surface-muted/70 p-1">
+        <div class="inline-flex rounded-2xl border border-soft bg-surface-muted/70 p-1 gap-0.5">
           <button
             v-for="tab in tabOptions"
             :key="tab.value"
             type="button"
-            class="rounded-full px-4 py-2 text-xs font-semibold transition"
-            :class="activeTab === tab.value ? 'bg-white text-brand-700 shadow-sm' : 'text-secondary hover:text-primary'"
+            class="rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-150"
+            :class="activeTab === tab.value ? 'bg-white text-brand-700 ring-1 ring-brand-100' : 'text-secondary hover:text-primary hover:bg-white/50'"
             @click="activeTab = tab.value"
           >
             {{ tab.label }}
@@ -390,9 +401,12 @@
 
     <section class="card-surface space-y-5 p-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-lg font-semibold text-primary">结果与记录</h2>
-          <p class="text-sm text-secondary">先看结果摘要，再看最近处理记录和样本。执行区不会重复展示这些结果。</p>
+        <div class="space-y-0.5">
+          <div class="flex items-center gap-2">
+            <span class="h-4 w-1 rounded-full bg-brand-500" />
+            <h2 class="text-base font-bold text-primary">结果与记录</h2>
+          </div>
+          <p class="pl-3 text-sm text-secondary">查看本次筛选的摘要统计、最近处理记录及保留 / 丢弃样本。</p>
         </div>
         <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="statusLoading || !currentProjectName || !selectedCleanDate" @click="loadStatus">
           <ArrowPathIcon class="h-4 w-4" :class="statusLoading ? 'animate-spin' : ''" />
@@ -400,22 +414,22 @@
         </button>
       </div>
 
-      <div class="grid gap-4 md:grid-cols-4">
-        <div class="rounded-2xl border border-soft bg-surface-muted/50 px-4 py-4">
-          <p class="text-xs text-muted">结果来源</p>
-          <p class="mt-1 text-lg font-semibold text-primary">{{ filterSourceLabel }}</p>
+      <div class="grid gap-3 md:grid-cols-4">
+        <div class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+          <p class="text-[10px] font-medium uppercase tracking-wide text-muted">结果来源</p>
+          <p class="mt-1.5 text-base font-bold text-primary">{{ filterSourceLabel }}</p>
         </div>
-        <div class="rounded-2xl border border-soft bg-surface-muted/50 px-4 py-4">
-          <p class="text-xs text-muted">总条数</p>
-          <p class="mt-1 text-lg font-semibold text-primary">{{ statusState.summary.total_rows || 0 }}</p>
+        <div class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+          <p class="text-[10px] font-medium uppercase tracking-wide text-muted">总条数</p>
+          <p class="mt-1.5 text-base font-bold text-primary">{{ statusState.summary.total_rows || 0 }}</p>
         </div>
-        <div class="rounded-2xl border border-soft bg-surface-muted/50 px-4 py-4">
-          <p class="text-xs text-muted">保留</p>
-          <p class="mt-1 text-lg font-semibold text-emerald-700">{{ statusState.summary.kept_rows || 0 }}</p>
+        <div class="rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-4">
+          <p class="text-[10px] font-medium uppercase tracking-wide text-emerald-600/70">保留</p>
+          <p class="mt-1.5 text-base font-bold text-emerald-700">{{ statusState.summary.kept_rows || 0 }}</p>
         </div>
-        <div class="rounded-2xl border border-soft bg-surface-muted/50 px-4 py-4">
-          <p class="text-xs text-muted">Token</p>
-          <p class="mt-1 text-lg font-semibold text-primary">{{ formatInteger(statusState.summary.token_usage || 0) }}</p>
+        <div class="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-4">
+          <p class="text-[10px] font-medium uppercase tracking-wide text-indigo-500/70">Token</p>
+          <p class="mt-1.5 text-base font-bold text-indigo-700">{{ formatInteger(statusState.summary.token_usage || 0) }}</p>
         </div>
       </div>
 
@@ -431,14 +445,15 @@
       <div v-if="!showResultEmptyState" class="grid gap-5 xl:grid-cols-[1.25fr,1fr]">
         <div class="space-y-3">
           <div class="flex items-center justify-between">
-            <h3 class="text-sm font-semibold text-primary">最近处理记录</h3>
-            <span class="text-xs text-muted">{{ statusState.recentRecords.length }} 条</span>
+            <h3 class="text-sm font-bold text-primary">最近处理记录</h3>
+            <span class="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold text-muted">{{ statusState.recentRecords.length }} 条</span>
           </div>
-          <div v-if="statusState.recentRecords.length" class="space-y-3">
+          <div v-if="statusState.recentRecords.length" class="space-y-2.5">
             <article
               v-for="(record, index) in statusState.recentRecords"
               :key="`filter-recent-${record.channel}-${record.index}-${index}`"
-              class="rounded-2xl border border-soft bg-surface-muted/50 px-4 py-4"
+              class="rounded-2xl border bg-white px-4 py-4"
+              :class="record.status === 'discarded' ? 'border-rose-100' : 'border-emerald-100'"
             >
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
@@ -449,23 +464,23 @@
                   {{ record.status === 'discarded' ? '已丢弃' : '已保留' }}
                 </span>
               </div>
-              <p class="mt-3 text-sm font-semibold text-primary">{{ record.title || '无标题记录' }}</p>
+              <p class="mt-2.5 text-sm font-semibold text-primary">{{ record.title || '无标题记录' }}</p>
               <p class="mt-1 text-sm text-secondary">{{ record.preview || '—' }}</p>
-              <p v-if="record.matched_terms?.length" class="mt-2 text-xs text-rose-700">
-                命中词: {{ record.matched_terms.join('、') }}
+              <p v-if="record.matched_terms?.length" class="mt-2 text-xs text-rose-600">
+                命中词：{{ record.matched_terms.join('、') }}
               </p>
             </article>
           </div>
-          <div v-else class="rounded-2xl border border-dashed border-soft px-4 py-8 text-sm text-secondary">
+          <div v-else class="rounded-2xl border border-dashed border-soft px-4 py-8 text-center text-sm text-secondary">
             当前还没有筛选记录。
           </div>
         </div>
 
-        <div class="space-y-4">
-          <div class="rounded-3xl border border-soft bg-surface-muted/50 p-4">
-            <p class="text-sm font-semibold text-primary">保留样本</p>
+        <div class="space-y-3">
+          <div class="rounded-3xl border border-emerald-100 bg-emerald-50/40 p-4">
+            <p class="text-xs font-bold text-emerald-700">保留样本</p>
             <div v-if="statusState.relevantSamples.length" class="mt-3 space-y-2">
-              <article v-for="(item, index) in statusState.relevantSamples" :key="`relevant-${item.channel}-${index}`" class="rounded-2xl border border-soft bg-white px-4 py-3">
+              <article v-for="(item, index) in statusState.relevantSamples" :key="`relevant-${item.channel}-${index}`" class="rounded-2xl border border-emerald-100/70 bg-white px-4 py-3">
                 <p class="text-sm font-semibold text-primary">{{ item.title || '无标题记录' }}</p>
                 <p class="mt-1 text-xs text-secondary">{{ item.preview || '—' }}</p>
               </article>
@@ -473,10 +488,10 @@
             <p v-else class="mt-3 text-sm text-secondary">暂无保留样本。</p>
           </div>
 
-          <div class="rounded-3xl border border-soft bg-surface-muted/50 p-4">
-            <p class="text-sm font-semibold text-primary">丢弃样本</p>
+          <div class="rounded-3xl border border-rose-100 bg-rose-50/40 p-4">
+            <p class="text-xs font-bold text-rose-600">丢弃样本</p>
             <div v-if="statusState.irrelevantSamples.length" class="mt-3 space-y-2">
-              <article v-for="(item, index) in statusState.irrelevantSamples" :key="`irrelevant-${item.channel}-${index}`" class="rounded-2xl border border-soft bg-white px-4 py-3">
+              <article v-for="(item, index) in statusState.irrelevantSamples" :key="`irrelevant-${item.channel}-${index}`" class="rounded-2xl border border-rose-100/70 bg-white px-4 py-3">
                 <p class="text-sm font-semibold text-primary">{{ item.title || '无标题记录' }}</p>
                 <p class="mt-1 text-xs text-secondary">{{ item.preview || '—' }}</p>
               </article>

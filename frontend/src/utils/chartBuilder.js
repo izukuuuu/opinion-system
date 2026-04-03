@@ -127,13 +127,21 @@ export const sortRowsDescending = (rows) =>
 
 const buildBarOption = (title, rows, orientation = 'vertical', categoryLabel = '类别', valueLabel = '数量') => {
   const orderedRows = sortRowsDescending(rows)
-  const displayRows = orientation === 'horizontal' ? [...orderedRows].reverse() : orderedRows
+  const displayRows = orderedRows
   const categories = displayRows.map((row) => rowName(row))
   const values = displayRows.map((row) => ensureNumber(rowValue(row)))
   const isVertical = orientation !== 'horizontal'
+  const defaultVisibleCount = 20
+  const shouldEnableVerticalZoom = !isVertical && categories.length > defaultVisibleCount
   const grid = isVertical
     ? { left: 30, right: 20, top: 20, bottom: 30, containLabel: true }
-    : { left: 50, right: 25, top: 20, bottom: 20, containLabel: true }
+    : {
+        left: 120,
+        right: shouldEnableVerticalZoom ? 80 : 28,
+        top: 20,
+        bottom: 20,
+        containLabel: true
+      }
   const catAxis = {
     type: 'category',
     data: categories,
@@ -150,15 +158,69 @@ const buildBarOption = (title, rows, orientation = 'vertical', categoryLabel = '
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid,
     xAxis: isVertical ? catAxis : valAxis,
-    yAxis: isVertical ? valAxis : catAxis,
+    yAxis: isVertical
+      ? valAxis
+      : {
+          ...catAxis,
+          inverse: true,
+          axisLabel: {
+            ...catAxis.axisLabel,
+            width: 96,
+            overflow: 'truncate'
+          }
+        },
     dataset: {
       dimensions: [categoryLabel, valueLabel],
       source: displayRows.map((row) => ({ name: rowName(row), value: ensureNumber(rowValue(row)) }))
     },
+    dataZoom: shouldEnableVerticalZoom
+      ? [
+          {
+            type: 'inside',
+            yAxisIndex: 0,
+            zoomLock: true,
+            startValue: 0,
+            endValue: defaultVisibleCount - 1,
+            moveOnMouseMove: true,
+            moveOnMouseWheel: true,
+            preventDefaultMouseMove: true
+          },
+          {
+            type: 'slider',
+            yAxisIndex: 0,
+            right: 18,
+            top: 20,
+            bottom: 20,
+            width: 14,
+            startValue: 0,
+            endValue: defaultVisibleCount - 1,
+            zoomLock: true,
+            brushSelect: false,
+            fillerColor: 'rgba(154, 178, 203, 0.22)',
+            borderColor: '#d0d5d9',
+            backgroundColor: '#eef2f6',
+            dataBackground: {
+              lineStyle: { color: '#d0d5d9' },
+              areaStyle: { color: 'rgba(154, 178, 203, 0.16)' }
+            },
+            handleStyle: {
+              color: '#9ab2cb',
+              borderColor: '#879db3'
+            },
+            moveHandleStyle: {
+              color: '#879db3'
+            },
+            textStyle: {
+              color: '#445562'
+            }
+          }
+        ]
+      : undefined,
     series: [
       {
         type: 'bar',
         data: values,
+        barMaxWidth: isVertical ? 28 : 18,
         label: {
           show: true,
           color: '#303d47',

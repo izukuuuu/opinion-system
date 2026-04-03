@@ -1,7 +1,7 @@
 <template>
   <div>
     <div v-if="safeLogs.length" class="space-y-4">
-      <section class="rounded-3xl border border-soft bg-gradient-to-br from-white to-surface-muted/40 p-4 shadow-inner">
+      <section class="rounded-3xl border border-soft bg-gradient-to-br from-white to-surface-muted/40 p-4">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="space-y-1">
             <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">分析进度</p>

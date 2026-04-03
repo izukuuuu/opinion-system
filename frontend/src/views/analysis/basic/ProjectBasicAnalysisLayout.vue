@@ -1,49 +1,25 @@
 <template>
-  <div class="space-y-6">
-    <header class="flex flex-wrap items-center justify-between gap-3 text-sm text-secondary">
-      <nav class="flex items-center gap-2">
-        <RouterLink
-          :to="{ name: 'project-data-analysis' }"
-          class="inline-flex items-center gap-1 rounded-full px-3 py-1 transition focus-ring-accent"
-          :class="isOverview ? 'bg-brand-soft text-brand-600' : 'text-secondary hover:bg-brand-soft/60'"
-        >
-          <Squares2X2Icon class="h-4 w-4" />
-          <span>流程概览</span>
-        </RouterLink>
-        <template v-if="!isOverview">
-          <ChevronRightIcon class="h-4 w-4 text-muted" />
-          <span class="text-secondary">{{ currentBreadcrumb }}</span>
-        </template>
-      </nav>
-      <RouterLink
-        v-if="!isOverview"
-        :to="{ name: 'project-data-analysis' }"
-        class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600 focus-ring-accent"
-      >
-        <ChevronLeftIcon class="h-4 w-4" />
-        返回开始页
-      </RouterLink>
-    </header>
-
-    <div class="flex flex-col gap-6 pb-20 lg:flex-row lg:items-start lg:pb-0">
-      <CollapsibleSidebar :items="steps" :is-active-fn="isActive" />
-      <div class="flex-1 min-w-0">
-        <RouterView />
-      </div>
-    </div>
-  </div>
+  <AnalysisModuleLayout
+    module-label="基础分析"
+    :overview-route="{ name: 'project-data-analysis' }"
+    :steps="steps"
+    :current-breadcrumb="currentBreadcrumb"
+    :is-overview="isOverview"
+    :is-active-fn="isActive"
+  >
+    <RouterView />
+  </AnalysisModuleLayout>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { RouterLink, RouterView, useRoute } from 'vue-router'
+import { RouterView, useRoute } from 'vue-router'
 import {
   Squares2X2Icon,
-  PlayCircleIcon,
   ChartBarSquareIcon,
-  ChevronRightIcon
+  PlayCircleIcon
 } from '@heroicons/vue/24/outline'
-import CollapsibleSidebar from '../../../components/navigation/CollapsibleSidebar.vue'
+import AnalysisModuleLayout from '../../../components/analysis/AnalysisModuleLayout.vue'
 
 const steps = [
   {
