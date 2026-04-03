@@ -55,6 +55,15 @@ from .postclean_jobs import (
     heartbeat_postclean_job,
     update_postclean_job,
 )
+from .fetch_refresh_jobs import (
+    create_fetch_refresh_job,
+    get_fetch_refresh_job,
+    heartbeat_fetch_refresh_job,
+    load_fetch_refresh_worker_status,
+    list_fetch_refresh_jobs,
+    update_fetch_refresh_job,
+    update_fetch_refresh_worker,
+)
 from .filter_templates import (
     load_filter_template_config,
     persist_filter_template_config,
@@ -146,12 +155,19 @@ __all__ = [
     # Filter helpers
     "collect_filter_status",
     "create_postclean_job",
+    "create_fetch_refresh_job",
+    "get_fetch_refresh_job",
     "get_postclean_job",
+    "heartbeat_fetch_refresh_job",
     "heartbeat_postclean_job",
     "is_filter_job_running",
+    "list_fetch_refresh_jobs",
+    "load_fetch_refresh_worker_status",
     "load_filter_template_config",
     "mark_filter_job_finished",
     "mark_filter_job_running",
+    "update_fetch_refresh_job",
+    "update_fetch_refresh_worker",
     "update_postclean_job",
     "persist_filter_template_config",
     # Paths

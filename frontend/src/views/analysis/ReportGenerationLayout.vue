@@ -26,6 +26,7 @@
 import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import {
+  DocumentDuplicateIcon,
   ChartBarSquareIcon,
   ChevronRightIcon,
   DocumentTextIcon,
@@ -47,6 +48,13 @@ const steps = [
     to: { name: 'report-generation-view' },
     icon: ChartBarSquareIcon,
     description: '读取结果并导出报告'
+  },
+  {
+    key: 'ai',
+    label: 'AI 完整报告',
+    to: { name: 'report-generation-ai' },
+    icon: DocumentDuplicateIcon,
+    description: '阅读 Markdown 长报告'
   }
 ]
 

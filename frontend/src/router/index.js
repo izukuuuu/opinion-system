@@ -24,6 +24,7 @@ const TopicBertopicResults = () => import('../views/analysis/topic/TopicBertopic
 const ReportGenerationLayout = () => import('../views/analysis/ReportGenerationLayout.vue')
 const ReportGenerationRun = () => import('../views/analysis/ReportGenerationRun.vue')
 const ReportGenerationView = () => import('../views/analysis/ReportGenerationView.vue')
+const ReportGenerationAiView = () => import('../views/analysis/ReportGenerationAiView.vue')
 const DatabaseOverviewView = () => import('../views/DatabaseOverviewView.vue')
 const DatabaseDatasetsView = () => import('../views/DatabaseDatasetsView.vue')
 const SettingsLayout = () => import('../views/settings/SettingsLayout.vue')
@@ -199,6 +200,15 @@ export const routes = [
         meta: {
           title: '报告解读 · 查看结果',
           breadcrumb: '查看报告'
+        }
+      },
+      {
+        path: 'ai',
+        name: 'report-generation-ai',
+        component: ReportGenerationAiView,
+        meta: {
+          title: '报告解读 · AI 完整报告',
+          breadcrumb: 'AI 完整报告'
         }
       }
     ]

@@ -17,6 +17,8 @@ from src.project import get_project_manager
 from src.utils.setting.paths import bucket, ensure_bucket, get_logs_root
 
 from .runtime import ANALYZE_FILE_MAP, collect_explain_outputs
+from .full_report_service import generate_full_report_payload
+from .full_report_service import AI_FULL_REPORT_CACHE_FILENAME
 from .structured_service import REPORT_CACHE_FILENAME, generate_report_payload
 from .task_queue import (
     cancel_task,
@@ -162,11 +164,23 @@ def _load_report_cache_payload(report_cache: Path) -> Dict[str, Any]:
         return {}
 
 
+def _load_json_payload(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
 def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
     recent_events = task.get("recent_events") if isinstance(task.get("recent_events"), list) else []
     trust = task.get("trust") if isinstance(task.get("trust"), dict) else {}
     artifacts = task.get("artifacts") if isinstance(task.get("artifacts"), dict) else {}
     explain_ready = not bool(trust.get("requires_manual_review")) or bool(artifacts.get("report_ready"))
+    full_report_ready = bool(artifacts.get("full_report_ready"))
     stage = str(task.get("phase") or "").strip()
     status = str(task.get("status") or "").strip() or "queued"
     updated_at = str(task.get("updated_at") or "").strip()
@@ -259,6 +273,8 @@ def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
         "report": {
             "cache_exists": bool(artifacts.get("report_ready")),
             "cache_path": str(artifacts.get("report_cache_path") or "").strip(),
+            "full_cache_exists": full_report_ready,
+            "full_cache_path": str(artifacts.get("full_report_cache_path") or "").strip(),
         },
     }
 
@@ -418,11 +434,49 @@ def get_report_payload():
         return error("Missing required field(s): start")
     try:
         topic_identifier, display_name = _resolve_topic(topic_param, project_param, dataset_id)
-        payload = generate_report_payload(topic_identifier, start, end, topic_label=display_name, regenerate=False)
+        folder = compose_folder_name(start, end)
+        cache_path = bucket("reports", topic_identifier, folder) / REPORT_CACHE_FILENAME
+        payload = _load_report_cache_payload(cache_path)
+        if not payload:
+            return error("当前区间暂无已生成报告，请前往“运行报告”创建后台任务。", status_code=409)
     except ValueError as exc:
         return error(str(exc), status_code=404)
     except Exception as exc:
         return error(f"报告生成失败: {str(exc)}", status_code=500)
+    return success({"data": payload})
+
+
+@report_bp.get("/full")
+def get_full_report_payload():
+    topic_param = str(request.args.get("topic") or "").strip()
+    project_param = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    start = str(request.args.get("start") or "").strip()
+    end = str(request.args.get("end") or "").strip() or None
+    regenerate_raw = str(request.args.get("regenerate") or "").strip().lower()
+    regenerate = regenerate_raw in {"1", "true", "yes", "on"}
+    if not start:
+        return error("Missing required field(s): start")
+    try:
+        topic_identifier, display_name = _resolve_topic(topic_param, project_param, dataset_id)
+        folder = compose_folder_name(start, end)
+        cache_path = bucket("reports", topic_identifier, folder) / AI_FULL_REPORT_CACHE_FILENAME
+        if regenerate:
+            payload = generate_full_report_payload(
+                topic_identifier,
+                start,
+                end,
+                topic_label=display_name,
+                regenerate=True,
+            )
+        else:
+            payload = _load_json_payload(cache_path)
+            if not payload:
+                return error("当前区间暂无 AI 完整报告，请前往“运行报告”创建后台任务。", status_code=409)
+    except ValueError as exc:
+        return error(str(exc), status_code=404)
+    except Exception as exc:
+        return error(f"AI 完整报告生成失败: {str(exc)}", status_code=500)
     return success({"data": payload})
 
 

@@ -334,6 +334,7 @@
           <div class="rounded-3xl border border-rose-200 bg-white px-4 py-3 text-sm text-rose-700">
             <p class="font-semibold">危险操作</p>
             <p class="mt-1 text-xs leading-relaxed">建议先确认数据库名，再核对是否需要限制表名。执行后不会进入回收站。</p>
+            <p class="mt-1 text-xs leading-relaxed">若本次确实删除了记录，系统会自动提交当前项目已有本地缓存的同步任务，进度可在后台任务中查看。</p>
           </div>
 
           <label class="space-y-2">
@@ -404,6 +405,18 @@
             <div class="rounded-2xl border border-soft bg-white px-4 py-3">
               <p class="text-xs text-muted">总删除数</p>
               <p class="mt-1 text-lg font-semibold text-rose-700">{{ postcleanState.lastResult.deleted_rows || 0 }}</p>
+            </div>
+            <div v-if="postcleanState.lastResult.follow_up" class="rounded-2xl border border-soft bg-white px-4 py-3">
+              <p class="text-xs text-muted">本地缓存同步</p>
+              <p class="mt-1 text-sm font-semibold text-primary">
+                {{ postcleanState.lastResult.follow_up.message || '—' }}
+              </p>
+              <p
+                v-if="Array.isArray(postcleanState.lastResult.follow_up.ranges) && postcleanState.lastResult.follow_up.ranges.length"
+                class="mt-1 text-xs text-secondary"
+              >
+                共 {{ postcleanState.lastResult.follow_up.ranges.length }} 个缓存批次。
+              </p>
             </div>
             <div class="space-y-2">
               <article
@@ -548,40 +561,69 @@
       scrollable
     >
       <div class="space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="inline-flex rounded-2xl border border-soft bg-surface-muted/70 p-1 gap-0.5">
-            <button
-              v-for="option in stopwordStageOptions"
-              :key="option.value"
-              type="button"
-              class="rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-150"
-              :class="stopwordSuggestionStage === option.value ? 'bg-white text-brand-700 ring-1 ring-brand-100' : 'text-secondary hover:text-primary hover:bg-white/50'"
-              @click="stopwordSuggestionStage = option.value; seedStopwordSuggestionDate(); loadStopwordSuggestionStatus()"
-            >
-              {{ option.label }}
-            </button>
+        <div class="rounded-3xl border border-soft bg-surface-muted/35 p-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="inline-flex rounded-2xl border border-soft bg-white p-1 gap-0.5">
+              <button
+                v-for="option in stopwordStageOptions"
+                :key="option.value"
+                type="button"
+                class="rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-150"
+                :class="stopwordSuggestionStage === option.value ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'text-secondary hover:text-primary hover:bg-surface-muted/70'"
+                @click="stopwordSuggestionStage = option.value; seedStopwordSuggestionDate(); loadStopwordSuggestionStatus({ syncTopK: true })"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs font-medium text-secondary">获取数量</span>
+              <div class="inline-flex rounded-2xl border border-soft bg-white p-1 gap-0.5">
+                <button
+                  v-for="option in stopwordSuggestionTopKOptions"
+                  :key="option.value"
+                  type="button"
+                  class="rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-150"
+                  :class="stopwordSuggestionTopKMode === option.value ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'text-secondary hover:text-primary hover:bg-surface-muted/70'"
+                  @click="stopwordSuggestionTopKMode = option.value"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+              <input
+                v-if="stopwordSuggestionUsesCustomTopK"
+                v-model.trim="stopwordSuggestionCustomTopK"
+                type="number"
+                min="20"
+                step="1"
+                class="input w-28"
+                placeholder="自定义"
+              />
+            </div>
           </div>
-          <div class="flex flex-wrap items-center gap-2">
+
+          <div class="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr),auto,auto] lg:items-center">
             <select
               v-model="currentStopwordSuggestionDate"
-              class="input min-w-[16rem]"
+              class="input w-full min-w-0"
               :disabled="stopwordSuggestionArchivesState.loading || !stopwordSuggestionArchiveOptions.length"
-              @change="loadStopwordSuggestionStatus"
+              @change="loadStopwordSuggestionStatus({ syncTopK: true })"
             >
               <option value="" disabled>{{ stopwordSuggestionArchiveOptions.length ? '选择存档范围' : '暂无可用存档' }}</option>
               <option v-for="option in stopwordSuggestionArchiveOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
               </option>
             </select>
-            <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="stopwordSuggestionArchivesState.loading" @click="loadStopwordSuggestionArchives">
+            <button type="button" class="btn-secondary inline-flex items-center justify-center gap-2 whitespace-nowrap" :disabled="stopwordSuggestionArchivesState.loading" @click="loadStopwordSuggestionArchives">
               <ArrowPathIcon class="h-4 w-4" :class="stopwordSuggestionArchivesState.loading ? 'animate-spin' : ''" />
               刷新存档
             </button>
-            <button type="button" class="btn-primary" :disabled="stopwordSuggestionState.starting || !stopwordSuggestionCanRun" @click="startStopwordSuggestionTask(true)">
+            <button type="button" class="btn-primary whitespace-nowrap" :disabled="stopwordSuggestionState.starting || !stopwordSuggestionCanRun" @click="startStopwordSuggestionTask(true)">
               {{ stopwordSuggestionState.starting ? '启动中…' : '开始统计词频' }}
             </button>
           </div>
         </div>
+        <p v-if="stopwordSuggestionTopKError" class="text-xs text-danger">{{ stopwordSuggestionTopKError }}</p>
 
         <div class="grid gap-4 xl:grid-cols-[1.02fr,1.18fr]">
           <div class="rounded-3xl border border-soft bg-surface-muted/60 p-5">
@@ -619,7 +661,7 @@
               </div>
             </div>
 
-            <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <div class="mt-4 grid gap-3 sm:grid-cols-3">
               <div class="rounded-2xl border border-soft bg-white px-4 py-3">
                 <p class="text-xs text-muted">统计范围</p>
                 <p class="mt-1 text-sm font-semibold text-primary">{{ stopwordSuggestionSourceLabel }}</p>
@@ -627,6 +669,10 @@
               <div class="rounded-2xl border border-soft bg-white px-4 py-3">
                 <p class="text-xs text-muted">文档进度</p>
                 <p class="mt-1 text-sm font-semibold text-primary">{{ stopwordSuggestionSummary.processed_docs || 0 }} / {{ stopwordSuggestionSummary.total_docs || 0 }}</p>
+              </div>
+              <div class="rounded-2xl border border-soft bg-white px-4 py-3">
+                <p class="text-xs text-muted">词频数量</p>
+                <p class="mt-1 text-sm font-semibold text-primary">{{ stopwordSuggestionTaskTopK }}</p>
               </div>
             </div>
 
@@ -747,6 +793,13 @@ const {
 const SPLIT_PATTERN = /[\s,，;；]+/
 const POLL_INTERVAL = 2000
 const SHARED_PROMPT_AUTOSAVE_DELAY = 800
+const STOPWORD_SUGGESTION_DEFAULT_TOP_K = 100
+const STOPWORD_SUGGESTION_TOP_K_OPTIONS = [
+  { value: '100', label: '100' },
+  { value: '300', label: '300' },
+  { value: '500', label: '500' },
+  { value: 'custom', label: '自定义' }
+]
 
 const datasets = ref([])
 const datasetsLoading = ref(false)
@@ -763,6 +816,8 @@ const selectedCleanDate = ref('')
 const stopwordModalOpen = ref(false)
 const manualNoiseTerm = ref('')
 const stopwordSuggestionStage = ref('pre')
+const stopwordSuggestionTopKMode = ref(String(STOPWORD_SUGGESTION_DEFAULT_TOP_K))
+const stopwordSuggestionCustomTopK = ref('')
 const stopwordSuggestionDateByStage = reactive({
   pre: '',
   post: ''
@@ -961,11 +1016,30 @@ const stopwordStageOptions = [
   { value: 'pre', label: '预处理词频' },
   { value: 'post', label: '后处理词频' }
 ]
+const stopwordSuggestionTopKOptions = STOPWORD_SUGGESTION_TOP_K_OPTIONS
 const currentStopwordSuggestionDate = computed({
   get: () => stopwordSuggestionDateByStage[stopwordSuggestionStage.value] || '',
   set: (value) => {
     stopwordSuggestionDateByStage[stopwordSuggestionStage.value] = String(value || '')
   }
+})
+const stopwordSuggestionUsesCustomTopK = computed(() => stopwordSuggestionTopKMode.value === 'custom')
+const stopwordSuggestionTopKError = computed(() => {
+  if (!stopwordSuggestionUsesCustomTopK.value) return ''
+  const rawValue = String(stopwordSuggestionCustomTopK.value || '').trim()
+  if (!rawValue) return '请输入自定义获取数量。'
+  const parsed = Number.parseInt(rawValue, 10)
+  if (!Number.isInteger(parsed) || parsed < 20) {
+    return '自定义获取数量需为不小于 20 的整数。'
+  }
+  return ''
+})
+const stopwordSuggestionTopK = computed(() => {
+  if (!stopwordSuggestionUsesCustomTopK.value) {
+    return Number.parseInt(stopwordSuggestionTopKMode.value, 10) || STOPWORD_SUGGESTION_DEFAULT_TOP_K
+  }
+  const parsed = Number.parseInt(String(stopwordSuggestionCustomTopK.value || '').trim(), 10)
+  return Number.isInteger(parsed) && parsed >= 20 ? parsed : STOPWORD_SUGGESTION_DEFAULT_TOP_K
 })
 const stopwordSuggestionArchiveOptions = computed(() => {
   const priorities = stopwordSuggestionStage.value === 'pre'
@@ -1006,6 +1080,7 @@ const stopwordSuggestionSummary = computed(() => {
   return summary && typeof summary === 'object' ? summary : {}
 })
 const stopwordSuggestionStatus = computed(() => String(stopwordSuggestionTask.value?.status || 'idle'))
+const stopwordSuggestionTaskTopK = computed(() => Number(stopwordSuggestionTask.value?.top_k || stopwordSuggestionTopK.value || STOPWORD_SUGGESTION_DEFAULT_TOP_K))
 const stopwordSuggestionPercentage = computed(() => Number(stopwordSuggestionTask.value?.percentage || 0))
 const stopwordSuggestionSourceLabel = computed(() => {
   const source = String(stopwordSuggestionSummary.value?.source_layer || stopwordSuggestionTask.value?.source_layer || '').toLowerCase()
@@ -1014,7 +1089,11 @@ const stopwordSuggestionSourceLabel = computed(() => {
   if (source === 'fetch') return '原始抓取结果'
   return '待生成'
 })
-const stopwordSuggestionCanRun = computed(() => Boolean(currentProjectName.value && currentStopwordSuggestionDate.value))
+const stopwordSuggestionCanRun = computed(() => Boolean(
+  currentProjectName.value &&
+  currentStopwordSuggestionDate.value &&
+  !stopwordSuggestionTopKError.value
+))
 const stopwordSuggestionRunning = computed(() => ['queued', 'running'].includes(stopwordSuggestionStatus.value))
 const stopwordSuggestionTitle = computed(() => (
   stopwordSuggestionRunning.value ? '后台统计中' : '词频建议'
@@ -1138,7 +1217,7 @@ watch(stopwordModalOpen, async (open) => {
   }
   await Promise.all([loadSharedPromptConfig(), loadStopwordSuggestionArchives()])
   seedStopwordSuggestionDate()
-  await loadStopwordSuggestionStatus()
+  await loadStopwordSuggestionStatus({ syncTopK: true })
   if (stopwordSuggestionRunning.value) {
     startStopwordSuggestionPolling()
   }
@@ -1156,6 +1235,22 @@ function goToPreprocess() {
 function openStopwordModal(stage = 'pre') {
   stopwordSuggestionStage.value = stage === 'post' ? 'post' : 'pre'
   stopwordModalOpen.value = true
+}
+
+function syncStopwordSuggestionTopK(value) {
+  const parsed = Number.parseInt(String(value || '').trim(), 10)
+  if (!Number.isInteger(parsed) || parsed < 20) {
+    stopwordSuggestionTopKMode.value = String(STOPWORD_SUGGESTION_DEFAULT_TOP_K)
+    stopwordSuggestionCustomTopK.value = ''
+    return
+  }
+  if ([100, 300, 500].includes(parsed)) {
+    stopwordSuggestionTopKMode.value = String(parsed)
+    stopwordSuggestionCustomTopK.value = ''
+    return
+  }
+  stopwordSuggestionTopKMode.value = 'custom'
+  stopwordSuggestionCustomTopK.value = String(parsed)
 }
 
 function seedStopwordSuggestionDate() {
@@ -1276,7 +1371,7 @@ async function loadSharedPromptConfig() {
   }
 }
 
-async function loadStopwordSuggestionStatus() {
+async function loadStopwordSuggestionStatus({ syncTopK = false } = {}) {
   if (!currentProjectName.value) return
   stopwordSuggestionState.loading = true
   stopwordSuggestionState.error = ''
@@ -1294,6 +1389,9 @@ async function loadStopwordSuggestionStatus() {
     const payload = response.data || {}
     stopwordSuggestionState.task = payload.task || null
     stopwordSuggestionState.worker = payload.worker || {}
+    if (syncTopK && payload.task?.top_k) {
+      syncStopwordSuggestionTopK(payload.task.top_k)
+    }
     if (payload.date && !currentStopwordSuggestionDate.value) {
       currentStopwordSuggestionDate.value = String(payload.date)
     }
@@ -1324,10 +1422,11 @@ async function startStopwordSuggestionTask(force = true) {
         dataset_id: selectedDatasetId.value || undefined,
         date: currentStopwordSuggestionDate.value || undefined,
         stage: stopwordSuggestionStage.value,
+        top_k: stopwordSuggestionTopK.value,
         force
       })
     })
-    await loadStopwordSuggestionStatus()
+    await loadStopwordSuggestionStatus({ syncTopK: true })
     startStopwordSuggestionPolling()
   } catch (error) {
     stopwordSuggestionState.error = error instanceof Error ? error.message : '启动词频统计失败'
@@ -1638,7 +1737,7 @@ async function runPostclean() {
     applyPostcleanPayload(payload)
     postcleanState.success = null
     postcleanState.message = response.status === 'accepted'
-      ? (payload.message || '后清洗已开始，处理进度会自动刷新。')
+      ? (payload.message || '后清洗已开始，处理进度会自动刷新；若删除了记录，系统会自动同步当前项目已有的本地缓存。')
       : (payload.message || '后清洗已开始。')
     startPostcleanPolling()
   } catch (error) {

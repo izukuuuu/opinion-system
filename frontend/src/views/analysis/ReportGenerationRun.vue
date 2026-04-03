@@ -94,6 +94,10 @@
             <DocumentTextIcon class="h-4 w-4" />
             查看结果
           </button>
+          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="!canOpenAiResults" @click="goToAiResultsPage">
+            <DocumentDuplicateIcon class="h-4 w-4" />
+            查看 AI 报告
+          </button>
         </div>
       </div>
 
@@ -247,6 +251,7 @@ import { useRouter } from 'vue-router'
 import {
   ArrowPathIcon,
   ClockIcon,
+  DocumentDuplicateIcon,
   DocumentTextIcon,
   SparklesIcon,
   StopIcon
@@ -279,6 +284,10 @@ const canCancelTask = computed(() => Boolean(taskState.id && ['queued', 'running
 const canRetryTask = computed(() => Boolean(taskState.id && ['failed', 'cancelled'].includes(taskState.status)))
 const canOpenResults = computed(() => Boolean(
   (taskState.artifacts?.report_ready && taskState.topic && taskState.start && taskState.end) ||
+  (reportForm.topic && reportForm.start && (reportForm.end || reportForm.start))
+))
+const canOpenAiResults = computed(() => Boolean(
+  (taskState.artifacts?.full_report_ready && taskState.topic && taskState.start && taskState.end) ||
   (reportForm.topic && reportForm.start && (reportForm.end || reportForm.start))
 ))
 const progressPercent = computed(() => {
@@ -408,5 +417,10 @@ async function handleSelectHistory(event) {
 function goToResultsPage() {
   if (!canOpenResults.value) return
   router.push({ name: 'report-generation-view' })
+}
+
+function goToAiResultsPage() {
+  if (!canOpenAiResults.value) return
+  router.push({ name: 'report-generation-ai' })
 }
 </script>

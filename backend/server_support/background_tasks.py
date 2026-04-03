@@ -7,6 +7,10 @@ from typing import Any, Dict, List, Tuple
 
 from src.utils.setting.paths import get_data_root  # type: ignore
 
+from .fetch_refresh_jobs import (
+    list_fetch_refresh_jobs,
+    load_fetch_refresh_worker_status,
+)
 from .postclean_jobs import list_postclean_jobs
 from .stopword_suggestions import load_worker_status as load_stopword_worker_status
 
@@ -55,6 +59,7 @@ def collect_background_task_payload(*, active_only: bool = True, limit: int = _D
         _collect_netinsight_tasks,
         _collect_stopword_tasks,
         _collect_postclean_tasks,
+        _collect_fetch_refresh_tasks,
     ):
         try:
             collector_tasks, collector_workers = collector(active_only=active_only)
@@ -154,6 +159,23 @@ def _collect_postclean_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]]
             continue
         tasks.append(_normalise_postclean_task(job))
     return tasks, []
+
+
+def _collect_fetch_refresh_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    jobs = list_fetch_refresh_jobs()
+    worker_payload = _normalise_worker(
+        source="fetch-refresh",
+        source_label="缓存刷新 Worker",
+        payload=load_fetch_refresh_worker_status(),
+    )
+    tasks = []
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        if not _include_task(job, active_only=active_only):
+            continue
+        tasks.append(_normalise_fetch_refresh_task(job, worker_payload))
+    return tasks, [worker_payload]
 
 
 def _normalise_report_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict[str, Any]:
@@ -304,6 +326,46 @@ def _normalise_postclean_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "heartbeat_at": str(task.get("last_heartbeat") or task.get("updated_at") or "").strip(),
         "heartbeat_stale": _is_stale_timestamp(task.get("last_heartbeat") or task.get("updated_at")),
         "worker_pid": 0,
+    }
+
+
+def _normalise_fetch_refresh_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict[str, Any]:
+    progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
+    percentage = _safe_int(progress.get("percentage"), 0)
+    total_ranges = _safe_int(progress.get("total_ranges"), 0)
+    completed_ranges = _safe_int(progress.get("completed_ranges"), 0)
+    refreshed_rows = _safe_int(progress.get("refreshed_rows"), 0)
+    progress_text = f"{completed_ranges} / {total_ranges} 批" if total_ranges > 0 else f"{percentage}%"
+    if refreshed_rows > 0:
+        progress_text = f"{progress_text} · {refreshed_rows} 条"
+    status = _normalise_status(task.get("status"))
+    current_worker_task = str(worker.get("current_task_id") or "").strip()
+    task_id = f"{str(task.get('topic') or '').strip()}:{str(task.get('database') or '').strip()}"
+    heartbeat_at = (
+        str(worker.get("last_heartbeat") or "").strip()
+        if current_worker_task == task_id
+        else str(task.get("last_heartbeat") or task.get("updated_at") or "").strip()
+    )
+    return {
+        "id": f"fetch-refresh:{task_id}",
+        "task_id": task_id,
+        "source": "fetch-refresh",
+        "source_label": "本地缓存同步",
+        "title": f"{str(task.get('database') or '数据库').strip()} 缓存刷新",
+        "scope": str(task.get("topic") or "").strip(),
+        "status": "failed" if status == "error" else status,
+        "phase": "persist" if status == "running" else status,
+        "phase_label": "刷新缓存中" if status == "running" else GENERIC_PHASE_LABELS.get(status, status or "处理中"),
+        "message": str(task.get("message") or "").strip() or "等待处理。",
+        "percentage": percentage,
+        "progress_text": progress_text,
+        "detail_text": str(progress.get("current_range") or "").strip(),
+        "updated_at": str(task.get("updated_at") or "").strip(),
+        "started_at": str(task.get("started_at") or "").strip(),
+        "finished_at": str(task.get("finished_at") or "").strip(),
+        "heartbeat_at": heartbeat_at,
+        "heartbeat_stale": _is_stale_timestamp(heartbeat_at),
+        "worker_pid": _safe_int(worker.get("pid"), 0),
     }
 
 

@@ -149,7 +149,7 @@
             <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
           </div>
           <div class="ml-auto flex items-center gap-2">
-            <BackgroundTaskIndicator />
+            <BackgroundTaskIndicator compact />
             <button type="button"
               class="hidden lg:flex h-8 w-8 items-center justify-center rounded-lg border border-soft bg-white/50 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
               :class="{ 'bg-brand-soft text-brand-700 border-brand-soft': isAiSidebarOpen }"
@@ -323,7 +323,7 @@ const navigationGroups = [
         label: '报告解读',
         description: '运行报告与查看结果',
         to: { name: 'report-generation-run' },
-        match: ['report-generation-run', 'report-generation-view'],
+        match: ['report-generation-run', 'report-generation-view', 'report-generation-ai'],
         icon: DocumentTextIcon
       }
     ]

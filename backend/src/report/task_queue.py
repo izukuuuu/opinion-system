@@ -26,7 +26,9 @@ AGENT_DEFS = [
     ("researcher", "Researcher"),
     ("interpreter", "Interpreter"),
     ("theme_analyst", "Theme Analyst"),
+    ("integrator", "Integrator"),
     ("writer", "Writer"),
+    ("reviser", "Reviser"),
     ("reviewer", "Reviewer"),
 ]
 PHASE_LABELS = {
@@ -90,6 +92,9 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
             "report_ready": False,
             "report_cache_path": "",
             "report_title": "",
+            "full_report_ready": False,
+            "full_report_cache_path": "",
+            "full_report_title": "",
             "view": {
                 "topic": topic,
                 "topic_identifier": topic_identifier,
@@ -497,6 +502,8 @@ def mark_artifact_ready(task_id: str, *, message: str, payload: Dict[str, Any]) 
         artifacts.update(payload or {})
         if payload.get("report_cache_path"):
             artifacts["report_ready"] = True
+        if payload.get("full_report_cache_path"):
+            artifacts["full_report_ready"] = True
 
     return _mutate_task_with_event(
         task_id,

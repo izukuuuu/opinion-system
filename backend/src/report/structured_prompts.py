@@ -231,3 +231,61 @@ def build_review_verdict_prompt(facts: Dict[str, Any]) -> str:
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
+
+
+def build_full_report_brief_prompt(facts: Dict[str, Any]) -> str:
+    schema = {
+        "core_thesis": "80-160字，说明完整报告最核心的主线判断。",
+        "tone_notes": ["最多4条，说明行文口径、边界与应保持的表达克制。"],
+        "preferred_terms": ["最多8条，优先沿用方法论/知识库中的术语。"],
+        "sections": [
+            {
+                "id": "summary",
+                "title": "执行摘要",
+                "goal": "这一节要回答什么问题",
+                "evidence": ["最多4条，应引用哪些事实或已知方法论"],
+            }
+        ],
+    }
+    return (
+        "请作为 report integrator，把结构化报告、知识库方法论和 skill 约束整合成一份写作 brief。\n"
+        "要求：\n"
+        "1) core_thesis 必须形成完整主线，不得只是标题复述；\n"
+        "2) tone_notes 要强调证据边界、表达克制和适合业务报告的语气；\n"
+        "3) preferred_terms 优先吸收 methodology_context / theory_hints / dynamic_theories / skill_context 中的术语；\n"
+        "4) sections 至少包含 5 段，覆盖执行摘要、传播态势、结构拆解、风险研判、建议与复核；\n"
+        "5) sections.evidence 只能来自输入事实、方法论、旧报告上下文或 reviewer 裁决；\n"
+        "6) 仅输出 JSON。\n\n"
+        f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
+        f"【事实数据】\n{_json_block(facts)}"
+    )
+
+
+def build_full_report_markdown_prompt(facts: Dict[str, Any]) -> str:
+    return (
+        "请基于写作 brief 和结构化事实，输出一份完整中文 Markdown 报告。\n"
+        "要求：\n"
+        "1) 只输出 Markdown，禁止输出 JSON、解释文字或代码块；\n"
+        "2) 必须包含 1 个 H1 标题，以及至少 5 个 H2 章节；\n"
+        "3) 优先沿用 brief.preferred_terms、skill_context.reasoningStyle 和 methodology_context 中的术语；\n"
+        "4) 不得编造新的数字、日期、机构表态或事件细节；\n"
+        "5) 风格应像面向业务方的专业舆情报告，不要写成口号式评论；\n"
+        "6) 建议部分必须可执行，复核部分必须明确证据边界；\n"
+        "7) 如存在 review_verdict.requires_manual_review=true，必须在文中提醒人工复核点；\n"
+        "8) 不要输出目录，不要输出图片占位符，图片会由系统后处理插入。\n\n"
+        f"【事实数据】\n{_json_block(facts)}"
+    )
+
+
+def build_full_report_revise_prompt(facts: Dict[str, Any]) -> str:
+    return (
+        "请作为 report reviser，对现有 Markdown 报告做最后一轮修订。\n"
+        "要求：\n"
+        "1) 只输出修订后的 Markdown，禁止输出解释文字；\n"
+        "2) 优先修正过度推断、口号化表达、重复段落和证据链不清的问题；\n"
+        "3) 保留原有章节结构，但可以重写句子和段落；\n"
+        "4) 必须更充分地吸收 knowledge_context / skill_context 的术语和分析视角；\n"
+        "5) 若 reviewer 指出需要人工复核，必须在结尾明确列出复核提醒；\n"
+        "6) 不能新增输入中不存在的事实。\n\n"
+        f"【事实数据】\n{_json_block(facts)}"
+    )

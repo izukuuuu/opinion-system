@@ -18,6 +18,10 @@ for path in (BACKEND_DIR, SRC_DIR):
 
 from server_support.archive_locator import compose_folder_name  # type: ignore
 from server_support.topic_context import TopicContext  # type: ignore
+from src.report.full_report_service import (  # type: ignore
+    AI_FULL_REPORT_CACHE_FILENAME,
+    generate_full_report_payload,
+)
 from src.report.runtime import ensure_analyze_results, ensure_explain_results  # type: ignore
 from src.report.structured_service import REPORT_CACHE_FILENAME, generate_report_payload  # type: ignore
 from src.report.task_queue import (  # type: ignore
@@ -254,16 +258,36 @@ def _run_task(task_id: str) -> None:
         )
         _raise_if_cancelled(task_id)
 
+        full_report_payload = generate_full_report_payload(
+            topic_identifier,
+            start,
+            end,
+            topic_label=topic_label,
+            regenerate=True,
+            structured_payload=report_payload,
+            event_callback=lambda event: _handle_report_event(task_id, event),
+        )
+        LOGGER.warning(
+            "report worker | full report payload generated | task=%s title=%s",
+            task_id,
+            str(full_report_payload.get("title") or "").strip(),
+        )
+        _raise_if_cancelled(task_id)
+
         folder = compose_folder_name(start, end)
         cache_path = bucket("reports", topic_identifier, folder) / REPORT_CACHE_FILENAME
+        full_cache_path = bucket("reports", topic_identifier, folder) / AI_FULL_REPORT_CACHE_FILENAME
         mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="正在写入最终报告缓存。")
         mark_artifact_ready(
             task_id,
-            message="报告缓存已写入。",
+            message="结构化报告与 AI 完整报告缓存已写入。",
             payload={
                 "report_ready": True,
                 "report_cache_path": str(cache_path),
                 "report_title": str(report_payload.get("title") or "").strip(),
+                "full_report_ready": True,
+                "full_report_cache_path": str(full_cache_path),
+                "full_report_title": str(full_report_payload.get("title") or "").strip(),
                 "view": {
                     "topic": topic_label,
                     "topic_identifier": topic_identifier,
@@ -283,12 +307,16 @@ def _run_task(task_id: str) -> None:
                 "report_ready": True,
                 "report_cache_path": str(cache_path),
                 "report_title": str(report_payload.get("title") or "").strip(),
+                "full_report_ready": True,
+                "full_report_cache_path": str(full_cache_path),
+                "full_report_title": str(full_report_payload.get("title") or "").strip(),
             },
         )
         LOGGER.warning(
-            "report worker | task completed | task=%s cache=%s",
+            "report worker | task completed | task=%s cache=%s full_cache=%s",
             task_id,
             cache_path,
+            full_cache_path,
         )
     finally:
         stop_event.set()
@@ -386,6 +414,9 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
         return
     if event_type == "review.verdict":
         mark_review_verdict(task_id, message=message or "Reviewer 已完成复核。", payload=payload)
+        return
+    if event_type == "artifact.ready":
+        mark_artifact_ready(task_id, message=message or "报告产物已写入。", payload=payload)
         return
     append_event(
         task_id,

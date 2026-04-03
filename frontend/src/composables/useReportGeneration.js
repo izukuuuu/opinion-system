@@ -20,6 +20,7 @@ const availableRange = reactive({
   end: ''
 })
 const reportState = reactive({ loading: false, regenerating: false, error: '', lastLoaded: '' })
+const fullReportState = reactive({ loading: false, regenerating: false, error: '', lastLoaded: '' })
 const analysisState = reactive({ loading: false, error: '', lastLoaded: '', topic: '', start: '', end: '' })
 const progressState = reactive({
   loading: false,
@@ -68,6 +69,7 @@ const taskState = reactive({
 const reportHistory = ref([])
 const selectedHistoryId = ref('')
 const reportData = ref(null)
+const fullReportData = ref(null)
 const analysisData = ref(null)
 const progressLogs = ref([])
 const topicOptions = computed(() => topicsState.options)
@@ -116,6 +118,7 @@ export const useReportGeneration = () => {
     reportForm,
     availableRange,
     reportState,
+    fullReportState,
     analysisState,
     progressState,
     historyState,
@@ -123,6 +126,7 @@ export const useReportGeneration = () => {
     reportHistory,
     selectedHistoryId,
     reportData,
+    fullReportData,
     analysisData,
     analysisSections,
     analysisAiSummary,
@@ -136,6 +140,7 @@ export const useReportGeneration = () => {
     loadProgress,
     loadHistory,
     loadReport,
+    loadFullReport,
     regenerateReport,
     createReportTask,
     loadReportTask,
@@ -158,6 +163,7 @@ function initializeStore() {
       const trimmed = String(topic || '').trim()
       if (!trimmed) {
         resetRangeState()
+        resetFullReportState()
         resetAnalysisState()
         resetProgressState()
         resetTaskState()
@@ -168,6 +174,7 @@ function initializeStore() {
       }
       if (trimmed === String(previous || '').trim()) return
       reportData.value = null
+      fullReportData.value = null
       analysisData.value = null
       reportForm.start = ''
       reportForm.end = ''
@@ -225,6 +232,14 @@ function resetAnalysisState() {
   analysisState.start = ''
   analysisState.end = ''
   analysisData.value = null
+}
+
+function resetFullReportState() {
+  fullReportState.loading = false
+  fullReportState.regenerating = false
+  fullReportState.error = ''
+  fullReportState.lastLoaded = ''
+  fullReportData.value = null
 }
 
 function resetProgressState() {
@@ -343,6 +358,7 @@ async function loadTopics() {
     topicsState.options = []
     reportForm.topic = ''
     resetRangeState()
+    resetFullReportState()
     resetAnalysisState()
     resetProgressState()
     resetTaskState()
@@ -546,6 +562,46 @@ async function loadReport(rangeOverride = null) {
   } finally {
     reportState.loading = false
     analysisState.loading = false
+  }
+}
+
+async function loadFullReport(rangeOverride = null, { regenerate = false } = {}) {
+  const resolvedRange = rangeOverride ? normalizeRange(rangeOverride) : await hydrateRangeFromCurrentTopic()
+  if (!hasCompleteRange(resolvedRange)) {
+    fullReportState.error = availableRange.notice || 'Topic / Start / End 为必填'
+    return null
+  }
+  fullReportState.loading = !regenerate
+  fullReportState.regenerating = regenerate
+  fullReportState.error = ''
+  try {
+    const params = new URLSearchParams({
+      topic: resolvedRange.topic,
+      start: resolvedRange.start,
+      end: resolvedRange.end
+    })
+    if (regenerate) params.set('regenerate', '1')
+    const response = await callApi(`/api/report/full?${params.toString()}`, { method: 'GET' })
+    const payload = response?.data || null
+    if (!payload || typeof payload !== 'object') throw new Error('AI 完整报告接口返回为空')
+    fullReportData.value = payload
+    fullReportState.lastLoaded = currentTimeString()
+    reportForm.topic = resolvedRange.topic
+    reportForm.start = resolvedRange.start
+    reportForm.end = resolvedRange.end
+    await loadHistory(resolvedRange.topic)
+    const matched = reportHistory.value.find((item) => item.start === resolvedRange.start && item.end === resolvedRange.end)
+    if (matched) selectedHistoryId.value = matched.id
+    await loadProgress(resolvedRange, { silent: true })
+    return payload
+  } catch (error) {
+    fullReportData.value = null
+    fullReportState.error = error instanceof Error ? error.message : String(error)
+    await loadProgress(resolvedRange, { silent: true })
+    return null
+  } finally {
+    fullReportState.loading = false
+    fullReportState.regenerating = false
   }
 }
 

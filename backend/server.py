@@ -75,13 +75,19 @@ from server_support import (  # type: ignore
     require_fields,
     serialise_result,
     success,
+    split_folder_range,
     validate_rag_config,
     DATA_PROJECTS_ROOT,
+    create_fetch_refresh_job,
+    get_fetch_refresh_job,
+    heartbeat_fetch_refresh_job,
     mark_filter_job_running,
     mark_filter_job_finished,
     create_postclean_job,
     get_postclean_job,
     heartbeat_postclean_job,
+    update_fetch_refresh_job,
+    update_fetch_refresh_worker,
     update_postclean_job,
     get_default_rag_config,
 )
@@ -279,23 +285,41 @@ def _submit_postclean_job(
                 },
             )
             serialised = serialise_result(result)
+            follow_up_payload: Optional[Dict[str, Any]] = None
+            if success and isinstance(serialised, dict):
+                deleted_rows = int(serialised.get("deleted_rows") or 0)
+                if deleted_rows > 0:
+                    follow_up_payload = _enqueue_fetch_refresh_job(
+                        topic_identifier=topic_identifier,
+                        database=database,
+                        log_project=log_project,
+                        display_name=display_name,
+                    )
+                else:
+                    follow_up_payload = {
+                        "status": "skipped",
+                        "message": "本次后清洗未删除记录，未触发本地缓存刷新。",
+                        "ranges": [],
+                    }
+                serialised["follow_up"] = follow_up_payload
+            success_message = (
+                f"后清洗完成，共删除 {int(serialised.get('deleted_rows') or 0)} 条记录。"
+                if success and isinstance(serialised, dict)
+                else str((serialised or {}).get("message") if isinstance(serialised, dict) else serialised or "后清洗失败")
+            )
+            if success and isinstance(follow_up_payload, dict):
+                follow_up_message = str(follow_up_payload.get("message") or "").strip()
+                if follow_up_message:
+                    success_message = f"{success_message} {follow_up_message}"
             update_postclean_job(
                 topic_identifier,
                 database,
                 tables,
                 status="completed" if success else "error",
-                message=(
-                    f"后清洗完成，共删除 {int(serialised.get('deleted_rows') or 0)} 条记录。"
-                    if success and isinstance(serialised, dict)
-                    else str((serialised or {}).get("message") if isinstance(serialised, dict) else serialised or "后清洗失败")
-                ),
+                message=success_message,
                 progress={"percentage": 100 if success else 0},
                 result=serialised,
-                log_message=(
-                    f"后清洗完成，共删除 {int(serialised.get('deleted_rows') or 0)} 条记录。"
-                    if success and isinstance(serialised, dict)
-                    else str((serialised or {}).get("message") if isinstance(serialised, dict) else serialised or "后清洗失败")
-                ),
+                log_message=success_message,
                 log_event="task.completed" if success else "task.failed",
                 log_level="info" if success else "error",
             )
@@ -333,6 +357,291 @@ def _submit_postclean_job(
     return POSTCLEAN_EXECUTOR.submit(_job)
 
 
+def _build_fetch_refresh_ranges(topic_identifier: str) -> List[Dict[str, str]]:
+    ranges: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for archive in collect_layer_archives(topic_identifier, "fetch"):
+        folder = str((archive or {}).get("date") or "").strip()
+        if not folder or folder in seen:
+            continue
+        start, end = split_folder_range(folder)
+        if not start:
+            continue
+        seen.add(folder)
+        ranges.append({
+            "folder": folder,
+            "start": start,
+            "end": end or start,
+        })
+    return ranges
+
+
+def _submit_fetch_refresh_job(
+    *,
+    topic_identifier: str,
+    database: str,
+    ranges: List[Dict[str, str]],
+    log_project: str,
+    display_name: str,
+) -> concurrent.futures.Future:
+    def _job():
+        stop_event = threading.Event()
+        task_id = f"{topic_identifier}:{database}"
+
+        def _heartbeat_loop():
+            while not stop_event.wait(2.0):
+                heartbeat_fetch_refresh_job(topic_identifier, database)
+                update_fetch_refresh_worker(
+                    status="running",
+                    running=True,
+                    current_task_id=task_id,
+                    heartbeat=True,
+                )
+
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            name=f"fetch-refresh-heartbeat-{topic_identifier}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
+        try:
+            from src.fetch import run_fetch  # type: ignore
+
+            total_ranges = len(ranges)
+            refreshed_rows = 0
+            completed_ranges = 0
+            refreshed_ranges: List[Dict[str, Any]] = []
+            failed_ranges: List[Dict[str, Any]] = []
+
+            update_fetch_refresh_worker(
+                status="running",
+                running=True,
+                pid=os.getpid(),
+                current_task_id=task_id,
+                heartbeat=True,
+            )
+            update_fetch_refresh_job(
+                topic_identifier,
+                database,
+                status="running",
+                ranges=ranges,
+                message=f"准备刷新 {total_ranges} 个本地缓存批次。",
+                progress={
+                    "total_ranges": total_ranges,
+                    "completed_ranges": 0,
+                    "refreshed_rows": 0,
+                    "current_range": "",
+                    "percentage": 0,
+                },
+                log_message=f"准备刷新 {total_ranges} 个本地缓存批次。",
+                log_event="task.started",
+            )
+
+            for index, item in enumerate(ranges, start=1):
+                folder = str(item.get("folder") or "").strip()
+                start = str(item.get("start") or "").strip()
+                end = str(item.get("end") or start).strip() or start
+                update_fetch_refresh_job(
+                    topic_identifier,
+                    database,
+                    message=f"开始刷新缓存批次 {folder}。",
+                    progress={
+                        "total_ranges": total_ranges,
+                        "completed_ranges": completed_ranges,
+                        "refreshed_rows": refreshed_rows,
+                        "current_range": folder,
+                        "percentage": round((completed_ranges / max(1, total_ranges)) * 100),
+                    },
+                    log_message=f"开始刷新缓存批次 {folder}。",
+                    log_event="range.started",
+                )
+                result = run_fetch(
+                    topic_identifier,
+                    start,
+                    end,
+                    db_topic=database,
+                )
+                serialised = serialise_result(result)
+                success = evaluate_success(result)
+                count = int(serialised.get("count") or 0) if isinstance(serialised, dict) else 0
+                completed_ranges += 1
+                if success:
+                    refreshed_rows += count
+                    refreshed_ranges.append({
+                        "folder": folder,
+                        "start": start,
+                        "end": end,
+                        "count": count,
+                    })
+                    update_fetch_refresh_job(
+                        topic_identifier,
+                        database,
+                        message=f"{folder} 刷新完成，共同步 {count} 条记录。",
+                        progress={
+                            "total_ranges": total_ranges,
+                            "completed_ranges": completed_ranges,
+                            "refreshed_rows": refreshed_rows,
+                            "current_range": folder,
+                            "percentage": round((completed_ranges / max(1, total_ranges)) * 100),
+                        },
+                        log_message=f"{folder} 刷新完成，共同步 {count} 条记录。",
+                        log_event="range.completed",
+                    )
+                else:
+                    failure_message = (
+                        str(serialised.get("message") or "").strip()
+                        if isinstance(serialised, dict)
+                        else str(serialised or "缓存刷新失败")
+                    ) or "缓存刷新失败"
+                    failed_ranges.append({
+                        "folder": folder,
+                        "start": start,
+                        "end": end,
+                        "message": failure_message,
+                    })
+                    update_fetch_refresh_job(
+                        topic_identifier,
+                        database,
+                        message=f"{folder} 刷新失败：{failure_message}",
+                        progress={
+                            "total_ranges": total_ranges,
+                            "completed_ranges": completed_ranges,
+                            "refreshed_rows": refreshed_rows,
+                            "current_range": folder,
+                            "percentage": round((completed_ranges / max(1, total_ranges)) * 100),
+                        },
+                        log_message=f"{folder} 刷新失败：{failure_message}",
+                        log_event="range.failed",
+                        log_level="error",
+                    )
+
+            overall_success = len(failed_ranges) == 0
+            result_payload = {
+                "topic": topic_identifier,
+                "database": database,
+                "ranges": ranges,
+                "refreshed_ranges": refreshed_ranges,
+                "failed_ranges": failed_ranges,
+                "refreshed_rows": refreshed_rows,
+            }
+            _log_with_context(
+                "fetch-refresh",
+                overall_success,
+                {
+                    "project": log_project,
+                    "params": {
+                        "database": database,
+                        "ranges": [item.get("folder") for item in ranges],
+                        "source": "postclean-auto",
+                        "topic": display_name,
+                        "bucket": topic_identifier,
+                    },
+                },
+            )
+            final_message = (
+                f"本地缓存刷新完成，共处理 {completed_ranges} 个批次，累计同步 {refreshed_rows} 条记录。"
+                if overall_success
+                else f"本地缓存刷新部分失败，已完成 {completed_ranges} / {total_ranges} 个批次。"
+            )
+            update_fetch_refresh_job(
+                topic_identifier,
+                database,
+                status="completed" if overall_success else "error",
+                message=final_message,
+                progress={
+                    "total_ranges": total_ranges,
+                    "completed_ranges": completed_ranges,
+                    "refreshed_rows": refreshed_rows,
+                    "current_range": "",
+                    "percentage": 100,
+                },
+                result=result_payload,
+                log_message=final_message,
+                log_event="task.completed" if overall_success else "task.failed",
+                log_level="info" if overall_success else "error",
+            )
+        except Exception as exc:  # pragma: no cover - background diagnostics
+            LOGGER.exception("Fetch refresh job failed for %s@%s", topic_identifier, database)
+            detail = str(exc)
+            _log_with_context(
+                "fetch-refresh",
+                False,
+                {
+                    "project": log_project,
+                    "params": {
+                        "database": database,
+                        "ranges": [item.get("folder") for item in ranges],
+                        "source": "postclean-auto",
+                        "topic": display_name,
+                        "bucket": topic_identifier,
+                    },
+                },
+            )
+            update_fetch_refresh_job(
+                topic_identifier,
+                database,
+                status="error",
+                message=detail,
+                progress={"current_range": "", "percentage": 0},
+                log_message=detail,
+                log_event="task.failed",
+                log_level="error",
+            )
+        finally:
+            stop_event.set()
+            heartbeat_fetch_refresh_job(topic_identifier, database)
+            update_fetch_refresh_worker(
+                status="idle",
+                running=False,
+                current_task_id="",
+                heartbeat=True,
+            )
+
+    return FETCH_REFRESH_EXECUTOR.submit(_job)
+
+
+def _enqueue_fetch_refresh_job(
+    *,
+    topic_identifier: str,
+    database: str,
+    log_project: str,
+    display_name: str,
+) -> Dict[str, Any]:
+    ranges = _build_fetch_refresh_ranges(topic_identifier)
+    if not ranges:
+        return {
+            "status": "skipped",
+            "message": "当前项目暂无可刷新的本地缓存批次。",
+            "ranges": [],
+        }
+
+    existing = get_fetch_refresh_job(topic_identifier, database)
+    if existing and str(existing.get("status") or "").strip() in {"queued", "running"}:
+        return {
+            "status": "queued",
+            "reused": True,
+            "message": existing.get("message") or "本地缓存刷新任务已在后台运行。",
+            "ranges": existing.get("ranges") or ranges,
+            "task": existing,
+        }
+
+    payload = create_fetch_refresh_job(topic_identifier, database, ranges)
+    _submit_fetch_refresh_job(
+        topic_identifier=topic_identifier,
+        database=database,
+        ranges=ranges,
+        log_project=log_project,
+        display_name=display_name,
+    )
+    return {
+        "status": "queued",
+        "reused": False,
+        "message": f"已自动提交本地缓存刷新任务，共 {len(ranges)} 个批次待处理。",
+        "ranges": ranges,
+        "task": payload,
+    }
+
+
 from src.fluid.api import fluid_bp
 from src.analyze.api import analyze_bp
 from src.topic.api import topic_bp
@@ -368,6 +677,7 @@ FILTER_STATUS_STREAM_INTERVAL = 1.0
 FILTER_STATUS_STREAM_TIMEOUT = 300.0
 FILTER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 POSTCLEAN_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+FETCH_REFRESH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 
 def _resolve_runtime_binding() -> Tuple[str, int]:
@@ -821,7 +1131,7 @@ def create_filter_stopword_suggestion_task():
     date_param = str(payload.get("date") or "").strip()
     stage_param = str(payload.get("stage") or "").strip().lower()
     force_value = payload.get("force")
-    top_k_value = payload.get("top_k", payload.get("limit", 120))
+    top_k_value = payload.get("top_k", payload.get("limit", 100))
 
     try:
         topic_identifier, resolved_date, stage = _resolve_stopword_suggestion_inputs(
@@ -839,7 +1149,7 @@ def create_filter_stopword_suggestion_task():
         task = create_stopword_suggestion_task(
             topic_identifier,
             resolved_date,
-            top_k=int(top_k_value or 120),
+            top_k=int(top_k_value or 100),
             stage=stage,
             force=force,
         )
