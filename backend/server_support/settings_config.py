@@ -189,6 +189,25 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
             }
         })
 
+    @app.get("/api/settings/llm/report-runtime")
+    def get_report_runtime_settings():
+        config = load_llm_config()
+        langchain = config.get("langchain") if isinstance(config.get("langchain"), dict) else {}
+        report_runtime = langchain.get("report_runtime") if isinstance(langchain.get("report_runtime"), dict) else {}
+        credentials = config.get("credentials") if isinstance(config.get("credentials"), dict) else {}
+        report_key = credentials.get("report_api_key")
+        payload = {
+            "provider": str(report_runtime.get("provider") or langchain.get("provider") or "qwen").strip() or "qwen",
+            "model": str(report_runtime.get("model") or langchain.get("report_model") or langchain.get("model") or "").strip(),
+            "base_url": str(report_runtime.get("base_url") or langchain.get("base_url") or "").strip(),
+            "temperature": report_runtime.get("temperature", langchain.get("temperature", 0.3)),
+            "max_tokens": report_runtime.get("max_tokens", langchain.get("report_max_tokens", langchain.get("max_tokens", 3000))),
+            "timeout": report_runtime.get("timeout", langchain.get("report_timeout", langchain.get("timeout", 120.0))),
+            "max_retries": report_runtime.get("max_retries", langchain.get("max_retries", 2)),
+            "api_key": _summarise_api_key(report_key if isinstance(report_key, str) else None),
+        }
+        return success({"data": payload})
+
     @app.put("/api/settings/llm/credentials")
     def update_llm_credentials():
         payload = request.get_json(silent=True) or {}
@@ -217,6 +236,7 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
         _update_text_field("openai_api_key")
         _update_text_field("opinion_openai_api_key")
         _update_text_field("openai_base_url")
+        _update_text_field("report_api_key")
 
         config["credentials"] = credentials
         persist_llm_config(config)
@@ -229,13 +249,83 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
             }
         })
 
+    @app.put("/api/settings/llm/report-runtime")
+    def update_report_runtime_settings():
+        payload = request.get_json(silent=True) or {}
+        config = load_llm_config()
+        langchain = config.get("langchain", {})
+        if not isinstance(langchain, dict):
+            langchain = {}
+        report_runtime = langchain.get("report_runtime", {})
+        if not isinstance(report_runtime, dict):
+            report_runtime = {}
+
+        for field in ["provider", "model", "base_url"]:
+            if field in payload:
+                report_runtime[field] = str(payload.get(field) or "").strip()
+
+        if "temperature" in payload:
+            try:
+                report_runtime["temperature"] = float(payload["temperature"])
+            except (TypeError, ValueError):
+                return error("Field 'temperature' must be a number")
+
+        for field in ["max_tokens", "max_retries"]:
+            if field in payload:
+                try:
+                    report_runtime[field] = int(payload[field])
+                except (TypeError, ValueError):
+                    return error(f"Field '{field}' must be an integer")
+
+        if "timeout" in payload:
+            try:
+                report_runtime["timeout"] = float(payload["timeout"])
+            except (TypeError, ValueError):
+                return error("Field 'timeout' must be a number")
+
+        langchain["report_runtime"] = report_runtime
+        config["langchain"] = langchain
+
+        credentials = config.get("credentials", {})
+        if not isinstance(credentials, dict):
+            credentials = {}
+        if payload.get("clear_api_key"):
+            credentials.pop("report_api_key", None)
+        elif "api_key" in payload:
+            api_key = str(payload.get("api_key") or "").strip()
+            if api_key:
+                credentials["report_api_key"] = api_key
+            else:
+                credentials.pop("report_api_key", None)
+        config["credentials"] = credentials
+
+        persist_llm_config(config)
+        saved = load_llm_config()
+        saved_langchain = saved.get("langchain") if isinstance(saved.get("langchain"), dict) else {}
+        saved_runtime = saved_langchain.get("report_runtime") if isinstance(saved_langchain.get("report_runtime"), dict) else {}
+        saved_credentials = saved.get("credentials") if isinstance(saved.get("credentials"), dict) else {}
+        return success(
+            {
+                "data": {
+                    "provider": str(saved_runtime.get("provider") or saved_langchain.get("provider") or "qwen").strip() or "qwen",
+                    "model": str(saved_runtime.get("model") or saved_langchain.get("report_model") or saved_langchain.get("model") or "").strip(),
+                    "base_url": str(saved_runtime.get("base_url") or saved_langchain.get("base_url") or "").strip(),
+                    "temperature": saved_runtime.get("temperature", saved_langchain.get("temperature", 0.3)),
+                    "max_tokens": saved_runtime.get("max_tokens", saved_langchain.get("report_max_tokens", saved_langchain.get("max_tokens", 3000))),
+                    "timeout": saved_runtime.get("timeout", saved_langchain.get("report_timeout", saved_langchain.get("timeout", 120.0))),
+                    "max_retries": saved_runtime.get("max_retries", saved_langchain.get("max_retries", 2)),
+                    "api_key": _summarise_api_key(saved_credentials.get("report_api_key") if isinstance(saved_credentials.get("report_api_key"), str) else None),
+                }
+            }
+        )
+
     @app.put("/api/settings/llm/filter")
     def update_llm_filter():
         payload = request.get_json(silent=True) or {}
         config = load_llm_config()
         filter_llm = config.get("filter_llm", {})
 
-        for field in ["provider", "model"]:
+        for field in ["provider", "model", "base_url"]:
             if field in payload:
                 filter_llm[field] = str(payload[field]).strip()
 
@@ -310,15 +400,6 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
             if field in payload:
                 langchain[field] = str(payload[field]).strip()
 
-        if "enabled" in payload:
-            value = payload.get("enabled")
-            if isinstance(value, bool):
-                langchain["enabled"] = value
-            elif isinstance(value, str):
-                langchain["enabled"] = value.strip().lower() in {"1", "true", "yes", "on"}
-            else:
-                langchain["enabled"] = bool(value)
-
         if "temperature" in payload:
             try:
                 langchain["temperature"] = float(payload["temperature"])
@@ -338,6 +419,7 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
             except (TypeError, ValueError):
                 return error("Field 'timeout' must be a number")
 
+        langchain.pop("enabled", None)
         config["langchain"] = langchain
         persist_llm_config(config)
         return success({"data": langchain})

@@ -84,14 +84,14 @@
     <div class="theme-editor__tools">
       <button
         type="button"
-        class="rounded-full border border-slate-200 px-4 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
+        class="btn-secondary px-4 py-1.5 text-sm"
         @click="triggerImport"
       >
         读取配置
       </button>
       <button
         type="button"
-        class="rounded-full border border-slate-200 px-4 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
+        class="btn-secondary px-4 py-1.5 text-sm"
         @click="handleExport"
       >
         导出配置

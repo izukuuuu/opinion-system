@@ -342,3 +342,169 @@
 .bg-warning-soft {
   background-color: rgb(var(--color-warning-100) / 1);
 }
+
+/* Settings area baseline: page header, feedback, table shell, tabs, and helper blocks
+   should reuse these classes instead of rebuilding local slate/indigo utility stacks. */
+.settings-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-page-eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.settings-page-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.settings-page-desc {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.settings-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-section-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.settings-section-desc {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.settings-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-section-split {
+  border-top: 1px solid var(--color-border-soft);
+  padding-top: 1.5rem;
+}
+
+.settings-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid var(--color-border-soft);
+  padding-top: 1rem;
+}
+
+.settings-message-success,
+.settings-message-error,
+.settings-message-warning {
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+}
+
+.settings-message-success {
+  background-color: rgb(var(--color-success-100) / 1);
+  color: rgb(var(--color-success-600) / 1);
+}
+
+.settings-message-error {
+  background-color: rgb(var(--color-danger-100) / 1);
+  color: rgb(var(--color-danger-600) / 1);
+}
+
+.settings-message-warning {
+  background-color: rgb(var(--color-warning-100) / 1);
+  color: rgb(var(--color-warning-600) / 1);
+}
+
+.settings-empty-state {
+  border-radius: 1rem;
+  background-color: var(--color-surface-muted);
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.settings-help-block {
+  border-radius: 1rem;
+  border: 1px solid var(--color-border-soft);
+  background-color: var(--color-bg-base-soft);
+  padding: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.settings-table-shell {
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid var(--color-border-soft);
+  background-color: var(--color-surface);
+}
+
+.settings-table-head {
+  background-color: var(--color-surface-muted);
+}
+
+.settings-table-row {
+  transition: background-color 0.2s ease;
+}
+
+.settings-table-row:hover {
+  background-color: rgb(var(--color-brand-100) / 0.35);
+}
+
+.settings-tabbar {
+  display: inline-flex;
+  gap: 0.25rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-border-soft);
+  background-color: var(--color-bg-base-soft);
+  padding: 0.25rem;
+}
+
+.settings-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.85rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.settings-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.settings-tab-active {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+}

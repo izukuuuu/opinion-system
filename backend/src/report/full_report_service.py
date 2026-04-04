@@ -466,6 +466,30 @@ def _list_strings(rows: Any, *, max_items: int = 6, max_chars: int = 80) -> List
     ][: max(1, max_items)]
 
 
+def _compact_skill_context(skill_context: Dict[str, Any], *, include_excerpt: bool = True) -> Dict[str, Any]:
+    payload = {
+        "name": str(skill_context.get("name") or "").strip(),
+        "display_name": str(skill_context.get("displayName") or "").strip(),
+        "description": _truncate_text(skill_context.get("description") or "", 220),
+        "goal": str(skill_context.get("goal") or "").strip(),
+        "document_type": str(skill_context.get("documentType") or "").strip(),
+        "reasoning_style": _list_strings(skill_context.get("reasoningStyle"), max_items=5, max_chars=80),
+        "language_requirements": _list_strings(skill_context.get("languageRequirements"), max_items=8, max_chars=120),
+        "language_contract": skill_context.get("languageContract") if isinstance(skill_context.get("languageContract"), dict) else {},
+        "style_language_requirements": (
+            skill_context.get("styleLanguageRequirements")
+            if isinstance(skill_context.get("styleLanguageRequirements"), dict)
+            else {}
+        ),
+        "constraints": _list_strings(skill_context.get("constraints"), max_items=5, max_chars=80),
+        "section_guidance": skill_context.get("sectionGuidance") if isinstance(skill_context.get("sectionGuidance"), dict) else {},
+        "tool_names": _list_strings(skill_context.get("toolNames"), max_items=12, max_chars=48),
+    }
+    if include_excerpt:
+        payload["instructions_excerpt"] = _truncate_text(skill_context.get("instructionsMarkdown") or "", 1400)
+    return payload
+
+
 def _looks_internal_identifier(token: str) -> bool:
     text = str(token or "").strip()
     if len(text) < 4:
@@ -611,6 +635,7 @@ def _build_scene_selection_input(
         "title": str(structured_payload.get("title") or "").strip(),
         "subtitle": str(structured_payload.get("subtitle") or "").strip(),
         "document_type": str(skill_context.get("documentType") or "").strip(),
+        "skill_context": _compact_skill_context(skill_context, include_excerpt=False),
         "deep_analysis": {
             "event_type": str(deep_analysis.get("eventType") or "").strip(),
             "domain": str(deep_analysis.get("domain") or "").strip(),
@@ -725,6 +750,7 @@ def _build_layout_input(
         "title": str(structured_payload.get("title") or "").strip(),
         "subtitle": str(structured_payload.get("subtitle") or "").strip(),
         "document_type": str(skill_context.get("documentType") or "").strip(),
+        "skill_context": _compact_skill_context(skill_context),
         "style_profile": {
             "document_label": str(style_profile.get("document_label") or "").strip(),
             "fallback_sections": style_profile.get("fallback_sections") if isinstance(style_profile.get("fallback_sections"), list) else [],
@@ -900,6 +926,7 @@ def build_full_report_budget(
     facts = {
         "topic_label": topic_label,
         "document_type": str(skill_context.get("documentType") or "").strip(),
+        "skill_context": _compact_skill_context(skill_context, include_excerpt=False),
         "scene_profile": {
             "scene_id": str(scene_profile.get("scene_id") or "").strip(),
             "scene_label": str(scene_profile.get("scene_label") or "").strip(),
@@ -2929,20 +2956,7 @@ def _build_compact_report_facts(
             "reference_snippets": reference_snippets[:4],
             "expert_notes": expert_notes[:4],
         },
-        "skill_context": {
-            "goal": str(skill_context.get("goal") or "").strip(),
-            "document_type": str(skill_context.get("documentType") or "").strip(),
-            "reasoning_style": _list_strings(skill_context.get("reasoningStyle"), max_items=5, max_chars=80),
-            "language_requirements": _list_strings(skill_context.get("languageRequirements"), max_items=8, max_chars=120),
-            "language_contract": skill_context.get("languageContract") if isinstance(skill_context.get("languageContract"), dict) else {},
-            "style_language_requirements": (
-                skill_context.get("styleLanguageRequirements")
-                if isinstance(skill_context.get("styleLanguageRequirements"), dict)
-                else {}
-            ),
-            "constraints": _list_strings(skill_context.get("constraints"), max_items=5, max_chars=80),
-            "section_guidance": skill_context.get("sectionGuidance") if isinstance(skill_context.get("sectionGuidance"), dict) else {},
-        },
+        "skill_context": _compact_skill_context(skill_context),
         "style_profile": style_profile,
         "scene_profile": scene_profile,
         "layout_plan": layout_plan,
@@ -3885,7 +3899,23 @@ def generate_full_report_payload(
             "revise_source": revise_source,
             "analysis_iterations": int(analysis_state.get("analysis_iterations") or 0),
             "section_rewrite_count": int(writing_state.get("section_rewrite_count") or 0),
-            "agent_runtime": "langchain_create_agent",
+            "agent_runtime": next(
+                (
+                    str((value or {}).get("runtime") or "").strip()
+                    for value in analysis_trace.values()
+                    if isinstance(value, dict) and str((value or {}).get("runtime") or "").strip()
+                ),
+                next(
+                    (
+                        str(((item or {}).get("trace") or {}).get("runtime") or "").strip()
+                        for item in exploration_sections
+                        if isinstance(item, dict)
+                        and isinstance(item.get("trace"), dict)
+                        and str(((item.get("trace") or {}).get("runtime")) or "").strip()
+                    ),
+                    "langchain_create_agent",
+                ),
+            ),
             "analysis_trace": analysis_trace,
             "exploration_sections": exploration_sections,
             "exploration_turns_total": exploration_turns_total,

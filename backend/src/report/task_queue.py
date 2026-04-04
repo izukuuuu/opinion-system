@@ -66,10 +66,12 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("创建报告任务缺少必要字段")
 
     now = _utc_now()
+    thread_id = f"report::{topic_identifier}::{start}::{end}"
     task = {
         "id": _new_task_id(),
         "topic": topic,
         "topic_identifier": topic_identifier,
+        "thread_id": thread_id,
         "start": start,
         "end": end,
         "mode": mode,
@@ -84,6 +86,7 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
         "request": {
             "topic": topic,
             "topic_identifier": topic_identifier,
+            "thread_id": thread_id,
             "start": start,
             "end": end,
             "mode": mode,
@@ -96,6 +99,16 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
             ],
         },
         "agents": _initial_agents(),
+        "todos": [],
+        "approvals": [],
+        "structured_result_digest": {},
+        "structured_result_path": "",
+        "run_state": {
+            "thread_id": thread_id,
+            "status": "queued",
+            "phase": "prepare",
+            "message": "等待报告 worker 接单。",
+        },
         "trust": _initial_trust(),
         "artifacts": {
             "report_ready": False,
@@ -380,6 +393,12 @@ def mark_task_started(task_id: str, *, phase: str, percentage: int, message: str
         task["message"] = message
         task["error"] = ""
         task["worker_pid"] = _safe_int(task.get("worker_pid"), 0) or os.getpid()
+        task["run_state"] = {
+            "thread_id": str(task.get("thread_id") or "").strip(),
+            "status": "running",
+            "phase": phase,
+            "message": message,
+        }
 
     return _mutate_task_with_event(
         task_id,
@@ -401,6 +420,12 @@ def mark_task_progress(task_id: str, *, phase: str, percentage: int, message: st
                 "percentage": max(0, min(100, int(percentage))),
                 "message": message,
                 "worker_pid": _safe_int(task.get("worker_pid"), 0) or os.getpid(),
+                "run_state": {
+                    "thread_id": str(task.get("thread_id") or "").strip(),
+                    "status": "running",
+                    "phase": phase,
+                    "message": message,
+                },
             }
         ),
         event_type="phase.progress",
@@ -440,6 +465,33 @@ def mark_agent_started(
         phase=phase,
         agent=agent,
         title=title or f"{_agent_name(agent)} 已启动",
+        message=message,
+        payload=payload or {},
+    )
+
+
+def mark_agent_completed(
+    task_id: str,
+    *,
+    agent: str,
+    phase: str,
+    message: str,
+    title: str = "",
+    payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return _mutate_task_with_event(
+        task_id,
+        mutate=lambda task: _update_agent(
+            task,
+            agent,
+            status="done",
+            message=message,
+            payload=payload,
+        ),
+        event_type="subagent.completed",
+        phase=phase,
+        agent=agent,
+        title=title or f"{_agent_name(agent)} 已完成",
         message=message,
         payload=payload or {},
     )
@@ -598,6 +650,123 @@ def append_event(
     )
 
 
+def update_todos(task_id: str, *, todos: List[Dict[str, Any]], phase: str, message: str = "") -> Dict[str, Any]:
+    return _mutate_task_with_event(
+        task_id,
+        mutate=lambda task: task.update({"todos": todos}),
+        event_type="todo.updated",
+        phase=phase,
+        title="任务清单已更新",
+        message=message or "任务清单已更新。",
+        payload={"todos": todos},
+    )
+
+
+def set_structured_result_digest(task_id: str, *, digest: Dict[str, Any], path: str = "") -> Dict[str, Any]:
+    return _mutate_task_with_event(
+        task_id,
+        mutate=lambda task: task.update(
+            {
+                "structured_result_digest": digest if isinstance(digest, dict) else {},
+                "structured_result_path": str(path or "").strip(),
+            }
+        ),
+        event_type="artifact.updated",
+        phase="write",
+        title="结构化结果已更新",
+        message="结构化结果摘要已更新。",
+        payload={
+            "structured_result_digest": digest if isinstance(digest, dict) else {},
+            "structured_result_path": str(path or "").strip(),
+        },
+    )
+
+
+def mark_approval_required(task_id: str, *, approvals: List[Dict[str, Any]], phase: str, message: str) -> Dict[str, Any]:
+    def _mutate(task: Dict[str, Any]) -> None:
+        task["approvals"] = approvals
+        task["status"] = "waiting_approval"
+        task["phase"] = phase
+        task["message"] = message
+        task["run_state"] = {
+            "thread_id": str(task.get("thread_id") or "").strip(),
+            "status": "waiting_approval",
+            "phase": phase,
+            "message": message,
+        }
+
+    return _mutate_task_with_event(
+        task_id,
+        mutate=_mutate,
+        event_type="approval.required",
+        phase=phase,
+        title="需要人工确认",
+        message=message,
+        payload={"approvals": approvals},
+    )
+
+
+def resolve_approval(
+    task_id: str,
+    *,
+    approval_id: str,
+    decision: str,
+    edited_action: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    decision_text = str(decision or "").strip().lower()
+    if decision_text not in {"approve", "reject", "edit"}:
+        raise ValueError("approval decision 仅支持 approve、reject、edit")
+
+    def _mutate(task: Dict[str, Any]) -> None:
+        approvals = task.get("approvals")
+        if not isinstance(approvals, list):
+            raise ValueError("当前任务没有待处理审批")
+        matched = None
+        for item in approvals:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("approval_id") or "").strip() != str(approval_id or "").strip():
+                continue
+            matched = item
+            break
+        if matched is None:
+            raise LookupError("未找到对应审批项")
+        matched["status"] = "resolved"
+        matched["decision"] = decision_text
+        matched["resolved_at"] = _utc_now()
+        if isinstance(edited_action, dict) and decision_text == "edit":
+            matched["edited_action"] = edited_action
+        pending = [
+            item
+            for item in approvals
+            if isinstance(item, dict) and str(item.get("status") or "").strip() not in {"resolved", "rejected"}
+        ]
+        if not pending:
+            task["status"] = "queued"
+            task["message"] = "审批已处理，等待 worker 恢复执行。"
+            task["worker_pid"] = 0
+            task["run_state"] = {
+                "thread_id": str(task.get("thread_id") or "").strip(),
+                "status": "queued",
+                "phase": str(task.get("phase") or "").strip() or "persist",
+                "message": "审批已处理，等待 worker 恢复执行。",
+            }
+
+    return _mutate_task_with_event(
+        task_id,
+        mutate=_mutate,
+        event_type="approval.resolved",
+        phase="persist",
+        title="审批已处理",
+        message=f"审批 {approval_id} 已处理为 {decision_text}。",
+        payload={
+            "approval_id": str(approval_id or "").strip(),
+            "decision": decision_text,
+            "edited_action": edited_action if isinstance(edited_action, dict) else {},
+        },
+    )
+
+
 def task_state_path(task_id: str) -> Path:
     _ensure_state_dirs()
     return TASK_STATE_DIR / f"{task_id}.json"
@@ -709,6 +878,12 @@ def _apply_terminal_state(
     task["cancel_requested"] = False
     task["child_pid"] = 0
     task["finished_at"] = _utc_now()
+    task["run_state"] = {
+        "thread_id": str(task.get("thread_id") or "").strip(),
+        "status": status,
+        "phase": phase,
+        "message": message,
+    }
     agent_status = "done" if status == "completed" else ("failed" if status == "failed" else "idle")
     agents = task.get("agents")
     if isinstance(agents, list):
@@ -846,7 +1021,7 @@ def _merge_agent_payload(agent: Dict[str, Any], payload: Optional[Dict[str, Any]
 
 
 def _summarise_tasks(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
-    counts = {"queued": 0, "running": 0, "completed": 0, "failed": 0, "cancelled": 0}
+    counts = {"queued": 0, "running": 0, "waiting_approval": 0, "completed": 0, "failed": 0, "cancelled": 0}
     for task in tasks:
         status = str(task.get("status") or "")
         if status in counts:
@@ -985,7 +1160,9 @@ __all__ = [
     "list_tasks",
     "load_events_since",
     "load_worker_status",
+    "mark_agent_completed",
     "mark_agent_started",
+    "mark_approval_required",
     "mark_artifact_ready",
     "mark_task_cancelled",
     "mark_task_completed",
@@ -995,12 +1172,15 @@ __all__ = [
     "record_tool_call",
     "record_tool_result",
     "reserve_next_task",
+    "resolve_approval",
     "retry_task",
     "set_child_pid",
+    "set_structured_result_digest",
     "set_worker_pid",
     "should_cancel",
     "tail_events",
     "task_events_path",
     "task_state_path",
+    "update_todos",
     "write_worker_status",
 ]

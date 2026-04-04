@@ -306,7 +306,6 @@ async def _llm_call_report(messages: Dict, logger, model: Optional[str] = None, 
         langchain_text = await call_langchain_chat(
             msg_list,
             task="report",
-            model=model,
             temperature=0.3,
             max_tokens=3000,
             timeout=timeout,

@@ -1,16 +1,16 @@
 <template>
   <section class="card-surface space-y-6 p-6">
-    <header class="flex flex-wrap items-center justify-between gap-4">
-      <div>
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-muted">颜色</p>
-        <h1 class="text-xl font-semibold text-primary">主题颜色管理</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-secondary">
+    <header class="settings-toolbar">
+      <div class="settings-page-header">
+        <p class="settings-page-eyebrow">颜色</p>
+        <h1 class="settings-page-title">主题颜色管理</h1>
+        <p class="settings-page-desc max-w-3xl">
           调整系统主题色板以适配不同品牌形象。变更会立即应用到当前会话并保存在浏览器本地，可随时导入或导出 JSON 配置。
         </p>
       </div>
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+        class="btn-secondary px-4 py-2 text-sm text-danger"
         @click="confirmReset = true"
       >
         重设颜色

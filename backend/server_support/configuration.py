@@ -139,6 +139,15 @@ def load_llm_config() -> Dict[str, Any]:
     dynamic_langchain = config.get("langchain")
     if isinstance(dynamic_langchain, dict):
         langchain.update(dynamic_langchain)
+    static_report_runtime = static_langchain.get("report_runtime") if isinstance(static_langchain, dict) else None
+    dynamic_report_runtime = dynamic_langchain.get("report_runtime") if isinstance(dynamic_langchain, dict) else None
+    report_runtime: Dict[str, Any] = {}
+    if isinstance(static_report_runtime, dict):
+        report_runtime.update(static_report_runtime)
+    if isinstance(dynamic_report_runtime, dict):
+        report_runtime.update(dynamic_report_runtime)
+    if report_runtime:
+        langchain["report_runtime"] = report_runtime
     config["langchain"] = langchain
 
     credentials = config.get("credentials")

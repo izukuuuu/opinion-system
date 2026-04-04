@@ -1,52 +1,58 @@
 <template>
-  <div class="space-y-10">
-    <section class="card-surface">
-      <div class="border-b px-6 py-4">
-        <h2 class="text-lg font-semibold text-primary">BERTopic 全局配置</h2>
-        <p class="text-sm text-secondary mt-1">配置 BERTopic 主题分析使用的嵌入模型与分词停用词。</p>
+  <section class="card-surface space-y-6 p-6">
+      <header class="settings-page-header">
+        <p class="settings-page-eyebrow">BERTopic</p>
+        <h2 class="settings-page-title">BERTopic 配置</h2>
+        <p class="settings-page-desc">配置主题分析使用的嵌入模型和停用词。</p>
+      </header>
+
+      <div class="settings-toolbar settings-section-split">
+        <div class="settings-section-header">
+          <h3 class="settings-section-title">配置项</h3>
+          <p class="settings-section-desc">在嵌入配置和停用词之间切换。</p>
+        </div>
+        <div class="settings-tabbar">
+          <button
+            type="button"
+            class="settings-tab"
+            :class="activeTab === 'embedding' ? 'settings-tab-active' : ''"
+            @click="activeTab = 'embedding'"
+          >
+            嵌入配置
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
+            :class="activeTab === 'stopwords' ? 'settings-tab-active' : ''"
+            @click="activeTab = 'stopwords'"
+          >
+            停用词
+          </button>
+        </div>
       </div>
 
-      <div class="p-6">
-        <div v-if="configState.error" class="mb-6 rounded-xl border border-red-200 bg-red-50/70 p-4 text-sm text-red-700">
+      <div>
+        <div v-if="configState.error" class="settings-message-error mb-6">
           {{ configState.error }}
         </div>
 
         <div
           v-if="statusMessage"
           :class="[
-            'mb-6 rounded-lg p-4 text-sm',
-            statusType === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
+            'mb-6',
+            statusType === 'success' ? 'settings-message-success' : 'settings-message-error'
           ]"
         >
           {{ statusMessage }}
         </div>
 
-        <div v-if="configState.loading && !configForm.embedding.model_name" class="py-8 text-center text-gray-500">
+        <div v-if="configState.loading && !configForm.embedding.model_name" class="settings-empty-state py-8">
           加载中...
         </div>
 
         <div v-else class="space-y-6">
-          <div class="flex flex-wrap gap-2 border-b border-soft pb-4">
-            <button
-              type="button"
-              class="rounded-full px-4 py-2 text-sm font-medium transition-colors"
-              :class="activeTab === 'embedding' ? 'bg-brand-600 text-white' : 'bg-surface-muted text-secondary hover:text-primary'"
-              @click="activeTab = 'embedding'"
-            >
-              嵌入配置
-            </button>
-            <button
-              type="button"
-              class="rounded-full px-4 py-2 text-sm font-medium transition-colors"
-              :class="activeTab === 'stopwords' ? 'bg-brand-600 text-white' : 'bg-surface-muted text-secondary hover:text-primary'"
-              @click="activeTab = 'stopwords'"
-            >
-              停用词
-            </button>
-          </div>
-
           <div v-if="activeTab === 'embedding'" class="space-y-6">
-            <div class="rounded-xl border border-brand-200/60 bg-brand-50/70 p-4 text-sm text-brand-900">
+            <div class="settings-help-block border-brand-soft bg-brand-soft text-primary">
               <p class="font-semibold">当前建议</p>
               <p class="mt-1 leading-6">
                 对 8GB 级别 GPU，默认推荐 `moka-ai/m3e-base + auto + batch_size=32`。
@@ -67,7 +73,7 @@
                   常用模型列表由后端接口提供，失败时自动回退到内置推荐列表。BERTopic 实际运行会读取这里保存的全局配置。
                 </p>
                 <p v-if="embeddingModelState.loading" class="text-xs text-muted">正在刷新模型列表...</p>
-                <p v-else-if="embeddingModelState.error" class="text-xs text-amber-700">
+                <p v-else-if="embeddingModelState.error" class="text-xs text-warning">
                   模型列表加载失败，已使用内置列表：{{ embeddingModelState.error }}
                 </p>
               </div>
@@ -108,7 +114,7 @@
           </div>
 
           <div v-else class="space-y-5">
-            <div class="rounded-xl border border-amber-200/60 bg-amber-50/70 p-4 text-sm text-amber-900">
+            <div class="settings-message-warning">
               <p class="font-semibold">编辑说明</p>
               <p class="mt-1 leading-6">
                 一行一个停用词，保存后会直接写入 `configs/stopwords.txt`，后续 BERTopic 分词会读取这份文件。
@@ -120,7 +126,7 @@
               <span>当前行数：{{ currentStopwordCount }}</span>
             </div>
 
-            <div v-if="stopwordsState.error" class="rounded-xl border border-red-200 bg-red-50/70 p-4 text-sm text-red-700">
+            <div v-if="stopwordsState.error" class="settings-message-error">
               {{ stopwordsState.error }}
             </div>
 
@@ -134,8 +140,8 @@
         </div>
       </div>
 
-      <div class="border-t bg-gray-50 px-6 py-4">
-        <div class="flex justify-between">
+      <div class="settings-action-row">
+        <div class="flex w-full flex-wrap items-center justify-between gap-3">
           <template v-if="activeTab === 'embedding'">
             <button @click="resetConfig" class="btn-secondary">重置为默认</button>
             <button @click="saveConfig" :disabled="!canSave" class="btn-primary">
@@ -154,8 +160,7 @@
           </template>
         </div>
       </div>
-    </section>
-  </div>
+  </section>
 </template>
 
 <script setup>

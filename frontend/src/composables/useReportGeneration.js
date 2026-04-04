@@ -43,6 +43,7 @@ const taskState = reactive({
   usingPollingFallback: false,
   error: '',
   id: '',
+  threadId: '',
   reused: false,
   topic: '',
   topicIdentifier: '',
@@ -61,7 +62,12 @@ const taskState = reactive({
   cancelRequested: false,
   trust: {},
   artifacts: {},
+  subagents: [],
   agents: [],
+  todos: [],
+  approvals: [],
+  runState: {},
+  structuredResultDigest: {},
   events: [],
   lastEventId: 0
 })
@@ -78,13 +84,19 @@ const analysisAiSummary = computed(() => analysisData.value?.ai_summary || null)
 const taskEvents = computed(() => taskState.events)
 const activeTask = computed(() => (taskState.id ? {
   id: taskState.id,
+  threadId: taskState.threadId,
   status: taskState.status,
   phase: taskState.phase,
   percentage: taskState.percentage,
   message: taskState.message,
   trust: taskState.trust,
   artifacts: taskState.artifacts,
+  subagents: taskState.subagents,
   agents: taskState.agents,
+  todos: taskState.todos,
+  approvals: taskState.approvals,
+  runState: taskState.runState,
+  structuredResultDigest: taskState.structuredResultDigest,
   events: taskState.events
 } : null))
 const taskStageList = [
@@ -148,6 +160,7 @@ export const useReportGeneration = () => {
     closeReportTaskStream,
     cancelReportTask,
     retryReportTask,
+    resolveReportApproval,
     resumeLastReportTask,
     applyHistorySelection
   }
@@ -271,6 +284,7 @@ function resetTaskState() {
   taskState.usingPollingFallback = false
   taskState.error = ''
   taskState.id = ''
+  taskState.threadId = ''
   taskState.reused = false
   taskState.topic = ''
   taskState.topicIdentifier = ''
@@ -289,7 +303,12 @@ function resetTaskState() {
   taskState.cancelRequested = false
   taskState.trust = {}
   taskState.artifacts = {}
+  taskState.subagents = []
   taskState.agents = []
+  taskState.todos = []
+  taskState.approvals = []
+  taskState.runState = {}
+  taskState.structuredResultDigest = {}
   taskState.events = []
   taskState.lastEventId = 0
 }
@@ -665,6 +684,7 @@ function mergeTaskEvents(incoming = []) {
 function applyTaskSnapshot(task, { reused = false } = {}) {
   if (!task || typeof task !== 'object') return
   taskState.id = String(task.id || '').trim()
+  taskState.threadId = String(task.thread_id || '').trim()
   taskState.reused = reused
   taskState.topic = String(task.topic || '').trim()
   taskState.topicIdentifier = String(task.topic_identifier || '').trim()
@@ -683,14 +703,26 @@ function applyTaskSnapshot(task, { reused = false } = {}) {
   taskState.cancelRequested = Boolean(task.cancel_requested)
   taskState.trust = task.trust && typeof task.trust === 'object' ? task.trust : {}
   taskState.artifacts = task.artifacts && typeof task.artifacts === 'object' ? task.artifacts : {}
-  taskState.agents = Array.isArray(task.agents) ? task.agents : []
+  taskState.subagents = Array.isArray(task.subagents) ? task.subagents : (Array.isArray(task.agents) ? task.agents : [])
+  taskState.agents = taskState.subagents
+  taskState.todos = Array.isArray(task.todos) ? task.todos : []
+  taskState.approvals = Array.isArray(task.approvals) ? task.approvals : []
+  taskState.runState = task.run_state && typeof task.run_state === 'object' ? task.run_state : {}
+  taskState.structuredResultDigest = task.structured_result_digest && typeof task.structured_result_digest === 'object'
+    ? task.structured_result_digest
+    : {}
   mergeTaskEvents(task.recent_events || [])
   persistTaskKey(taskState)
   applyProgressPayload({
     topic: taskState.topic,
     range: { start: taskState.start, end: taskState.end },
     state: { stage: taskState.phase, status: taskState.status, message: taskState.message, updated_at: taskState.updatedAt },
-    summary: { status: taskState.status === 'completed' ? 'ok' : (['queued', 'running'].includes(taskState.status) ? 'running' : 'error'), message: taskState.message },
+    summary: {
+      status: taskState.status === 'completed'
+        ? 'ok'
+        : (['queued', 'running', 'waiting_approval'].includes(taskState.status) ? 'running' : 'error'),
+      message: taskState.message
+    },
     steps: buildProgressStepsFromTask()
   }, taskState)
 }
@@ -763,7 +795,25 @@ async function openReportTaskStream(taskId = taskState.id, { force = false } = {
       // ignore parse errors
     }
   }
-  ;['task.created', 'phase.started', 'phase.progress', 'agent.started', 'agent.memo', 'tool.called', 'tool.result', 'artifact.ready', 'task.completed', 'task.failed', 'task.cancelled'].forEach((eventName) => {
+  ;[
+    'task.created',
+    'phase.started',
+    'phase.progress',
+    'agent.started',
+    'agent.memo',
+    'tool.called',
+    'tool.result',
+    'artifact.ready',
+    'task.completed',
+    'task.failed',
+    'task.cancelled',
+    'todo.updated',
+    'subagent.started',
+    'subagent.completed',
+    'approval.required',
+    'approval.resolved',
+    'artifact.updated'
+  ].forEach((eventName) => {
     es.addEventListener(eventName, handleEvent)
   })
   es.onerror = () => {
@@ -860,6 +910,27 @@ async function retryReportTask(taskId = taskState.id) {
       applyTaskSnapshot(task)
       await openReportTaskStream(task.id, { force: true })
     }
+    return task
+  } catch (error) {
+    taskState.error = error instanceof Error ? error.message : String(error)
+    return null
+  }
+}
+
+async function resolveReportApproval(taskId = taskState.id, approvalId, payload = {}) {
+  const resolvedTaskId = String(taskId || '').trim()
+  const resolvedApprovalId = String(approvalId || '').trim()
+  if (!resolvedTaskId || !resolvedApprovalId) return null
+  try {
+    const response = await callApi(
+      `/api/report/tasks/${encodeURIComponent(resolvedTaskId)}/approvals/${encodeURIComponent(resolvedApprovalId)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      }
+    )
+    const task = response?.task || null
+    if (task) applyTaskSnapshot(task)
     return task
   } catch (error) {
     taskState.error = error instanceof Error ? error.message : String(error)

@@ -40,6 +40,14 @@ def _read_langchain_config() -> Dict[str, Any]:
     return langchain_cfg
 
 
+def _read_llm_credentials() -> Dict[str, Any]:
+    llm_config = settings.get_llm_config()
+    if not isinstance(llm_config, dict):
+        return {}
+    credentials = llm_config.get("credentials")
+    return credentials if isinstance(credentials, dict) else {}
+
+
 def _resolve_client_config(
     *,
     task: str = "default",
@@ -51,28 +59,35 @@ def _resolve_client_config(
     max_retries: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     cfg = _read_langchain_config()
-    if not cfg.get("enabled", False):
-        return None
+    runtime_override = cfg.get(f"{task}_runtime")
+    if not isinstance(runtime_override, dict):
+        runtime_override = {}
+    credentials = _read_llm_credentials()
 
-    provider = str(cfg.get("provider") or "qwen").strip().lower()
+    provider = str(runtime_override.get("provider") or cfg.get("provider") or "qwen").strip().lower()
     default_model = str(cfg.get("model") or "").strip()
     task_model = str(cfg.get(f"{task}_model") or "").strip()
     role_model = str(cfg.get(f"{str(model_role or '').strip()}_model") or "").strip() if model_role else ""
-    resolved_model = (model or role_model or task_model or default_model).strip()
+    override_model = str(runtime_override.get("model") or "").strip()
+    resolved_model = (override_model or model or role_model or task_model or default_model).strip()
     if not resolved_model:
         resolved_model = "qwen-plus" if provider == "qwen" else "gpt-4o-mini"
 
     if provider == "openai":
-        api_key = get_openai_api_key()
+        api_key = str(credentials.get("report_api_key") or "").strip() if task == "report" else ""
+        if not api_key:
+            api_key = get_openai_api_key()
         base_url = (
-            str(cfg.get("base_url") or "").strip()
+            str(runtime_override.get("base_url") or cfg.get("base_url") or "").strip()
             or get_openai_base_url()
             or "https://api.openai.com/v1"
         )
     else:
         provider = "qwen"
-        api_key = get_api_key()
-        base_url = str(cfg.get("base_url") or "").strip() or QWEN_COMPAT_BASE_URL
+        api_key = str(credentials.get("report_api_key") or "").strip() if task == "report" else ""
+        if not api_key:
+            api_key = get_api_key()
+        base_url = str(runtime_override.get("base_url") or cfg.get("base_url") or "").strip() or QWEN_COMPAT_BASE_URL
 
     if not api_key:
         return None
@@ -83,28 +98,64 @@ def _resolve_client_config(
     resolved_temperature = (
         _as_float(temperature, 0.3)
         if temperature is not None
-        else _as_float(role_temperature if role_temperature is not None else task_temperature if task_temperature is not None else cfg.get("temperature"), 0.3)
+        else _as_float(
+            runtime_override.get("temperature")
+            if runtime_override.get("temperature") is not None
+            else role_temperature
+            if role_temperature is not None
+            else task_temperature
+            if task_temperature is not None
+            else cfg.get("temperature"),
+            0.3,
+        )
     )
     role_max_tokens = cfg.get(f"{role_prefix}_max_tokens") if role_prefix else None
     task_max_tokens = cfg.get(f"{task}_max_tokens")
     resolved_max_tokens = (
         _as_int(max_tokens, 1024)
         if max_tokens is not None
-        else _as_int(role_max_tokens if role_max_tokens is not None else task_max_tokens if task_max_tokens is not None else cfg.get("max_tokens"), 1024)
+        else _as_int(
+            runtime_override.get("max_tokens")
+            if runtime_override.get("max_tokens") is not None
+            else role_max_tokens
+            if role_max_tokens is not None
+            else task_max_tokens
+            if task_max_tokens is not None
+            else cfg.get("max_tokens"),
+            1024,
+        )
     )
     role_timeout = cfg.get(f"{role_prefix}_timeout") if role_prefix else None
     task_timeout = cfg.get(f"{task}_timeout")
     resolved_timeout = (
         _as_float(timeout, 60.0)
         if timeout is not None
-        else _as_float(role_timeout if role_timeout is not None else task_timeout if task_timeout is not None else cfg.get("timeout"), 60.0)
+        else _as_float(
+            runtime_override.get("timeout")
+            if runtime_override.get("timeout") is not None
+            else role_timeout
+            if role_timeout is not None
+            else task_timeout
+            if task_timeout is not None
+            else cfg.get("timeout"),
+            60.0,
+        )
     )
     role_retries = cfg.get(f"{role_prefix}_max_retries") if role_prefix else None
     task_retries = cfg.get(f"{task}_max_retries")
     resolved_max_retries = (
         _as_int(max_retries, 2)
         if max_retries is not None
-        else _as_int(role_retries if role_retries is not None else task_retries if task_retries is not None else cfg.get("max_retries"), 2)
+        else _as_int(
+            runtime_override.get("max_retries")
+            if runtime_override.get("max_retries") is not None
+            else role_retries
+            if role_retries is not None
+            else task_retries
+            if task_retries is not None
+            else cfg.get("max_retries"),
+            2,
+        )
     )
 
     return {

@@ -9,7 +9,6 @@ from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
     ToolCallLimitMiddleware,
     ToolRetryMiddleware,
-    dynamic_prompt,
     wrap_model_call,
     wrap_tool_call,
 )
@@ -17,6 +16,13 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from ..utils.ai import build_langchain_chat_model
+from ..utils.setting import settings
+from .skills import (
+    build_report_skill_runtime_assets,
+    discover_report_skills,
+    read_report_skill_resource,
+    resolve_report_skill,
+)
 from .tools import ensure_langchain_toolset_valid, get_report_tool_bundle
 
 
@@ -52,6 +58,7 @@ class ExplorationTrace(TypedDict, total=False):
     unresolved_questions: List[str]
     tool_call_count: int
     exploration_turns: int
+    runtime: str
 
 
 def ensure_langchain_uuid_compat() -> None:
@@ -63,6 +70,16 @@ def ensure_langchain_uuid_compat() -> None:
         lc_uuid._uuid_utils_uuid7()  # type: ignore[attr-defined]
     except Exception:
         lc_uuid._uuid_utils_uuid7 = lambda timestamp=None, nanos=None: uuid.uuid4()  # type: ignore[attr-defined]
+
+
+def _configured_skills_runtime() -> str:
+    try:
+        settings.reload()
+    except Exception:
+        pass
+    raw = settings.get("llm.langchain.report.skills.runtime", "deepagents")
+    runtime = str(raw or "deepagents").strip().lower()
+    return runtime if runtime in {"deepagents", "plain"} else "deepagents"
 
 
 def _extract_json_text(raw_text: str) -> str:
@@ -85,6 +102,132 @@ def _safe_json_loads(raw_text: str) -> Dict[str, Any]:
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _build_skill_catalog_prompt(topic: str) -> str:
+    catalog = discover_report_skills(topic)
+    if not catalog:
+        return "当前未注册可用 skills。"
+    lines = [
+        "当前可用 skills catalog：",
+    ]
+    for item in catalog:
+        skill_key = str(item.get("skill_key") or item.get("name") or "").strip()
+        agent_skill_name = str(item.get("agentSkillName") or "").strip()
+        description = str(item.get("description") or "").strip()
+        document_type = str(item.get("documentType") or "").strip()
+        source_scope = str(item.get("sourceScope") or "").strip()
+        target = agent_skill_name or skill_key or "unknown-skill"
+        lines.append(
+            f"- {target}: {description or '无描述'}"
+            f"{f' | documentType={document_type}' if document_type else ''}"
+            f"{f' | source={source_scope}' if source_scope else ''}"
+        )
+    lines.append("如果当前任务明显匹配某个 skill，请先调用 load_skill 读取完整说明。")
+    return "\n".join(lines)
+
+
+def _compose_runtime_system_prompt(
+    *,
+    base_prompt: str,
+    context: ReportAgentContext,
+    policy: ToolPolicy,
+    include_plain_skill_catalog: bool,
+    topic: str,
+) -> str:
+    tool_names = [
+        str(getattr(tool, "name", "") or "").strip()
+        for tool in (policy.get("allowed_tools") or [])
+        if str(getattr(tool, "name", "") or "").strip()
+    ]
+    required = [str(item).strip() for item in (policy.get("required_tools") or []) if str(item or "").strip()]
+    stop_conditions = policy.get("stop_conditions") if isinstance(policy, dict) and isinstance(policy.get("stop_conditions"), list) else []
+    escalation_conditions = (
+        policy.get("escalation_conditions")
+        if isinstance(policy, dict) and isinstance(policy.get("escalation_conditions"), list)
+        else []
+    )
+    skill_section = ""
+    if include_plain_skill_catalog:
+        skill_section = f"\n\n{_build_skill_catalog_prompt(topic)}"
+    return (
+        f"{base_prompt}{skill_section}\n\n"
+        f"当前 scene: {str(context.get('scene_id') or '').strip()}\n"
+        f"当前 section: {str(context.get('section_id') or '').strip()}\n"
+        f"允许工具: {', '.join(tool_names) if tool_names else '无'}\n"
+        f"必需优先命中的工具: {', '.join(required) if required else '无'}\n"
+        f"停止条件: {'；'.join(str(item).strip() for item in stop_conditions if str(item or '').strip()) or '得到足够证据后停止'}\n"
+        f"升级条件: {'；'.join(str(item).strip() for item in escalation_conditions if str(item or '').strip()) or '证据不足时降低判断强度'}\n"
+        "如果能通过工具补证，请先补证；如果证据仍不足，必须明确保留边界。"
+    )
+
+
+def _build_plain_load_skill_tool(topic: str) -> Any:
+    from langchain_core.tools import tool
+
+    @tool("load_skill")
+    def load_skill(skill_name: str) -> str:
+        """Load the full instructions for a report skill by name or alias."""
+        resolved = resolve_report_skill(skill_name, topic=topic)
+        resource_contents: Dict[str, str] = {}
+        for item in resolved.get("resourceIndex") or []:
+            relative_path = str(item.get("path") or "").strip()
+            if not relative_path:
+                continue
+            if str(item.get("kind") or "") not in {"references", "root"}:
+                continue
+            if not bool(item.get("staged")):
+                continue
+            try:
+                resource_contents[relative_path] = read_report_skill_resource(
+                    str(resolved.get("skill_key") or resolved.get("name") or skill_name),
+                    relative_path,
+                    topic=topic,
+                )[:6000]
+            except Exception:
+                continue
+            if len(resource_contents) >= 3:
+                break
+        payload = {
+            "skill_key": resolved.get("skill_key") or resolved.get("name"),
+            "agent_skill_name": resolved.get("agentSkillName"),
+            "display_name": resolved.get("displayName"),
+            "description": resolved.get("description"),
+            "document_type": resolved.get("documentType"),
+            "instructions_markdown": resolved.get("instructionsMarkdown"),
+            "sections": resolved.get("sections") if isinstance(resolved.get("sections"), dict) else {},
+            "resource_index": resolved.get("resourceIndex") if isinstance(resolved.get("resourceIndex"), list) else [],
+            "resource_contents": resource_contents,
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+    return load_skill
+
+
+def _build_runtime_middleware(
+    *,
+    policy: ToolPolicy,
+) -> List[Any]:
+    required_tools = [str(item).strip() for item in (policy.get("required_tools") or []) if str(item or "").strip()]
+    max_turns = max(1, int(policy.get("max_exploration_turns") or 4))
+    parallel_tool_calls = bool(policy.get("parallel_tool_calls"))
+
+    @wrap_model_call
+    def _model_policy(request: Any, handler: Any) -> Any:
+        request.model_settings = {**(request.model_settings or {}), "parallel_tool_calls": parallel_tool_calls}
+        return handler(request)
+
+    @wrap_tool_call
+    def _tool_policy(request: Any, handler: Any) -> Any:
+        return handler(request)
+
+    return [
+        _model_policy,
+        _tool_policy,
+        ModelCallLimitMiddleware(run_limit=max_turns + (2 if required_tools else 1), exit_behavior="end"),
+        ToolCallLimitMiddleware(run_limit=max_turns, exit_behavior="end"),
+        ToolRetryMiddleware(max_retries=1, on_failure="return_message"),
+    ]
 
 
 def build_section_tool_policy(scene_id: str, section_id: str) -> ToolPolicy:
@@ -170,7 +313,77 @@ def _build_thread_id(context: ReportAgentContext, suffix: str) -> str:
     return f"{topic_identifier}:{scene_id}:{section_id}:{suffix}"
 
 
-def create_report_agent_runner(
+def create_report_deep_agent(
+    policy: ToolPolicy,
+    context: ReportAgentContext,
+    *,
+    task: str = "report",
+    model_role: str = "report",
+    system_prompt: str,
+    max_tokens: int = 2200,
+    temperature: float = 0.2,
+    name: str = "report_agent",
+) -> Optional[Dict[str, Any]]:
+    ensure_langchain_uuid_compat()
+    try:
+        from deepagents import create_deep_agent
+        from deepagents.backends import StateBackend
+    except Exception:
+        return None
+
+    llm, client_cfg = build_langchain_chat_model(
+        task=task,
+        model_role=model_role,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    if llm is None or client_cfg is None:
+        return None
+
+    allowed_tools = policy.get("allowed_tools") or []
+    ensure_langchain_toolset_valid(list(allowed_tools))
+    runtime_context = dict(context or {})
+    runtime_context["tool_policy"] = policy
+    topic = str(runtime_context.get("topic_label") or runtime_context.get("topic_identifier") or "").strip()
+    runtime_system_prompt = _compose_runtime_system_prompt(
+        base_prompt=system_prompt,
+        context=runtime_context,
+        policy=policy,
+        include_plain_skill_catalog=False,
+        topic=topic,
+    )
+    skill_assets = build_report_skill_runtime_assets(topic)
+    middleware = _build_runtime_middleware(
+        policy=policy,
+    )
+
+    agent = create_deep_agent(
+        model=llm,
+        tools=allowed_tools,
+        system_prompt=runtime_system_prompt,
+        middleware=middleware,
+        skills=skill_assets.get("sources") or None,
+        context_schema=ReportAgentContext,
+        checkpointer=InMemorySaver(),
+        backend=StateBackend,
+        name=name,
+        debug=False,
+    )
+    seed_state = {"files": skill_assets.get("files") or {}} if skill_assets.get("files") else {}
+    return {
+        "agent": agent,
+        "client_cfg": client_cfg,
+        "context": runtime_context,
+        "policy": policy,
+        "thread_id": _build_thread_id(context, name),
+        "runtime": "deepagents",
+        "seed_state": seed_state,
+        "skill_sources": skill_assets.get("sources") or [],
+        "skill_catalog": skill_assets.get("catalog") or [],
+    }
+
+
+def _create_plain_report_agent_runner(
     policy: ToolPolicy,
     context: ReportAgentContext,
     *,
@@ -193,57 +406,27 @@ def create_report_agent_runner(
 
     allowed_tools = policy.get("allowed_tools") or []
     ensure_langchain_toolset_valid(list(allowed_tools))
-    required_tools = [str(item).strip() for item in (policy.get("required_tools") or []) if str(item or "").strip()]
-    max_turns = max(1, int(policy.get("max_exploration_turns") or 4))
-    parallel_tool_calls = bool(policy.get("parallel_tool_calls"))
     runtime_context = dict(context or {})
     runtime_context["tool_policy"] = policy
-
-    @dynamic_prompt
-    def _runtime_prompt(request: Any) -> str:
-        runtime_context = request.runtime.context or {}
-        tool_policy = runtime_context.get("tool_policy") if isinstance(runtime_context, dict) and isinstance(runtime_context.get("tool_policy"), dict) else {}
-        tool_names = [
-            str(getattr(tool, "name", "") or "").strip()
-            for tool in (tool_policy.get("allowed_tools") or [])
-            if str(getattr(tool, "name", "") or "").strip()
-        ]
-        required = [str(item).strip() for item in (tool_policy.get("required_tools") or []) if str(item or "").strip()]
-        stop_conditions = tool_policy.get("stop_conditions") if isinstance(tool_policy, dict) else []
-        escalation_conditions = tool_policy.get("escalation_conditions") if isinstance(tool_policy, dict) else []
-        return (
-            f"{system_prompt}\n\n"
-            f"当前 scene: {str(runtime_context.get('scene_id') or '').strip()}\n"
-            f"当前 section: {str(runtime_context.get('section_id') or '').strip()}\n"
-            f"允许工具: {', '.join(tool_names) if tool_names else '无'}\n"
-            f"必需优先命中的工具: {', '.join(required) if required else '无'}\n"
-            f"停止条件: {'；'.join(str(item).strip() for item in stop_conditions if str(item or '').strip()) or '得到足够证据后停止'}\n"
-            f"升级条件: {'；'.join(str(item).strip() for item in escalation_conditions if str(item or '').strip()) or '证据不足时降低判断强度'}\n"
-            "如果能通过工具补证，请先补证；如果证据仍不足，必须明确保留边界。"
-        )
-
-    @wrap_model_call
-    def _model_policy(request: Any, handler: Any) -> Any:
-        request.model_settings = {**(request.model_settings or {}), "parallel_tool_calls": parallel_tool_calls}
-        return handler(request)
-
-    @wrap_tool_call
-    def _tool_policy(request: Any, handler: Any) -> Any:
-        return handler(request)
-
-    middleware: List[Any] = [
-        _runtime_prompt,
-        _model_policy,
-        _tool_policy,
-        ModelCallLimitMiddleware(run_limit=max_turns + (2 if allowed_tools else 1), exit_behavior="end"),
-        ToolCallLimitMiddleware(run_limit=max_turns, exit_behavior="end"),
-        ToolRetryMiddleware(max_retries=1, on_failure="return_message"),
-    ]
+    topic = str(runtime_context.get("topic_label") or runtime_context.get("topic_identifier") or "").strip()
+    runtime_system_prompt = _compose_runtime_system_prompt(
+        base_prompt=system_prompt,
+        context=runtime_context,
+        policy=policy,
+        include_plain_skill_catalog=True,
+        topic=topic,
+    )
+    middleware = _build_runtime_middleware(
+        policy=policy,
+    )
+    compatibility_tools = [_build_plain_load_skill_tool(topic)]
     agent = create_agent(
         model=llm,
-        tools=allowed_tools,
+        system_prompt=runtime_system_prompt,
+        tools=[*allowed_tools, *compatibility_tools],
         middleware=middleware,
         checkpointer=InMemorySaver(),
+        context_schema=ReportAgentContext,
         name=name,
         debug=False,
     )
@@ -253,10 +436,48 @@ def create_report_agent_runner(
         "context": runtime_context,
         "policy": policy,
         "thread_id": _build_thread_id(context, name),
+        "runtime": "plain",
     }
 
 
-def _extract_agent_trace(messages: List[Any], policy: ToolPolicy) -> ExplorationTrace:
+def create_report_agent_runner(
+    policy: ToolPolicy,
+    context: ReportAgentContext,
+    *,
+    task: str = "report",
+    model_role: str = "report",
+    system_prompt: str,
+    max_tokens: int = 2200,
+    temperature: float = 0.2,
+    name: str = "report_agent",
+) -> Optional[Dict[str, Any]]:
+    runtime = _configured_skills_runtime()
+    if runtime == "deepagents":
+        runner = create_report_deep_agent(
+            policy,
+            context,
+            task=task,
+            model_role=model_role,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            name=name,
+        )
+        if runner is not None:
+            return runner
+    return _create_plain_report_agent_runner(
+        policy,
+        context,
+        task=task,
+        model_role=model_role,
+        system_prompt=system_prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        name=name,
+    )
+
+
+def _extract_agent_trace(messages: List[Any], policy: ToolPolicy, runtime: str) -> ExplorationTrace:
     tool_calls: List[Dict[str, Any]] = []
     tool_results: List[Dict[str, Any]] = []
     evidence_summary: List[str] = []
@@ -299,6 +520,7 @@ def _extract_agent_trace(messages: List[Any], policy: ToolPolicy) -> Exploration
         "unresolved_questions": [],
         "tool_call_count": len(tool_calls),
         "exploration_turns": len(tool_calls),
+        "runtime": runtime,
     }
 
 
@@ -312,8 +534,12 @@ def run_report_agent_step(
     user_prompt = str(input_state.get("prompt") or "").strip()
     if not user_prompt:
         return {"content": "", "messages": [], "trace": {}}
+    payload = {
+        **(agent_runner.get("seed_state") if isinstance(agent_runner.get("seed_state"), dict) else {}),
+        "messages": [{"role": "user", "content": user_prompt}],
+    }
     result = agent.invoke(
-        {"messages": [{"role": "user", "content": user_prompt}]},
+        payload,
         config={"configurable": {"thread_id": str(agent_runner.get("thread_id") or "report_agent")}},
         context=agent_runner.get("context") or {},
     )
@@ -323,7 +549,7 @@ def run_report_agent_step(
         if isinstance(message, AIMessage) and not (message.tool_calls or []):
             final_content = str(message.content or "").strip()
             break
-    trace = _extract_agent_trace(messages, agent_runner.get("policy") or {})
+    trace = _extract_agent_trace(messages, agent_runner.get("policy") or {}, str(agent_runner.get("runtime") or "plain"))
     return {"content": final_content, "messages": messages, "trace": trace}
 
 
@@ -366,7 +592,7 @@ def run_section_exploration(section_context: Dict[str, Any], tool_policy: ToolPo
             "status": "fallback",
             "evidence_summary": [],
             "unresolved_questions": [],
-            "trace": {"tool_calls": [], "tool_results": [], "stop_reason": "runner_unavailable", "tool_call_count": 0, "exploration_turns": 0},
+            "trace": {"tool_calls": [], "tool_results": [], "stop_reason": "runner_unavailable", "tool_call_count": 0, "exploration_turns": 0, "runtime": "none"},
         }
     prompt = (
         "请先用可用工具补充该节最关键的证据，再输出 JSON。\n"
@@ -429,7 +655,7 @@ def run_section_writer_agent(section_context: Dict[str, Any], exploration_result
         name="section_writer",
     )
     if runner is None:
-        return {"markdown": "", "trace": {"tool_calls": [], "tool_results": [], "stop_reason": "runner_unavailable", "tool_call_count": 0, "exploration_turns": 0}}
+        return {"markdown": "", "trace": {"tool_calls": [], "tool_results": [], "stop_reason": "runner_unavailable", "tool_call_count": 0, "exploration_turns": 0, "runtime": "none"}}
     prompt = (
         "请基于 section_context 与 exploration_result 撰写该节 Markdown 正文。\n"
         "要求：只输出正文，不要 H1/H2，不要 JSON，不要暴露工具或字段名。\n"

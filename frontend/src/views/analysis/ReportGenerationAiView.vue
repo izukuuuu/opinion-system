@@ -4,7 +4,7 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="space-y-1">
           <h2 class="text-xl font-semibold text-primary">AI 完整报告</h2>
-          <p class="text-sm text-secondary">基于当前结构化报告、知识库方法论和证据约束，生成一份可导航的 Markdown 长报告。</p>
+          <p class="text-sm text-secondary">这里展示基于结构化结果整理出的正式文稿，适合直接阅读、导出和分享。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="topicsState.loading" @click="loadTopics">
@@ -24,7 +24,7 @@
 
       <div class="grid gap-4 lg:grid-cols-[1.2fr,1fr,1fr,1fr]">
         <label class="space-y-2 text-secondary">
-          <span class="text-xs font-semibold text-muted">专题 (Topic)</span>
+          <span class="text-xs font-semibold text-muted">专题</span>
           <select v-model="reportForm.topic" class="input" :disabled="topicsState.loading || !topicOptions.length" required>
             <option value="" disabled>请选择专题</option>
             <option v-for="option in topicOptions" :key="`full-report-topic-${option}`" :value="option">
@@ -125,14 +125,14 @@
 
       <article class="card-surface overflow-hidden p-0">
         <div class="border-b border-soft px-6 py-5">
-          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Markdown Preview</p>
+          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">文稿预览</p>
         </div>
         <div class="ai-report-body px-6 py-8" v-html="renderedHtml"></div>
       </article>
     </section>
 
     <section v-else class="card-surface p-6 text-sm text-muted">
-      请先选择专题与时间范围，然后点击“读取 AI 报告”。
+      请先选择专题和时间范围，然后读取正式文稿。
     </section>
   </div>
 </template>
@@ -316,7 +316,6 @@ function escapeHtml(text) {
   border-radius: 1.25rem;
   border: 1px solid rgb(219 234 254);
   background: rgb(248 250 252);
-  box-shadow: 0 18px 40px -30px rgba(15, 23, 42, 0.45);
 }
 
 .ai-report-body :deep(blockquote) {

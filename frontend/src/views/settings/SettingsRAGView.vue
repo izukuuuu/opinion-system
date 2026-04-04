@@ -1,18 +1,26 @@
 <template>
-  <div class="space-y-10">
-    <!-- Configuration Tabs -->
-    <section class="card-surface">
-      <div class="border-b">
-        <nav class="-mb-px flex space-x-8 px-6">
+  <section class="card-surface space-y-6 p-6">
+      <header class="settings-page-header">
+        <p class="settings-page-eyebrow">RAG</p>
+        <h2 class="settings-page-title">RAG 配置</h2>
+        <p class="settings-page-desc">配置文本分块、检索、存储、提示词和密钥等默认参数。</p>
+      </header>
+
+      <div class="settings-toolbar settings-section-split">
+        <div class="settings-section-header">
+          <h3 class="settings-section-title">配置分类</h3>
+          <p class="settings-section-desc">切换不同分组并调整相应参数。</p>
+        </div>
+        <nav class="settings-tabbar">
           <button
             v-for="tab in tabs"
             :key="tab.key"
             @click="activeTab = tab.key"
             :class="[
-              'py-4 px-1 border-b-2 font-medium text-sm transition-colors',
+              'settings-tab',
               activeTab === tab.key
-                ? 'border-brand-500 text-brand-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ? 'settings-tab-active'
+                : ''
             ]"
           >
             {{ tab.label }}
@@ -20,15 +28,14 @@
         </nav>
       </div>
 
-      <div class="p-6">
-        <!-- Error/Success Messages -->
-        <div v-if="ragState.configState.error" class="mb-6 rounded-xl border border-red-200 bg-red-50/70 p-4 text-sm text-red-700">
+      <div>
+        <div v-if="ragState.configState.error" class="settings-message-error mb-6">
           {{ ragState.configState.error }}
         </div>
 
         <div v-if="statusMessage" :class="[
-          'mb-6 rounded-lg p-4 text-sm',
-          statusType === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
+          'mb-6',
+          statusType === 'success' ? 'settings-message-success' : 'settings-message-error'
         ]">
           {{ statusMessage }}
         </div>
@@ -205,7 +212,7 @@
             </div>
 
             <div class="border-t pt-4 mt-4 space-y-4">
-              <h3 class="text-sm font-bold text-gray-700">RouterRAG 特有配置</h3>
+              <h3 class="text-sm font-bold text-primary">RouterRAG 特有配置</h3>
               
               <div class="flex items-center">
                 <input
@@ -419,7 +426,7 @@
               </button>
               <button
                 @click="resetPromptsToDefault"
-                class="btn-secondary border-red-200 text-red-600 hover:bg-red-50 py-1.5 text-xs"
+                class="btn-secondary py-1.5 text-xs text-danger"
                 title="重置为默认"
               >
                 重置为默认
@@ -431,8 +438,8 @@
             <!-- Time Extraction -->
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-sm font-bold text-gray-700">时间提取提示词 (Time Extraction)</label>
-                <span class="text-xs text-gray-400">用于识别查询中的时间信息</span>
+                <label class="text-sm font-bold text-primary">时间提取提示词 (Time Extraction)</label>
+                <span class="text-xs text-muted">用于识别查询中的时间信息</span>
               </div>
               <textarea
                 v-model="promptConfig.time_extraction.prompt"
@@ -445,8 +452,8 @@
             <!-- Time Matching -->
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-sm font-bold text-gray-700">时间匹配提示词 (Time Matching)</label>
-                <span class="text-xs text-gray-400">用于匹配查询时间与文档时间</span>
+                <label class="text-sm font-bold text-primary">时间匹配提示词 (Time Matching)</label>
+                <span class="text-xs text-muted">用于匹配查询时间与文档时间</span>
               </div>
               <textarea
                 v-model="promptConfig.time_matching.prompt"
@@ -459,8 +466,8 @@
             <!-- Query Expansion -->
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-sm font-bold text-gray-700">查询扩展提示词 (Query Expansion)</label>
-                <span class="text-xs text-gray-400">用于优化和扩展用户查询</span>
+                <label class="text-sm font-bold text-primary">查询扩展提示词 (Query Expansion)</label>
+                <span class="text-xs text-muted">用于优化和扩展用户查询</span>
               </div>
               <textarea
                 v-model="promptConfig.query_expansion.prompt"
@@ -473,8 +480,8 @@
             <!-- Result Summary (Strict) -->
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-sm font-bold text-gray-700">结果整理 - 严格模式 (Strict Summary)</label>
-                <span class="text-xs text-gray-400">仅使用检索资料回答</span>
+                <label class="text-sm font-bold text-primary">结果整理 - 严格模式 (Strict Summary)</label>
+                <span class="text-xs text-muted">仅使用检索资料回答</span>
               </div>
               <textarea
                 v-model="promptConfig.result_summary_strict.prompt"
@@ -487,8 +494,8 @@
             <!-- Result Summary (Supplement) -->
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-sm font-bold text-gray-700">结果整理 - 补充模式 (Supplement Summary)</label>
-                <span class="text-xs text-gray-400">结合外部知识回答</span>
+                <label class="text-sm font-bold text-primary">结果整理 - 补充模式 (Supplement Summary)</label>
+                <span class="text-xs text-muted">结合外部知识回答</span>
               </div>
               <textarea
                 v-model="promptConfig.result_summary_supplement.prompt"
@@ -510,10 +517,10 @@
             </div>
           </div>
           
-          <div v-else-if="selectedPromptTopic" class="text-center py-12 text-gray-500">
+          <div v-else-if="selectedPromptTopic" class="settings-empty-state py-12">
              加载中...
           </div>
-          <div v-else class="text-center py-12 text-gray-400">
+          <div v-else class="settings-empty-state py-12">
              请选择一个专题以编辑其 RouterRAG 提示词
           </div>
         </div>
@@ -524,8 +531,8 @@
           <h2 class="text-lg font-semibold text-primary">API 密钥配置</h2>
 
           <div class="space-y-4">
-            <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <p class="text-sm text-yellow-800">
+            <div class="settings-message-warning">
+              <p class="text-sm">
                 <strong>注意：</strong> API 密钥将被安全存储在服务器配置中。为了安全，显示时会自动遮蔽部分字符。
               </p>
             </div>
@@ -595,9 +602,9 @@
               </div>
             </div>
 
-            <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h3 class="text-sm font-medium text-blue-800 mb-2">API 密钥获取指南：</h3>
-              <ul class="text-xs text-blue-700 space-y-1">
+            <div class="settings-help-block">
+              <h3 class="mb-2 text-sm font-medium text-primary">API 密钥获取指南：</h3>
+              <ul class="space-y-1 text-xs text-secondary">
                 <li><strong>OpenAI：</strong> 访问 <a href="https://platform.openai.com/api-keys" target="_blank" class="underline">OpenAI API Keys</a> 页面创建</li>
                 <li><strong>Cohere：</strong> 访问 <a href="https://dashboard.cohere.com/api-keys" target="_blank" class="underline">Cohere Dashboard</a> 获取</li>
                 <li><strong>HuggingFace：</strong> 访问 <a href="https://huggingface.co/settings/tokens" target="_blank" class="underline">HuggingFace Tokens</a> 页面创建</li>
@@ -607,9 +614,8 @@
         </div>
       </div>
 
-      <!-- Action Buttons -->
-      <div class="border-t bg-gray-50 px-6 py-4">
-        <div class="flex justify-between">
+      <div class="settings-action-row">
+        <div class="flex w-full flex-wrap items-center justify-between gap-3">
           <button
             @click="resetConfig"
             class="btn-secondary"
@@ -636,8 +642,7 @@
           </div>
         </div>
       </div>
-    </section>
-  </div>
+  </section>
 </template>
 
 <script setup>

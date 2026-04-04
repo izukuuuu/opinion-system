@@ -18,27 +18,32 @@ for path in (BACKEND_DIR, SRC_DIR):
 
 from server_support.archive_locator import compose_folder_name  # type: ignore
 from server_support.topic_context import TopicContext  # type: ignore
-from src.report.full_report_service import (  # type: ignore
+from src.report.deep_report import (  # type: ignore
     AI_FULL_REPORT_CACHE_FILENAME,
-    generate_full_report_payload,
+    REPORT_CACHE_FILENAME,
+    run_or_resume_deep_report_task,
 )
+from src.report.deep_report.assets import build_artifacts_root  # type: ignore
 from src.report.runtime import ensure_analyze_results, ensure_explain_results  # type: ignore
-from src.report.structured_service import REPORT_CACHE_FILENAME, generate_report_payload  # type: ignore
 from src.report.task_queue import (  # type: ignore
     append_agent_memo,
     append_event,
     get_task,
+    mark_approval_required,
     mark_agent_started,
     mark_artifact_ready,
     mark_task_cancelled,
     mark_task_completed,
     mark_task_failed,
     mark_task_progress,
+    set_structured_result_digest,
     reserve_next_task,
     set_worker_pid,
     should_cancel,
+    update_todos,
     write_worker_status,
 )
+from src.utils.setting.paths import get_data_root  # type: ignore
 from src.utils.setting.paths import bucket  # type: ignore
 
 LOGGER = logging.getLogger(__name__)
@@ -151,6 +156,9 @@ def _run_task(task_id: str) -> None:
         if str(item or "").strip()
     ]
     ctx = TopicContext(identifier=topic_identifier, display_name=topic_label, aliases=aliases)
+    folder = compose_folder_name(start, end)
+    cache_path = bucket("reports", topic_identifier, folder) / REPORT_CACHE_FILENAME
+    full_cache_path = bucket("reports", topic_identifier, folder) / AI_FULL_REPORT_CACHE_FILENAME
     LOGGER.warning(
         "report worker | task start | task=%s topic=%s start=%s end=%s mode=%s",
         task_id,
@@ -240,52 +248,93 @@ def _run_task(task_id: str) -> None:
                 delta="当前任务使用 research 模式，会保留更完整的调研轨迹。",
             )
         _raise_if_cancelled(task_id)
+        update_todos(
+            task_id,
+            todos=_deep_todos_snapshot("interpret"),
+            phase="interpret",
+            message="总控代理开始协调检索、证据整理和结构分析。",
+        )
+        if _has_rejected_approval(task):
+            raise TaskCancelled("审批已拒绝，本次报告未继续写入正式结果。")
 
-        report_payload = generate_report_payload(
+        resume_payload = _build_resume_payload_from_task(task)
+        if resume_payload is None:
+            mark_task_progress(task_id, phase="interpret", percentage=PHASE_PERCENTAGE["interpret"], message="总控代理正在调度子代理并生成结构化结果。")
+        else:
+            mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="审批已处理，正在恢复正式写入流程。")
+
+        runtime_result = run_or_resume_deep_report_task(
             topic_identifier,
             start,
             end,
             topic_label=topic_label,
-            regenerate=True,
+            mode=mode,
+            thread_id=str(task.get("thread_id") or request.get("thread_id") or "").strip(),
+            task_id=task_id,
+            resume_payload=resume_payload,
             event_callback=lambda event: _handle_report_event(task_id, event),
         )
-        LOGGER.warning(
-            "report worker | report payload generated | task=%s title=%s",
-            task_id,
-            str(report_payload.get("title") or "").strip(),
-        )
+        report_payload = runtime_result.get("structured_payload") if isinstance(runtime_result.get("structured_payload"), dict) else {}
+        full_report_payload = runtime_result.get("full_payload") if isinstance(runtime_result.get("full_payload"), dict) else {}
+        if report_payload:
+            LOGGER.warning(
+                "report worker | structured payload ready | task=%s title=%s",
+                task_id,
+                str(((report_payload.get("task") or {}).get("topic_label")) or "").strip(),
+            )
+            set_structured_result_digest(
+                task_id,
+                digest=_structured_digest_from_payload(report_payload),
+                path=str(cache_path),
+            )
+            update_todos(
+                task_id,
+                todos=_deep_todos_snapshot("review"),
+                phase="write",
+                message="结构化结果已生成，正在准备正式文稿。",
+            )
         _raise_if_cancelled(task_id)
 
-        full_report_payload = generate_full_report_payload(
-            topic_identifier,
-            start,
-            end,
-            topic_label=topic_label,
-            regenerate=True,
-            structured_payload=report_payload,
-            event_callback=lambda event: _handle_report_event(task_id, event),
-        )
-        LOGGER.warning(
-            "report worker | full report payload generated | task=%s title=%s",
-            task_id,
-            str(full_report_payload.get("title") or "").strip(),
-        )
-        _raise_if_cancelled(task_id)
+        if str(runtime_result.get("status") or "").strip() == "interrupted":
+            approval_items = runtime_result.get("approvals") if isinstance(runtime_result.get("approvals"), list) else []
+            mark_task_progress(task_id, phase="review", percentage=PHASE_PERCENTAGE["review"], message="文稿写入前需要人工确认。")
+            update_todos(
+                task_id,
+                todos=_deep_todos_snapshot("persist"),
+                phase="persist",
+                message="正式写入前等待人工确认。",
+            )
+            mark_approval_required(
+                task_id,
+                approvals=approval_items,
+                phase="persist",
+                message=str(runtime_result.get("message") or "文稿写入前需要人工确认。").strip() or "文稿写入前需要人工确认。",
+            )
+            LOGGER.warning("report worker | task interrupted for approval | task=%s approvals=%s", task_id, len(approval_items))
+            return
+        if not report_payload:
+            raise RuntimeError("深度代理未产出结构化报告缓存。")
+        if not full_report_payload:
+            raise RuntimeError("深度代理未产出完整文稿缓存。")
 
-        folder = compose_folder_name(start, end)
-        cache_path = bucket("reports", topic_identifier, folder) / REPORT_CACHE_FILENAME
-        full_cache_path = bucket("reports", topic_identifier, folder) / AI_FULL_REPORT_CACHE_FILENAME
-        mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="正在写入最终报告缓存。")
+        mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="正在整理最终报告产物。")
+        update_todos(
+            task_id,
+            todos=_deep_todos_snapshot("completed"),
+            phase="persist",
+            message="结构化结果、正式文稿和校验结果均已完成。",
+        )
         mark_artifact_ready(
             task_id,
             message="结构化报告与 AI 完整报告缓存已写入。",
             payload={
                 "report_ready": True,
                 "report_cache_path": str(cache_path),
-                "report_title": str(report_payload.get("title") or "").strip(),
+                "report_title": str(((report_payload.get("task") or {}).get("topic_label")) or topic_label).strip(),
                 "full_report_ready": True,
                 "full_report_cache_path": str(full_cache_path),
                 "full_report_title": str(full_report_payload.get("title") or "").strip(),
+                "report_runtime_artifact": str(build_artifacts_root(task_id, get_data_root()) / "report.md"),
                 "view": {
                     "topic": topic_label,
                     "topic_identifier": topic_identifier,
@@ -300,7 +349,7 @@ def _run_task(task_id: str) -> None:
             payload={
                 "report_ready": True,
                 "report_cache_path": str(cache_path),
-                "report_title": str(report_payload.get("title") or "").strip(),
+                "report_title": str(((report_payload.get("task") or {}).get("topic_label")) or topic_label).strip(),
                 "full_report_ready": True,
                 "full_report_cache_path": str(full_cache_path),
                 "full_report_title": str(full_report_payload.get("title") or "").strip(),
@@ -378,6 +427,28 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
             payload=payload,
         )
         return
+    if event_type == "subagent.started":
+        mark_agent_started(
+            task_id,
+            agent=agent or "runtime",
+            phase=phase,
+            message=message or title or "子代理已启动。",
+            title=title,
+            payload=payload,
+        )
+        return
+    if event_type == "subagent.completed":
+        from src.report.task_queue import mark_agent_completed  # type: ignore
+
+        mark_agent_completed(
+            task_id,
+            agent=agent or "runtime",
+            phase=phase,
+            message=message or title or "子代理已完成。",
+            title=title,
+            payload=payload,
+        )
+        return
     if event_type == "agent.memo":
         append_agent_memo(
             task_id,
@@ -387,6 +458,14 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
             title=title,
             delta=str(event.get("delta") or "").strip(),
             payload=payload,
+        )
+        return
+    if event_type == "todo.updated":
+        update_todos(
+            task_id,
+            todos=payload.get("todos") if isinstance(payload.get("todos"), list) else [],
+            phase=phase,
+            message=message or title or "任务清单已更新。",
         )
         return
     if event_type == "tool.called":
@@ -431,6 +510,104 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
 def _raise_if_cancelled(task_id: str) -> None:
     if should_cancel(task_id):
         raise TaskCancelled("任务已按请求取消。")
+
+
+def _structured_digest_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
+    return {
+        "topic": str(task.get("topic_label") or task.get("topic_identifier") or "").strip(),
+        "range": {
+            "start": str(task.get("start") or "").strip(),
+            "end": str(task.get("end") or "").strip(),
+        },
+        "summary": str(conclusion.get("executive_summary") or "").strip(),
+        "key_findings": [str(item).strip() for item in (conclusion.get("key_findings") or []) if str(item or "").strip()][:6],
+        "key_risks": [str(item).strip() for item in (conclusion.get("key_risks") or []) if str(item or "").strip()][:6],
+        "counts": {
+            "timeline": len(payload.get("timeline") or []),
+            "subjects": len(payload.get("subjects") or []),
+            "evidence": len(payload.get("key_evidence") or []),
+            "conflicts": len(payload.get("conflict_points") or []),
+            "propagation": len(payload.get("propagation_features") or []),
+            "risks": len(payload.get("risk_judgement") or []),
+            "actions": len(payload.get("suggested_actions") or []),
+            "citations": len(payload.get("citations") or []),
+        },
+    }
+
+
+def _deep_todos_snapshot(stage: str) -> list[Dict[str, Any]]:
+    order = ["scope", "retrieval", "evidence", "structure", "writing", "validation", "persist"]
+    labels = {
+        "scope": "范围确认",
+        "retrieval": "检索路由",
+        "evidence": "证据整理",
+        "structure": "结构分析",
+        "writing": "文稿生成",
+        "validation": "质量校验",
+        "persist": "审批与落盘",
+    }
+    progress_map = {
+        "interpret": {"scope": "completed", "retrieval": "running", "evidence": "pending", "structure": "pending", "writing": "pending", "validation": "pending", "persist": "pending"},
+        "review": {"scope": "completed", "retrieval": "completed", "evidence": "completed", "structure": "completed", "writing": "running", "validation": "pending", "persist": "pending"},
+        "persist": {"scope": "completed", "retrieval": "completed", "evidence": "completed", "structure": "completed", "writing": "completed", "validation": "completed", "persist": "running"},
+        "completed": {"scope": "completed", "retrieval": "completed", "evidence": "completed", "structure": "completed", "writing": "completed", "validation": "completed", "persist": "completed"},
+    }
+    selected = progress_map.get(stage, progress_map["interpret"])
+    return [{"id": item, "label": labels[item], "status": selected[item]} for item in order]
+
+
+def _has_rejected_approval(task: Dict[str, Any]) -> bool:
+    approvals = task.get("approvals") if isinstance(task.get("approvals"), list) else []
+    return any(
+        isinstance(item, dict)
+        and str(item.get("status") or "").strip() == "resolved"
+        and str(item.get("decision") or "").strip().lower() == "reject"
+        for item in approvals
+    )
+
+
+def _build_resume_payload_from_task(task: Dict[str, Any]) -> Any:
+    approvals = task.get("approvals") if isinstance(task.get("approvals"), list) else []
+    resolved = [item for item in approvals if isinstance(item, dict) and str(item.get("status") or "").strip() == "resolved"]
+    if not resolved:
+        return None
+    grouped: Dict[str, Dict[int, Dict[str, Any]]] = {}
+    for item in resolved:
+        interrupt_id = str(item.get("interrupt_id") or "").strip()
+        if not interrupt_id:
+            continue
+        decision_index = int(item.get("decision_index") or 0)
+        tool_name = str(item.get("tool_name") or "").strip()
+        action = item.get("action") if isinstance(item.get("action"), dict) else {}
+        original_args = action.get("tool_args") if isinstance(action.get("tool_args"), dict) else {}
+        decision_type = str(item.get("decision") or "").strip().lower()
+        if decision_type == "edit":
+            edited = item.get("edited_action") if isinstance(item.get("edited_action"), dict) else {}
+            grouped.setdefault(interrupt_id, {})[decision_index] = {
+                "type": "edit",
+                "edited_action": {
+                    "name": tool_name,
+                    "args": {**original_args, **edited},
+                },
+            }
+        elif decision_type == "reject":
+            grouped.setdefault(interrupt_id, {})[decision_index] = {
+                "type": "reject",
+                "message": "人工审批拒绝了该动作。",
+            }
+        else:
+            grouped.setdefault(interrupt_id, {})[decision_index] = {"type": "approve"}
+    if not grouped:
+        return None
+    ordered = {
+        interrupt_id: {"decisions": [entries[index] for index in sorted(entries.keys())]}
+        for interrupt_id, entries in grouped.items()
+    }
+    if len(ordered) == 1:
+        return next(iter(ordered.values()))
+    return ordered
 
 
 def _utc_now() -> str:

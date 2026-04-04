@@ -17,9 +17,12 @@ from src.project import get_project_manager
 from src.utils.setting.paths import bucket, ensure_bucket, get_logs_root
 
 from .runtime import ANALYZE_FILE_MAP, collect_explain_outputs
-from .full_report_service import generate_full_report_payload
-from .full_report_service import AI_FULL_REPORT_CACHE_FILENAME
-from .structured_service import REPORT_CACHE_FILENAME, generate_report_payload
+from .deep_report import (
+    AI_FULL_REPORT_CACHE_FILENAME,
+    REPORT_CACHE_FILENAME,
+    generate_full_report_payload,
+    generate_report_payload,
+)
 from .task_queue import (
     cancel_task,
     create_task,
@@ -29,6 +32,7 @@ from .task_queue import (
     get_task,
     list_tasks,
     load_events_since,
+    resolve_approval,
     retry_task,
 )
 
@@ -179,6 +183,10 @@ def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
     recent_events = task.get("recent_events") if isinstance(task.get("recent_events"), list) else []
     artifacts = task.get("artifacts") if isinstance(task.get("artifacts"), dict) else {}
     trust = task.get("trust") if isinstance(task.get("trust"), dict) else {}
+    run_state = task.get("run_state") if isinstance(task.get("run_state"), dict) else {}
+    approvals = task.get("approvals") if isinstance(task.get("approvals"), list) else []
+    todos = task.get("todos") if isinstance(task.get("todos"), list) else []
+    structured_digest = task.get("structured_result_digest") if isinstance(task.get("structured_result_digest"), dict) else {}
     explain_ready = bool(artifacts.get("report_ready"))
     full_report_ready = bool(artifacts.get("full_report_ready"))
     stage = str(task.get("phase") or "").strip()
@@ -250,12 +258,13 @@ def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
             "updated_at": updated_at,
         },
         "summary": {
-            "status": "running" if status in {"queued", "running"} else ("ok" if status == "completed" else "error"),
+            "status": "running" if status in {"queued", "running", "waiting_approval"} else ("ok" if status == "completed" else "error"),
             "message": message or "当前区间暂无执行中的报告任务。",
         },
         "steps": steps,
         "task": {
             "id": str(task.get("id") or "").strip(),
+            "thread_id": str(task.get("thread_id") or "").strip(),
             "status": status,
             "phase": stage,
             "percentage": int(task.get("percentage") or 0),
@@ -263,6 +272,11 @@ def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
             "child_pid": int(task.get("child_pid") or 0),
             "cancel_requested": bool(task.get("cancel_requested")),
             "agents": task.get("agents") or [],
+            "subagents": task.get("agents") or [],
+            "todos": todos,
+            "approvals": approvals,
+            "run_state": run_state,
+            "structured_result_digest": structured_digest,
             "trust": trust,
             "recent_events": recent_events,
         },
@@ -405,6 +419,7 @@ def _create_or_reuse_task(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], bool
         start=start,
         end=end,
         mode=mode,
+        statuses=["queued", "running", "waiting_approval"],
     )
     if existing:
         return existing, True
@@ -557,7 +572,7 @@ def get_report_progress():
         topic_identifier=ctx.identifier,
         start=start,
         end=str(end or start),
-        statuses=["queued", "running", "completed", "failed", "cancelled"],
+        statuses=["queued", "running", "waiting_approval", "completed", "failed", "cancelled"],
     )
     if task:
         return success({"data": _build_task_progress_payload(task)})
@@ -587,7 +602,16 @@ def create_report_task():
         return error(str(exc), 400)
     except Exception as exc:
         return error(f"报告任务创建失败: {str(exc)}", 500)
-    return success({"task": task, "worker": worker, "reused": reused})
+    return success(
+        {
+            "task": task,
+            "task_id": str(task.get("id") or "").strip(),
+            "thread_id": str(task.get("thread_id") or "").strip(),
+            "run_state": task.get("run_state") if isinstance(task.get("run_state"), dict) else {},
+            "worker": worker,
+            "reused": reused,
+        }
+    )
 
 
 @report_bp.get("/tasks")
@@ -624,6 +648,24 @@ def cancel_report_task(task_id: str):
 def retry_report_task(task_id: str):
     try:
         task = retry_task(task_id)
+        worker = ensure_worker_running()
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except ValueError as exc:
+        return error(str(exc), 400)
+    return success({"task": task, "worker": worker})
+
+
+@report_bp.post("/tasks/<task_id>/approvals/<approval_id>")
+def resolve_report_approval(task_id: str, approval_id: str):
+    payload = request.get_json(silent=True) or {}
+    try:
+        task = resolve_approval(
+            task_id,
+            approval_id=approval_id,
+            decision=str(payload.get("decision") or "").strip(),
+            edited_action=payload.get("edited_action") if isinstance(payload.get("edited_action"), dict) else None,
+        )
         worker = ensure_worker_running()
     except LookupError as exc:
         return error(str(exc), 404)

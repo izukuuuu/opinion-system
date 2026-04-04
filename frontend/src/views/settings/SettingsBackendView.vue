@@ -1,34 +1,34 @@
 <template>
   <section class="card-surface space-y-6 p-6">
-    <header class="space-y-2">
-      <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">后端服务</p>
-      <h2 class="text-xl font-semibold text-slate-900">后端地址配置</h2>
-      <p class="text-sm text-slate-500">
+    <header class="settings-page-header">
+      <p class="settings-page-eyebrow">后端服务</p>
+      <h2 class="settings-page-title">后端地址配置</h2>
+      <p class="settings-page-desc">
         前端请求的 API 地址配置。默认使用 <code>http://127.0.0.1:8000</code>，部署时需更改为对应公网地址和端口。
       </p>
     </header>
 
     <form class="space-y-4" @submit.prevent="handleSave">
-      <label class="flex flex-col gap-2 text-sm font-medium text-slate-600">
+      <label class="flex flex-col gap-2 text-sm font-medium text-secondary">
         <span>后端基础地址（不带 /api）</span>
         <input
           v-model.trim="form.base"
           type="text"
           placeholder="例如：https://api.example.com:8000"
-          class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          class="input"
         />
       </label>
       <div class="flex flex-wrap gap-3">
         <button
           type="submit"
-          class="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-60"
+          class="btn-primary px-5 py-2 text-sm"
           :disabled="saving"
         >
           {{ saving ? '保存中…' : '保存配置' }}
         </button>
         <button
           type="button"
-          class="rounded-full border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-60"
+          class="btn-secondary px-5 py-2 text-sm"
           :disabled="saving"
           @click="resetToDefault"
         >
@@ -37,21 +37,21 @@
       </div>
     </form>
 
-    <p v-if="message.success" class="rounded-2xl bg-emerald-100 px-4 py-3 text-sm text-emerald-600">
+    <p v-if="message.success" class="settings-message-success">
       {{ message.success }}
     </p>
-    <p v-if="message.error" class="rounded-2xl bg-rose-100 px-4 py-3 text-sm text-rose-600">
+    <p v-if="message.error" class="settings-message-error">
       {{ message.error }}
     </p>
 
-    <dl class="grid gap-4 rounded-[14px] border border-slate-200 bg-white p-4 text-sm text-slate-600 md:grid-cols-2">
+    <dl class="settings-help-block grid gap-4 md:grid-cols-2">
       <div>
-        <dt class="text-xs uppercase tracking-[0.4em] text-slate-400">当前基础地址</dt>
-        <dd class="mt-2 font-semibold text-slate-900">{{ backendBase }}</dd>
+        <dt class="settings-page-eyebrow">当前基础地址</dt>
+        <dd class="mt-2 font-semibold text-primary">{{ backendBase }}</dd>
       </div>
       <div>
-        <dt class="text-xs uppercase tracking-[0.4em] text-slate-400">API 请求前缀</dt>
-        <dd class="mt-2 font-semibold text-slate-900">{{ apiBase }}</dd>
+        <dt class="settings-page-eyebrow">API 请求前缀</dt>
+        <dd class="mt-2 font-semibold text-primary">{{ apiBase }}</dd>
       </div>
     </dl>
   </section>

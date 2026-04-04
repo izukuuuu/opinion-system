@@ -1,25 +1,25 @@
 <template>
-  <div class="space-y-8">
-    <header class="space-y-2">
+  <section class="card-surface space-y-6 p-6">
+    <header class="settings-page-header">
+      <p class="settings-page-eyebrow">实验功能</p>
       <div class="flex items-center gap-2">
-        <h1 class="text-2xl font-semibold text-primary">实验性功能</h1>
-        <span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Beta</span>
+        <h1 class="settings-page-title">实验性功能</h1>
+        <span class="badge-accent px-2 py-0.5 text-xs font-medium">Beta</span>
       </div>
-      <p class="text-sm text-secondary">
+      <p class="settings-page-desc">
         这些功能正在开发中，可能不稳定。用于准备 PostgreSQL 迁移和统一项目管理。
       </p>
     </header>
 
-    <!-- 远程专题快照 -->
-    <section class="card-surface space-y-4 p-6">
-      <header class="flex items-center justify-between">
-        <div>
-          <h2 class="text-lg font-semibold text-primary">远程专题快照</h2>
-          <p class="text-sm text-secondary">从远程数据库获取专题列表并保存到本地</p>
+    <section class="settings-section settings-section-split">
+      <header class="settings-toolbar">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">远程专题快照</h2>
+          <p class="settings-section-desc">从远程数据库获取专题列表并保存到本地。</p>
         </div>
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+          class="btn-primary px-4 py-2 text-sm font-medium"
           :disabled="snapshotLoading"
           @click="fetchRemoteTopics"
         >
@@ -29,7 +29,7 @@
         </button>
       </header>
 
-      <div v-if="snapshotError" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-600">
+      <div v-if="snapshotError" class="settings-message-error">
         {{ snapshotError }}
       </div>
 
@@ -38,24 +38,24 @@
           <span>共 {{ remoteTopics.length }} 个远程专题</span>
           <span v-if="snapshotTime">快照时间：{{ snapshotTime }}</span>
         </div>
-        <div class="max-h-64 overflow-y-auto rounded-2xl border border-soft">
+        <div class="settings-table-shell max-h-64 overflow-y-auto">
           <table class="min-w-full divide-y divide-soft text-sm">
-            <thead class="bg-surface-muted">
+            <thead class="settings-table-head">
               <tr>
                 <th class="px-4 py-2 text-left font-medium text-secondary">专题名称</th>
                 <th class="px-4 py-2 text-left font-medium text-secondary">数据量</th>
                 <th class="px-4 py-2 text-left font-medium text-secondary">映射状态</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-soft bg-white">
-              <tr v-for="topic in remoteTopics" :key="topic.name" class="hover:bg-surface-muted/50">
+            <tbody class="divide-y divide-soft bg-surface">
+              <tr v-for="topic in remoteTopics" :key="topic.name" class="settings-table-row">
                 <td class="px-4 py-2 font-medium text-primary">{{ topic.name }}</td>
                 <td class="px-4 py-2 text-secondary">{{ topic.count ?? '—' }}</td>
                 <td class="px-4 py-2">
                   <span
                     :class="[
                       'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
-                      getMappingForTopic(topic.name) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                      getMappingForTopic(topic.name) ? 'bg-success-soft text-success' : 'bg-surface-muted text-muted'
                     ]"
                   >
                     {{ getMappingForTopic(topic.name) ? '已映射' : '未映射' }}
@@ -68,7 +68,7 @@
         <div class="flex gap-2">
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600"
+            class="btn-secondary px-3 py-1.5 text-sm font-medium"
             @click="saveSnapshotToLocal"
           >
             <ArrowDownTrayIcon class="h-4 w-4" />
@@ -76,7 +76,7 @@
           </button>
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600"
+            class="btn-secondary px-3 py-1.5 text-sm font-medium"
             @click="exportSnapshotAsJson"
           >
             <DocumentArrowDownIcon class="h-4 w-4" />
@@ -85,23 +85,20 @@
         </div>
       </div>
 
-      <div v-else-if="!snapshotLoading" class="rounded-2xl bg-surface-muted px-4 py-6 text-center text-sm text-secondary">
+      <div v-else-if="!snapshotLoading" class="settings-empty-state">
         点击上方按钮获取远程专题列表
       </div>
     </section>
 
-    <!-- 继续下一部分 -->
-
-    <!-- 本地项目列表 -->
-    <section class="card-surface space-y-4 p-6">
-      <header class="flex items-center justify-between">
-        <div>
-          <h2 class="text-lg font-semibold text-primary">本地项目列表</h2>
-          <p class="text-sm text-secondary">当前系统中的本地项目</p>
+    <section class="settings-section settings-section-split">
+      <header class="settings-toolbar">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">本地项目列表</h2>
+          <p class="settings-section-desc">查看当前系统中的本地项目。</p>
         </div>
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-full border border-soft px-4 py-2 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600 disabled:opacity-50"
+          class="btn-secondary px-4 py-2 text-sm font-medium"
           :disabled="projectsLoading"
           @click="fetchLocalProjects"
         >
@@ -110,21 +107,21 @@
         </button>
       </header>
 
-      <div v-if="projectsError" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-600">
+      <div v-if="projectsError" class="settings-message-error">
         {{ projectsError }}
       </div>
 
-      <div v-if="localProjects.length" class="max-h-48 overflow-y-auto rounded-2xl border border-soft">
+      <div v-if="localProjects.length" class="settings-table-shell max-h-48 overflow-y-auto">
         <table class="min-w-full divide-y divide-soft text-sm">
-          <thead class="bg-surface-muted">
+          <thead class="settings-table-head">
             <tr>
               <th class="px-4 py-2 text-left font-medium text-secondary">项目名称</th>
               <th class="px-4 py-2 text-left font-medium text-secondary">标识</th>
               <th class="px-4 py-2 text-left font-medium text-secondary">已映射专题</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-soft bg-white">
-            <tr v-for="project in localProjects" :key="project.name" class="hover:bg-surface-muted/50">
+          <tbody class="divide-y divide-soft bg-surface">
+            <tr v-for="project in localProjects" :key="project.name" class="settings-table-row">
               <td class="px-4 py-2 font-medium text-primary">{{ project.display_name || project.name }}</td>
               <td class="px-4 py-2 text-secondary">{{ project.slug || project.name }}</td>
               <td class="px-4 py-2 text-secondary">{{ getMappingsForProject(project.name).length || '—' }}</td>
@@ -133,27 +130,25 @@
         </table>
       </div>
 
-      <div v-else-if="!projectsLoading" class="rounded-2xl bg-surface-muted px-4 py-6 text-center text-sm text-secondary">
+      <div v-else-if="!projectsLoading" class="settings-empty-state">
         暂无本地项目，请先在项目管理中创建
       </div>
     </section>
 
-    <!-- 映射管理 -->
-    <section class="card-surface space-y-4 p-6">
-      <header>
-        <h2 class="text-lg font-semibold text-primary">专题映射管理</h2>
-        <p class="text-sm text-secondary">建立本地项目与远程专题的对应关系</p>
+    <section class="settings-section settings-section-split">
+      <header class="settings-section-header">
+        <h2 class="settings-section-title">专题映射管理</h2>
+        <p class="settings-section-desc">建立本地项目与远程专题的对应关系。</p>
       </header>
 
-      <!-- 添加映射表单 -->
-      <div class="rounded-2xl border border-soft bg-surface-muted/50 p-4">
+      <div class="settings-help-block">
         <h3 class="mb-3 text-sm font-medium text-primary">添加新映射</h3>
         <div class="grid gap-3 sm:grid-cols-3">
           <label class="space-y-1">
             <span class="text-xs text-secondary">本地项目</span>
             <select
               v-model="newMapping.localProject"
-              class="w-full rounded-xl border border-soft bg-white px-3 py-2 text-sm"
+              class="input"
             >
               <option value="">选择项目...</option>
               <option v-for="p in localProjects" :key="p.name" :value="p.name">
@@ -165,7 +160,7 @@
             <span class="text-xs text-secondary">远程专题</span>
             <select
               v-model="newMapping.remoteTopic"
-              class="w-full rounded-xl border border-soft bg-white px-3 py-2 text-sm"
+              class="input"
             >
               <option value="">选择专题...</option>
               <option v-for="t in remoteTopics" :key="t.name" :value="t.name">
@@ -176,7 +171,7 @@
           <div class="flex items-end">
             <button
               type="button"
-              class="inline-flex items-center gap-1 rounded-full bg-brand px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
+              class="btn-primary px-4 py-2 text-sm font-medium"
               :disabled="!newMapping.localProject || !newMapping.remoteTopic"
               @click="addMapping"
             >
@@ -192,9 +187,9 @@
         <div class="flex items-center justify-between text-sm text-secondary">
           <span>已建立 {{ topicMappings.length }} 个映射</span>
         </div>
-        <div class="rounded-2xl border border-soft">
+        <div class="settings-table-shell">
           <table class="min-w-full divide-y divide-soft text-sm">
-            <thead class="bg-surface-muted">
+            <thead class="settings-table-head">
               <tr>
                 <th class="px-4 py-2 text-left font-medium text-secondary">本地项目</th>
                 <th class="px-4 py-2 text-left font-medium text-secondary">远程专题</th>
@@ -202,15 +197,15 @@
                 <th class="px-4 py-2 text-right font-medium text-secondary">操作</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-soft bg-white">
-              <tr v-for="(mapping, idx) in topicMappings" :key="idx" class="hover:bg-surface-muted/50">
+            <tbody class="divide-y divide-soft bg-surface">
+              <tr v-for="(mapping, idx) in topicMappings" :key="idx" class="settings-table-row">
                 <td class="px-4 py-2 font-medium text-primary">{{ mapping.localProject }}</td>
                 <td class="px-4 py-2 text-secondary">{{ mapping.remoteTopic }}</td>
                 <td class="px-4 py-2 text-xs text-muted">{{ mapping.createdAt || '—' }}</td>
                 <td class="px-4 py-2 text-right">
                   <button
                     type="button"
-                    class="text-rose-500 hover:text-rose-600"
+                    class="text-danger hover:text-danger"
                     @click="removeMapping(idx)"
                   >
                     <TrashIcon class="h-4 w-4" />
@@ -222,15 +217,14 @@
         </div>
       </div>
 
-      <div v-else class="rounded-2xl bg-surface-muted px-4 py-6 text-center text-sm text-secondary">
+      <div v-else class="settings-empty-state">
         暂无映射关系，请在上方添加
       </div>
 
-      <!-- 导出操作 -->
       <div class="flex flex-wrap gap-2 border-t border-soft pt-4">
         <button
           type="button"
-          class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600"
+          class="btn-secondary px-3 py-1.5 text-sm font-medium"
           @click="saveMappingsToLocal"
         >
           <ArrowDownTrayIcon class="h-4 w-4" />
@@ -238,7 +232,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600"
+          class="btn-secondary px-3 py-1.5 text-sm font-medium"
           @click="exportMappingsAsJson"
         >
           <DocumentArrowDownIcon class="h-4 w-4" />
@@ -246,7 +240,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex items-center gap-1 rounded-full border border-soft px-3 py-1.5 text-sm font-medium text-secondary transition hover:border-brand-soft hover:text-brand-600"
+          class="btn-secondary px-3 py-1.5 text-sm font-medium"
           @click="exportAsSql"
         >
           <CodeBracketIcon class="h-4 w-4" />
@@ -254,7 +248,7 @@
         </button>
       </div>
     </section>
-  </div>
+  </section>
 </template>
 
 <script setup>

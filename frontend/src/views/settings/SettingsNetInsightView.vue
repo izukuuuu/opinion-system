@@ -1,9 +1,9 @@
 <template>
-  <section class="max-w-4xl space-y-6">
-    <!-- Page header -->
-    <header class="space-y-1">
-      <h2 class="text-xl font-semibold text-primary">NetInsight 配置</h2>
-      <p class="text-sm text-muted">
+  <section class="card-surface space-y-6 p-6">
+    <header class="settings-page-header">
+      <p class="settings-page-eyebrow">NetInsight</p>
+      <h2 class="settings-page-title">NetInsight 配置</h2>
+      <p class="settings-page-desc">
         在这里保存 NetInsight 登录信息和默认采集参数。保存后，新建任务会自动使用这些设置。
       </p>
     </header>
@@ -11,16 +11,13 @@
     <!-- Feedback banner -->
     <div
       v-if="feedback.message"
-      class="rounded-2xl px-4 py-3 text-sm"
-      :class="feedback.type === 'error' ? 'bg-danger-soft text-danger' : 'bg-success-soft text-success'"
+      :class="feedback.type === 'error' ? 'settings-message-error' : 'settings-message-success'"
     >
       {{ feedback.message }}
     </div>
 
-    <!-- ─── Credentials ─────────────────────────────────────── -->
-    <div class="card-surface p-6 space-y-5">
-      <!-- Section header row: title + status badge -->
-      <div class="flex items-center justify-between gap-4">
+    <section class="settings-section settings-section-split">
+      <div class="settings-toolbar">
         <div class="flex items-center gap-3">
           <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-soft">
             <KeyIcon class="h-4 w-4 text-brand" />
@@ -41,7 +38,6 @@
         </span>
       </div>
 
-      <!-- Account + password inputs -->
       <div class="grid gap-4 sm:grid-cols-2">
         <label class="space-y-1.5 text-sm">
           <span class="font-medium text-secondary">账号</span>
@@ -76,14 +72,13 @@
         <input
           v-model="form.clearPassword"
           type="checkbox"
-          class="rounded border-soft accent-brand-600"
+          class="settings-checkbox"
         />
         清空已保存的密码
       </label>
-    </div>
+    </section>
 
-    <!-- ─── Runtime parameters ──────────────────────────────── -->
-    <div class="card-surface p-6 space-y-5">
+    <section class="settings-section settings-section-split">
       <div class="flex items-center gap-3">
         <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-soft">
           <CogIcon class="h-4 w-4 text-brand" />
@@ -152,24 +147,23 @@
       <!-- Toggle options -->
       <div class="grid gap-3 sm:grid-cols-2">
         <label class="flex items-center gap-3 rounded-2xl border border-soft bg-base-soft px-4 py-3 text-sm text-secondary cursor-pointer select-none">
-          <input v-model="form.headless" type="checkbox" class="rounded border-soft accent-brand-600" />
+          <input v-model="form.headless" type="checkbox" class="settings-checkbox" />
           <div>
             <span class="font-medium text-primary">隐藏浏览器窗口</span>
             <p class="text-xs text-muted mt-0.5">关闭后会显示浏览器窗口，便于观察登录过程</p>
           </div>
         </label>
         <label class="flex items-center gap-3 rounded-2xl border border-soft bg-base-soft px-4 py-3 text-sm text-secondary cursor-pointer select-none">
-          <input v-model="form.noProxy" type="checkbox" class="rounded border-soft accent-brand-600" />
+          <input v-model="form.noProxy" type="checkbox" class="settings-checkbox" />
           <div>
             <span class="font-medium text-primary">登录阶段禁用系统代理</span>
             <p class="text-xs text-muted mt-0.5">仅登录步骤绕过代理设置</p>
           </div>
         </label>
       </div>
-    </div>
+    </section>
 
-    <!-- ─── Planner defaults ────────────────────────────────── -->
-    <div class="card-surface p-6 space-y-5">
+    <section class="settings-section settings-section-split">
       <div class="flex items-center gap-3">
         <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-soft">
           <CalendarDaysIcon class="h-4 w-4 text-brand" />
@@ -209,10 +203,9 @@
           />
         </label>
       </div>
-    </div>
+    </section>
 
-    <!-- ─── Save action bar ────────────────────────────────── -->
-    <div class="card-surface flex items-center justify-between gap-4 px-5 py-4">
+    <div class="settings-action-row">
       <p class="text-xs text-muted">
         保存后，所有新建任务将自动继承以上设置
       </p>
