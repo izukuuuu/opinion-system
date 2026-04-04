@@ -8,7 +8,6 @@ This module reads knowledge assets that are maintained inside
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import re
 from datetime import datetime
@@ -16,10 +15,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
+from .tools.knowledge_base_tools import (
+    append_expert_judgement as append_expert_judgement_tool,
+    build_event_reference_links as build_event_reference_links_tool,
+    get_sentiment_analysis_framework as get_sentiment_analysis_framework_tool,
+    get_sentiment_case_template as get_sentiment_case_template_tool,
+    get_sentiment_theories as get_sentiment_theories_tool,
+    get_youth_sentiment_insight as get_youth_sentiment_insight_tool,
+    search_reference_insights as search_reference_insights_tool,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SONA_ROOT = REPO_ROOT / "backend" / "knowledge_base" / "report" / "sona_feature_analysis"
-SONA_TOOL_FILE = SONA_ROOT / "tools" / "舆情智库.py"
 SONA_METHOD_DIR = SONA_ROOT / "舆情深度分析"
 SONA_REFERENCE_DIR = SONA_METHOD_DIR / "references"
 SONA_EXPERT_NOTES_DIR = SONA_REFERENCE_DIR / "expert_notes"
@@ -47,10 +55,6 @@ KNOWN_THEORY_NAMES = [
     "社会燃烧规律",
     "博弈均衡规律",
 ]
-
-_TOOL_MODULE: Any = None
-_TOOL_MODULE_LOADED = False
-
 
 def _read_text(path: Path) -> str:
     try:
@@ -273,35 +277,8 @@ def _guess_case_type(topic: str) -> str:
     return "社会事件"
 
 
-def _load_tool_module() -> Any:
-    global _TOOL_MODULE, _TOOL_MODULE_LOADED
-    if _TOOL_MODULE_LOADED:
-        return _TOOL_MODULE
-    _TOOL_MODULE_LOADED = True
-
-    if not SONA_TOOL_FILE.exists():
-        _TOOL_MODULE = None
-        return None
-
+def _invoke_tool(tool_obj: Any, payload: Dict[str, Any]) -> str:
     try:
-        spec = importlib.util.spec_from_file_location("report_sona_knowledge_tool", SONA_TOOL_FILE)
-        if not spec or not spec.loader:
-            _TOOL_MODULE = None
-            return None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _TOOL_MODULE = module
-        return module
-    except Exception:
-        _TOOL_MODULE = None
-        return None
-
-
-def _invoke_tool(module: Any, tool_name: str, payload: Dict[str, Any]) -> str:
-    try:
-        tool_obj = getattr(module, tool_name, None)
-        if tool_obj is None:
-            return ""
         if hasattr(tool_obj, "invoke"):
             result = tool_obj.invoke(payload)
         elif callable(tool_obj):
@@ -464,13 +441,11 @@ def search_report_reference_insights(topic: Optional[str], limit: int = 6) -> Li
     if not topic_text:
         return []
     safe_limit = max(1, min(int(limit or 6), 12))
-    module = _load_tool_module()
-    if module:
-        hits = _parse_reference_hits(
-            _invoke_tool(module, "search_reference_insights", {"query": topic_text, "limit": safe_limit})
-        )
-        if hits:
-            return hits[:safe_limit]
+    hits = _parse_reference_hits(
+        _invoke_tool(search_reference_insights_tool, {"query": topic_text, "limit": safe_limit})
+    )
+    if hits:
+        return hits[:safe_limit]
     return _search_local_references(topic_text, max_items=safe_limit)
 
 
@@ -478,11 +453,9 @@ def build_report_reference_links(topic: Optional[str]) -> List[Dict[str, str]]:
     topic_text = str(topic or "").strip()
     if not topic_text:
         return []
-    module = _load_tool_module()
-    if module:
-        links = _parse_links(_invoke_tool(module, "build_event_reference_links", {"topic": topic_text}))
-        if links:
-            return links[:4]
+    links = _parse_links(_invoke_tool(build_event_reference_links_tool, {"topic": topic_text}))
+    if links:
+        return links[:4]
     return _build_fallback_links(topic_text)
 
 
@@ -491,10 +464,7 @@ def get_dynamic_theories(topic: Optional[str], limit: int = 4) -> List[str]:
     if not topic_text:
         return []
     safe_limit = max(1, min(int(limit or 4), 6))
-    module = _load_tool_module()
-    raw_text = ""
-    if module:
-        raw_text = _invoke_tool(module, "get_sentiment_theories", {"topic": topic_text})
+    raw_text = _invoke_tool(get_sentiment_theories_tool, {"topic": topic_text})
     if not raw_text:
         theory_path = _first_existing(THEORY_CANDIDATES)
         raw_text = _read_text(theory_path) if theory_path else ""
@@ -521,25 +491,22 @@ def append_report_expert_judgement(
     if not topic_text or not judgement_text:
         return {"ok": False, "error": "topic 与 judgement 不能为空"}
 
-    module = _load_tool_module()
-    if module:
-        raw = _invoke_tool(
-            module,
-            "append_expert_judgement",
-            {
-                "topic": topic_text,
-                "judgement": judgement_text,
-                "tags": tags,
-                "source": source,
-            },
-        )
-        if raw:
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    return parsed
-            except Exception:
-                return {"ok": False, "error": raw}
+    raw = _invoke_tool(
+        append_expert_judgement_tool,
+        {
+            "topic": topic_text,
+            "judgement": judgement_text,
+            "tags": tags,
+            "source": source,
+        },
+    )
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {"ok": False, "error": raw}
 
     SONA_EXPERT_NOTES_DIR.mkdir(parents=True, exist_ok=True)
     slug = re.sub(r"[^\w\u4e00-\u9fff-]+", "_", topic_text)[:60].strip("_") or "expert_note"
@@ -567,26 +534,17 @@ def append_report_expert_judgement(
 
 def load_report_knowledge(topic: Optional[str] = None) -> Dict[str, Any]:
     topic_text = str(topic or "").strip() or "舆情事件"
-    module = _load_tool_module()
-
-    framework = ""
-    theories = ""
-    case_template = ""
-    youth_insight = ""
+    framework = _invoke_tool(get_sentiment_analysis_framework_tool, {"topic": topic_text})
+    theories = _invoke_tool(get_sentiment_theories_tool, {"topic": topic_text})
+    case_template = _invoke_tool(
+        get_sentiment_case_template_tool,
+        {"case_type": _guess_case_type(topic_text)},
+    )
+    youth_insight = _invoke_tool(get_youth_sentiment_insight_tool, {})
     reference_hits: List[Dict[str, Any]] = []
     reference_links: List[Dict[str, str]] = []
     dynamic_theories: List[str] = []
     expert_notes: List[Dict[str, Any]] = []
-
-    if module:
-        framework = _invoke_tool(module, "get_sentiment_analysis_framework", {"topic": topic_text})
-        theories = _invoke_tool(module, "get_sentiment_theories", {"topic": topic_text})
-        case_template = _invoke_tool(
-            module,
-            "get_sentiment_case_template",
-            {"case_type": _guess_case_type(topic_text)},
-        )
-        youth_insight = _invoke_tool(module, "get_youth_sentiment_insight", {})
     reference_hits = search_report_reference_insights(topic_text, limit=6)
     reference_links = build_report_reference_links(topic_text)
     dynamic_theories = get_dynamic_theories(topic_text, limit=4)
@@ -667,9 +625,9 @@ def load_report_knowledge(topic: Optional[str] = None) -> Dict[str, Any]:
         "meta": {
             "knowledgeRoot": str(SONA_ROOT),
             "methodDir": str(SONA_METHOD_DIR),
-            "toolFile": str(SONA_TOOL_FILE),
+            "toolModule": "backend.src.report.tools.knowledge_base_tools",
             "sonaRoot": str(SONA_ROOT),
-            "toolAvailable": bool(module),
+            "toolAvailable": True,
             "referenceCount": len(reference_hits),
             "linkCount": len(reference_links),
             "dynamicTheoryCount": len(dynamic_theories),

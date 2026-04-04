@@ -1,9 +1,9 @@
 ---
-name: frontend-user-copy
+name: frontend-ui-copy
 description: Rewrite visible frontend copy into clear, human-facing product language. Use when writing or revising labels, status text, helper text, empty states, errors, toasts, modal copy, onboarding copy, or explanation text shown to end users, especially when the current wording sounds like backend narration, policy defense, raw system output, or internal process notes.
 ---
 
-# Frontend User Copy
+# Frontend UI Copy
 
 ## Goal
 

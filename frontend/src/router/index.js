@@ -8,6 +8,9 @@ const TopicUploadStep = () => import('../views/topics/TopicUploadStep.vue')
 const TopicPreprocessStep = () => import('../views/topics/TopicPreprocessStep.vue')
 const TopicFilterStep = () => import('../views/topics/TopicFilterStep.vue')
 const TopicIngestionStep = () => import('../views/topics/TopicIngestionStep.vue')
+const DataProcessingLayout = () => import('../views/processing/DataProcessingLayout.vue')
+const DataProcessingDeduplicateView = () => import('../views/processing/DataProcessingDeduplicateView.vue')
+const DataProcessingPostcleanView = () => import('../views/processing/DataProcessingPostcleanView.vue')
 const ProjectDataLayout = () => import('../views/project-data/ProjectDataLayout.vue')
 const ProjectDataLocalView = () => import('../views/project-data/ProjectDataLocalView.vue')
 const ProjectDataRemoteCacheView = () => import('../views/project-data/ProjectDataRemoteCacheView.vue')
@@ -105,6 +108,34 @@ export const routes = [
           breadcrumb: '数据入库'
         }
       },
+    ]
+  },
+  {
+    path: '/processing',
+    component: DataProcessingLayout,
+    children: [
+      {
+        path: '',
+        redirect: { name: 'processing-deduplicate' }
+      },
+      {
+        path: 'deduplicate',
+        name: 'processing-deduplicate',
+        component: DataProcessingDeduplicateView,
+        meta: {
+          title: '数据处理 · 数据库去重',
+          breadcrumb: '数据库去重'
+        }
+      },
+      {
+        path: 'postclean',
+        name: 'processing-postclean',
+        component: DataProcessingPostcleanView,
+        meta: {
+          title: '数据处理 · 后清洗',
+          breadcrumb: '后清洗'
+        }
+      }
     ]
   },
   {

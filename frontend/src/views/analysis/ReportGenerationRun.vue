@@ -4,7 +4,7 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="space-y-1">
           <h2 class="text-xl font-semibold text-primary">运行报告</h2>
-          <p class="text-sm text-secondary">创建持久任务，实时查看多 Agent 公开备忘录、工具轨迹和复核裁决。</p>
+          <p class="text-sm text-secondary">创建持久任务，实时查看任务进展、关键回执和成果状态。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="topicsState.loading" @click="loadTopics">
@@ -63,9 +63,7 @@
       <div class="grid gap-3 rounded-3xl border border-soft bg-surface-muted/60 p-4 lg:grid-cols-[1.4fr,1fr]">
         <div class="space-y-2">
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">运行说明</p>
-          <p class="text-sm text-secondary">
-            系统只展示公开工作备忘录、工具调用和 reviewer 裁决，不直接暴露原始 chain-of-thought。
-          </p>
+          <p class="text-sm text-secondary">这里会展示任务进展、关键回执和成果状态，方便你随时了解运行到哪一步。</p>
           <p class="text-xs text-muted">
             建议范围：{{ availableRange.start || '--' }} → {{ availableRange.end || '--' }}
             <span v-if="availableRange.loading" class="ml-2 animate-pulse">检查中…</span>
@@ -114,9 +112,9 @@
           <p class="text-sm text-secondary">{{ progressSubline }}</p>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
-          <span v-if="taskState.id" class="rounded-full border border-soft px-3 py-1">Task {{ taskState.id }}</span>
-          <span v-if="taskState.streaming" class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700">SSE 已连接</span>
-          <span v-else-if="taskState.usingPollingFallback" class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">轮询保活</span>
+          <span v-if="taskState.id" class="rounded-full border border-soft px-3 py-1">任务 {{ taskState.id }}</span>
+          <span v-if="taskState.streaming" class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700">实时连接已建立</span>
+          <span v-else-if="taskState.usingPollingFallback" class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">自动刷新中</span>
           <span v-else-if="taskState.reconnecting" class="rounded-full border border-soft px-3 py-1">重连中</span>
           <span v-if="taskState.updatedAt" class="rounded-full border border-soft px-3 py-1">最近更新 {{ taskState.updatedAt }}</span>
         </div>
@@ -145,7 +143,7 @@
         <div class="flex items-center justify-between gap-3">
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">实时事件流</p>
-            <p class="text-sm text-secondary">这里只展示真实发生的任务事件、工具回执和公开 memo。</p>
+            <p class="text-sm text-secondary">这里只展示真实发生的任务事件、处理回执和当前状态。</p>
           </div>
           <span class="text-xs text-muted">最近 {{ visibleEvents.length }} 条</span>
         </div>
@@ -172,17 +170,17 @@
         </div>
 
         <div v-else class="rounded-3xl border border-dashed border-soft px-4 py-8 text-sm text-secondary">
-          当前还没有事件。创建任务后，这里会实时显示阶段推进、工具回执和 reviewer 裁决。
+          当前还没有事件。创建任务后，这里会实时显示阶段推进、工具回执和产物更新。
         </div>
       </div>
 
       <div class="space-y-6">
         <section class="card-surface space-y-4 p-6">
           <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Agent Room</p>
-            <p class="text-sm text-secondary">默认折叠原始推理，只保留 agent 的公开工作痕迹。</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">运行节点</p>
+            <p class="text-sm text-secondary">这里只展示真实运行节点、处理轨迹和阶段状态，方便你追踪每一步进展。</p>
           </div>
-          <div class="space-y-3">
+          <div v-if="agentCards.length" class="space-y-3">
             <article v-for="agent in agentCards" :key="agent.id" class="rounded-3xl border border-soft bg-surface-muted/50 p-4">
               <div class="flex items-center justify-between gap-3">
                 <div>
@@ -192,8 +190,10 @@
                 <span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="agentStatusClass(agent.status)">{{ agentStatusLabel(agent.status) }}</span>
               </div>
               <div class="mt-3 flex flex-wrap gap-2 text-[11px] text-muted">
-                <span class="rounded-full border border-soft px-2.5 py-1">tool calls {{ agent.tool_call_count || 0 }}</span>
-                <span class="rounded-full border border-soft px-2.5 py-1">tool results {{ agent.tool_result_count || 0 }}</span>
+                <span class="rounded-full border border-soft px-2.5 py-1" :class="toolStateClass(agent)">{{ toolStateLabel(agent) }}</span>
+                <span v-if="showToolResultChip(agent)" class="rounded-full border border-soft px-2.5 py-1">回执 {{ agent.tool_result_count || 0 }}</span>
+                <span v-if="agent.stop_reason" class="rounded-full border border-soft px-2.5 py-1">结束原因 {{ agent.stop_reason }}</span>
+                <span v-if="agent.tool_policy_mode" class="rounded-full border border-soft px-2.5 py-1">策略 {{ agent.tool_policy_mode }}</span>
               </div>
               <div v-if="agent.memos?.length" class="mt-3 space-y-2">
                 <p v-for="memo in agent.memos.slice(-2)" :key="`${agent.id}-${memo.ts}`" class="rounded-2xl bg-white/80 px-3 py-2 text-xs text-secondary">
@@ -202,42 +202,8 @@
               </div>
             </article>
           </div>
-        </section>
-
-        <section class="card-surface space-y-4 p-6">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">可信度面板</p>
-            <p class="text-sm text-secondary">信服度来自工具轨迹、覆盖情况和 reviewer 的真实裁决。</p>
-          </div>
-          <div class="grid gap-3 sm:grid-cols-2">
-            <div class="rounded-2xl border border-soft bg-surface-muted/50 p-4">
-              <p class="text-xs text-muted">Confidence</p>
-              <p class="mt-1 text-lg font-semibold text-primary">{{ trustConfidence }}</p>
-            </div>
-            <div class="rounded-2xl border border-soft bg-surface-muted/50 p-4">
-              <p class="text-xs text-muted">Manual Review</p>
-              <p class="mt-1 text-lg font-semibold" :class="trustManualClass">{{ trustManualText }}</p>
-            </div>
-            <div class="rounded-2xl border border-soft bg-surface-muted/50 p-4">
-              <p class="text-xs text-muted">Evidence Coverage</p>
-              <p class="mt-1 text-lg font-semibold text-primary">{{ trustCoverage }}</p>
-            </div>
-            <div class="rounded-2xl border border-soft bg-surface-muted/50 p-4">
-              <p class="text-xs text-muted">Issues</p>
-              <p class="mt-1 text-lg font-semibold text-primary">{{ trustIssueCount }}</p>
-            </div>
-          </div>
-          <div class="rounded-3xl border border-soft bg-surface-muted/60 p-4">
-            <p class="text-sm font-semibold text-primary">Reviewer Verdict</p>
-            <p class="mt-2 text-sm text-secondary">{{ trustVerdict }}</p>
-          </div>
-          <div v-if="trustIssues.length" class="space-y-2">
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">需要关注</p>
-            <div class="flex flex-wrap gap-2">
-              <span v-for="issue in trustIssues" :key="issue" class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                {{ issue }}
-              </span>
-            </div>
+          <div v-else class="rounded-3xl border border-dashed border-soft px-4 py-6 text-sm text-secondary">
+            当前还没有可展示的任务节点。任务启动后，这里会按步骤显示处理进展和工具回执。
           </div>
         </section>
       </div>
@@ -257,6 +223,8 @@ import {
   StopIcon
 } from '@heroicons/vue/24/outline'
 import { useReportGeneration } from '../../composables/useReportGeneration'
+
+const LEGACY_STAGE_AGENTS = new Set(['researcher', 'interpreter', 'theme_analyst', 'integrator', 'writer', 'reviser'])
 
 const router = useRouter()
 const {
@@ -306,15 +274,16 @@ const progressSubline = computed(() => {
   return `当前阶段：${stageLabel(taskState.phase)}`
 })
 const visibleEvents = computed(() => (Array.isArray(taskEvents.value) ? taskEvents.value.slice(-40).reverse() : []))
-const agentCards = computed(() => Array.isArray(taskState.agents) ? taskState.agents : [])
-const trust = computed(() => taskState.trust && typeof taskState.trust === 'object' ? taskState.trust : {})
-const trustConfidence = computed(() => String(trust.value.confidence_label || '待评估'))
-const trustIssueCount = computed(() => Number(trust.value.issue_count || (Array.isArray(trust.value.issues) ? trust.value.issues.length : 0) || 0))
-const trustVerdict = computed(() => String(trust.value.verdict || 'Reviewer 尚未给出裁决。'))
-const trustIssues = computed(() => Array.isArray(trust.value.issues) ? trust.value.issues : [])
-const trustCoverage = computed(() => `${Math.round(Number(trust.value.evidence_coverage || 0) * 100)}%`)
-const trustManualText = computed(() => (trust.value.requires_manual_review ? '需要人工复核' : '可直接交付'))
-const trustManualClass = computed(() => trust.value.requires_manual_review ? 'text-amber-700' : 'text-emerald-700')
+const agentCards = computed(() => {
+  const agents = Array.isArray(taskState.agents) ? taskState.agents : []
+  return agents
+    .filter(isRuntimeAgentCard)
+    .sort((a, b) => {
+      const aTime = String(a?.updated_at || a?.updatedAt || a?.started_at || a?.startedAt || '')
+      const bTime = String(b?.updated_at || b?.updatedAt || b?.started_at || b?.startedAt || '')
+      return bTime.localeCompare(aTime)
+    })
+})
 
 function stageLabel(phase) {
   const item = taskStageList.find((entry) => entry.id === phase)
@@ -340,19 +309,18 @@ function stageMeta(stageId) {
 
 function eventTypeLabel(type) {
   const mapping = {
-    'task.created': '创建',
-    'phase.started': '阶段启动',
-    'phase.progress': '阶段进度',
-    'agent.started': 'Agent 启动',
-    'agent.memo': '公开备忘录',
-    'tool.called': '工具调用',
-    'tool.result': '工具回执',
-    'review.verdict': '复核裁决',
-    'artifact.ready': '产物就绪',
-    heartbeat: '保活心跳',
+    'task.created': '任务创建',
+    'phase.started': '阶段开始',
+    'phase.progress': '阶段进展',
+    'agent.started': '执行节点启动',
+    'agent.memo': '任务记录',
+    'tool.called': '工具执行',
+    'tool.result': '执行回执',
+    'artifact.ready': '成果就绪',
+    heartbeat: '状态同步',
     'task.completed': '任务完成',
     'task.failed': '任务失败',
-    'task.cancelled': '任务取消'
+    'task.cancelled': '任务已取消'
   }
   return mapping[type] || type || '事件'
 }
@@ -360,7 +328,7 @@ function eventTypeLabel(type) {
 function eventTypeClass(type) {
   if (['task.failed'].includes(type)) return 'bg-rose-50 text-rose-700'
   if (['task.completed', 'artifact.ready'].includes(type)) return 'bg-emerald-50 text-emerald-700'
-  if (['review.verdict', 'tool.result'].includes(type)) return 'bg-amber-50 text-amber-700'
+  if (['tool.result'].includes(type)) return 'bg-amber-50 text-amber-700'
   return 'bg-cyan-50 text-cyan-700'
 }
 
@@ -374,6 +342,44 @@ function agentStatusClass(status) {
   if (status === 'running') return 'bg-cyan-50 text-cyan-700'
   if (status === 'failed') return 'bg-rose-50 text-rose-700'
   return 'bg-slate-100 text-slate-600'
+}
+
+function isRuntimeAgentCard(agent) {
+  if (!agent || typeof agent !== 'object') return false
+  const id = String(agent.id || '').trim()
+  if (!id) return false
+  if (agent.agent_runtime || agent.tool_policy_mode || agent.section_id || agent.scene_id) return true
+  if (/^(scene_router|analysis_graph|evidence_analyst|mechanism_analyst|claim_judge|risk_mapper|writing_graph|layout_planner|budget_planner|report_editor)$/.test(id)) return true
+  if (/^(section_exploration|section_writer|style_critic|fact_critic):/.test(id)) return true
+  return !LEGACY_STAGE_AGENTS.has(id)
+}
+
+function toolsAllowed(agent) {
+  return Array.isArray(agent?.tools_allowed) ? agent.tools_allowed.filter(Boolean) : []
+}
+
+function toolUsageState(agent) {
+  if (!toolsAllowed(agent).length) return 'no_tools_allowed'
+  if (Number(agent?.tool_call_count || 0) > 0 || Number(agent?.tool_result_count || 0) > 0) return 'tools_used'
+  return 'tools_allowed_but_unused'
+}
+
+function toolStateLabel(agent) {
+  const state = toolUsageState(agent)
+  if (state === 'no_tools_allowed') return '无需工具'
+  if (state === 'tools_allowed_but_unused') return '本轮未触发工具'
+  return `已调用 ${Number(agent?.tool_call_count || 0)} 次工具`
+}
+
+function toolStateClass(agent) {
+  const state = toolUsageState(agent)
+  if (state === 'tools_used') return 'border-amber-200 bg-amber-50 text-amber-700'
+  if (state === 'tools_allowed_but_unused') return 'border-sky-200 bg-sky-50 text-sky-700'
+  return 'border-soft bg-white/80 text-slate-600'
+}
+
+function showToolResultChip(agent) {
+  return toolUsageState(agent) === 'tools_used'
 }
 
 function prettyPayload(payload) {

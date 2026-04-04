@@ -93,7 +93,7 @@ const taskStageList = [
   { id: 'explain', label: '总体解读' },
   { id: 'interpret', label: '综合研判' },
   { id: 'write', label: '报告编排' },
-  { id: 'review', label: '复核裁判' },
+  { id: 'review', label: '润色定稿' },
   { id: 'persist', label: '写入结果' }
 ]
 
@@ -763,7 +763,7 @@ async function openReportTaskStream(taskId = taskState.id, { force = false } = {
       // ignore parse errors
     }
   }
-  ;['task.created', 'phase.started', 'phase.progress', 'agent.started', 'agent.memo', 'tool.called', 'tool.result', 'review.verdict', 'artifact.ready', 'task.completed', 'task.failed', 'task.cancelled'].forEach((eventName) => {
+  ;['task.created', 'phase.started', 'phase.progress', 'agent.started', 'agent.memo', 'tool.called', 'tool.result', 'artifact.ready', 'task.completed', 'task.failed', 'task.cancelled'].forEach((eventName) => {
     es.addEventListener(eventName, handleEvent)
   })
   es.onerror = () => {

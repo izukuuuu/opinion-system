@@ -22,7 +22,7 @@ from ..utils.logging.logging import log_module_start, log_success, setup_logger
 from ..utils.setting.paths import bucket, ensure_bucket, get_data_root
 from .knowledge_loader import load_report_knowledge
 from .skills import load_report_skill_context
-from .tools import REPORT_ANALYSIS_TOOLS
+from .tools import REPORT_ANALYSIS_TOOLS, ensure_langchain_toolset_valid
 from .data_report import (
     _collect_sections as legacy_collect_sections,
     _compose_llm_input as legacy_compose_llm_input,
@@ -33,7 +33,6 @@ from .data_report import (
 )
 from .structured_prompts import (
     REPORT_SYSTEM_PROMPT,
-    build_review_verdict_prompt,
     build_section_agent_analysis_prompt,
     build_section_agent_system_prompt,
     build_bertopic_insight_prompt,
@@ -2166,102 +2165,6 @@ def _compose_agent_public_memo(
     return f"{section_name} 已完成结构化整理。"
 
 
-def _normalize_review_verdict(payload: Any) -> Dict[str, Any]:
-    if not isinstance(payload, dict):
-        return {}
-    excluded_keywords = ("bertopic", "coverage", "subset", "映射", "覆盖率", "子集构成", "主题覆盖")
-
-    def _contains_excluded_signal(value: Any) -> bool:
-        text = str(value or "").strip().lower()
-        if not text:
-            return False
-        return any(keyword in text for keyword in excluded_keywords)
-
-    def _ratio(value: Any) -> float:
-        try:
-            parsed = float(value)
-        except Exception:
-            parsed = 0.0
-        return round(max(0.0, min(1.0, parsed)), 2)
-    issues = payload.get("issues")
-    focus_areas = payload.get("focusAreas") or payload.get("focus_areas")
-    status = str(payload.get("status") or "").strip().lower()
-    verdict = str(payload.get("verdict") or "").strip()
-    confidence = str(payload.get("confidenceLabel") or payload.get("confidence_label") or "").strip()
-    filtered_issues = [
-        str(item).strip()
-        for item in (issues or [])
-        if str(item or "").strip() and not _contains_excluded_signal(item)
-    ][:4] if isinstance(issues, list) else []
-    filtered_focus_areas = [
-        str(item).strip()
-        for item in (focus_areas or [])
-        if str(item or "").strip() and not _contains_excluded_signal(item)
-    ][:4] if isinstance(focus_areas, list) else []
-
-    if _contains_excluded_signal(verdict) and not filtered_issues and not filtered_focus_areas:
-        return {}
-
-    normalized = {
-        "status": "pass" if status == "pass" else "needs_review",
-        "verdict": (
-            "报告存在需要人工复核的结论或建议，请优先核查关键判断与动作建议的直接依据。"
-            if _contains_excluded_signal(verdict) and status != "pass"
-            else (
-                "报告关键结论已有统计与文本解读支撑，可作为当前版本输出。"
-                if _contains_excluded_signal(verdict)
-                else verdict
-            )
-        ),
-        "confidence_label": confidence or "中",
-        "issues": filtered_issues,
-        "focus_areas": filtered_focus_areas,
-        "evidence_coverage": _ratio(payload.get("evidenceCoverage") or payload.get("evidence_coverage") or 0.0),
-        "corroborated_coverage": _ratio(payload.get("corroboratedCoverage") or payload.get("corroborated_coverage") or 0.0),
-        "official_source_coverage": _ratio(payload.get("officialSourceCoverage") or payload.get("official_source_coverage") or 0.0),
-        "requires_manual_review": bool(payload.get("requiresManualReview") or payload.get("requires_manual_review")),
-    }
-    if normalized["status"] != "pass" and not normalized["requires_manual_review"]:
-        normalized["requires_manual_review"] = True
-    return normalized
-
-
-def _build_fallback_review_verdict(
-    *,
-    source_readiness: Dict[str, Any],
-    deep_analysis_trace: Dict[str, Any],
-    section_agents_meta: Dict[str, Any],
-) -> Dict[str, Any]:
-    issues: List[str] = []
-    if not bool(source_readiness.get("aiSummaryReady")):
-        issues.append("missing_ai_summary")
-    if not bool(source_readiness.get("explainReady")):
-        issues.append("low_evidence_coverage")
-    if str(deep_analysis_trace.get("source") or "fallback") != "llm":
-        issues.append("limited_interpretation")
-    if sum(1 for item in section_agents_meta.values() if str((item or {}).get("source") or "") == "fallback") >= 2:
-        issues.append("high_fallback_ratio")
-    requires_manual_review = bool(issues)
-    evidence_coverage = 1.0 if source_readiness.get("explainReady") else 0.62
-    corroborated_coverage = 0.76 if str(deep_analysis_trace.get("source") or "") == "llm" else 0.44
-    verdict = (
-        "报告关键信息具备可读性，但证据覆盖仍有缺口，建议结合原始总体解读做人工复核。"
-        if requires_manual_review
-        else "报告关键结论已有统计与文本解读支撑，可作为当前版本输出。"
-    )
-    return {
-        "status": "needs_review" if requires_manual_review else "pass",
-        "verdict": verdict,
-        "confidence_label": "低" if requires_manual_review else "中",
-        "issues": issues,
-        "focus_areas": ["核查总体文字解读缺口", "确认高风险结论对应证据"] if requires_manual_review else [],
-        "evidence_coverage": evidence_coverage,
-        "corroborated_coverage": corroborated_coverage,
-        "official_source_coverage": 0.5 if source_readiness.get("explainReady") else 0.25,
-        "requires_manual_review": requires_manual_review,
-    }
-
-
 def _call_langchain_json(
     user_prompt: str,
     *,
@@ -3506,71 +3409,6 @@ def _build_report_payload(
             "message": "Reviewer 正在核对关键结论与证据覆盖。",
         },
     )
-    reviewer_facts = {
-        "topic": topic_label,
-        "time_range": {"start": start, "end": end},
-        "source_readiness": source_readiness,
-        "metrics": metrics,
-        "highlight_points": highlight_points,
-        "insights": insights,
-        "deep_analysis": {
-            "narrativeSummary": deep_analysis.get("narrativeSummary"),
-            "keyEvents": deep_analysis.get("keyEvents"),
-            "keyRisks": deep_analysis.get("keyRisks"),
-            "stage": deep_analysis.get("stage"),
-            "indicatorDimensions": deep_analysis.get("indicatorDimensions"),
-            "theoryNames": deep_analysis.get("theoryNames"),
-        },
-        "section_agents_meta": {
-            key: {
-                "source": str((value or {}).get("source") or ""),
-                "analysis_source": str((value or {}).get("analysis_source") or ""),
-                "tool_call_count": len((value or {}).get("tool_calls") or []),
-                "tool_result_count": len((value or {}).get("tool_results") or []),
-            }
-            for key, value in section_agents_meta.items()
-        },
-        "legacy_context": {
-            "sections_count": len(legacy_context.get("sections") or []),
-            "has_legacy_report_text": bool(str(legacy_context.get("full_text") or "").strip()),
-            "has_manual_text": bool(str(legacy_context.get("manual_text") or "").strip()),
-        },
-    }
-    review_verdict = _build_fallback_review_verdict(
-        source_readiness=source_readiness,
-        deep_analysis_trace=deep_analysis_trace,
-        section_agents_meta=section_agents_meta,
-    )
-    reviewer_payload, reviewer_trace = _run_section_agent(
-        SectionAgentSpec(
-            name="报告复核裁判",
-            focus="负责核对关键结论是否有证据支撑、是否存在过度推断，并给出人工复核建议。",
-            agent_id="reviewer",
-            phase="review",
-            prompt_builder=build_review_verdict_prompt,
-            model_role="report",
-            max_tokens=900,
-        ),
-        reviewer_facts,
-        event_callback=event_callback,
-    )
-    reviewer_candidate = _normalize_review_verdict(reviewer_payload)
-    if reviewer_candidate:
-        review_verdict = reviewer_candidate
-    reviewer_trace["source"] = "llm" if reviewer_candidate else "fallback"
-    section_agents_meta["reviewer"] = reviewer_trace
-    _emit_report_event(
-        event_callback,
-        {
-            "type": "review.verdict",
-            "phase": "review",
-            "agent": "reviewer",
-            "title": "Reviewer 裁决",
-            "message": str(review_verdict.get("verdict") or "").strip() or "Reviewer 已完成复核。",
-            "payload": review_verdict,
-        },
-    )
-
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
     if bertopic_insight_source == "fallback" and str(deep_analysis.get("narrativeSummary") or "").strip():
         bertopic_insight = (
@@ -3622,7 +3460,6 @@ def _build_report_payload(
         "highlightPoints": highlight_points,
         "insights": insights,
         "conclusionMining": conclusion_mining,
-        "reviewVerdict": review_verdict,
         "meta": {
             "topic_identifier": topic_identifier,
             "topic_label": topic_label,
@@ -3635,7 +3472,6 @@ def _build_report_payload(
             "bertopic_insight_source": bertopic_insight_source,
             "bertopic_temporal_narrative_source": bertopic_temporal_narrative_source,
             "deep_analysis_source": deep_analysis_source,
-            "review_source": reviewer_trace.get("source") or "fallback",
             "deep_analysis_tool_trace": {
                 "tool_call_count": len(deep_analysis_trace.get("tool_calls") or []),
                 "tool_calls": deep_analysis_trace.get("tool_calls") or [],
@@ -3656,7 +3492,6 @@ def _build_report_payload(
                 "sections_count": len(legacy_context.get("sections") or []),
                 "has_legacy_report_text": bool(str(legacy_context.get("full_text") or "").strip()),
             },
-            "review_verdict": review_verdict,
             "cache_version": REPORT_CACHE_VERSION,
             "generated_at": now_text,
         },
@@ -3713,22 +3548,6 @@ def _upgrade_cached_report_payload(
         insights=payload.get("insights") if isinstance(payload.get("insights"), list) else [],
         legacy_context=legacy_context,
     )
-    review_verdict = _build_fallback_review_verdict(
-        source_readiness=source_readiness,
-        deep_analysis_trace={
-            "source": (
-                payload.get("meta", {}).get("deep_analysis_source")
-                if isinstance(payload.get("meta"), dict)
-                else ""
-            )
-        },
-        section_agents_meta=(
-            payload.get("meta", {}).get("section_agents")
-            if isinstance(payload.get("meta"), dict) and isinstance(payload.get("meta", {}).get("section_agents"), dict)
-            else {}
-        ),
-    )
-
     payload["legacyContext"] = {
         "sections": legacy_context.get("sections") or [],
         "fullText": str(legacy_context.get("full_text") or "").strip(),
@@ -3742,8 +3561,10 @@ def _upgrade_cached_report_payload(
     payload["sourceReadiness"] = source_readiness
     payload["keywords"] = _build_keyword_data(keyword_rows, topic_text=topic_label or topic_identifier)
     payload["conclusionMining"] = conclusion_mining
-    existing_review_verdict = _normalize_review_verdict(payload.get("reviewVerdict"))
-    payload["reviewVerdict"] = existing_review_verdict or review_verdict
+    for legacy_key in list(payload.keys()):
+        key_text = str(legacy_key or "").strip().lower()
+        if "review" in key_text and "verdict" in key_text:
+            payload.pop(legacy_key, None)
 
     meta = dict(payload.get("meta") or {}) if isinstance(payload.get("meta"), dict) else {}
     meta["topic_identifier"] = topic_identifier
@@ -3758,8 +3579,11 @@ def _upgrade_cached_report_payload(
         "sections_count": len(legacy_context.get("sections") or []),
         "has_legacy_report_text": bool(str(legacy_context.get("full_text") or "").strip()),
     }
-    meta["review_verdict"] = payload["reviewVerdict"]
-    meta["review_source"] = str(meta.get("review_source") or "fallback")
+    for legacy_meta_key in list(meta.keys()):
+        key_text = str(legacy_meta_key or "").strip().lower()
+        if "review" in key_text and "verdict" in key_text:
+            meta.pop(legacy_meta_key, None)
+    meta.pop("review_source", None)
     meta["cache_version"] = REPORT_CACHE_VERSION
     meta["generated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     payload["meta"] = meta
@@ -3788,6 +3612,7 @@ def generate_report_payload(
         topic_label: 前端展示名称，缺省时使用 topic_identifier。
         regenerate: 是否强制跳过缓存重新生成文字部分。
     """
+    ensure_langchain_toolset_valid(REPORT_ANALYSIS_TOOLS)
     start_text = str(start or "").strip()
     end_text = str(end or "").strip() or start_text
     if not start_text:

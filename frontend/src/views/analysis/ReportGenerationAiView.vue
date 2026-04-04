@@ -4,7 +4,7 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="space-y-1">
           <h2 class="text-xl font-semibold text-primary">AI 完整报告</h2>
-          <p class="text-sm text-secondary">基于当前结构化报告、知识库方法论和 reviewer 裁决，生成一份可导航的 Markdown 长报告。</p>
+          <p class="text-sm text-secondary">基于当前结构化报告、知识库方法论和证据约束，生成一份可导航的 Markdown 长报告。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="topicsState.loading" @click="loadTopics">
@@ -100,26 +100,13 @@
           </div>
           <div class="space-y-2 text-sm text-secondary">
             <p>{{ fullReport.rangeText }}</p>
-            <p>最近更新：{{ fullReport.lastUpdated }}</p>
-            <p v-if="fullReportState.lastLoaded">前端读取：{{ fullReportState.lastLoaded }}</p>
-          </div>
-          <div class="flex flex-wrap gap-2 text-xs">
-            <span class="rounded-full border border-soft bg-surface px-3 py-1 text-secondary">
-              brief {{ fullMeta.briefSource }}
-            </span>
-            <span class="rounded-full border border-soft bg-surface px-3 py-1 text-secondary">
-              draft {{ fullMeta.draftSource }}
-            </span>
-            <span class="rounded-full border border-soft bg-surface px-3 py-1 text-secondary">
-              revise {{ fullMeta.reviseSource }}
-            </span>
+            <p>知识术语：{{ knowledgeTermsText }}</p>
           </div>
         </section>
 
         <section class="card-surface space-y-4 p-5">
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">章节导航</p>
-            <p class="mt-2 text-sm text-secondary">当前目录直接来自 Markdown 标题。</p>
           </div>
           <nav class="space-y-1.5">
             <a
@@ -134,38 +121,11 @@
           </nav>
         </section>
 
-        <section class="card-surface space-y-4 p-5">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">复核裁决</p>
-            <p class="mt-2 text-sm text-secondary">{{ reviewVerdict.verdict || '暂无 reviewer 裁决。' }}</p>
-          </div>
-          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <div class="rounded-2xl border border-soft bg-surface-muted/60 p-4">
-              <p class="text-xs text-muted">状态</p>
-              <p class="mt-1 text-lg font-semibold" :class="reviewVerdict.requiresManual ? 'text-amber-700' : 'text-emerald-700'">
-                {{ reviewVerdict.statusText }}
-              </p>
-            </div>
-            <div class="rounded-2xl border border-soft bg-surface-muted/60 p-4">
-              <p class="text-xs text-muted">知识术语</p>
-              <p class="mt-1 text-sm font-semibold text-primary">{{ knowledgeTermsText }}</p>
-            </div>
-          </div>
-          <div v-if="reviewVerdict.focusAreas.length" class="space-y-2">
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">人工复核重点</p>
-            <div class="flex flex-wrap gap-2">
-              <span v-for="item in reviewVerdict.focusAreas" :key="item" class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                {{ item }}
-              </span>
-            </div>
-          </div>
-        </section>
       </aside>
 
       <article class="card-surface overflow-hidden p-0">
         <div class="border-b border-soft px-6 py-5">
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Markdown Preview</p>
-          <p class="mt-2 text-sm text-secondary">图片由系统根据结构化数据自动插入，导出 HTML 时会保持内嵌。</p>
         </div>
         <div class="ai-report-body px-6 py-8" v-html="renderedHtml"></div>
       </article>
@@ -212,29 +172,12 @@ const {
 
 const fullReport = computed(() => (fullReportData.value && typeof fullReportData.value === 'object' ? fullReportData.value : null))
 const fullMeta = computed(() => ({
-  briefSource: String(fullReport.value?.meta?.brief_source || 'fallback').trim(),
-  draftSource: String(fullReport.value?.meta?.draft_source || 'fallback').trim(),
-  reviseSource: String(fullReport.value?.meta?.revise_source || 'fallback').trim(),
   knowledgeTerms: Array.isArray(fullReport.value?.meta?.knowledge_terms)
     ? fullReport.value.meta.knowledge_terms.map((item) => String(item || '').trim()).filter(Boolean)
     : []
 }))
 const tocItems = computed(() => extractMarkdownToc(fullReport.value?.markdown || ''))
 const renderedHtml = computed(() => renderAiReportMarkdown(fullReport.value?.markdown || '', { assets: fullReport.value?.assets || [] }))
-
-const reviewVerdict = computed(() => {
-  const payload = fullReport.value?.reviewVerdict || {}
-  const focusAreas = Array.isArray(payload?.focus_areas || payload?.focusAreas)
-    ? (payload.focus_areas || payload.focusAreas).map((item) => String(item || '').trim()).filter(Boolean)
-    : []
-  const requiresManual = Boolean(payload?.requires_manual_review || payload?.requiresManualReview || fullReport.value?.meta?.requires_manual_review)
-  return {
-    verdict: String(payload?.verdict || '').trim(),
-    requiresManual,
-    focusAreas,
-    statusText: requiresManual ? '需要人工复核' : '可直接阅读'
-  }
-})
 
 const knowledgeTermsText = computed(() => fullMeta.value.knowledgeTerms.length ? fullMeta.value.knowledgeTerms.join('、') : '暂无')
 

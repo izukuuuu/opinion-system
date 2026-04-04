@@ -430,6 +430,14 @@ def save_topic_bertopic_prompt():
         if project_stopwords is None:
             project_stopwords = payload.get("projectStopwordsText")
 
+        publisher_blacklist = payload.get("publisher_blacklist")
+        if publisher_blacklist is None:
+            publisher_blacklist = payload.get("publisherBlacklist")
+        if publisher_blacklist is None:
+            publisher_blacklist = payload.get("publisher_blacklist_text")
+        if publisher_blacklist is None:
+            publisher_blacklist = payload.get("publisherBlacklistText")
+
         recluster_topic_limit = payload.get("recluster_topic_limit")
         if recluster_topic_limit is None:
             recluster_topic_limit = payload.get("reclusterTopicLimit")
@@ -459,6 +467,7 @@ def save_topic_bertopic_prompt():
             pre_filter_query_hint=str(pre_filter_query_hint or ""),
             pre_filter_negative_hint=str(pre_filter_negative_hint or ""),
             project_stopwords=project_stopwords,
+            publisher_blacklist=publisher_blacklist,
             recluster_topic_limit=recluster_topic_limit,
             recluster_target_coverage_ratio=recluster_target_coverage_ratio,
         )

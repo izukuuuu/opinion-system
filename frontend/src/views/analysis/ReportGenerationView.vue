@@ -152,39 +152,11 @@
 
     <template v-if="report">
       <section class="card-surface space-y-5 p-6">
-        <header class="space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="space-y-1">
-              <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">基础分析总览</p>
-              <h3 class="text-lg font-semibold text-primary">基础分析已压缩进报告结构</h3>
-            </div>
-            <p class="text-xs text-muted">
-              <span v-if="analysisState.loading">基础分析结果加载中…</span>
-              <span v-else-if="analysisState.lastLoaded">图表读取：{{ analysisState.lastLoaded }}</span>
-              <span v-else>图表来自 `/api/analyze/results`</span>
-            </p>
+        <header class="space-y-2">
+          <div class="space-y-1">
+            <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">基础分析总览</p>
+            <h3 class="text-lg font-semibold text-primary">基础分析模块</h3>
           </div>
-
-          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <article
-              v-for="item in sourceReadinessItems"
-              :key="item.id"
-              class="rounded-2xl border p-4"
-              :class="item.ready ? 'border-brand-soft bg-brand-soft/10' : 'border-soft bg-surface'"
-            >
-              <div class="flex items-center justify-between gap-2">
-                <p class="text-sm font-semibold text-primary">{{ item.label }}</p>
-                <span
-                  class="rounded-full px-2.5 py-1 text-[11px] font-semibold"
-                  :class="item.ready ? 'bg-brand-soft/40 text-brand-700' : 'bg-surface-muted text-muted'"
-                >
-                  {{ item.ready ? '已接入' : '待补齐/缺失' }}
-                </span>
-              </div>
-              <p class="mt-2 text-xs leading-6 text-secondary">{{ item.detail }}</p>
-            </article>
-          </div>
-
           <div v-if="analysisMainFinding" class="rounded-2xl border border-brand-soft bg-brand-soft/10 px-4 py-4">
             <div class="flex items-start gap-3">
               <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600/10 text-brand-600">
@@ -539,56 +511,6 @@
 
       <section class="card-surface space-y-5 p-6">
         <header class="space-y-2">
-          <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">原始依据</p>
-          <h3 class="text-lg font-semibold text-primary">旧版报告依据</h3>
-          <p class="text-sm text-secondary">
-            该区块用于承接旧版 `report.py` 链路中的文字解读、检索增强段落和长文结果，便于追溯报告结论的原始依据。
-          </p>
-        </header>
-
-        <div
-          v-if="!sourceReadiness.explainReady"
-          class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
-        >
-          当前区间还没有补齐总体文字解读，报告页先展示 AI 摘要和统计结果；下方仅列出当前可用的旧版依据。
-        </div>
-
-        <div v-if="legacyContext.sections.length" class="grid gap-4 xl:grid-cols-2">
-          <article
-            v-for="section in legacyContext.sections"
-            :id="section.anchorId"
-            :key="section.anchorId"
-            class="rounded-2xl border border-soft bg-surface p-5"
-          >
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{{ section.label }}</p>
-                <h4 class="mt-1 text-base font-semibold text-primary">{{ section.sourceLabel || '文字解读段落' }}</h4>
-              </div>
-              <span class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
-                {{ getNarrativeSourceLabel(section.source) }}
-              </span>
-            </div>
-            <p class="mt-4 whitespace-pre-line text-sm leading-7 text-secondary">{{ section.text }}</p>
-          </article>
-        </div>
-
-        <div v-if="legacyContext.fullText || legacyContext.manualText" class="grid gap-4 xl:grid-cols-2">
-          <details v-if="legacyContext.fullText" class="rounded-2xl border border-soft bg-surface p-4">
-            <summary class="cursor-pointer text-sm font-semibold text-primary">查看 legacy report 长文</summary>
-            <pre class="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-sm leading-7 text-secondary">{{ legacyContext.fullText }}</pre>
-          </details>
-          <details v-if="legacyContext.manualText" class="rounded-2xl border border-soft bg-surface p-4">
-            <summary class="cursor-pointer text-sm font-semibold text-primary">查看人工补充文本</summary>
-            <pre class="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-sm leading-7 text-secondary">{{ legacyContext.manualText }}</pre>
-          </details>
-        </div>
-
-        <p v-if="!hasLegacyContextContent" class="text-sm text-muted">当前报告未找到可展示的旧版 explain / report 上下文。</p>
-      </section>
-
-      <section class="card-surface space-y-5 p-6">
-        <header class="space-y-2">
           <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">结论挖掘</p>
           <h3 class="text-lg font-semibold text-primary">从基础分析、文字解读与结构化研判中回收可执行结论</h3>
         </header>
@@ -854,30 +776,6 @@ const moduleNarratives = computed(() => (
       .filter((item) => item.id && item.label)
     : []
 ))
-const legacyContext = computed(() => {
-  const payload = report.value?.legacyContext
-  const sections = Array.isArray(payload?.sections)
-    ? payload.sections
-      .map((item) => ({
-        id: String(item?.id || '').trim(),
-        label: String(item?.label || item?.sourceLabel || '').trim(),
-        sourceLabel: String(item?.sourceLabel || '').trim(),
-        text: String(item?.text || '').trim(),
-        source: String(item?.source || 'legacy_rag').trim() || 'legacy_rag',
-        anchorId: `legacy-section-${String(item?.id || '').trim()}`
-      }))
-      .filter((item) => item.id && item.label && item.text)
-    : []
-  return {
-    sections,
-    fullText: String(payload?.fullText || '').trim(),
-    manualText: String(payload?.manualText || '').trim(),
-    hasManualText: Boolean(payload?.hasManualText),
-    hasLegacyReportText: Boolean(payload?.hasLegacyReportText),
-    sectionsCount: Number(payload?.sectionsCount || sections.length || 0),
-    sourceTopic: String(payload?.sourceTopic || '').trim()
-  }
-})
 const conclusionMining = computed(() => {
   const payload = report.value?.conclusionMining
   const normalizeModules = (rows) => (
@@ -911,53 +809,10 @@ const conclusionMining = computed(() => {
     supportingModules: normalizeModules(payload?.supportingModules)
   }
 })
-const sourceReadiness = computed(() => {
-  const payload = report.value?.sourceReadiness
-  return {
-    analyzeReady: Boolean(payload?.analyzeReady),
-    aiSummaryReady: Boolean(payload?.aiSummaryReady),
-    explainReady: Boolean(payload?.explainReady),
-    legacyContextReady: Boolean(payload?.legacyContextReady)
-  }
-})
-
-const sourceReadinessItems = computed(() => ([
-  {
-    id: 'analyze',
-    label: '基础分析',
-    ready: sourceReadiness.value.analyzeReady,
-    detail: sourceReadiness.value.analyzeReady ? '7 个基础分析模块可直接复用。' : '基础分析结果尚未准备完成。'
-  },
-  {
-    id: 'ai-summary',
-    label: 'AI 摘要',
-    ready: sourceReadiness.value.aiSummaryReady,
-    detail: sourceReadiness.value.aiSummaryReady ? '模块摘要可用于快速解读。' : '当前缺少 AI 摘要，将仅展示统计结果。'
-  },
-  {
-    id: 'explain',
-    label: '总体文字解读',
-    ready: sourceReadiness.value.explainReady,
-    detail: sourceReadiness.value.explainReady ? '总体文字解读已接入报告。' : '总体文字解读待补齐，当前先结合 AI 摘要和统计结果展示。'
-  },
-  {
-    id: 'legacy-context',
-    label: '原始依据',
-    ready: sourceReadiness.value.legacyContextReady,
-    detail: sourceReadiness.value.legacyContextReady ? '已收集旧 report 段落与长文依据。' : '旧 report 上下文暂不可用。'
-  }
-]))
-
 const conclusionGroups = computed(() => conclusionGroupMeta.map((group) => ({
   ...group,
   items: Array.isArray(conclusionMining.value?.[group.key]) ? conclusionMining.value[group.key] : []
 })))
-
-const hasLegacyContextContent = computed(() => Boolean(
-  legacyContext.value.sections.length ||
-  legacyContext.value.fullText ||
-  legacyContext.value.manualText
-))
 
 const hasConclusionMiningContent = computed(() => Boolean(
   conclusionMining.value.executiveSummary ||
@@ -1754,20 +1609,6 @@ const buildHtmlDocument = () => {
     </ul>`
     : '<p class="empty-text">暂无阶段说明。</p>'
 
-  const readinessHtml = `
-    <div class="readiness-grid">
-      ${sourceReadinessItems.value.map((item) => `
-        <article class="readiness-card ${item.ready ? 'is-ready' : ''}">
-          <div class="readiness-head">
-            <p>${escapeHtml(item.label)}</p>
-            <span>${item.ready ? '已接入' : '待补齐/缺失'}</span>
-          </div>
-          <p class="readiness-detail">${escapeHtml(item.detail)}</p>
-        </article>
-      `).join('')}
-    </div>
-  `
-
   const analysisMainFindingHtml = analysisMainFinding.value
     ? `
       <div class="callout">
@@ -1923,38 +1764,6 @@ const buildHtmlDocument = () => {
     </div>
   `
 
-  const legacySectionsHtml = legacyContext.value.sections.length
-    ? `<div class="evidence-grid">
-      ${legacyContext.value.sections.map((section) => `
-        <article class="panel" id="${escapeHtml(section.anchorId)}">
-          <header class="panel-header">
-            <h3>${escapeHtml(section.label)}</h3>
-            <p class="panel-subtitle">${escapeHtml(section.sourceLabel || '文字解读段落')}</p>
-          </header>
-          <span class="source-pill">${escapeHtml(getNarrativeSourceLabel(section.source))}</span>
-          <p class="evidence-text">${escapeHtml(section.text)}</p>
-        </article>
-      `).join('')}
-    </div>`
-    : '<p class="empty-text">当前报告未找到可展示的旧版 explain / report 段落。</p>'
-
-  const legacyLongformHtml = (legacyContext.value.fullText || legacyContext.value.manualText)
-    ? `<div class="chart-grid-2" style="margin-top:14px;">
-      ${legacyContext.value.fullText ? `
-        <details class="panel">
-          <summary class="details-summary">查看 legacy report 长文</summary>
-          <pre class="evidence-pre">${escapeHtml(legacyContext.value.fullText)}</pre>
-        </details>
-      ` : ''}
-      ${legacyContext.value.manualText ? `
-        <details class="panel">
-          <summary class="details-summary">查看人工补充文本</summary>
-          <pre class="evidence-pre">${escapeHtml(legacyContext.value.manualText)}</pre>
-        </details>
-      ` : ''}
-    </div>`
-    : ''
-
   const conclusionHtml = hasConclusionMiningContent.value
     ? `
       <div class="callout">
@@ -2009,10 +1818,6 @@ const buildHtmlDocument = () => {
   const loadedSuffix = reportState.lastLoaded
     ? ` · 前端读取：${escapeHtml(reportState.lastLoaded)}`
     : ''
-  const analysisLoadedSuffix = analysisState.lastLoaded
-    ? ` · 图表读取：${escapeHtml(analysisState.lastLoaded)}`
-    : ''
-
   const chartJson = JSON.stringify(chartOptions)
   const chartRuntimeJson = JSON.stringify(chartRuntime)
   const closeScript = '</scr' + 'ipt>'
@@ -2470,10 +2275,9 @@ const buildHtmlDocument = () => {
     <section class="panel">
       <p class="section-kicker">基础分析总览</p>
       <h2 class="panel-header" style="margin-bottom:0;">
-        <span style="display:block;font-size:20px;color:#0f172a;font-weight:700;">基础分析已压缩进报告结构</span>
-        <span class="panel-subtitle">每个模块保留一张代表图，并直接结合摘要与综合解读。图表读取来自 /api/analyze/results${analysisLoadedSuffix}</span>
+        <span style="display:block;font-size:20px;color:#0f172a;font-weight:700;">基础分析模块</span>
+        <span class="panel-subtitle">每个模块保留一张代表图，并直接结合摘要与综合解读。</span>
       </h2>
-      ${readinessHtml}
       ${analysisMainFindingHtml}
       <div style="margin-top:16px;">
         ${analysisOverviewHtml}
@@ -2525,18 +2329,6 @@ const buildHtmlDocument = () => {
     <section class="chart-grid-2">
       ${renderChartPanel('keyword', '关键词热度')}
       ${renderChartPanel('theme', '主题分布')}
-    </section>
-
-    <section class="panel">
-      <header class="panel-header">
-        <h3>原始依据</h3>
-        <p class="panel-subtitle">旧版 report 的文字解读段落与长文上下文。</p>
-      </header>
-      ${!sourceReadiness.value.explainReady
-        ? '<div class="callout"><p class="callout-text">当前区间还没有补齐总体文字解读，导出报告先展示 AI 摘要和统计结果；下方仅列出当前可用的旧版依据。</p></div>'
-        : ''}
-      ${legacySectionsHtml}
-      ${legacyLongformHtml}
     </section>
 
     <section class="panel">

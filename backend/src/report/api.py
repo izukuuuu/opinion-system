@@ -177,9 +177,9 @@ def _load_json_payload(path: Path) -> Dict[str, Any]:
 
 def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
     recent_events = task.get("recent_events") if isinstance(task.get("recent_events"), list) else []
-    trust = task.get("trust") if isinstance(task.get("trust"), dict) else {}
     artifacts = task.get("artifacts") if isinstance(task.get("artifacts"), dict) else {}
-    explain_ready = not bool(trust.get("requires_manual_review")) or bool(artifacts.get("report_ready"))
+    trust = task.get("trust") if isinstance(task.get("trust"), dict) else {}
+    explain_ready = bool(artifacts.get("report_ready"))
     full_report_ready = bool(artifacts.get("full_report_ready"))
     stage = str(task.get("phase") or "").strip()
     status = str(task.get("status") or "").strip() or "queued"

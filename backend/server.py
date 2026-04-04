@@ -78,14 +78,18 @@ from server_support import (  # type: ignore
     split_folder_range,
     validate_rag_config,
     DATA_PROJECTS_ROOT,
+    create_deduplicate_job,
     create_fetch_refresh_job,
     get_fetch_refresh_job,
+    get_deduplicate_job,
     heartbeat_fetch_refresh_job,
+    heartbeat_deduplicate_job,
     mark_filter_job_running,
     mark_filter_job_finished,
     create_postclean_job,
     get_postclean_job,
     heartbeat_postclean_job,
+    update_deduplicate_job,
     update_fetch_refresh_job,
     update_fetch_refresh_worker,
     update_postclean_job,
@@ -105,6 +109,10 @@ from server_support.hot_overview import (
 from server_support.stopword_suggestions import (
     build_status_payload as build_stopword_suggestion_status_payload,
     create_or_reuse_task as create_stopword_suggestion_task,
+)
+from server_support.publisher_detection import (
+    build_status_payload as build_publisher_detection_status_payload,
+    create_or_reuse_task as create_publisher_detection_task,
 )
 
 PROJECT_MANAGER = get_project_manager()
@@ -355,6 +363,143 @@ def _submit_postclean_job(
             heartbeat_postclean_job(topic_identifier, database, tables)
 
     return POSTCLEAN_EXECUTOR.submit(_job)
+
+
+def _submit_deduplicate_job(
+    *,
+    topic_identifier: str,
+    database: str,
+    tables: Optional[List[str]],
+    log_project: str,
+    display_name: str,
+) -> concurrent.futures.Future:
+    def _job():
+        stop_event = threading.Event()
+
+        def _heartbeat_loop():
+            while not stop_event.wait(2.0):
+                heartbeat_deduplicate_job(topic_identifier, database, tables)
+
+        def _on_progress(event: str, message: str, payload: Dict[str, Any]) -> None:
+            progress_payload = {
+                "total_tables": int(payload.get("total_tables") or 0),
+                "completed_tables": int(payload.get("completed_tables") or 0),
+                "deleted_rows": int(payload.get("deleted_rows") or 0),
+                "current_table": str(payload.get("table") or "").strip(),
+                "percentage": int(payload.get("percentage") or 0),
+            }
+            update_deduplicate_job(
+                topic_identifier,
+                database,
+                tables,
+                message=message,
+                progress=progress_payload,
+                log_message=message,
+                log_event=event,
+                log_level="error" if event == "task.failed" else "info",
+            )
+
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            name=f"deduplicate-heartbeat-{topic_identifier}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
+        try:
+            from src.filter import run_database_deduplicate  # type: ignore
+
+            result = run_database_deduplicate(
+                topic_identifier,
+                database,
+                tables=tables,
+                progress_callback=_on_progress,
+            )
+            success = evaluate_success(result)
+            _log_with_context(
+                "database-deduplicate",
+                success,
+                {
+                    "project": log_project,
+                    "params": {
+                        "database": database,
+                        "tables": tables or [],
+                        "source": "api",
+                        "topic": display_name,
+                        "bucket": topic_identifier,
+                    },
+                },
+            )
+            serialised = serialise_result(result)
+            follow_up_payload: Optional[Dict[str, Any]] = None
+            if success and isinstance(serialised, dict):
+                deleted_rows = int(serialised.get("deleted_rows") or 0)
+                if deleted_rows > 0:
+                    follow_up_payload = _enqueue_fetch_refresh_job(
+                        topic_identifier=topic_identifier,
+                        database=database,
+                        log_project=log_project,
+                        display_name=display_name,
+                    )
+                else:
+                    follow_up_payload = {
+                        "status": "skipped",
+                        "message": "本次数据库去重未删除记录，未触发本地缓存刷新。",
+                        "ranges": [],
+                    }
+                serialised["follow_up"] = follow_up_payload
+            success_message = (
+                f"数据库去重完成，共删除 {int(serialised.get('deleted_rows') or 0)} 条重复记录。"
+                if success and isinstance(serialised, dict)
+                else str((serialised or {}).get("message") if isinstance(serialised, dict) else serialised or "数据库去重失败")
+            )
+            if success and isinstance(follow_up_payload, dict):
+                follow_up_message = str(follow_up_payload.get("message") or "").strip()
+                if follow_up_message:
+                    success_message = f"{success_message} {follow_up_message}"
+            update_deduplicate_job(
+                topic_identifier,
+                database,
+                tables,
+                status="completed" if success else "error",
+                message=success_message,
+                progress={"percentage": 100 if success else 0},
+                result=serialised,
+                log_message=success_message,
+                log_event="task.completed" if success else "task.failed",
+                log_level="info" if success else "error",
+            )
+        except Exception as exc:  # pragma: no cover
+            LOGGER.exception("Deduplicate job failed for %s@%s", topic_identifier, database)
+            detail = str(exc)
+            _log_with_context(
+                "database-deduplicate",
+                False,
+                {
+                    "project": log_project,
+                    "params": {
+                        "database": database,
+                        "tables": tables or [],
+                        "source": "api",
+                        "topic": display_name,
+                        "bucket": topic_identifier,
+                    },
+                },
+            )
+            update_deduplicate_job(
+                topic_identifier,
+                database,
+                tables,
+                status="error",
+                message=detail,
+                log_message=detail,
+                log_event="task.failed",
+                log_level="error",
+            )
+        finally:
+            stop_event.set()
+            heartbeat_deduplicate_job(topic_identifier, database, tables)
+
+    return DEDUPLICATE_EXECUTOR.submit(_job)
 
 
 def _build_fetch_refresh_ranges(topic_identifier: str) -> List[Dict[str, str]]:
@@ -677,6 +822,7 @@ FILTER_STATUS_STREAM_INTERVAL = 1.0
 FILTER_STATUS_STREAM_TIMEOUT = 300.0
 FILTER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 POSTCLEAN_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+DEDUPLICATE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 FETCH_REFRESH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 
@@ -1668,6 +1814,149 @@ def database_postclean_endpoint():
     }), 202
 
 
+@app.post("/api/database/postclean/publishers/task")
+def database_postclean_publishers_task_endpoint():
+    payload = request.get_json(silent=True) or {}
+    topic = str(payload.get("topic") or "").strip()
+    project = str(payload.get("project") or "").strip()
+    dataset_id = str(payload.get("dataset_id") or "").strip()
+    database = str(payload.get("database") or "").strip()
+    raw_tables = payload.get("tables")
+    force = bool(payload.get("force"))
+    limit = int(payload.get("limit") or 50)
+    sample_limit = int(payload.get("sample_limit") or 3)
+
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+    if not database:
+        return jsonify({"status": "error", "message": "Missing required field(s): database"}), 400
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(
+            {
+                "topic": topic,
+                "project": project,
+                "dataset_id": dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    tables: Optional[List[str]] = None
+    if isinstance(raw_tables, list):
+        tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
+
+    try:
+        task = create_publisher_detection_task(
+            topic_identifier,
+            database,
+            tables=tables,
+            limit=max(1, min(limit or 50, 200)),
+            sample_limit=max(1, min(sample_limit or 3, 10)),
+            force=force,
+        )
+    except Exception as exc:  # pragma: no cover
+        LOGGER.exception("Failed to create publisher detection task")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+    payload = build_publisher_detection_status_payload(
+        topic_identifier,
+        database,
+        tables=tables,
+    )
+    return jsonify({
+        "status": "accepted",
+        "operation": "database-postclean-publishers-task",
+        "data": serialise_result(payload),
+        "task_id": str(task.get("id") or ""),
+    }), 202
+
+
+@app.get("/api/database/postclean/publishers")
+def database_postclean_publishers_endpoint():
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    database = str(request.args.get("database") or "").strip()
+    raw_tables = request.args.getlist("tables")
+    limit = request.args.get("limit", default=50, type=int)
+    sample_limit = request.args.get("sample_limit", default=3, type=int)
+
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+    if not database:
+        return jsonify({"status": "error", "message": "Missing required field(s): database"}), 400
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(
+            {
+                "topic": topic,
+                "project": project,
+                "dataset_id": dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
+    try:
+        from src.filter import list_postclean_publishers  # type: ignore
+
+        result = list_postclean_publishers(
+            topic_identifier,
+            database,
+            tables=tables or None,
+            limit=max(1, min(limit or 50, 200)),
+            sample_limit=max(1, min(sample_limit or 3, 10)),
+        )
+    except Exception as exc:  # pragma: no cover
+        LOGGER.exception("Failed to load postclean publishers for %s@%s", topic_identifier, database)
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+    code = 200 if evaluate_success(result) else 400
+    return jsonify(serialise_result(result)), code
+
+
+@app.get("/api/database/postclean/publishers/status")
+def database_postclean_publishers_status_endpoint():
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    database = str(request.args.get("database") or "").strip()
+    raw_tables = request.args.getlist("tables")
+
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+    if not database:
+        return jsonify({"status": "error", "message": "Missing required field(s): database"}), 400
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(
+            {
+                "topic": topic,
+                "project": project,
+                "dataset_id": dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
+    payload = build_publisher_detection_status_payload(
+        topic_identifier,
+        database,
+        tables=tables,
+    )
+    return jsonify({
+        "status": "ok",
+        "operation": "database-postclean-publishers-status",
+        "data": serialise_result(payload),
+    }), 200
+
+
 @app.get("/api/database/postclean/status")
 def database_postclean_status_endpoint():
     topic = str(request.args.get("topic") or "").strip()
@@ -1714,6 +2003,109 @@ def database_postclean_status_endpoint():
         "result": None,
     }
     return jsonify({"status": "ok", "operation": "database-postclean-status", "data": payload}), 200
+
+
+@app.post("/api/database/deduplicate")
+def database_deduplicate_endpoint():
+    payload = request.get_json(silent=True) or {}
+    topic = str(payload.get("topic") or "").strip()
+    project = str(payload.get("project") or "").strip()
+    dataset_id = str(payload.get("dataset_id") or "").strip()
+    database = str(payload.get("database") or "").strip()
+    raw_tables = payload.get("tables")
+
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+    if not database:
+        return jsonify({"status": "error", "message": "Missing required field(s): database"}), 400
+
+    try:
+        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(
+            {
+                "topic": topic,
+                "project": project,
+                "dataset_id": dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    tables: Optional[List[str]] = None
+    if isinstance(raw_tables, list):
+        tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
+
+    existing = get_deduplicate_job(topic_identifier, database, tables)
+    if existing and existing.get("status") == "running":
+        return jsonify({
+            "status": "accepted",
+            "operation": "database-deduplicate",
+            "reused": True,
+            "data": existing,
+        }), 202
+
+    payload = create_deduplicate_job(topic_identifier, database, tables)
+    _submit_deduplicate_job(
+        topic_identifier=topic_identifier,
+        database=database,
+        tables=tables,
+        log_project=log_project,
+        display_name=display_name,
+    )
+    return jsonify({
+        "status": "accepted",
+        "operation": "database-deduplicate",
+        "reused": False,
+        "data": payload,
+    }), 202
+
+
+@app.get("/api/database/deduplicate/status")
+def database_deduplicate_status_endpoint():
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    database = str(request.args.get("database") or "").strip()
+    raw_tables = request.args.getlist("tables")
+
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+    if not database:
+        return jsonify({"status": "error", "message": "Missing required field(s): database"}), 400
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(
+            {
+                "topic": topic,
+                "project": project,
+                "dataset_id": dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
+    payload = get_deduplicate_job(topic_identifier, database, tables) or {
+        "topic": topic_identifier,
+        "database": database,
+        "tables": tables,
+        "status": "idle",
+        "message": "",
+        "started_at": "",
+        "updated_at": "",
+        "last_heartbeat": "",
+        "progress": {
+            "total_tables": 0,
+            "completed_tables": 0,
+            "deleted_rows": 0,
+            "current_table": "",
+            "percentage": 0,
+        },
+        "logs": [],
+        "result": None,
+    }
+    return jsonify({"status": "ok", "operation": "database-deduplicate-status", "data": payload}), 200
 
 
 @app.post("/api/fetch")

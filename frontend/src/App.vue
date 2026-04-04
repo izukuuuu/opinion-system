@@ -286,6 +286,13 @@ const navigationGroups = [
         icon: Squares2X2Icon
       },
       {
+        label: '数据处理',
+        description: '数据库去重与后清洗',
+        to: { name: 'processing-deduplicate' },
+        match: ['processing-deduplicate', 'processing-postclean'],
+        icon: PencilSquareIcon
+      },
+      {
         label: '项目数据',
         description: '本地项目数据管理',
         to: { name: 'project-data' },

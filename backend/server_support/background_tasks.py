@@ -11,7 +11,9 @@ from .fetch_refresh_jobs import (
     list_fetch_refresh_jobs,
     load_fetch_refresh_worker_status,
 )
+from .deduplicate_jobs import list_deduplicate_jobs
 from .postclean_jobs import list_postclean_jobs
+from .publisher_detection import load_worker_status as load_publisher_detection_worker_status
 from .stopword_suggestions import load_worker_status as load_stopword_worker_status
 
 ACTIVE_STATUSES = {"queued", "running"}
@@ -58,7 +60,9 @@ def collect_background_task_payload(*, active_only: bool = True, limit: int = _D
         _collect_report_tasks,
         _collect_netinsight_tasks,
         _collect_stopword_tasks,
+        _collect_publisher_detection_tasks,
         _collect_postclean_tasks,
+        _collect_deduplicate_tasks,
         _collect_fetch_refresh_tasks,
     ):
         try:
@@ -149,6 +153,25 @@ def _collect_stopword_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]],
     return tasks, [worker_payload]
 
 
+def _collect_publisher_detection_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    task_dir = get_data_root() / "_publisher_detection" / "tasks"
+    raw_worker = load_publisher_detection_worker_status()
+    worker_payload = _normalise_worker(
+        source="publisher-detection",
+        source_label="异常发布者识别 Worker",
+        payload=raw_worker,
+    )
+    tasks: List[Dict[str, Any]] = []
+    for path in sorted(task_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        payload = _load_json(path)
+        if not isinstance(payload, dict):
+            continue
+        if not _include_task(payload, active_only=active_only):
+            continue
+        tasks.append(_normalise_publisher_detection_task(payload, worker_payload))
+    return tasks, [worker_payload]
+
+
 def _collect_postclean_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     jobs = list_postclean_jobs()
     tasks = []
@@ -158,6 +181,18 @@ def _collect_postclean_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]]
         if not _include_task(job, active_only=active_only):
             continue
         tasks.append(_normalise_postclean_task(job))
+    return tasks, []
+
+
+def _collect_deduplicate_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    jobs = list_deduplicate_jobs()
+    tasks = []
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        if not _include_task(job, active_only=active_only):
+            continue
+        tasks.append(_normalise_deduplicate_task(job))
     return tasks, []
 
 
@@ -329,6 +364,41 @@ def _normalise_postclean_task(task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _normalise_publisher_detection_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict[str, Any]:
+    task_id = str(task.get("id") or "").strip()
+    progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    phase = str(task.get("phase") or task.get("status") or "").strip() or "queued"
+    percentage = _safe_int(progress.get("percentage"), _safe_int(task.get("percentage"), 0))
+    total_tables = _safe_int(progress.get("total_tables"), 0)
+    completed_tables = _safe_int(progress.get("completed_tables"), 0)
+    progress_text = f"{completed_tables} / {total_tables} 表" if total_tables > 0 else f"{percentage}%"
+    publishers = result.get("publishers") if isinstance(result.get("publishers"), list) else []
+    current_worker_task = str(worker.get("current_task_id") or "").strip()
+    heartbeat_at = str(worker.get("last_heartbeat") or "").strip() if current_worker_task == task_id else str(task.get("updated_at") or "").strip()
+    return {
+        "id": f"publisher-detection:{task_id}",
+        "task_id": task_id,
+        "source": "publisher-detection",
+        "source_label": "异常发布者识别",
+        "title": f"{str(task.get('database') or '数据库').strip()} 发布者识别",
+        "scope": str(task.get("topic_identifier") or "").strip(),
+        "status": _normalise_status(task.get("status")),
+        "phase": phase,
+        "phase_label": "发布者识别中" if str(task.get("status") or "") == "running" else GENERIC_PHASE_LABELS.get(phase, phase or "处理中"),
+        "message": str(task.get("message") or "").strip() or "等待处理。",
+        "percentage": percentage,
+        "progress_text": progress_text,
+        "detail_text": str(progress.get("current_table") or "").strip() or (publishers and f"{len(publishers)} 个候选发布者" or ""),
+        "updated_at": str(task.get("updated_at") or "").strip(),
+        "started_at": str(task.get("started_at") or "").strip(),
+        "finished_at": str(task.get("finished_at") or "").strip(),
+        "heartbeat_at": heartbeat_at,
+        "heartbeat_stale": _is_stale_timestamp(heartbeat_at),
+        "worker_pid": _safe_int(task.get("worker_pid"), 0) or _safe_int(worker.get("pid"), 0),
+    }
+
+
 def _normalise_fetch_refresh_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict[str, Any]:
     progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
     percentage = _safe_int(progress.get("percentage"), 0)
@@ -366,6 +436,39 @@ def _normalise_fetch_refresh_task(task: Dict[str, Any], worker: Dict[str, Any]) 
         "heartbeat_at": heartbeat_at,
         "heartbeat_stale": _is_stale_timestamp(heartbeat_at),
         "worker_pid": _safe_int(worker.get("pid"), 0),
+    }
+
+
+def _normalise_deduplicate_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
+    percentage = _safe_int(progress.get("percentage"), 0)
+    total_tables = _safe_int(progress.get("total_tables"), 0)
+    completed_tables = _safe_int(progress.get("completed_tables"), 0)
+    deleted_rows = _safe_int(progress.get("deleted_rows"), 0)
+    progress_text = f"{completed_tables} / {total_tables} 表" if total_tables > 0 else f"{percentage}%"
+    if deleted_rows > 0:
+        progress_text = f"{progress_text} · 删除 {deleted_rows} 条"
+    status = _normalise_status(task.get("status"))
+    return {
+        "id": f"deduplicate:{str(task.get('topic') or '').strip()}:{str(task.get('database') or '').strip()}",
+        "task_id": "",
+        "source": "deduplicate",
+        "source_label": "数据库去重",
+        "title": f"{str(task.get('database') or '数据库').strip()} 去重",
+        "scope": str(task.get("topic") or "").strip(),
+        "status": "failed" if status == "error" else status,
+        "phase": "dedupe" if status == "running" else status,
+        "phase_label": "去重处理中" if status == "running" else GENERIC_PHASE_LABELS.get(status, status or "处理中"),
+        "message": str(task.get("message") or "").strip() or "等待处理。",
+        "percentage": percentage,
+        "progress_text": progress_text,
+        "detail_text": str(progress.get("current_table") or "").strip(),
+        "updated_at": str(task.get("updated_at") or "").strip(),
+        "started_at": str(task.get("started_at") or "").strip(),
+        "finished_at": "",
+        "heartbeat_at": str(task.get("last_heartbeat") or task.get("updated_at") or "").strip(),
+        "heartbeat_stale": _is_stale_timestamp(task.get("last_heartbeat") or task.get("updated_at")),
+        "worker_pid": 0,
     }
 
 

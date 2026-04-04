@@ -55,6 +55,12 @@ from .postclean_jobs import (
     heartbeat_postclean_job,
     update_postclean_job,
 )
+from .deduplicate_jobs import (
+    create_deduplicate_job,
+    get_deduplicate_job,
+    heartbeat_deduplicate_job,
+    update_deduplicate_job,
+)
 from .fetch_refresh_jobs import (
     create_fetch_refresh_job,
     get_fetch_refresh_job,
@@ -63,6 +69,10 @@ from .fetch_refresh_jobs import (
     list_fetch_refresh_jobs,
     update_fetch_refresh_job,
     update_fetch_refresh_worker,
+)
+from .publisher_detection import (
+    build_status_payload as build_publisher_detection_status_payload,
+    create_or_reuse_task as create_publisher_detection_task,
 )
 from .filter_templates import (
     load_filter_template_config,
@@ -155,9 +165,13 @@ __all__ = [
     # Filter helpers
     "collect_filter_status",
     "create_postclean_job",
+    "create_deduplicate_job",
     "create_fetch_refresh_job",
+    "create_publisher_detection_task",
+    "get_deduplicate_job",
     "get_fetch_refresh_job",
     "get_postclean_job",
+    "heartbeat_deduplicate_job",
     "heartbeat_fetch_refresh_job",
     "heartbeat_postclean_job",
     "is_filter_job_running",
@@ -166,9 +180,11 @@ __all__ = [
     "load_filter_template_config",
     "mark_filter_job_finished",
     "mark_filter_job_running",
+    "update_deduplicate_job",
     "update_fetch_refresh_job",
     "update_fetch_refresh_worker",
     "update_postclean_job",
+    "build_publisher_detection_status_payload",
     "persist_filter_template_config",
     # Paths
     "BACKEND_DIR",

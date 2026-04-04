@@ -30,7 +30,6 @@ from src.report.task_queue import (  # type: ignore
     get_task,
     mark_agent_started,
     mark_artifact_ready,
-    mark_review_verdict,
     mark_task_cancelled,
     mark_task_completed,
     mark_task_failed,
@@ -251,9 +250,8 @@ def _run_task(task_id: str) -> None:
             event_callback=lambda event: _handle_report_event(task_id, event),
         )
         LOGGER.warning(
-            "report worker | report payload generated | task=%s review_requires_manual=%s title=%s",
+            "report worker | report payload generated | task=%s title=%s",
             task_id,
-            bool(report_payload.get("reviewVerdict", {}).get("requires_manual_review")),
             str(report_payload.get("title") or "").strip(),
         )
         _raise_if_cancelled(task_id)
@@ -298,11 +296,7 @@ def _run_task(task_id: str) -> None:
         )
         mark_task_completed(
             task_id,
-            message=(
-                "报告已生成。"
-                if bool(report_payload.get("reviewVerdict", {}).get("requires_manual_review")) is False
-                else "报告已生成，但 reviewer 建议人工复核关键结论。"
-            ),
+            message="报告已生成。",
             payload={
                 "report_ready": True,
                 "report_cache_path": str(cache_path),
@@ -359,7 +353,7 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
     message = str(event.get("message") or "").strip()
     agent = str(event.get("agent") or "").strip()
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-    if event_type in {"review.verdict", "task.failed"}:
+    if event_type == "task.failed":
         LOGGER.warning(
             "report worker | callback event | task=%s type=%s phase=%s message=%s payload=%s",
             task_id,
@@ -375,12 +369,19 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
         mark_task_progress(task_id, phase=phase, percentage=PHASE_PERCENTAGE.get(phase, 60), message=message or title or "阶段执行中。")
         return
     if event_type == "agent.started":
-        mark_agent_started(task_id, agent=agent or "writer", phase=phase, message=message or title or "Agent 已启动。", title=title)
+        mark_agent_started(
+            task_id,
+            agent=agent or "runtime",
+            phase=phase,
+            message=message or title or "Agent 已启动。",
+            title=title,
+            payload=payload,
+        )
         return
     if event_type == "agent.memo":
         append_agent_memo(
             task_id,
-            agent=agent or "writer",
+            agent=agent or "runtime",
             phase=phase,
             message=message or title or "Agent 已输出公开备忘录。",
             title=title,
@@ -393,7 +394,7 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
 
         record_tool_call(
             task_id,
-            agent=agent or "interpreter",
+            agent=agent or "runtime",
             phase=phase,
             title=title or "工具调用",
             message=message or "Agent 正在调用工具。",
@@ -405,15 +406,12 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
 
         record_tool_result(
             task_id,
-            agent=agent or "interpreter",
+            agent=agent or "runtime",
             phase=phase,
             title=title or "工具回执",
             message=message or "Agent 已拿到工具结果。",
             payload=payload,
         )
-        return
-    if event_type == "review.verdict":
-        mark_review_verdict(task_id, message=message or "Reviewer 已完成复核。", payload=payload)
         return
     if event_type == "artifact.ready":
         mark_artifact_ready(task_id, message=message or "报告产物已写入。", payload=payload)

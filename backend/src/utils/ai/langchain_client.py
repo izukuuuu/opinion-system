@@ -120,6 +120,28 @@ def _resolve_client_config(
     }
 
 
+def _resolve_max_tool_rounds(
+    *,
+    task: str = "default",
+    model_role: Optional[str] = None,
+    explicit_value: Optional[int] = None,
+) -> int:
+    if explicit_value is not None:
+        return max(1, _as_int(explicit_value, 5))
+    cfg = _read_langchain_config()
+    role_prefix = str(model_role or "").strip()
+    role_value = cfg.get(f"{role_prefix}_max_tool_rounds") if role_prefix else None
+    task_value = cfg.get(f"{task}_max_tool_rounds")
+    global_value = cfg.get("max_tool_rounds")
+    return max(
+        1,
+        _as_int(
+            role_value if role_value is not None else task_value if task_value is not None else global_value,
+            5,
+        ),
+    )
+
+
 def _coerce_response_content(content: Any) -> str:
     if isinstance(content, str):
         return content.strip()
@@ -182,7 +204,6 @@ def _build_chat_model(client_cfg: Dict[str, Any]) -> Optional[Any]:
         from langchain_openai import ChatOpenAI
     except Exception:
         return None
-
     try:
         return ChatOpenAI(
             model=client_cfg["model"],
@@ -195,6 +216,33 @@ def _build_chat_model(client_cfg: Dict[str, Any]) -> Optional[Any]:
         )
     except Exception:
         return None
+
+
+def build_langchain_chat_model(
+    *,
+    task: str = "default",
+    model_role: Optional[str] = None,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+    timeout: Optional[float] = None,
+    max_retries: Optional[int] = None,
+) -> tuple[Optional[Any], Optional[Dict[str, Any]]]:
+    client_cfg = _resolve_client_config(
+        task=task,
+        model_role=model_role,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
+    if not client_cfg:
+        return None, None
+    llm = _build_chat_model(client_cfg)
+    if llm is None:
+        return None, client_cfg
+    return llm, client_cfg
 
 
 async def call_langchain_chat(
@@ -257,7 +305,7 @@ async def call_langchain_with_tools(
     max_tokens: Optional[int] = None,
     timeout: Optional[float] = None,
     max_retries: Optional[int] = None,
-    max_tool_rounds: int = 3,
+    max_tool_rounds: Optional[int] = None,
     event_callback: Optional[Any] = None,
 ) -> Optional[Dict[str, Any]]:
     """
@@ -291,6 +339,11 @@ async def call_langchain_with_tools(
     llm = _build_chat_model(client_cfg)
     if llm is None:
         return None
+    resolved_max_tool_rounds = _resolve_max_tool_rounds(
+        task=task,
+        model_role=model_role,
+        explicit_value=max_tool_rounds,
+    )
 
     try:
         bound_llm = llm.bind_tools(tools)
@@ -326,7 +379,7 @@ async def call_langchain_with_tools(
     tool_calls_trace: List[Dict[str, Any]] = []
     tool_results_trace: List[Dict[str, Any]] = []
 
-    for _ in range(max(1, int(max_tool_rounds or 1))):
+    for _ in range(resolved_max_tool_rounds):
         try:
             response = await bound_llm.ainvoke(history)
         except Exception:

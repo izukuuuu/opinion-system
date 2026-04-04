@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend UI Copy"
+  short_description: "Write clear, human-facing UI strings"
+  default_prompt: "Use $frontend-ui-copy to rewrite visible frontend text so it sounds clear, friendly, and user-facing."

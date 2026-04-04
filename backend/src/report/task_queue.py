@@ -22,22 +22,31 @@ STATE_ROOT = get_data_root() / "_report"
 TASK_STATE_DIR = STATE_ROOT / "tasks"
 WORKER_STATUS_PATH = STATE_ROOT / "worker.json"
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
-AGENT_DEFS = [
-    ("researcher", "Researcher"),
-    ("interpreter", "Interpreter"),
-    ("theme_analyst", "Theme Analyst"),
-    ("integrator", "Integrator"),
-    ("writer", "Writer"),
-    ("reviser", "Reviser"),
-    ("reviewer", "Reviewer"),
-]
+AGENT_LABELS = {
+    "researcher": "Researcher",
+    "interpreter": "Interpreter",
+    "theme_analyst": "Theme Analyst",
+    "integrator": "Integrator",
+    "writer": "Writer",
+    "reviser": "Reviser",
+    "scene_router": "Scene Router",
+    "analysis_graph": "Analysis Graph",
+    "evidence_analyst": "Evidence Analyst",
+    "mechanism_analyst": "Mechanism Analyst",
+    "claim_judge": "Claim Judge",
+    "risk_mapper": "Risk Mapper",
+    "writing_graph": "Writing Graph",
+    "layout_planner": "Layout Planner",
+    "budget_planner": "Budget Planner",
+    "report_editor": "Report Editor",
+}
 PHASE_LABELS = {
     "prepare": "准备数据",
     "analyze": "基础分析",
     "explain": "总体解读",
     "interpret": "综合研判",
     "write": "报告编排",
-    "review": "复核裁判",
+    "review": "润色定稿",
     "persist": "写入结果",
     "completed": "已完成",
     "failed": "已失败",
@@ -409,7 +418,15 @@ def set_child_pid(task_id: str, child_pid: int) -> Dict[str, Any]:
     return _update_task(task_id, lambda task: task.update({"child_pid": _safe_int(child_pid, 0)}))
 
 
-def mark_agent_started(task_id: str, *, agent: str, phase: str, message: str, title: str = "") -> Dict[str, Any]:
+def mark_agent_started(
+    task_id: str,
+    *,
+    agent: str,
+    phase: str,
+    message: str,
+    title: str = "",
+    payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     return _mutate_task_with_event(
         task_id,
         mutate=lambda task: _update_agent(
@@ -417,12 +434,14 @@ def mark_agent_started(task_id: str, *, agent: str, phase: str, message: str, ti
             agent,
             status="running",
             message=message,
+            payload=payload,
         ),
         event_type="agent.started",
         phase=phase,
         agent=agent,
         title=title or f"{_agent_name(agent)} 已启动",
         message=message,
+        payload=payload or {},
     )
 
 
@@ -438,7 +457,14 @@ def append_agent_memo(
 ) -> Dict[str, Any]:
     return _mutate_task_with_event(
         task_id,
-        mutate=lambda task: _update_agent(task, agent, status="running", message=message, memo=delta or message),
+        mutate=lambda task: _update_agent(
+            task,
+            agent,
+            status="running",
+            message=message,
+            memo=delta or message,
+            payload=payload,
+        ),
         event_type="agent.memo",
         phase=phase,
         agent=agent,
@@ -452,7 +478,7 @@ def append_agent_memo(
 def record_tool_call(task_id: str, *, agent: str, phase: str, title: str, message: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return _mutate_task_with_event(
         task_id,
-        mutate=lambda task: _update_agent(task, agent, tool_call_inc=1, message=message),
+        mutate=lambda task: _update_agent(task, agent, tool_call_inc=1, message=message, payload=payload),
         event_type="tool.called",
         phase=phase,
         agent=agent,
@@ -465,32 +491,11 @@ def record_tool_call(task_id: str, *, agent: str, phase: str, title: str, messag
 def record_tool_result(task_id: str, *, agent: str, phase: str, title: str, message: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return _mutate_task_with_event(
         task_id,
-        mutate=lambda task: _update_agent(task, agent, tool_result_inc=1, message=message),
+        mutate=lambda task: _update_agent(task, agent, tool_result_inc=1, message=message, payload=payload),
         event_type="tool.result",
         phase=phase,
         agent=agent,
         title=title,
-        message=message,
-        payload=payload,
-    )
-
-
-def mark_review_verdict(task_id: str, *, message: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    def _mutate(task: Dict[str, Any]) -> None:
-        trust = task.setdefault("trust", _initial_trust())
-        trust.update(payload or {})
-        issue_count = len(trust.get("issues") or [])
-        trust["issue_count"] = issue_count
-        trust["requires_manual_review"] = bool(trust.get("requires_manual_review") or issue_count > 0)
-        _update_agent(task, "reviewer", status="done", message=message, memo=message)
-
-    return _mutate_task_with_event(
-        task_id,
-        mutate=_mutate,
-        event_type="review.verdict",
-        phase="review",
-        agent="reviewer",
-        title="Reviewer 裁决",
         message=message,
         payload=payload,
     )
@@ -704,6 +709,15 @@ def _apply_terminal_state(
     task["cancel_requested"] = False
     task["child_pid"] = 0
     task["finished_at"] = _utc_now()
+    agent_status = "done" if status == "completed" else ("failed" if status == "failed" else "idle")
+    agents = task.get("agents")
+    if isinstance(agents, list):
+        for item in agents:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "").strip() == "running":
+                item["status"] = agent_status
+            item["updated_at"] = _utc_now()
     if payload:
         task.setdefault("artifacts", {}).update(payload)
 
@@ -717,6 +731,7 @@ def _update_agent(
     memo: str = "",
     tool_call_inc: int = 0,
     tool_result_inc: int = 0,
+    payload: Optional[Dict[str, Any]] = None,
 ) -> None:
     agent = _ensure_agent_slot(task, agent_id)
     if status:
@@ -729,6 +744,7 @@ def _update_agent(
         agent["memos"] = memos[-8:]
     agent["tool_call_count"] = _safe_int(agent.get("tool_call_count"), 0) + max(tool_call_inc, 0)
     agent["tool_result_count"] = _safe_int(agent.get("tool_result_count"), 0) + max(tool_result_inc, 0)
+    _merge_agent_payload(agent, payload)
     if status == "running" and not agent.get("started_at"):
         agent["started_at"] = _utc_now()
     agent["updated_at"] = _utc_now()
@@ -747,6 +763,12 @@ def _ensure_agent_slot(task: Dict[str, Any], agent_id: str) -> Dict[str, Any]:
         "message": "",
         "tool_call_count": 0,
         "tool_result_count": 0,
+        "tool_policy_mode": "",
+        "tools_allowed": [],
+        "stop_reason": "",
+        "agent_runtime": "",
+        "section_id": "",
+        "scene_id": "",
         "memos": [],
         "started_at": "",
         "updated_at": "",
@@ -759,30 +781,13 @@ def _ensure_agent_slot(task: Dict[str, Any], agent_id: str) -> Dict[str, Any]:
 
 
 def _initial_agents() -> List[Dict[str, Any]]:
-    return [
-        {
-            "id": agent_id,
-            "name": label,
-            "status": "idle",
-            "message": "",
-            "tool_call_count": 0,
-            "tool_result_count": 0,
-            "memos": [],
-            "started_at": "",
-            "updated_at": "",
-        }
-        for agent_id, label in AGENT_DEFS
-    ]
+    return []
 
 
 def _initial_trust() -> Dict[str, Any]:
     return {
         "status": "pending",
-        "verdict": "",
         "confidence_label": "待评估",
-        "issues": [],
-        "issue_count": 0,
-        "requires_manual_review": False,
         "evidence_coverage": 0.0,
         "corroborated_coverage": 0.0,
         "official_source_coverage": 0.0,
@@ -795,10 +800,49 @@ def _phase_label(phase: str) -> str:
 
 
 def _agent_name(agent_id: str) -> str:
-    for key, label in AGENT_DEFS:
-        if key == agent_id:
-            return label
-    return agent_id or "Agent"
+    key = str(agent_id or "").strip()
+    if not key:
+        return "Agent"
+    if key in AGENT_LABELS:
+        return AGENT_LABELS[key]
+    if ":" in key:
+        prefix, suffix = key.split(":", 1)
+        suffix_label = _titleize_agent_token(suffix)
+        if prefix == "section_exploration":
+            return f"{suffix_label} Exploration"
+        if prefix == "section_writer":
+            return f"{suffix_label} Writer"
+        if prefix == "style_critic":
+            return f"{suffix_label} Style Critic"
+        if prefix == "fact_critic":
+            return f"{suffix_label} Fact Critic"
+    return _titleize_agent_token(key)
+
+
+def _titleize_agent_token(value: str) -> str:
+    text = str(value or "").strip().replace("-", "_")
+    if not text:
+        return "Agent"
+    return " ".join(part.capitalize() for part in text.split("_") if part)
+
+
+def _merge_agent_payload(agent: Dict[str, Any], payload: Optional[Dict[str, Any]]) -> None:
+    if not isinstance(payload, dict):
+        return
+    name = str(payload.get("agent_name") or "").strip()
+    if name:
+        agent["name"] = name
+    tools_allowed = payload.get("tools_allowed")
+    if isinstance(tools_allowed, list):
+        agent["tools_allowed"] = [
+            str(item).strip()
+            for item in tools_allowed
+            if str(item or "").strip()
+        ]
+    for field in ("tool_policy_mode", "stop_reason", "agent_runtime", "section_id", "scene_id"):
+        value = str(payload.get(field) or "").strip()
+        if value:
+            agent[field] = value
 
 
 def _summarise_tasks(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -943,7 +987,6 @@ __all__ = [
     "load_worker_status",
     "mark_agent_started",
     "mark_artifact_ready",
-    "mark_review_verdict",
     "mark_task_cancelled",
     "mark_task_completed",
     "mark_task_failed",

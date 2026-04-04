@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend Explanation Copy"
+  short_description: "Write user-friendly explanatory text for UI sections"
+  default_prompt: "Use $frontend-explanation-copy to rewrite visible explanatory frontend text so it is clear, meaningful, and free of backend or debugging jargon."
