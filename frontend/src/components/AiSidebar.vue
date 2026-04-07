@@ -93,7 +93,7 @@
               <label class="block text-xs font-medium text-slate-500 mb-2">最多保留会话数</label>
               <div class="flex items-center gap-3">
                 <input type="number" v-model.number="tempMaxSessions" min="1" max="100"
-                  class="block w-full rounded-lg border-slate-200 text-sm focus:border-brand-500 focus:ring-brand-500" />
+                  class="input max-w-[7rem] py-2" />
                 <span class="text-xs text-slate-400">条</span>
               </div>
               <p class="mt-2 text-[10px] text-slate-400">建议范围：5 - 50 条。保存更多会话可能会占用更多本地存储空间。</p>

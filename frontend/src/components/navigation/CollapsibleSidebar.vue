@@ -42,7 +42,7 @@
     <div class="mobile-pill-nav w-full max-w-xl">
       <div class="mobile-pill-nav__container">
       <component
-        v-for="(item, index) in items"
+        v-for="(item, index) in flatItems"
         :key="itemKey(item, index)"
         :is="item.to ? RouterLink : 'button'"
         v-bind="itemProps(item)"
@@ -66,53 +66,65 @@
     :class="isCollapsed ? 'lg:w-24' : 'lg:w-64'"
   >
     <div class="flex flex-col gap-3">
-      <component
-        v-for="(item, index) in items"
-        :key="itemKey(item, index)"
-        :is="item.to ? RouterLink : 'button'"
-        v-bind="itemProps(item)"
-        class="group rounded-2xl border transition focus-ring-accent"
-        :class="itemClasses(item)"
-        role="tab"
-        :aria-current="item.to ? (isItemActive(item) ? 'page' : undefined) : undefined"
-        :aria-selected="!item.to ? isItemActive(item) : undefined"
-        @click="handleSelect(item)"
-      >
-        <div
-          class="flex flex-1"
-          :class="isCollapsed ? 'flex-col items-center gap-1 text-center' : 'items-center gap-3'"
-        >
-          <div
-            class="rounded-xl p-2 shadow-sm"
-            :class="[
-              isCollapsed ? 'p-1.5' : '',
-              item.iconBg || 'bg-white/70',
-              item.iconColor || 'text-brand-600'
-            ]"
+      <template v-for="(group, groupIndex) in normalizedGroups" :key="groupKey(group, groupIndex)">
+        <section class="sidebar-group">
+          <h2
+            v-if="group.label && !isCollapsed"
+            class="sidebar-group__title"
           >
-            <component :is="item.icon" class="h-5 w-5" />
+            {{ group.label }}
+          </h2>
+          <div class="flex flex-col gap-3">
+            <component
+              v-for="(item, index) in group.items"
+              :key="itemKey(item, index)"
+              :is="item.to ? RouterLink : 'button'"
+              v-bind="itemProps(item)"
+              class="group rounded-2xl border transition focus-ring-accent"
+              :class="itemClasses(item)"
+              role="tab"
+              :aria-current="item.to ? (isItemActive(item) ? 'page' : undefined) : undefined"
+              :aria-selected="!item.to ? isItemActive(item) : undefined"
+              @click="handleSelect(item)"
+            >
+              <div
+                class="flex flex-1"
+                :class="isCollapsed ? 'flex-col items-center gap-1 text-center' : 'items-center gap-3'"
+              >
+                <div
+                  class="rounded-xl p-2 shadow-sm"
+                  :class="[
+                    isCollapsed ? 'p-1.5' : '',
+                    item.iconBg || 'bg-white/70',
+                    item.iconColor || 'text-brand-600'
+                  ]"
+                >
+                  <component :is="item.icon" class="h-5 w-5" />
+                </div>
+                <span
+                  class="flex flex-col text-muted transition-colors"
+                  :class="[
+                    isCollapsed
+                      ? 'items-center text-[11px] font-medium leading-tight text-secondary'
+                      : 'items-start gap-1 text-left'
+                  ]"
+                >
+                  <span :class="isCollapsed ? 'text-[11px] font-semibold text-secondary' : 'font-semibold text-left'">
+                    {{ item.label }}
+                  </span>
+                  <span v-if="item.description && !isCollapsed" class="text-xs text-muted">
+                    {{ item.description }}
+                  </span>
+                </span>
+              </div>
+              <ChevronRightIcon
+                v-if="!isCollapsed"
+                class="h-4 w-4 text-muted transition group-hover:text-brand-500"
+              />
+            </component>
           </div>
-          <span
-            class="flex flex-col text-muted transition-colors"
-            :class="[
-              isCollapsed
-                ? 'items-center text-[11px] font-medium leading-tight text-secondary'
-                : 'items-start gap-1 text-left'
-            ]"
-          >
-            <span :class="isCollapsed ? 'text-[11px] font-semibold text-secondary' : 'font-semibold text-left'">
-              {{ item.label }}
-            </span>
-            <span v-if="item.description && !isCollapsed" class="text-xs text-muted">
-              {{ item.description }}
-            </span>
-          </span>
-        </div>
-        <ChevronRightIcon
-          v-if="!isCollapsed"
-          class="h-4 w-4 text-muted transition group-hover:text-brand-500"
-        />
-      </component>
+        </section>
+      </template>
     </div>
     <button
       type="button"
@@ -141,7 +153,15 @@ const props = defineProps({
    */
   items: {
     type: Array,
-    required: true
+    default: () => []
+  },
+  /**
+   * 分组侧边栏项数组，可选
+   * 每个 group 对象可包含：key, label, items
+   */
+  groups: {
+    type: Array,
+    default: null
   },
   /**
    * 当前激活项的 key 值
@@ -209,11 +229,37 @@ const toggleCollapse = () => {
   isCollapsed.value = !isCollapsed.value
 }
 
+const normalizedGroups = computed(() => {
+  if (Array.isArray(props.groups) && props.groups.length) {
+    return props.groups
+      .map((group, index) => ({
+        key: group?.key ?? group?.label ?? index,
+        label: group?.label ?? '',
+        items: Array.isArray(group?.items) ? group.items : []
+      }))
+      .filter((group) => group.items.length > 0)
+  }
+
+  return [
+    {
+      key: 'default',
+      label: '',
+      items: Array.isArray(props.items) ? props.items : []
+    }
+  ]
+})
+
+const flatItems = computed(() =>
+  normalizedGroups.value.reduce((result, group) => result.concat(group.items), [])
+)
+
 /**
  * 获取侧边栏项的唯一 key
  * 优先级：item.key > item.label > item.to?.name > item.to > index
  */
 const itemKey = (item, index) => item.key ?? item.label ?? item.to?.name ?? item.to ?? index
+
+const groupKey = (group, index) => group?.key ?? group?.label ?? index
 
 /**
  * 判断侧边栏项是否处于激活状态
@@ -317,5 +363,21 @@ const mobileItemClasses = (item) => {
 
 .mobile-pill-nav__item--active .mobile-pill-nav__icon {
   color: rgb(var(--color-brand-700) / 1);
+}
+
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.sidebar-group__title {
+  margin: 0;
+  padding-left: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 </style>

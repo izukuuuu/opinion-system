@@ -7,65 +7,77 @@
       {{ statusMessage }}
     </p>
 
-    <div class="theme-editor__groups">
-      <article
-        v-for="group in groups"
-        :key="group.id"
-        class="theme-editor__group"
-      >
-        <header class="theme-editor__group-header">
-          <div>
-            <h3>{{ group.title }}</h3>
-            <p>{{ group.description }}</p>
-          </div>
-        </header>
-        <div class="theme-editor__tokens">
-          <div
-            v-for="token in group.tokens"
-            :key="token.variable"
-            class="theme-editor__token"
-          >
-            <div
-              class="theme-editor__preview"
-              :class="[
-                {
-                  'theme-editor__preview--outline': token.variant === 'outline',
-                },
-              ]"
-              :style="previewStyle(token)"
-            >
-              <span>{{ displayValue(token) }}</span>
-            </div>
-            <div class="theme-editor__details">
-              <p>{{ token.label }}</p>
-              <code>{{ token.variable }}</code>
-            </div>
-            <div class="theme-editor__controls">
-              <label
-                class="theme-editor__color-picker"
-                :title="`设置 ${token.label}`"
-              >
-                <input
-                  type="color"
-                  :value="hexValue(token)"
-                  @input="
-                    (event) => handleColorInput(token, event.target.value)
-                  "
-                />
-              </label>
-              <button
-                v-if="isOverridden(token.variable)"
-                type="button"
-                class="ghost-button ghost-button--small"
-                @click="restoreDefault(token.variable)"
-              >
-                恢复默认
-              </button>
-            </div>
-          </div>
+    <article class="theme-editor__preset-panel">
+      <header class="theme-editor__preset-header">
+        <div class="settings-section-header">
+          <h2 class="settings-section-title">预设主题</h2>
+          <p class="settings-section-desc">
+            先选择一套浅莫兰迪配色，再按需微调单个颜色变量。
+          </p>
         </div>
-      </article>
-    </div>
+        <div class="theme-editor__preset-meta">
+          <span class="theme-editor__preset-badge">
+            当前主题：{{ currentPreset?.label || "Baby Blue" }}
+          </span>
+          <span v-if="overrideCount" class="theme-editor__meta">
+            已微调 <strong>{{ overrideCount }}</strong> 项变量
+          </span>
+        </div>
+      </header>
+
+      <div class="theme-editor__preset-grid">
+        <button
+          v-for="preset in presets"
+          :key="preset.id"
+          type="button"
+          class="theme-editor__preset-card"
+          :class="{ 'theme-editor__preset-card--active': preset.id === currentPreset?.id }"
+          @click="handlePresetSelect(preset)"
+        >
+          <div class="theme-editor__preset-swatches">
+            <span
+              class="theme-editor__preset-swatch theme-editor__preset-swatch--surface"
+              :style="{ backgroundColor: preset.preview.surface }"
+            />
+            <span
+              class="theme-editor__preset-swatch"
+              :style="{ backgroundColor: preset.preview.brand }"
+            />
+            <span
+              class="theme-editor__preset-swatch"
+              :style="{ backgroundColor: preset.preview.accent }"
+            />
+          </div>
+          <div class="theme-editor__preset-copy">
+            <div class="theme-editor__preset-title-row">
+              <strong>{{ preset.label }}</strong>
+              <span
+                v-if="preset.id === currentPreset?.id"
+                class="theme-editor__preset-tag"
+              >
+                当前
+              </span>
+            </div>
+            <p>{{ preset.description }}</p>
+          </div>
+        </button>
+      </div>
+
+      <div class="theme-editor__group-grid">
+        <button
+          v-for="group in groups"
+          :key="group.id"
+          type="button"
+          class="theme-editor__group-entry"
+          @click="openGroupModal(group.id)"
+        >
+          <div class="theme-editor__group-entry-copy">
+            <strong>{{ group.title }}</strong>
+          </div>
+          <span class="theme-editor__group-entry-action">打开编辑</span>
+        </button>
+      </div>
+    </article>
 
     <input
       ref="fileInput"
@@ -74,12 +86,6 @@
       class="hidden"
       @change="handleImportFile"
     />
-
-    <div class="theme-editor__intro">
-      <p v-if="overrideCount" class="theme-editor__meta">
-        已覆盖 <strong>{{ overrideCount }}</strong> 项变量
-      </p>
-    </div>
 
     <div class="theme-editor__tools">
       <button
@@ -97,214 +103,297 @@
         导出配置
       </button>
     </div>
+
+    <AppModal
+      v-model="groupModalVisible"
+      eyebrow="主题分组"
+      :title="selectedGroup?.title || '颜色分组'"
+      :description="selectedGroup?.description || ''"
+      width="max-w-5xl"
+      :show-footer="false"
+      scrollable
+    >
+      <article v-if="selectedGroup" class="theme-editor__modal-group">
+        <div class="theme-editor__tokens">
+          <div
+            v-for="token in selectedGroup.tokens"
+            :key="token.variable"
+            class="theme-editor__token"
+          >
+            <div
+              class="theme-editor__preview"
+              :class="{
+                'theme-editor__preview--outline': token.variant === 'outline',
+              }"
+              :style="previewStyle(token)"
+            >
+              <span>{{ displayValue(token) }}</span>
+            </div>
+            <div class="theme-editor__details">
+              <p>{{ token.label }}</p>
+              <code>{{ token.variable }}</code>
+            </div>
+            <div class="theme-editor__controls">
+              <label
+                class="theme-editor__color-picker"
+                :title="`设置 ${token.label}`"
+              >
+                <input
+                  type="color"
+                  :value="hexValue(token)"
+                  @input="(event) => handleColorInput(token, event.target.value)"
+                />
+              </label>
+              <button
+                v-if="isOverridden(token.variable)"
+                type="button"
+                class="ghost-button ghost-button--small"
+                @click="restoreDefault(token.variable)"
+              >
+                恢复默认
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+    </AppModal>
   </section>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { themeGroups as groups } from "../../../settings/theme/defaultPalette";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
+import AppModal from "../../../components/AppModal.vue"
+import {
+  themeGroups as groups,
+  themePresets as presets
+} from "../../../settings/theme/defaultPalette"
 import {
   exportThemeConfig,
+  getActiveThemePreset,
   getCurrentThemeValues,
   importThemeConfig,
   loadThemeOverrides,
   resetThemeToDefaults,
-  updateThemeVariable,
-} from "../../../settings/theme/themeManager";
+  setThemePreset,
+  updateThemeVariable
+} from "../../../settings/theme/themeManager"
 
-const themeValues = ref({});
-const overrides = ref({});
-const statusMessage = ref("");
-const statusTone = ref("neutral");
-const fileInput = ref(null);
-let statusTimer = null;
+const themeValues = ref({})
+const overrides = ref({})
+const currentPreset = ref(null)
+const statusMessage = ref("")
+const statusTone = ref("neutral")
+const fileInput = ref(null)
+const groupModalVisible = ref(false)
+const selectedGroupId = ref(null)
+let statusTimer = null
 
-const overrideCount = computed(() => Object.keys(overrides.value || {}).length);
+const overrideCount = computed(() => Object.keys(overrides.value || {}).length)
+const selectedGroup = computed(
+  () => groups.find((group) => group.id === selectedGroupId.value) || null
+)
 
 const setStatus = (message, tone = "neutral") => {
-  statusMessage.value = message;
-  statusTone.value = tone;
+  statusMessage.value = message
+  statusTone.value = tone
 
   if (statusTimer) {
-    window.clearTimeout(statusTimer);
+    window.clearTimeout(statusTimer)
   }
 
   if (message) {
     statusTimer = window.setTimeout(() => {
-      statusMessage.value = "";
-    }, 3200);
+      statusMessage.value = ""
+    }, 3200)
   }
-};
+}
 
 const refresh = () => {
-  themeValues.value = getCurrentThemeValues();
-  overrides.value = loadThemeOverrides();
-};
+  themeValues.value = getCurrentThemeValues()
+  overrides.value = loadThemeOverrides()
+  currentPreset.value = getActiveThemePreset()
+}
 
 onMounted(() => {
-  refresh();
-});
+  refresh()
+})
 
 onBeforeUnmount(() => {
   if (statusTimer) {
-    window.clearTimeout(statusTimer);
+    window.clearTimeout(statusTimer)
   }
-});
+})
 
 const normalizeHex = (value) => {
-  if (!value) return "#000000";
-  let hex = value.trim().replace("#", "");
+  if (!value) return "#000000"
+  let hex = value.trim().replace("#", "")
   if (hex.length === 3) {
     hex = hex
       .split("")
       .map((char) => char + char)
-      .join("");
+      .join("")
   }
   if (hex.length !== 6) {
-    return "#000000";
+    return "#000000"
   }
-  return `#${hex.toLowerCase()}`;
-};
+  return `#${hex.toLowerCase()}`
+}
 
 const rgbToHex = (rgbString) => {
   const parts = rgbString
     .trim()
     .split(/\s+/)
-    .map((part) => Number(part));
+    .map((part) => Number(part))
   if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
-    return "#000000";
+    return "#000000"
   }
   const hex = parts
     .map((part) => {
-      const clamped = Math.min(255, Math.max(0, Math.round(part)));
-      return clamped.toString(16).padStart(2, "0");
+      const clamped = Math.min(255, Math.max(0, Math.round(part)))
+      return clamped.toString(16).padStart(2, "0")
     })
-    .join("");
-  return `#${hex}`;
-};
+    .join("")
+  return `#${hex}`
+}
 
 const hexToRgbString = (hex) => {
-  const normalized = normalizeHex(hex).replace("#", "");
+  const normalized = normalizeHex(hex).replace("#", "")
   const rgb = [0, 2, 4].map((index) =>
     parseInt(normalized.slice(index, index + 2), 16)
-  );
-  return rgb.join(" ");
-};
+  )
+  return rgb.join(" ")
+}
 
 const hexValue = (token) => {
-  const value = themeValues.value[token.variable] || "";
+  const value = themeValues.value[token.variable] || ""
   if (token.format === "rgb") {
-    return rgbToHex(value || "0 0 0");
+    return rgbToHex(value || "0 0 0")
   }
-  return normalizeHex(value || token.default);
-};
+  return normalizeHex(value || token.default)
+}
 
 const displayValue = (token) =>
-  themeValues.value[token.variable] || token.default;
+  themeValues.value[token.variable] || token.default
 
 const previewTextColor = (token) => {
   if (token.variant === "outline") {
-    return "var(--color-text-secondary)";
+    return "var(--color-text-secondary)"
   }
-  return token.previewTextColor || "var(--color-surface)";
-};
+  return token.previewTextColor || "var(--color-surface)"
+}
 
 const previewStyle = (token) => {
-  const value = themeValues.value[token.variable] || token.default;
+  const value = themeValues.value[token.variable] || token.default
 
   if (token.variant === "outline") {
     return {
       borderColor: token.format === "rgb" ? `rgb(${value})` : value,
-      color: previewTextColor(token),
-    };
+      color: previewTextColor(token)
+    }
   }
 
-  const background = token.format === "rgb" ? `rgb(${value})` : value;
+  const background = token.format === "rgb" ? `rgb(${value})` : value
   return {
     backgroundColor: background,
-    color: token.previewTextColor || "#ffffff",
-  };
-};
+    color: token.previewTextColor || "#ffffff"
+  }
+}
 
 const isOverridden = (variable) =>
-  Boolean(overrides.value && overrides.value[variable]);
+  Boolean(overrides.value && overrides.value[variable])
+
+const openGroupModal = (groupId) => {
+  selectedGroupId.value = groupId
+  groupModalVisible.value = true
+}
+
+const handlePresetSelect = (preset) => {
+  try {
+    setThemePreset(preset.id)
+    refresh()
+    setStatus(`已切换为 ${preset.label}，并清空之前的微调项`, "success")
+  } catch (error) {
+    console.error(error)
+    setStatus(`切换到 ${preset.label} 失败`, "danger")
+  }
+}
 
 const handleColorInput = (token, hex) => {
   const value =
-    token.format === "rgb" ? hexToRgbString(hex) : normalizeHex(hex);
+    token.format === "rgb" ? hexToRgbString(hex) : normalizeHex(hex)
   try {
-    overrides.value = updateThemeVariable(token.variable, value);
-    themeValues.value[token.variable] = value;
-    setStatus(`${token.label} 已更新`, "success");
+    overrides.value = updateThemeVariable(token.variable, value)
+    themeValues.value[token.variable] = value
+    setStatus(`${token.label} 已更新`, "success")
   } catch (error) {
-    console.error(error);
-    setStatus(`更新 ${token.label} 失败`, "danger");
+    console.error(error)
+    setStatus(`更新 ${token.label} 失败`, "danger")
   }
-};
+}
 
 const restoreDefault = (variable) => {
   try {
-    overrides.value = updateThemeVariable(variable, "");
-    refresh();
-    setStatus("已恢复默认颜色", "success");
+    overrides.value = updateThemeVariable(variable, "")
+    refresh()
+    setStatus("该颜色已恢复到当前主题默认值", "success")
   } catch (error) {
-    console.error(error);
-    setStatus("恢复默认颜色失败", "danger");
+    console.error(error)
+    setStatus("恢复默认颜色失败", "danger")
   }
-};
+}
 
 const triggerImport = () => {
-  fileInput.value?.click();
-};
+  fileInput.value?.click()
+}
 
 const handleImportFile = async (event) => {
-  const [file] = event.target.files || [];
-  event.target.value = "";
-  if (!file) return;
+  const [file] = event.target.files || []
+  event.target.value = ""
+  if (!file) return
 
   try {
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    importThemeConfig(parsed);
-    refresh();
-    setStatus("配置已导入并应用", "success");
+    const text = await file.text()
+    const parsed = JSON.parse(text)
+    importThemeConfig(parsed)
+    refresh()
+    setStatus("配置已导入并应用", "success")
   } catch (error) {
-    console.error(error);
-    setStatus("导入失败，请确认文件格式正确。", "danger");
+    console.error(error)
+    setStatus("导入失败，请确认文件格式正确。", "danger")
   }
-};
+}
 
 const handleExport = () => {
   try {
-    const payload = exportThemeConfig();
+    const payload = exportThemeConfig()
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
+      type: "application/json"
+    })
+    const url = window.URL.createObjectURL(blob)
+    const anchor = document.createElement("a")
+    anchor.href = url
     anchor.download = `theme-config-${new Date()
       .toISOString()
-      .replace(/[:.]/g, "-")}.json`;
-    anchor.click();
-    window.URL.revokeObjectURL(url);
-    setStatus("配置已导出", "success");
+      .replace(/[:.]/g, "-")}.json`
+    anchor.click()
+    window.URL.revokeObjectURL(url)
+    setStatus("配置已导出", "success")
   } catch (error) {
-    console.error(error);
-    setStatus("导出失败", "danger");
+    console.error(error)
+    setStatus("导出失败", "danger")
   }
-};
+}
 
 const resetAll = () => {
-  resetThemeToDefaults();
-  refresh();
-  setStatus("主题已还原为默认配色", "success");
-};
+  resetThemeToDefaults()
+  refresh()
+  setStatus("主题已还原为 Baby Blue 默认配色", "success")
+}
 
 defineExpose({
   refresh,
-  resetAll,
-});
+  resetAll
+})
 </script>
 
 <style scoped>
@@ -314,28 +403,173 @@ defineExpose({
   gap: 1.1rem;
 }
 
-.theme-editor__header {
+.theme-editor__preset-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-border-soft);
+  background: linear-gradient(180deg, rgb(var(--color-brand-50) / 0.7), var(--color-surface));
+  padding: 1rem;
+}
+
+.theme-editor__preset-header {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem 1.5rem;
+  gap: 0.75rem 1rem;
 }
 
-.theme-editor__intro h2 {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 700;
+.theme-editor__preset-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.theme-editor__preset-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background-color: rgb(var(--color-brand-100) / 0.95);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-brand-700-hex);
+}
+
+.theme-editor__preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+}
+
+.theme-editor__group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+  border-top: 1px solid var(--color-border-soft);
+  padding-top: 1rem;
+}
+
+.theme-editor__group-entry {
+  display: flex;
+  min-height: 88px;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.65rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-border-soft);
+  background-color: var(--color-surface);
+  padding: 0.95rem;
+  text-align: left;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.theme-editor__group-entry:hover {
+  border-color: rgb(var(--color-brand-300) / 1);
+  background-color: rgb(var(--color-brand-50) / 0.58);
+}
+
+.theme-editor__group-entry-copy {
+  display: flex;
+  flex-direction: column;
+}
+
+.theme-editor__group-entry-copy strong {
   color: var(--color-text-primary);
+  font-size: 0.95rem;
 }
 
-.theme-editor__intro p {
-  margin: 0.6rem 0 0;
+.theme-editor__group-entry-action {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  border-radius: 999px;
+  background-color: rgb(var(--color-accent-100) / 0.95);
+  padding: 0.3rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 600;
   color: var(--color-text-secondary);
-  line-height: 1.6;
+}
+
+.theme-editor__preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-border-soft);
+  background-color: var(--color-surface);
+  padding: 0.9rem;
+  text-align: left;
+  transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+}
+
+.theme-editor__preset-card:hover {
+  border-color: rgb(var(--color-brand-300) / 1);
+  background-color: rgb(var(--color-brand-50) / 0.7);
+}
+
+.theme-editor__preset-card--active {
+  border-color: rgb(var(--color-brand-400) / 1);
+  background-color: rgb(var(--color-brand-100) / 0.5);
+}
+
+.theme-editor__preset-swatches {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.theme-editor__preset-swatch {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--color-brand-200) / 0.8);
+}
+
+.theme-editor__preset-swatch--surface {
+  box-shadow: inset 0 0 0 1px rgb(var(--color-brand-200) / 0.6);
+}
+
+.theme-editor__preset-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.theme-editor__preset-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.theme-editor__preset-title-row strong {
+  color: var(--color-text-primary);
+  font-size: 0.95rem;
+}
+
+.theme-editor__preset-copy p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.theme-editor__preset-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background-color: rgb(var(--color-accent-100) / 1);
+  padding: 0.14rem 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
 }
 
 .theme-editor__meta {
-  margin-top: 0.5rem;
   font-size: 0.78rem;
   color: var(--color-accent-600-hex);
 }
@@ -373,8 +607,8 @@ defineExpose({
 }
 
 .ghost-button--small {
-  padding: 0.22rem 0.6rem; /* 原0.35rem 0.8rem */
-  font-size: 0.72rem;      /* 原0.78rem */
+  padding: 0.22rem 0.6rem;
+  font-size: 0.72rem;
 }
 
 .theme-editor__status {
@@ -402,17 +636,7 @@ defineExpose({
   color: rgb(var(--color-danger-600) / 1);
 }
 
-.theme-editor__groups {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.theme-editor__group {
-  border-radius: 14px;
-  border: 1px solid var(--color-border-soft);
-  background-color: var(--color-surface);
-  padding: 1rem;
+.theme-editor__modal-group {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
@@ -500,12 +724,21 @@ defineExpose({
 }
 
 @media (max-width: 960px) {
-  .theme-editor__token {
-  gap: 0.5rem;
-  padding: 0.5rem 0.5rem;
+  .theme-editor__preset-header {
+    flex-direction: column;
   }
+
+  .theme-editor__preset-meta {
+    justify-content: flex-start;
+  }
+
+  .theme-editor__token {
+    gap: 0.5rem;
+    padding: 0.5rem;
+  }
+
   .theme-editor__preview {
-  height: 28px;
+    height: 28px;
     font-size: 0.78rem;
   }
 }
@@ -514,9 +747,17 @@ defineExpose({
   .theme-editor__tools {
     gap: 0.5rem;
   }
+
   .theme-editor__token {
+    grid-template-columns: 1fr;
+    align-items: stretch;
     padding: 0.45rem;
   }
+
+  .theme-editor__controls {
+    justify-content: space-between;
+  }
+
   .theme-editor__color-picker input {
     width: 22px;
     height: 22px;

@@ -104,6 +104,7 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
             "name": str(payload["name"]).strip(),
             "engine": str(payload["engine"]).strip(),
             "url": str(payload["url"]).strip(),
+            "primary_key": str(payload.get("primary_key") or "id").strip() or "id",
             "description": str(payload.get("description", "")).strip(),
         }
 
@@ -131,6 +132,9 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
                 for field in ["name", "engine", "url", "description"]:
                     if field in payload:
                         connection[field] = str(payload[field]).strip()
+
+                if "primary_key" in payload:
+                    connection["primary_key"] = str(payload["primary_key"] or "id").strip() or "id"
 
                 if payload.get("set_active"):
                     config["active"] = connection_id

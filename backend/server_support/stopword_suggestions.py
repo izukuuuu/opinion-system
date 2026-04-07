@@ -617,10 +617,46 @@ def analyse_archive_terms(
     }
 
 
+def cancel_task(task_id: str) -> Dict[str, Any]:
+    """取消排除词建议任务"""
+    def _mutate(task: Dict[str, Any]) -> None:
+        status = str(task.get("status") or "")
+        if status == "queued":
+            task["status"] = "cancelled"
+            task["phase"] = "cancelled"
+            task["finished_at"] = _utc_now()
+            task["message"] = "任务已取消"
+            task["percentage"] = 0
+        elif status == "running":
+            task["cancel_requested"] = True
+            task["message"] = "已请求取消，等待 worker 安全停止"
+        else:
+            raise ValueError(f"当前任务状态 '{status}' 不支持取消")
+
+    return _update_task(task_id, _mutate)
+
+
+def delete_task(task_id: str) -> None:
+    """删除排除词建议任务文件"""
+    task = _load_task(task_id)
+    if not task:
+        raise LookupError("未找到排除词建议任务")
+    status = str(task.get("status") or "")
+    if status not in TERMINAL_STATUSES:
+        raise ValueError("只能删除已结束的任务（已完成、失败或已取消）")
+    path = task_state_path(task_id)
+    lock = FileLock(str(path) + ".lock")
+    with lock:
+        if path.exists():
+            path.unlink()
+
+
 __all__ = [
     "analyse_archive_terms",
     "build_status_payload",
+    "cancel_task",
     "create_or_reuse_task",
+    "delete_task",
     "ensure_worker_running",
     "get_task",
     "load_worker_status",

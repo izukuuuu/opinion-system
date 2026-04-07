@@ -22,12 +22,12 @@
 
         <form @submit.prevent="handleSearch" class="relative mx-auto max-w-2xl">
           <!-- 搜索框主体 -->
-          <div class="group relative flex items-center overflow-hidden rounded-2xl bg-white p-2 shadow-xl shadow-brand-500/5 ring-1 ring-black/5 transition focus-within:ring-2 focus-within:ring-brand-500">
+          <div class="group relative flex items-center overflow-hidden rounded-2xl bg-base-soft/90 p-2 ring-1 ring-brand-100/50 transition focus-within:ring-2 focus-within:ring-brand-500/20">
             <!-- 专题选择 (作为前置过滤器) -->
             <div class="relative flex items-center border-r border-gray-100 pr-2">
               <select
                 v-model="ragSearchForm.topic"
-                class="h-full w-32 cursor-pointer appearance-none rounded-xl border-none bg-transparent py-3 pl-4 pr-8 text-sm font-medium text-gray-700 focus:ring-0"
+                class="h-full w-32 cursor-pointer appearance-none rounded-xl border-none bg-transparent py-3 pl-4 pr-8 text-sm font-medium text-primary focus:outline-none focus:ring-0"
                 required
               >
                 <option value="" disabled>选择专题</option>
@@ -42,7 +42,7 @@
             <input
               v-model="ragSearchForm.query"
               type="text"
-              class="flex-1 border-none bg-transparent px-4 py-3 text-lg text-gray-900 placeholder-gray-400 focus:ring-0"
+              class="flex-1 border-none bg-transparent px-4 py-3 text-lg text-primary placeholder:text-muted/70 focus:outline-none focus:ring-0"
               placeholder="输入关键词，例如：'数据安全规范'..."
               required
             />
@@ -69,7 +69,7 @@
             </label>
             <label class="flex items-center gap-2">
               <span class="text-xs font-medium">Top-K:</span>
-              <input v-model.number="ragSearchForm.top_k" type="number" min="1" max="20" class="w-12 rounded-md border-gray-300 py-0.5 text-center text-xs focus:border-brand-500 focus:ring-brand-500" />
+              <input v-model.number="ragSearchForm.top_k" type="number" min="1" max="20" class="input w-16 px-2 py-1.5 text-center text-xs" />
             </label>
           </div>
         </form>

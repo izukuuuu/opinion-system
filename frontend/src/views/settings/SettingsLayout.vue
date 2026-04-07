@@ -18,7 +18,7 @@
         :items="navigationItems"
         :is-active-fn="isNavItemActive"
       />
-      <div class="min-w-0 flex-1">
+      <div class="settings-route-shell min-w-0 flex-1">
         <RouterView />
       </div>
     </div>

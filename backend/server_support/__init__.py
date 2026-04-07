@@ -70,6 +70,13 @@ from .fetch_refresh_jobs import (
     update_fetch_refresh_job,
     update_fetch_refresh_worker,
 )
+from .rebuild_fetch_jobs import (
+    create_rebuild_fetch_job,
+    get_rebuild_fetch_job,
+    heartbeat_rebuild_fetch_job,
+    list_rebuild_fetch_jobs,
+    update_rebuild_fetch_job,
+)
 from .publisher_detection import (
     build_status_payload as build_publisher_detection_status_payload,
     create_or_reuse_task as create_publisher_detection_task,
@@ -168,14 +175,18 @@ __all__ = [
     "create_deduplicate_job",
     "create_fetch_refresh_job",
     "create_publisher_detection_task",
+    "create_rebuild_fetch_job",
     "get_deduplicate_job",
     "get_fetch_refresh_job",
     "get_postclean_job",
+    "get_rebuild_fetch_job",
     "heartbeat_deduplicate_job",
     "heartbeat_fetch_refresh_job",
     "heartbeat_postclean_job",
+    "heartbeat_rebuild_fetch_job",
     "is_filter_job_running",
     "list_fetch_refresh_jobs",
+    "list_rebuild_fetch_jobs",
     "load_fetch_refresh_worker_status",
     "load_filter_template_config",
     "mark_filter_job_finished",
@@ -184,6 +195,7 @@ __all__ = [
     "update_fetch_refresh_job",
     "update_fetch_refresh_worker",
     "update_postclean_job",
+    "update_rebuild_fetch_job",
     "build_publisher_detection_status_payload",
     "persist_filter_template_config",
     # Paths

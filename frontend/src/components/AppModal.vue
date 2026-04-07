@@ -10,7 +10,7 @@
     >
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4 py-6"
+        class="modal-backdrop fixed inset-0 z-40 flex items-center justify-center px-4 py-6"
         @click.self="handleBackdrop"
       >
         <div

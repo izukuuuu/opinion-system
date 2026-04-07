@@ -28,7 +28,7 @@
             <label class="text-xs font-bold text-primary ml-1">选择项目</label>
             <div class="relative">
               <select v-if="projectOptions.length" v-model="selectedProjectName"
-                class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted disabled:opacity-60"
+                class="input w-full appearance-none py-4 pl-4 pr-10 disabled:opacity-60"
                 :disabled="projectsLoading">
                 <option disabled value="">请选择项目</option>
                 <option v-for="option in projectOptions" :key="option.value" :value="option.value">
@@ -86,7 +86,7 @@
             <label class="text-xs font-bold text-primary ml-1">Merge 存档日期</label>
             <div class="space-y-3">
               <input v-model="mergeDateInput" type="date"
-                class="w-full rounded-2xl border-0 bg-base-soft px-4 py-4 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+                class="input w-full px-4 py-4"
               />
 
               <div v-if="rawArchiveOptions.length" class="space-y-2">
@@ -119,7 +119,7 @@
             <label class="text-xs font-bold text-primary ml-1">Clean 存档来源</label>
             <div class="relative w-full">
               <select v-if="mergeArchiveOptions.length" v-model="archiveSelection.cleanDate"
-                class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60">
+                class="input w-full appearance-none py-4 pl-4 pr-10 disabled:opacity-60">
                 <option disabled value="">请选择 Merge 存档</option>
                 <option v-for="option in mergeArchiveOptions" :key="option.value" :value="option.value">
                   {{ option.label }}

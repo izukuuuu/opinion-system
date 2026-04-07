@@ -411,19 +411,23 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 .form__row input,
 .form__row textarea {
   padding: 0.75rem 1rem;
-  border-radius: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #f8fafc;
+  border-radius: 1rem;
+  border: 1px solid transparent;
+  background: var(--color-bg-base-soft);
   font-family: inherit;
   font-size: 0.95rem;
+  color: var(--color-text-primary);
+  box-shadow: none;
   resize: vertical;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .form__row input:focus,
 .form__row textarea:focus {
   outline: none;
-  border-color: rgba(59, 130, 246, 0.6);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+  background: var(--color-surface);
+  border-color: rgb(var(--color-brand-300) / 1);
+  box-shadow: 0 0 0 3px rgb(var(--color-brand-500) / 0.2);
 }
 
 .form__actions {
@@ -485,8 +489,8 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 
 .form__row input[readonly],
 .form__row textarea[readonly] {
-  background: #f1f5f9;
-  color: #64748b;
+  background: rgb(var(--color-brand-100) / 0.45);
+  color: var(--color-text-muted);
   cursor: not-allowed;
 }
 

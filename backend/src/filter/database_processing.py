@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+import pandas as pd
 from sqlalchemy import bindparam, inspect, text
 
 from ..topic.prompt_config import load_topic_bertopic_prompt_config
+from ..utils.io.excel import read_jsonl, write_jsonl
 from ..utils.io.db import db_manager
 from ..utils.logging.logging import (
     log_error,
@@ -38,7 +42,18 @@ _UNKNOWN_AUTHORS = {
     "n/a",
 }
 _NORMALISED_UNKNOWN_AUTHORS = {_normalise_match_text(item) for item in _UNKNOWN_AUTHORS}
+_UNKNOWN_URLS = {
+    "",
+    "未知",
+    "-",
+    "unknown",
+    "none",
+    "null",
+    "n/a",
+}
+_NORMALISED_UNKNOWN_URLS = {_normalise_match_text(item) for item in _UNKNOWN_URLS}
 _POSTCLEAN_SAMPLE_LIMIT = 3
+_SNAPSHOT_CHUNK_SIZE = 5000
 
 
 def load_shared_publisher_blacklist(topic: str) -> Dict[str, Any]:
@@ -100,6 +115,380 @@ def _normalised_column_expr(dialect_name: str, column_name: str) -> str:
 def _combined_text_expr(dialect_name: str, columns: Sequence[str]) -> str:
     expressions = [_normalised_column_expr(dialect_name, column) for column in columns]
     return _concat_text_expressions(dialect_name, expressions)
+
+
+def _normalised_datetime_expr(dialect_name: str, column_name: str) -> str:
+    quoted = _quote_identifier(dialect_name, column_name)
+    if _is_mysql_dialect(dialect_name):
+        return f"COALESCE(DATE_FORMAT({quoted}, '%Y-%m-%d %H:%i:%s'), '')"
+    return f"COALESCE(TO_CHAR({quoted}, 'YYYY-MM-DD HH24:MI:SS'), '')"
+
+
+def _sql_literal(value: str) -> str:
+    return "'" + str(value or "").replace("'", "''") + "'"
+
+
+def _is_meaningful_normalised_expr(expr: str, placeholders: Sequence[str]) -> str:
+    if not placeholders:
+        return f"({expr}) <> ''"
+    placeholder_sql = ", ".join(_sql_literal(item) for item in placeholders)
+    return f"(({expr}) <> '' AND ({expr}) NOT IN ({placeholder_sql}))"
+
+
+def _deduplicate_temp_table_name(table_name: str) -> str:
+    digest = hashlib.sha1(str(table_name or "").encode("utf-8")).hexdigest()[:12]
+    return f"__dedup_tmp_{digest}"
+
+
+def _snapshot_root(topic: str) -> Path:
+    return ensure_bucket("results", topic, "deduplicate_snapshots")
+
+
+def _snapshot_directory(topic: str, snapshot_id: str) -> Path:
+    path = _snapshot_root(topic) / str(snapshot_id or "").strip()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _snapshot_manifest_path(topic: str, snapshot_id: str) -> Path:
+    return _snapshot_root(topic) / str(snapshot_id or "").strip() / "manifest.json"
+
+
+def _load_snapshot_manifest(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        import json
+
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def list_database_deduplicate_snapshots(
+    topic: str,
+    database: str,
+    *,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    root = _snapshot_root(topic)
+    database_name = str(database or "").strip()
+    snapshots: List[Dict[str, Any]] = []
+    if not root.exists():
+        return snapshots
+    for manifest_path in root.glob("*/manifest.json"):
+        payload = _load_snapshot_manifest(manifest_path)
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("database") or "").strip() != database_name:
+            continue
+        snapshots.append(payload)
+    snapshots.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    return snapshots[: max(1, int(limit or 10))]
+
+
+def _get_snapshot_manifest(topic: str, database: str, snapshot_id: str) -> Optional[Dict[str, Any]]:
+    target_id = str(snapshot_id or "").strip()
+    if not target_id:
+        return None
+    path = _snapshot_manifest_path(topic, target_id)
+    payload = _load_snapshot_manifest(path)
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("database") or "").strip() != str(database or "").strip():
+        return None
+    return payload
+
+
+def _write_snapshot_manifest(path: Path, payload: Dict[str, Any]) -> None:
+    _write_json(path, payload)
+
+
+def _create_database_snapshot(
+    conn,
+    *,
+    topic: str,
+    database: str,
+    dialect_name: str,
+    table_names: Sequence[str],
+    inspector,
+) -> Dict[str, Any]:
+    snapshot_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    snapshot_dir = _snapshot_directory(topic, snapshot_id)
+    tables_payload: List[Dict[str, Any]] = []
+    total_rows = 0
+
+    for table_name in table_names:
+        ordered_columns = [str(column.get("name") or "").strip() for column in inspector.get_columns(table_name)]
+        quoted_columns = [_quote_identifier(dialect_name, column_name) for column_name in ordered_columns]
+        selected_columns_sql = ", ".join(quoted_columns) if quoted_columns else "*"
+        quoted_table = _quote_identifier(dialect_name, table_name)
+        sql = text(f"SELECT {selected_columns_sql} FROM {quoted_table}")
+        output_path = snapshot_dir / f"{table_name}.jsonl"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        row_count = 0
+        chunk_index = 0
+        for chunk in pd.read_sql_query(sql, conn, chunksize=_SNAPSHOT_CHUNK_SIZE):
+            write_jsonl(chunk, output_path, mode="w" if chunk_index == 0 else "a")
+            row_count += len(chunk)
+            chunk_index += 1
+        if chunk_index == 0:
+            write_jsonl(pd.DataFrame(columns=ordered_columns), output_path, mode="w")
+
+        total_rows += row_count
+        tables_payload.append(
+            {
+                "table": table_name,
+                "row_count": row_count,
+                "columns": ordered_columns,
+                "file": output_path.name,
+                "path": get_relative_path(output_path),
+            }
+        )
+
+    manifest = {
+        "snapshot_id": snapshot_id,
+        "topic": topic,
+        "database": str(database or "").strip(),
+        "created_at": _utc_now(),
+        "tables": tables_payload,
+        "table_count": len(tables_payload),
+        "total_rows": total_rows,
+        "path": get_relative_path(snapshot_dir),
+    }
+    _write_snapshot_manifest(snapshot_dir / "manifest.json", manifest)
+    return manifest
+
+
+def restore_database_snapshot(
+    topic: str,
+    database: str,
+    *,
+    snapshot_id: Optional[str] = None,
+    tables: Optional[Sequence[str]] = None,
+    logger=None,
+    progress_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
+    target_database = str(database or "").strip()
+    if not target_database:
+        return {"status": "error", "message": "Missing required field(s): database"}
+
+    snapshots = list_database_deduplicate_snapshots(topic, target_database, limit=20)
+    manifest = None
+    if snapshot_id:
+        manifest = _get_snapshot_manifest(topic, target_database, snapshot_id)
+    elif snapshots:
+        manifest = snapshots[0]
+    if not isinstance(manifest, dict):
+        return {"status": "error", "message": "未找到可恢复的数据库快照"}
+
+    if logger is None:
+        logger = setup_logger(topic, "deduplicate-restore")
+    log_module_start(logger, "DatabaseDeduplicateRestore")
+
+    def _emit(event: str, message: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        if progress_callback:
+            try:
+                progress_callback(event, message, payload or {})
+            except Exception:
+                pass
+
+    snapshot_tables = manifest.get("tables") if isinstance(manifest.get("tables"), list) else []
+    requested_tables = {
+        str(item or "").strip()
+        for item in (tables or [])
+        if str(item or "").strip()
+    }
+    target_tables = [
+        item for item in snapshot_tables
+        if isinstance(item, dict) and str(item.get("table") or "").strip()
+        and (not requested_tables or str(item.get("table") or "").strip() in requested_tables)
+    ]
+    missing_tables = sorted(requested_tables - {str(item.get("table") or "").strip() for item in target_tables})
+    if not target_tables:
+        return {
+            "status": "error",
+            "message": "指定快照中没有可恢复的数据表",
+            "missing_tables": missing_tables,
+            "snapshot": manifest,
+        }
+
+    engine = None
+    try:
+        engine = db_manager.get_engine_for_database(target_database)
+        from ..update.data_update import create_table_with_standard_schema  # Local import to avoid module cycle.
+
+        with engine.begin() as conn:
+            dialect_name = conn.dialect.name
+            inspector = inspect(conn)
+            total_tables = len(target_tables)
+            completed_tables = 0
+            restored_rows = 0
+            report_tables: List[Dict[str, Any]] = []
+
+            _emit(
+                "phase.started",
+                f"数据库恢复已启动，准备恢复 {total_tables} 张表。",
+                {"total_tables": total_tables, "completed_tables": 0, "deleted_rows": 0, "percentage": 0},
+            )
+
+            for item in target_tables:
+                table_name = str(item.get("table") or "").strip()
+                file_name = str(item.get("file") or "").strip()
+                snapshot_file = _snapshot_directory(topic, str(manifest.get("snapshot_id") or "")) / file_name
+                _emit(
+                    "table.started",
+                    f"开始恢复数据表 {table_name}。",
+                    {
+                        "table": table_name,
+                        "total_tables": total_tables,
+                        "completed_tables": completed_tables,
+                        "deleted_rows": restored_rows,
+                    },
+                )
+
+                if not inspector.has_table(table_name):
+                    if not create_table_with_standard_schema(conn, table_name, topic, logger):
+                        raise RuntimeError(f"{table_name} 建表失败，无法恢复快照")
+                    inspector = inspect(conn)
+
+                columns = [str(column.get("name") or "").strip() for column in inspector.get_columns(table_name)]
+                if not snapshot_file.exists():
+                    raise RuntimeError(f"{table_name} 快照文件缺失: {snapshot_file}")
+
+                stored_row_count = int(item.get("row_count") or 0)
+                stored_columns = item.get("columns") if isinstance(item.get("columns"), list) else columns
+                if stored_row_count > 0:
+                    df = read_jsonl(snapshot_file)
+                else:
+                    df = pd.DataFrame(columns=stored_columns)
+                if columns:
+                    for column_name in columns:
+                        if column_name not in df.columns:
+                            df[column_name] = None
+                    df = df[columns]
+
+                quoted_table = _quote_identifier(dialect_name, table_name)
+                conn.execute(text(f"DELETE FROM {quoted_table}"))
+                if not df.empty:
+                    df.to_sql(
+                        table_name,
+                        con=conn,
+                        if_exists="append",
+                        index=False,
+                        method="multi",
+                        chunksize=1000,
+                    )
+
+                table_rows = len(df)
+                restored_rows += table_rows
+                completed_tables += 1
+                report_tables.append(
+                    {
+                        "table": table_name,
+                        "status": "ok",
+                        "restored_rows": table_rows,
+                        "snapshot_file": get_relative_path(snapshot_file),
+                    }
+                )
+                _emit(
+                    "table.completed",
+                    f"{table_name} 恢复完成，写回 {table_rows} 条记录。",
+                    {
+                        "table": table_name,
+                        "total_tables": total_tables,
+                        "completed_tables": completed_tables,
+                        "deleted_rows": restored_rows,
+                        "percentage": round(completed_tables / max(1, total_tables) * 100),
+                    },
+                )
+
+    except Exception as exc:
+        detail = f"数据库恢复失败: {exc}"
+        log_error(logger, detail, "DatabaseDeduplicateRestore")
+        _emit("task.failed", detail, {})
+        return {"status": "error", "message": detail, "snapshot": manifest}
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+
+    result = {
+        "status": "ok",
+        "topic": topic,
+        "database": target_database,
+        "snapshot": manifest,
+        "restored_rows": restored_rows,
+        "missing_tables": missing_tables,
+        "tables": report_tables,
+    }
+    _emit(
+        "task.completed",
+        f"数据库恢复完成，共写回 {restored_rows} 条记录。",
+        {
+            "total_tables": len(target_tables),
+            "completed_tables": len(target_tables),
+            "deleted_rows": restored_rows,
+            "percentage": 100,
+        },
+    )
+    return result
+
+
+def _build_deduplicate_key_expr(
+    dialect_name: str,
+    column_names: Sequence[str],
+) -> tuple[Optional[str], str]:
+    normalised_columns = set(column_names)
+    url_expr = _normalised_column_expr(dialect_name, "url") if "url" in normalised_columns else None
+    contents_expr = _normalised_column_expr(dialect_name, "contents") if "contents" in normalised_columns else None
+    author_expr = _normalised_column_expr(dialect_name, "author") if "author" in normalised_columns else None
+    platform_expr = (
+        _normalised_column_expr(dialect_name, "platform")
+        if "platform" in normalised_columns
+        else _sql_literal("")
+    )
+    published_expr = (
+        _normalised_datetime_expr(dialect_name, "published_at")
+        if "published_at" in normalised_columns
+        else _sql_literal("")
+    )
+
+    branches: List[str] = []
+    strategies: List[str] = []
+
+    if url_expr is not None:
+        url_condition = _is_meaningful_normalised_expr(url_expr, sorted(_NORMALISED_UNKNOWN_URLS))
+        url_key = _concat_text_expressions(dialect_name, [_sql_literal("url:"), url_expr])
+        branches.append(f"WHEN {url_condition} THEN {url_key}")
+        strategies.append("链接")
+
+    if contents_expr is not None and author_expr is not None and "published_at" in normalised_columns:
+        contents_condition = _is_meaningful_normalised_expr(contents_expr, [])
+        author_condition = _is_meaningful_normalised_expr(author_expr, sorted(_NORMALISED_UNKNOWN_AUTHORS))
+        published_condition = f"({published_expr}) <> ''"
+        composite_condition = f"{contents_condition} AND {author_condition} AND {published_condition}"
+        composite_key = _concat_text_expressions(
+            dialect_name,
+            [
+                _sql_literal("meta:"),
+                contents_expr,
+                _sql_literal("|"),
+                author_expr,
+                _sql_literal("|"),
+                published_expr,
+                _sql_literal("|"),
+                platform_expr,
+            ],
+        )
+        branches.append(f"WHEN {composite_condition} THEN {composite_key}")
+        strategies.append("正文+作者+发布时间+平台")
+
+    if not branches:
+        return None, ""
+
+    return "CASE " + " ".join(branches) + " ELSE NULL END", " 或 ".join(strategies)
 
 
 def _escape_like_term(term: str) -> str:
@@ -763,10 +1152,18 @@ def run_database_deduplicate(
             total_deleted_rows = 0
             total_tables = len(table_names)
             completed_tables = 0
+            snapshot_manifest = _create_database_snapshot(
+                conn,
+                topic=topic,
+                database=target_database,
+                dialect_name=dialect_name,
+                table_names=table_names,
+                inspector=inspector,
+            )
 
             _emit(
                 "phase.started",
-                f"数据库去重已启动，准备扫描 {total_tables} 张表。",
+                f"数据库快照已创建，准备扫描 {total_tables} 张表。",
                 {
                     "total_tables": total_tables,
                     "completed_tables": completed_tables,
@@ -789,10 +1186,11 @@ def run_database_deduplicate(
                     str(column.get("name") or "").strip()
                     for column in inspector.get_columns(table_name)
                 }
-                if "id" not in column_names or "contents" not in column_names:
+                required_columns = [column_name for column_name in ("contents", "url") if column_name in column_names]
+                if not required_columns:
                     missing_cols = [
                         column_name
-                        for column_name in ("id", "contents")
+                        for column_name in ("contents", "url")
                         if column_name not in column_names
                     ]
                     report_tables.append(
@@ -818,24 +1216,105 @@ def run_database_deduplicate(
                     continue
 
                 quoted_table = _quote_identifier(dialect_name, table_name)
-                contents_expr = _normalised_column_expr(dialect_name, "contents")
+                ordered_columns = [str(column.get("name") or "").strip() for column in inspector.get_columns(table_name)]
+                quoted_columns = [_quote_identifier(dialect_name, column_name) for column_name in ordered_columns]
+                selected_columns_sql = ", ".join(quoted_columns)
+                dedupe_key_expr, strategy_label = _build_deduplicate_key_expr(dialect_name, ordered_columns)
+                if not dedupe_key_expr:
+                    report_tables.append(
+                        {
+                            "table": table_name,
+                            "status": "skipped",
+                            "reason": "缺少稳定判重字段，已跳过以避免误删",
+                            "deleted_rows": 0,
+                        }
+                    )
+                    completed_tables += 1
+                    _emit(
+                        "table.skipped",
+                        f"{table_name} 跳过：缺少稳定判重字段，未执行删除。",
+                        {
+                            "table": table_name,
+                            "total_tables": total_tables,
+                            "completed_tables": completed_tables,
+                            "deleted_rows": total_deleted_rows,
+                            "percentage": round(completed_tables / max(1, total_tables) * 100),
+                        },
+                    )
+                    continue
+
                 order_expr = _build_asc_order_expr(dialect_name, column_names)
-                select_duplicates_sql = text(
-                    f"SELECT ranked.id FROM ("
-                    f"SELECT {_quote_identifier(dialect_name, 'id')} AS id, "
-                    f"ROW_NUMBER() OVER (PARTITION BY {contents_expr} ORDER BY {order_expr}) AS rn "
-                    f"FROM {quoted_table} "
-                    f"WHERE TRIM(COALESCE({_quote_identifier(dialect_name, 'contents')}, '')) <> ''"
-                    f") AS ranked WHERE ranked.rn > 1"
+                ranked_cte_sql = (
+                    f"WITH ranked AS ("
+                    f"SELECT base.*, "
+                    f"CASE WHEN base.dedupe_key IS NULL THEN 1 "
+                    f"ELSE ROW_NUMBER() OVER (PARTITION BY base.dedupe_key ORDER BY {order_expr}) END AS rn "
+                    f"FROM ("
+                    f"SELECT {selected_columns_sql}, {dedupe_key_expr} AS dedupe_key "
+                    f"FROM {quoted_table}"
+                    f") AS base"
+                    f") "
                 )
-                duplicate_ids = [row.get("id") for row in conn.execute(select_duplicates_sql).mappings()]
-                deleted_rows = _delete_ids(conn, dialect_name, table_name, duplicate_ids)
+                table_stats_sql = text(
+                    ranked_cte_sql +
+                    "SELECT "
+                    "COUNT(*) AS total_rows, "
+                    "SUM(CASE WHEN dedupe_key IS NOT NULL THEN 1 ELSE 0 END) AS keyed_rows, "
+                    "SUM(CASE WHEN dedupe_key IS NULL THEN 1 ELSE 0 END) AS unsafe_rows, "
+                    "SUM(CASE WHEN dedupe_key IS NOT NULL AND rn > 1 THEN 1 ELSE 0 END) AS duplicate_rows, "
+                    "SUM(CASE WHEN dedupe_key IS NULL OR rn = 1 THEN 1 ELSE 0 END) AS kept_rows "
+                    "FROM ranked"
+                )
+                table_stats = conn.execute(table_stats_sql).mappings().first() or {}
+                total_rows = int(table_stats.get("total_rows") or 0)
+                keyed_rows = int(table_stats.get("keyed_rows") or 0)
+                unsafe_rows = int(table_stats.get("unsafe_rows") or 0)
+                duplicate_rows = int(table_stats.get("duplicate_rows") or 0)
+                kept_rows = int(table_stats.get("kept_rows") or 0)
+
+                if total_rows > 0 and kept_rows <= 0:
+                    raise RuntimeError(f"{table_name} 判重结果异常：未保留任何记录，已中止")
+
+                deleted_rows = 0
+                if duplicate_rows > 0:
+                    temp_table_name = _deduplicate_temp_table_name(table_name)
+                    quoted_temp_table = _quote_identifier(dialect_name, temp_table_name)
+                    conn.execute(text(f"DROP TABLE IF EXISTS {quoted_temp_table}"))
+                    create_temp_sql = text(
+                        f"CREATE TEMPORARY TABLE {quoted_temp_table} AS " +
+                        ranked_cte_sql +
+                        f"SELECT {selected_columns_sql} FROM ranked WHERE dedupe_key IS NULL OR rn = 1"
+                    )
+                    conn.execute(create_temp_sql)
+                    survivor_count = int(
+                        (conn.execute(text(f"SELECT COUNT(*) AS row_count FROM {quoted_temp_table}")).mappings().first() or {}).get("row_count") or 0
+                    )
+                    if total_rows > 0 and survivor_count <= 0:
+                        raise RuntimeError(f"{table_name} 临时保留集为空，已中止")
+                    if survivor_count > total_rows:
+                        raise RuntimeError(f"{table_name} 临时保留集异常放大，已中止")
+
+                    conn.execute(text(f"DELETE FROM {quoted_table}"))
+                    conn.execute(
+                        text(
+                            f"INSERT INTO {quoted_table} ({selected_columns_sql}) "
+                            f"SELECT {selected_columns_sql} FROM {quoted_temp_table}"
+                        )
+                    )
+                    conn.execute(text(f"DROP TABLE IF EXISTS {quoted_temp_table}"))
+                    deleted_rows = total_rows - survivor_count
+
                 total_deleted_rows += deleted_rows
                 report_tables.append(
                     {
                         "table": table_name,
                         "status": "ok",
-                        "duplicate_rows": len(duplicate_ids),
+                        "strategy": strategy_label,
+                        "total_rows": total_rows,
+                        "keyed_rows": keyed_rows,
+                        "unsafe_rows_kept": unsafe_rows,
+                        "duplicate_rows": duplicate_rows,
+                        "kept_rows": kept_rows,
                         "deleted_rows": deleted_rows,
                     }
                 )
@@ -847,7 +1326,7 @@ def run_database_deduplicate(
                 )
                 _emit(
                     "table.completed",
-                    f"{table_name} 去重完成，删除 {deleted_rows} 条重复记录。",
+                    f"{table_name} 去重完成，删除 {deleted_rows} 条明确重复记录，保留 {total_rows - deleted_rows} 条。",
                     {
                         "table": table_name,
                         "deleted_rows": total_deleted_rows,
@@ -878,6 +1357,7 @@ def run_database_deduplicate(
         "database": target_database,
         "generated_at": _utc_now(),
         "source": "database-deduplicate",
+        "snapshot": snapshot_manifest,
         "deleted_rows": total_deleted_rows,
         "missing_tables": missing_tables,
         "tables": report_tables,
@@ -900,6 +1380,7 @@ def run_database_deduplicate(
         "status": "ok",
         "topic": topic,
         "database": target_database,
+        "snapshot": snapshot_manifest,
         "deleted_rows": total_deleted_rows,
         "missing_tables": missing_tables,
         "tables": report_tables,
@@ -908,8 +1389,10 @@ def run_database_deduplicate(
 
 
 __all__ = [
+    "list_database_deduplicate_snapshots",
     "list_postclean_publishers",
     "load_shared_publisher_blacklist",
+    "restore_database_snapshot",
     "run_database_deduplicate",
     "run_database_postclean",
 ]

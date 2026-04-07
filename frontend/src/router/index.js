@@ -442,13 +442,17 @@ export const routes = [
         }
       },
       {
-        path: 'appearance/theme',
+        path: 'advanced/theme',
         name: 'settings-theme',
         component: SettingsThemeView,
         meta: {
           title: '主题颜色',
           breadcrumb: '主题颜色'
         }
+      },
+      {
+        path: 'appearance/theme',
+        redirect: { name: 'settings-theme' }
       },
       {
         path: 'databases',

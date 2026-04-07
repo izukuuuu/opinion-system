@@ -228,6 +228,180 @@ def _prepare_intermediate_from_clean(topic: str, date: str, logger=None) -> Dict
     return result
 
 
+def _rebuild_from_fetch(
+    topic: str,
+    date: str,
+    logger=None,
+    dataset_name: Optional[str] = None,
+    *,
+    fetch_date: str = "",
+) -> Dict[str, Any]:
+    """
+    从 fetch 层直接重建数据库，不经过 clean/filter 流程。
+
+    Args:
+        topic (str): 专题名称
+        date (str): 日期字符串（用于filter层目录）
+        logger: 日志记录器
+        dataset_name: 数据库名称
+        fetch_date: fetch层日期目录（如 "2025-01-15_2025-12-31"）
+
+    Returns:
+        Dict[str, Any]: 执行结果与详细信息
+    """
+    from ..utils.setting.paths import bucket as get_bucket
+
+    target_database = (dataset_name or topic).strip()
+    if not target_database:
+        target_database = topic
+
+    result: Dict[str, Any] = {
+        "status": "error",
+        "topic": topic,
+        "date": date,
+        "fetch_date": fetch_date,
+        "database": target_database,
+        "uploaded": [],
+        "skipped": [],
+        "failed": [],
+    }
+
+    # 定位 fetch 层数据
+    if fetch_date:
+        fetch_dir = get_bucket("fetch", topic, fetch_date)
+    else:
+        # 自动查找最新的 fetch 日期
+        fetch_base = get_bucket("fetch", topic, "").parent
+        fetch_dates = []
+        if fetch_base.exists():
+            for item in fetch_base.iterdir():
+                if item.is_dir():
+                    fetch_dates.append(item.name)
+        fetch_dates.sort(reverse=True)
+        if not fetch_dates:
+            result["message"] = "未找到 fetch 层数据，请先执行数据抓取。"
+            log_error(logger, result["message"], "Rebuild")
+            return result
+        fetch_date = fetch_dates[0]
+        fetch_dir = get_bucket("fetch", topic, fetch_date)
+        result["fetch_date"] = fetch_date
+
+    if not fetch_dir.exists():
+        result["message"] = f"fetch 层目录不存在: {fetch_dir}"
+        log_error(logger, result["message"], "Rebuild")
+        return result
+
+    jsonl_files = sorted(fetch_dir.glob("*.jsonl"))
+    # 跳过合并文件（如 总体.jsonl），避免重复导入
+    MERGED_FILE_NAMES = {"总体", "all", "merged", "combined"}
+    jsonl_files = [f for f in jsonl_files if f.stem not in MERGED_FILE_NAMES]
+    if not jsonl_files:
+        result["message"] = f"未在 fetch 层找到有效的渠道 JSONL 文件: {fetch_dir}"
+        log_error(logger, result["message"], "Rebuild")
+        return result
+
+    log_success(logger, f"从 fetch 层({fetch_date})找到 {len(jsonl_files)} 个数据文件", "Rebuild")
+
+    # 确保数据库存在
+    if not db_manager.ensure_database(target_database):
+        result["message"] = f"创建或连接数据库 {target_database} 失败。"
+        log_error(logger, result["message"], "Rebuild")
+        return result
+
+    # 获取数据库引擎
+    engine = None
+    try:
+        engine = db_manager.get_engine_for_database(target_database)
+    except Exception as exc:
+        result["message"] = f"无法连接数据库 {target_database}: {exc}"
+        log_error(logger, result["message"], "Rebuild")
+        return result
+
+    # 上传数据
+    success_tables: List[Dict[str, Any]] = []
+    try:
+        with engine.begin() as conn:
+            # 创建表（如果不存在）
+            for file_path in jsonl_files:
+                table_name = file_path.stem
+                if not table_exists(conn, table_name, target_database):
+                    if not create_table_with_standard_schema(conn, table_name, topic, logger):
+                        result["failed"].append(
+                            {"channel": table_name, "file": file_path.name, "reason": "建表失败"}
+                        )
+                        continue
+
+            # 上传数据
+            total_rows = 0
+            for file_path in jsonl_files:
+                table_name = file_path.stem
+                try:
+                    df = read_jsonl(file_path)
+                    if df is None or len(df) == 0:
+                        log_skip(logger, f"{file_path.name} 无数据，跳过", "Rebuild")
+                        result["skipped"].append({"channel": table_name, "reason": "文件无数据"})
+                        continue
+
+                    # 标准化数据
+                    df = _normalise_upload_dataframe(df)
+                    if df.empty:
+                        result["skipped"].append({"channel": table_name, "reason": "无有效入库数据"})
+                        continue
+
+                    # 去重（基于id字段）
+                    if "id" in df.columns:
+                        before_count = len(df)
+                        df = df.drop_duplicates(subset=["id"])
+                        after_count = len(df)
+                        if before_count != after_count:
+                            log_success(logger, f"{file_path.name} 去重: {before_count} -> {after_count}", "Rebuild")
+
+                    # 写入数据库
+                    df.to_sql(
+                        table_name,
+                        con=engine,
+                        if_exists="append",
+                        index=False,
+                        method="multi",
+                        chunksize=1000,
+                    )
+
+                    total_rows += len(df)
+                    result["uploaded"].append(
+                        {"channel": table_name, "file": file_path.name, "rows": len(df)}
+                    )
+                    log_success(
+                        logger,
+                        f"已上传 {table_name}: {len(df)} 条",
+                        "Rebuild",
+                    )
+                except Exception as exc:
+                    summary = _summarise_upload_exception(table_name, exc)
+                    result["failed"].append(
+                        {
+                            "channel": table_name,
+                            "file": file_path.name,
+                            "reason": summary["reason"],
+                            "detail": summary["detail"],
+                        }
+                    )
+                    log_error(
+                        logger,
+                        f"上传 {table_name} 失败: {summary['detail']}",
+                        "Rebuild",
+                    )
+
+        result["status"] = "ok"
+        result["message"] = f"从 fetch 层({fetch_date})重建完成，共上传 {len(result['uploaded'])} 个表，{total_rows} 条记录。"
+        log_success(logger, result["message"], "Rebuild")
+        return result
+
+    except Exception as exc:
+        result["message"] = f"数据库操作异常: {exc}"
+        log_error(logger, result["message"], "Rebuild")
+        return result
+
+
 def create_table_with_standard_schema(conn, table_name: str, topic: str, logger) -> bool:
     """
     使用标准结构创建表
@@ -333,16 +507,18 @@ def upload_filtered_excels(
     dataset_name: Optional[str] = None,
     *,
     prepare_intermediate_from_clean: bool = False,
+    rebuild_from_fetch: bool = False,
+    fetch_date: str = "",
 ) -> Dict[str, Any]:
     """
     上传筛选后的JSONL文件到数据库
     使用锁死的标准表结构，按最大容量设计
-    
+
     Args:
         topic (str): 专题名称
         date (str): 日期字符串
         logger: 日志记录器
-    
+
     Returns:
         Dict[str, Any]: 执行结果与详细信息
     """
@@ -364,9 +540,35 @@ def upload_filtered_excels(
         "database": target_database,
         "source_layer": "filter",
         "prepare_intermediate_from_clean": bool(prepare_intermediate_from_clean),
+        "rebuild_from_fetch": bool(rebuild_from_fetch),
     }
 
-    if prepare_intermediate_from_clean:
+    # 从 fetch 层重建：直接从 fetch 读取并入库
+    if rebuild_from_fetch:
+        rebuild_result = _rebuild_from_fetch(
+            topic, date, logger, dataset_name=target_database, fetch_date=fetch_date
+        )
+        response["rebuild"] = rebuild_result
+        if rebuild_result.get("status") != "ok":
+            message = str(rebuild_result.get("message") or "从fetch层重建数据失败")
+            log_error(logger, message, "Upload")
+            return {
+                **response,
+                "status": "error",
+                "message": message,
+            }
+        # 重建成功，直接返回结果（不需要再处理 filter 层文件）
+        response["source_layer"] = "fetch-direct"
+        response["uploaded"] = rebuild_result.get("uploaded", [])
+        response["skipped"] = rebuild_result.get("skipped", [])
+        response["failed"] = rebuild_result.get("failed", [])
+        return {
+            **response,
+            "status": "ok",
+            "message": rebuild_result.get("message", "从fetch层重建完成"),
+        }
+
+    if prepare_intermediate_from_clean and not rebuild_from_fetch:
         intermediate = _prepare_intermediate_from_clean(topic, date, logger)
         response["intermediate"] = intermediate
         if intermediate.get("status") == "ok":
@@ -531,15 +733,17 @@ def run_update(
     dataset_name: Optional[str] = None,
     *,
     prepare_intermediate_from_clean: bool = False,
+    rebuild_from_fetch: bool = False,
+    fetch_date: str = "",
 ) -> Dict[str, Any]:
     """
     运行数据更新
-    
+
     Args:
         topic (str): 专题名称
         date (str): 日期字符串
         logger: 日志记录器
-    
+
     Returns:
         Dict[str, Any]: 执行状态与详情
     """
@@ -555,6 +759,8 @@ def run_update(
             logger,
             dataset_name=dataset_name,
             prepare_intermediate_from_clean=prepare_intermediate_from_clean,
+            rebuild_from_fetch=rebuild_from_fetch,
+            fetch_date=fetch_date,
         )
         if isinstance(result, dict):
             if result.get("status") != "error":

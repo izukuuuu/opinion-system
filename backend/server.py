@@ -80,10 +80,13 @@ from server_support import (  # type: ignore
     DATA_PROJECTS_ROOT,
     create_deduplicate_job,
     create_fetch_refresh_job,
+    create_rebuild_fetch_job,
     get_fetch_refresh_job,
     get_deduplicate_job,
+    get_rebuild_fetch_job,
     heartbeat_fetch_refresh_job,
     heartbeat_deduplicate_job,
+    heartbeat_rebuild_fetch_job,
     mark_filter_job_running,
     mark_filter_job_finished,
     create_postclean_job,
@@ -93,6 +96,7 @@ from server_support import (  # type: ignore
     update_fetch_refresh_job,
     update_fetch_refresh_worker,
     update_postclean_job,
+    update_rebuild_fetch_job,
     get_default_rag_config,
 )
 from server_support.router_prompts.utils import (
@@ -108,11 +112,23 @@ from server_support.hot_overview import (
 )
 from server_support.stopword_suggestions import (
     build_status_payload as build_stopword_suggestion_status_payload,
+    cancel_task as cancel_stopword_task,
     create_or_reuse_task as create_stopword_suggestion_task,
+    delete_task as delete_stopword_task,
 )
 from server_support.publisher_detection import (
     build_status_payload as build_publisher_detection_status_payload,
+    cancel_task as cancel_publisher_detection_task,
     create_or_reuse_task as create_publisher_detection_task,
+    delete_task as delete_publisher_detection_task,
+)
+from server_support.deduplicate_jobs import (
+    cancel_deduplicate_job,
+    delete_deduplicate_job,
+)
+from server_support.postclean_jobs import (
+    cancel_postclean_job,
+    delete_postclean_job,
 )
 
 PROJECT_MANAGER = get_project_manager()
@@ -745,6 +761,115 @@ def _submit_fetch_refresh_job(
     return FETCH_REFRESH_EXECUTOR.submit(_job)
 
 
+def _submit_rebuild_fetch_job(
+    *,
+    topic_identifier: str,
+    database: str,
+    fetch_date: str,
+    date: str,
+    log_project: str,
+    display_name: str,
+) -> concurrent.futures.Future:
+    """提交 fetch 重建后台任务"""
+    def _job():
+        stop_event = threading.Event()
+
+        def _heartbeat_loop():
+            while not stop_event.wait(2.0):
+                heartbeat_rebuild_fetch_job(topic_identifier, database, fetch_date)
+
+        def _on_progress(event: str, message: str, payload: Dict[str, Any]) -> None:
+            progress_payload = {
+                "total_tables": int(payload.get("total_tables") or 0),
+                "completed_tables": int(payload.get("completed_tables") or 0),
+                "uploaded_rows": int(payload.get("uploaded_rows") or 0),
+                "current_table": str(payload.get("table") or "").strip(),
+                "percentage": int(payload.get("percentage") or 0),
+            }
+            update_rebuild_fetch_job(
+                topic_identifier,
+                database,
+                fetch_date,
+                message=message,
+                progress=progress_payload,
+                log_message=message,
+                log_event=event,
+                log_level="error" if event == "task.failed" else "info",
+            )
+
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            name=f"rebuild-fetch-heartbeat-{topic_identifier}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
+        try:
+            # 更新状态为运行中
+            update_rebuild_fetch_job(
+                topic_identifier,
+                database,
+                fetch_date,
+                status="running",
+                message="开始从本地缓存重建数据库...",
+            )
+
+            from src.update import run_update
+
+            result = run_update(
+                topic_identifier,
+                date,
+                dataset_name=database,
+                rebuild_from_fetch=True,
+                fetch_date=fetch_date,
+            )
+            success = evaluate_success(result)
+            _log_with_context(
+                "rebuild-fetch",
+                success,
+                {
+                    "project": log_project,
+                    "params": {
+                        "database": database,
+                        "fetch_date": fetch_date,
+                        "date": date,
+                        "source": "api",
+                        "topic": display_name,
+                        "bucket": topic_identifier,
+                    },
+                },
+            )
+            serialised = serialise_result(result)
+            update_rebuild_fetch_job(
+                topic_identifier,
+                database,
+                fetch_date,
+                status="completed" if success else "error",
+                message=serialised.get("message", "") if isinstance(serialised, dict) else str(result),
+                progress={"percentage": 100 if success else 0},
+                result=serialised,
+                log_message=serialised.get("message", "") if isinstance(serialised, dict) else str(result),
+                log_event="task.completed" if success else "task.failed",
+                log_level="info" if success else "error",
+            )
+        except Exception as exc:
+            LOGGER.exception("Rebuild fetch job failed for %s@%s", topic_identifier, database)
+            update_rebuild_fetch_job(
+                topic_identifier,
+                database,
+                fetch_date,
+                status="error",
+                message=str(exc),
+                log_message=str(exc),
+                log_event="task.failed",
+                log_level="error",
+            )
+        finally:
+            stop_event.set()
+            heartbeat_rebuild_fetch_job(topic_identifier, database, fetch_date)
+
+    return REBUILD_FETCH_EXECUTOR.submit(_job)
+
+
 def _enqueue_fetch_refresh_job(
     *,
     topic_identifier: str,
@@ -824,6 +949,7 @@ FILTER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 POSTCLEAN_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 DEDUPLICATE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 FETCH_REFRESH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+REBUILD_FETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 
 def _resolve_runtime_binding() -> Tuple[str, int]:
@@ -945,6 +1071,139 @@ def system_background_tasks():
         LOGGER.exception("Failed to collect background tasks")
         return error(f"读取后台任务状态失败: {str(exc)}", 500)
     return success({"data": payload})
+
+
+@app.post("/api/system/background-tasks/<string:task_id>/cancel")
+def system_cancel_background_task(task_id: str):
+    """统一取消后台任务 API
+
+    task_id 格式: <source>:<id>
+    例如:
+    - netinsight:ni-20250101-120000-abc123
+    - report:report-20250101-120000-abc123
+    - stopword:sw-20250101-120000-abc123
+    - publisher-detection:pd-20250101-120000-abc123
+    - deduplicate:<topic>:<database>
+    - postclean:<topic>:<database>
+    - fetch-refresh:<topic>:<database>
+    """
+    if not task_id or ":" not in task_id:
+        return error("无效的任务ID格式", 400)
+
+    parts = task_id.split(":", 1)
+    source = parts[0]
+    actual_id = parts[1]
+
+    try:
+        if source == "netinsight":
+            from src.netinsight import cancel_task as cancel_netinsight_task
+            task = cancel_netinsight_task(actual_id)
+            return success({"data": task})
+
+        elif source == "report":
+            from src.report.task_queue import cancel_task as cancel_report_task
+            task = cancel_report_task(actual_id)
+            return success({"data": task})
+
+        elif source == "stopword":
+            task = cancel_stopword_task(actual_id)
+            return success({"data": task})
+
+        elif source == "publisher-detection":
+            task = cancel_publisher_detection_task(actual_id)
+            return success({"data": task})
+
+        elif source == "deduplicate":
+            # deduplicate id format: <topic>:<database>
+            sub_parts = actual_id.split(":", 1)
+            if len(sub_parts) != 2:
+                return error("无效的去重任务ID格式", 400)
+            topic, database = sub_parts
+            result = cancel_deduplicate_job(topic, database)
+            if result is None:
+                return error("未找到去重任务", 404)
+            return success({"data": result})
+
+        elif source == "postclean":
+            # postclean id format: <topic>:<database>
+            sub_parts = actual_id.split(":", 1)
+            if len(sub_parts) != 2:
+                return error("无效的后清洗任务ID格式", 400)
+            topic, database = sub_parts
+            result = cancel_postclean_job(topic, database)
+            if result is None:
+                return error("未找到后清洗任务", 404)
+            return success({"data": result})
+
+        else:
+            return error(f"不支持的任务类型: {source}", 400)
+
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except ValueError as exc:
+        return error(str(exc), 409)
+    except Exception as exc:
+        LOGGER.exception("Failed to cancel background task: %s", task_id)
+        return error(f"取消任务失败: {str(exc)}", 500)
+
+
+@app.delete("/api/system/background-tasks/<string:task_id>")
+def system_delete_background_task(task_id: str):
+    """统一删除后台任务 API（只能删除已结束的任务）
+
+    task_id 格式与取消API相同
+    """
+    if not task_id or ":" not in task_id:
+        return error("无效的任务ID格式", 400)
+
+    parts = task_id.split(":", 1)
+    source = parts[0]
+    actual_id = parts[1]
+
+    try:
+        if source == "netinsight":
+            from src.netinsight import delete_task as delete_netinsight_task
+            delete_netinsight_task(actual_id)
+            return success({"data": {"deleted": task_id}})
+
+        elif source == "report":
+            # report 任务暂不支持删除
+            return error("报告任务暂不支持删除", 400)
+
+        elif source == "stopword":
+            delete_stopword_task(actual_id)
+            return success({"data": {"deleted": task_id}})
+
+        elif source == "publisher-detection":
+            delete_publisher_detection_task(actual_id)
+            return success({"data": {"deleted": task_id}})
+
+        elif source == "deduplicate":
+            sub_parts = actual_id.split(":", 1)
+            if len(sub_parts) != 2:
+                return error("无效的去重任务ID格式", 400)
+            topic, database = sub_parts
+            deleted = delete_deduplicate_job(topic, database)
+            return success({"data": {"deleted": task_id, "found": deleted}})
+
+        elif source == "postclean":
+            sub_parts = actual_id.split(":", 1)
+            if len(sub_parts) != 2:
+                return error("无效的后清洗任务ID格式", 400)
+            topic, database = sub_parts
+            deleted = delete_postclean_job(topic, database)
+            return success({"data": {"deleted": task_id, "found": deleted}})
+
+        else:
+            return error(f"不支持的任务类型: {source}", 400)
+
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except ValueError as exc:
+        return error(str(exc), 409)
+    except Exception as exc:
+        LOGGER.exception("Failed to delete background任务: %s", task_id)
+        return error(f"删除任务失败: {str(exc)}", 500)
 
 
 @app.get("/api/config")
@@ -1626,6 +1885,57 @@ def upload_endpoint():
             prepare_intermediate_value.strip().lower() in {"1", "true", "yes", "on"}
         )
 
+    # 处理从 fetch 重建参数
+    rebuild_from_fetch_value = payload.get("rebuild_from_fetch")
+    rebuild_from_fetch = False
+    fetch_date = str(payload.get("fetch_date") or "").strip()
+    if isinstance(rebuild_from_fetch_value, bool):
+        rebuild_from_fetch = rebuild_from_fetch_value
+    elif isinstance(rebuild_from_fetch_value, str):
+        rebuild_from_fetch = (
+            rebuild_from_fetch_value.strip().lower() in {"1", "true", "yes", "on"}
+        )
+
+    # 如果是 fetch 重建，使用后台任务模式
+    if rebuild_from_fetch:
+        database = display_name or topic_identifier
+        existing = get_rebuild_fetch_job(topic_identifier, database, fetch_date)
+        if existing and str(existing.get("status") or "").strip() in {"queued", "running"}:
+            return jsonify({
+                "status": "accepted",
+                "operation": "rebuild-fetch",
+                "reused": True,
+                "data": existing,
+            }), 202
+
+        create_rebuild_fetch_job(
+            topic_identifier,
+            database,
+            fetch_date,
+            message="任务已创建，等待执行...",
+            progress={"percentage": 0},
+        )
+        _submit_rebuild_fetch_job(
+            topic_identifier=topic_identifier,
+            database=database,
+            fetch_date=fetch_date,
+            date=date,
+            log_project=log_project,
+            display_name=display_name,
+        )
+        return jsonify({
+            "status": "accepted",
+            "operation": "rebuild-fetch",
+            "reused": False,
+            "data": {
+                "topic": topic_identifier,
+                "database": database,
+                "fetch_date": fetch_date,
+                "status": "queued",
+                "message": "已从本地缓存重建数据库任务提交",
+            },
+        }), 202
+
     from src.update import run_update  # type: ignore
 
     response, code = _execute_operation(
@@ -1647,6 +1957,53 @@ def upload_endpoint():
         },
     )
     return jsonify(response), code
+
+
+@app.get("/api/upload/rebuild-fetch/status")
+def upload_rebuild_fetch_status_endpoint():
+    """获取 fetch 重建任务状态"""
+    topic = str(request.args.get("topic") or "").strip()
+    project = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    database = str(request.args.get("database") or "").strip()
+    fetch_date = str(request.args.get("fetch_date") or "").strip()
+
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+    if not database:
+        return jsonify({"status": "error", "message": "Missing required field(s): database"}), 400
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(
+            {
+                "topic": topic,
+                "project": project,
+                "dataset_id": dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    job = get_rebuild_fetch_job(topic_identifier, database, fetch_date)
+    if not job:
+        return jsonify({
+            "status": "ok",
+            "operation": "rebuild-fetch-status",
+            "data": {
+                "topic": topic_identifier,
+                "database": database,
+                "fetch_date": fetch_date,
+                "status": "idle",
+                "message": "无运行中的任务",
+            },
+        }), 200
+
+    return jsonify({
+        "status": "ok",
+        "operation": "rebuild-fetch-status",
+        "data": job,
+    }), 200
 
 
 @app.post("/api/pipeline")
@@ -2548,6 +2905,19 @@ def project_fetch_cache(name: str):
         resolution_payload["dataset_id"] = dataset_id
     response_payload, status_code = _build_fetch_cache_response(resolution_payload)
     return jsonify(response_payload), status_code
+
+
+@app.get("/api/projects/<string:name>/fetch-dates")
+def project_fetch_dates(name: str):
+    """获取项目的 fetch 层缓存日期列表"""
+    fetch_base = DATA_PROJECTS_ROOT / name / "fetch"
+    dates = []
+    if fetch_base.exists():
+        for item in fetch_base.iterdir():
+            if item.is_dir():
+                dates.append(item.name)
+    dates.sort(reverse=True)
+    return jsonify({"status": "ok", "dates": dates})
 
 
 @app.get("/api/fetch/cache")

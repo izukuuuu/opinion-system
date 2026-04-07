@@ -35,6 +35,16 @@
     border-color: var(--color-border-soft);
   }
 
+  .settings-route-shell > .card-surface {
+    background:
+      linear-gradient(
+        180deg,
+        rgb(var(--color-brand-50) / 0.05) 0px,
+        rgb(var(--color-accent-50) / 0.03) 76px,
+        var(--color-surface) 164px
+      );
+  }
+
   .btn-base {
     @apply inline-flex items-center justify-center rounded-full border border-transparent text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2;
   }

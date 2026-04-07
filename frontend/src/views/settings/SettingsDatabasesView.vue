@@ -39,6 +39,9 @@
             {{ connection.engine }} · {{ connection.url }}
           </p>
           <p class="text-sm text-secondary">
+            主键：<code class="text-xs bg-surface-muted px-1 rounded">{{ connection.primary_key || 'id' }}</code>
+          </p>
+          <p class="text-sm text-secondary">
             {{ connection.description || "暂无描述" }}
           </p>
         </div>
@@ -167,6 +170,13 @@
               {{ databaseForm.url || '等待输入...' }}
             </div>
 
+            <label class="flex flex-col gap-2 text-sm font-medium text-secondary">
+              <span>主键字段</span>
+              <input v-model.trim="databaseForm.primary_key" type="text" placeholder="id"
+                class="input" />
+              <span class="text-xs text-muted">数据表建表时使用的主键列名，默认为 <code>id</code></span>
+            </label>
+
             <label class="md:col-span-2 flex flex-col gap-2 text-sm font-medium text-secondary">
               <span>描述</span>
               <textarea v-model.trim="databaseForm.description" rows="3" placeholder="用途说明（可选）"
@@ -216,6 +226,7 @@ const databaseForm = reactive({
   name: "",
   engine: "",
   url: "",
+  primary_key: "",
   description: "",
   set_active: false,
 });
@@ -288,6 +299,7 @@ const resetDatabaseForm = () => {
   databaseForm.name = "";
   databaseForm.engine = "";
   databaseForm.url = "";
+  databaseForm.primary_key = "";
   databaseForm.description = "";
   databaseForm.set_active = false;
 
@@ -351,6 +363,7 @@ const editDatabaseConnection = (connection) => {
   databaseForm.name = connection.name || "";
   databaseForm.engine = connection.engine || "";
   databaseForm.url = connection.url || "";
+  databaseForm.primary_key = connection.primary_key || "";
   databaseForm.description = connection.description || "";
   databaseForm.set_active = databaseState.active === connection.id;
 
@@ -385,6 +398,7 @@ const handleDatabaseModalConfirm = async () => {
     name: (databaseForm.name || "").trim(),
     engine: (databaseForm.engine || "").trim(),
     url: (databaseForm.url || "").trim(),
+    primary_key: (databaseForm.primary_key || "").trim() || "id",
     description: (databaseForm.description || "").trim(),
     set_active: databaseForm.set_active,
   };

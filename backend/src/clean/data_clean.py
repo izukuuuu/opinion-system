@@ -138,7 +138,7 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
 
     jsonl_files = sorted(merge_dir.glob("*.jsonl"))
     if not jsonl_files:
-        log_error(logger, f"未在 {merge_dir} 找到任何渠道 JSONL 文件")
+        log_error(logger, f"未在 {merge_dir} 找到任何渠道 JSONL 文件", "Clean")
         return False
 
     date_digits = date.replace('-', '')

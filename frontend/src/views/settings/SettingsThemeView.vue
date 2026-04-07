@@ -5,7 +5,7 @@
         <p class="settings-page-eyebrow">颜色</p>
         <h1 class="settings-page-title">主题颜色管理</h1>
         <p class="settings-page-desc max-w-3xl">
-          调整系统主题色板以适配不同品牌形象。变更会立即应用到当前会话并保存在浏览器本地，可随时导入或导出 JSON 配置。
+          切换后在当前会话中立即生效。
         </p>
       </div>
       <button
@@ -22,7 +22,7 @@
     <AppModal
       v-model="confirmReset"
       title="确认重置"
-      description="确定要将主题色恢复到默认配置吗？此操作会清除所有已保存的自定义颜色。"
+      description="确定要恢复到 Baby Blue 默认主题吗？此操作会清除当前主题和所有手动微调。"
       cancel-text="取消"
       confirm-text="重置"
       confirm-tone="danger"

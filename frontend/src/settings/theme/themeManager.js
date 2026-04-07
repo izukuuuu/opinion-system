@@ -1,68 +1,159 @@
-import { defaultThemeValues, managedThemeVariables } from './defaultPalette'
+import {
+  defaultThemePresetId,
+  defaultThemeValues,
+  managedThemeVariables,
+  themePresets
+} from "./defaultPalette"
 
-const STORAGE_KEY = 'opinion-system.theme.overrides'
+const STORAGE_KEY = "opinion-system.theme.overrides"
 
-const isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined'
+const isBrowser = typeof window !== "undefined" && typeof document !== "undefined"
 
-export function loadThemeOverrides() {
-  if (!isBrowser) {
+const themePresetMap = new Map(themePresets.map((preset) => [preset.id, preset]))
+
+function sanitizeOverrides(overrides) {
+  if (!overrides || typeof overrides !== "object") {
     return {}
   }
 
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY)
-    if (!stored) return {}
-    const parsed = JSON.parse(stored)
-    if (parsed && typeof parsed === 'object') {
-      return Object.fromEntries(
-        Object.entries(parsed)
-          .filter(([key, value]) => managedThemeVariables.includes(key) && typeof value === 'string')
-          .map(([key, value]) => [key, value.trim()])
-      )
+  return Object.fromEntries(
+    Object.entries(overrides)
+      .filter(([key, value]) => managedThemeVariables.includes(key) && typeof value === "string")
+      .map(([key, value]) => [key, value.trim()])
+      .filter(([, value]) => Boolean(value))
+  )
+}
+
+function sanitizePresetId(presetId) {
+  return themePresetMap.has(presetId) ? presetId : defaultThemePresetId
+}
+
+function parseThemeState(rawValue) {
+  if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
+    return {
+      state: { presetId: defaultThemePresetId, overrides: {} },
+      shouldNormalize: false
     }
-    return {}
-  } catch (error) {
-    console.warn('读取主题颜色配置失败，将使用默认值。', error)
-    return {}
+  }
+
+  if ("presetId" in rawValue || "overrides" in rawValue) {
+    return {
+      state: {
+        presetId: sanitizePresetId(rawValue.presetId),
+        overrides: sanitizeOverrides(rawValue.overrides)
+      },
+      shouldNormalize: rawValue.presetId !== sanitizePresetId(rawValue.presetId)
+    }
+  }
+
+  return {
+    state: {
+      presetId: defaultThemePresetId,
+      overrides: sanitizeOverrides(rawValue)
+    },
+    shouldNormalize: true
   }
 }
 
-export function saveThemeOverrides(overrides) {
-  if (!isBrowser) return
-  try {
-    const sanitized = Object.fromEntries(
-      Object.entries(overrides || {})
-        .filter(([variable, value]) => managedThemeVariables.includes(variable) && typeof value === 'string')
-        .map(([variable, value]) => [variable, value.trim()])
-    )
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized))
-  } catch (error) {
-    console.warn('无法保存主题颜色配置。', error)
+function composeThemeValuesFromState(state) {
+  const preset = getThemePresetDefinition(state?.presetId)
+  return {
+    ...preset.values,
+    ...sanitizeOverrides(state?.overrides)
   }
 }
 
-export function applyTheme(overrides = {}) {
+function applyThemeValues(values) {
   if (!isBrowser) return
 
   const root = document.documentElement
-
   managedThemeVariables.forEach((variable) => {
     root.style.removeProperty(variable)
   })
 
-  Object.entries(overrides).forEach(([variable, value]) => {
+  Object.entries(values).forEach(([variable, value]) => {
     if (!managedThemeVariables.includes(variable)) return
-    if (typeof value !== 'string') return
+    if (typeof value !== "string") return
     const trimmed = value.trim()
     if (!trimmed) return
     root.style.setProperty(variable, trimmed)
   })
 }
 
+export function getThemePresetDefinition(presetId = defaultThemePresetId) {
+  return themePresetMap.get(sanitizePresetId(presetId)) || themePresetMap.get(defaultThemePresetId)
+}
+
+export function loadThemeState() {
+  if (!isBrowser) {
+    return {
+      presetId: defaultThemePresetId,
+      overrides: {}
+    }
+  }
+
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY)
+    if (!stored) {
+      return {
+        presetId: defaultThemePresetId,
+        overrides: {}
+      }
+    }
+
+    const parsed = JSON.parse(stored)
+    const { state, shouldNormalize } = parseThemeState(parsed)
+    if (shouldNormalize) {
+      saveThemeState(state)
+    }
+    return state
+  } catch (error) {
+    console.warn("读取主题颜色配置失败，将使用默认值。", error)
+    return {
+      presetId: defaultThemePresetId,
+      overrides: {}
+    }
+  }
+}
+
+export function loadThemeOverrides() {
+  return loadThemeState().overrides
+}
+
+export function saveThemeState(state) {
+  if (!isBrowser) return
+
+  try {
+    const normalized = {
+      presetId: sanitizePresetId(state?.presetId),
+      overrides: sanitizeOverrides(state?.overrides)
+    }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
+  } catch (error) {
+    console.warn("无法保存主题颜色配置。", error)
+  }
+}
+
+export function saveThemeOverrides(overrides) {
+  const state = loadThemeState()
+  saveThemeState({
+    presetId: state.presetId,
+    overrides
+  })
+}
+
+export function applyTheme(state = loadThemeState()) {
+  if (!isBrowser) return
+  applyThemeValues(composeThemeValuesFromState(state))
+}
+
 export function initializeTheme() {
   if (!isBrowser) return
-  const overrides = loadThemeOverrides()
-  applyTheme(overrides)
+  applyTheme(loadThemeState())
+}
+
+export function getActiveThemePreset() {
+  return getThemePresetDefinition(loadThemeState().presetId)
 }
 
 export function getCurrentThemeValues() {
@@ -82,63 +173,90 @@ export function updateThemeVariable(variable, value, { persist = true } = {}) {
   if (!managedThemeVariables.includes(variable)) {
     throw new Error(`未知的主题变量：${variable}`)
   }
-  if (!isBrowser) return
+  if (!isBrowser) return {}
 
-  const overrides = loadThemeOverrides()
-  if (typeof value === 'string' && value.trim() !== '') {
-    overrides[variable] = value.trim()
+  const state = loadThemeState()
+  if (typeof value === "string" && value.trim() !== "") {
+    state.overrides[variable] = value.trim()
   } else {
-    delete overrides[variable]
+    delete state.overrides[variable]
   }
 
-  applyTheme(overrides)
+  applyTheme(state)
   if (persist) {
-    saveThemeOverrides(overrides)
+    saveThemeState(state)
   }
-  return overrides
+  return { ...state.overrides }
+}
+
+export function setThemePreset(presetId, { persist = true, clearOverrides = true } = {}) {
+  if (!themePresetMap.has(presetId)) {
+    throw new Error(`未知的主题预设：${presetId}`)
+  }
+  if (!isBrowser) {
+    return {
+      presetId,
+      overrides: {}
+    }
+  }
+
+  const state = loadThemeState()
+  state.presetId = presetId
+  if (clearOverrides) {
+    state.overrides = {}
+  }
+
+  applyTheme(state)
+  if (persist) {
+    saveThemeState(state)
+  }
+  return state
 }
 
 export function resetThemeToDefaults() {
-  if (!isBrowser) return { ...defaultThemeValues }
+  const defaultState = {
+    presetId: defaultThemePresetId,
+    overrides: {}
+  }
+
+  if (!isBrowser) {
+    return { ...defaultThemeValues }
+  }
+
   window.localStorage.removeItem(STORAGE_KEY)
-  applyTheme({})
+  applyTheme(defaultState)
   return getCurrentThemeValues()
 }
 
 export function exportThemeConfig({ includeDefaults = false } = {}) {
-  const overrides = loadThemeOverrides()
-  if (includeDefaults) {
-    return {
-      exportedAt: new Date().toISOString(),
-      overrides,
-      defaults: defaultThemeValues
-    }
-  }
-  return {
+  const state = loadThemeState()
+  const payload = {
     exportedAt: new Date().toISOString(),
-    overrides
+    presetId: state.presetId,
+    overrides: state.overrides
   }
+
+  if (includeDefaults) {
+    payload.defaults = defaultThemeValues
+  }
+
+  return payload
 }
 
 export function importThemeConfig(config) {
-  if (!isBrowser) return {}
-
-  let overrides = {}
-  if (config && typeof config === 'object') {
-    overrides = config.overrides || config
+  if (!isBrowser) {
+    return {
+      presetId: defaultThemePresetId,
+      overrides: {}
+    }
   }
 
-  if (!overrides || typeof overrides !== 'object') {
-    throw new Error('无效的主题配置文件。')
+  if (!config || typeof config !== "object") {
+    throw new Error("无效的主题配置文件。")
   }
 
-  const sanitized = Object.fromEntries(
-    Object.entries(overrides)
-      .filter(([variable, value]) => managedThemeVariables.includes(variable) && typeof value === 'string')
-      .map(([variable, value]) => [variable, value.trim()])
-  )
-
-  applyTheme(sanitized)
-  saveThemeOverrides(sanitized)
-  return sanitized
+  const { state } = parseThemeState(config)
+  applyTheme(state)
+  saveThemeState(state)
+  return state
 }

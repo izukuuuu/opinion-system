@@ -51,19 +51,28 @@ def _append_log(payload: Dict[str, Any], message: str, *, level: str = "info", e
     del logs[_LOG_LIMIT:]
 
 
-def create_deduplicate_job(topic: str, database: str, tables: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+def create_deduplicate_job(
+    topic: str,
+    database: str,
+    tables: Optional[Sequence[str]] = None,
+    *,
+    operation: str = "deduplicate",
+    initial_message: Optional[str] = None,
+) -> Dict[str, Any]:
     key = _job_key(topic, database, tables)
     with _lock:
         existing = _jobs.get(key)
         if existing and existing.get("status") == "running":
             return dict(existing)
         now = _utc_now()
+        message = str(initial_message or "数据库去重任务已提交，等待 worker 执行。").strip()
         payload = {
             "topic": key[0],
             "database": key[1],
             "tables": list(_normalise_tables(tables)),
+            "operation": str(operation or "deduplicate").strip() or "deduplicate",
             "status": "running",
-            "message": "数据库去重任务已提交，等待 worker 执行。",
+            "message": message,
             "started_at": now,
             "updated_at": now,
             "last_heartbeat": now,
@@ -71,6 +80,7 @@ def create_deduplicate_job(topic: str, database: str, tables: Optional[Sequence[
                 "total_tables": 0,
                 "completed_tables": 0,
                 "deleted_rows": 0,
+                "restored_rows": 0,
                 "current_table": "",
                 "percentage": 0,
             },
@@ -106,6 +116,7 @@ def update_deduplicate_job(
     log_message: Optional[str] = None,
     log_level: str = "info",
     log_event: str = "progress",
+    operation: Optional[str] = None,
 ) -> Dict[str, Any]:
     key = _job_key(topic, database, tables)
     with _lock:
@@ -116,6 +127,7 @@ def update_deduplicate_job(
                 "topic": key[0],
                 "database": key[1],
                 "tables": list(_normalise_tables(tables)),
+                "operation": "deduplicate",
                 "status": "idle",
                 "message": "",
                 "started_at": now,
@@ -125,6 +137,7 @@ def update_deduplicate_job(
                     "total_tables": 0,
                     "completed_tables": 0,
                     "deleted_rows": 0,
+                    "restored_rows": 0,
                     "current_table": "",
                     "percentage": 0,
                 },
@@ -133,6 +146,8 @@ def update_deduplicate_job(
             }
         if status:
             payload["status"] = str(status).strip()
+        if operation is not None:
+            payload["operation"] = str(operation or "").strip() or payload.get("operation") or "deduplicate"
         if message is not None:
             payload["message"] = str(message or "").strip()
         if isinstance(progress, dict):
@@ -160,6 +175,7 @@ def heartbeat_deduplicate_job(topic: str, database: str, tables: Optional[Sequen
                 "topic": key[0],
                 "database": key[1],
                 "tables": list(_normalise_tables(tables)),
+                "operation": "deduplicate",
                 "status": "idle",
                 "message": "",
                 "started_at": now,
@@ -169,6 +185,7 @@ def heartbeat_deduplicate_job(topic: str, database: str, tables: Optional[Sequen
                     "total_tables": 0,
                     "completed_tables": 0,
                     "deleted_rows": 0,
+                    "restored_rows": 0,
                     "current_table": "",
                     "percentage": 0,
                 },
@@ -181,10 +198,58 @@ def heartbeat_deduplicate_job(topic: str, database: str, tables: Optional[Sequen
         return dict(payload)
 
 
+def cancel_deduplicate_job(
+    topic: str,
+    database: str,
+    tables: Optional[Sequence[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """取消数据库去重任务"""
+    key = _job_key(topic, database, tables)
+    with _lock:
+        payload = _jobs.get(key)
+        if payload is None:
+            return None
+        status = str(payload.get("status") or "")
+        if status == "queued":
+            payload["status"] = "cancelled"
+            payload["message"] = "任务已取消"
+            _append_log(payload, "任务在排队阶段被取消", level="warning", event="task.cancelled")
+            _jobs[key] = payload
+            return dict(payload)
+        elif status == "running":
+            payload["cancel_requested"] = True
+            payload["message"] = "已请求取消，等待 worker 安全停止"
+            _append_log(payload, "已请求取消，等待 worker 安全停止", level="warning", event="task.cancel_requested")
+            _jobs[key] = payload
+            return dict(payload)
+        else:
+            raise ValueError(f"当前任务状态 '{status}' 不支持取消")
+
+
+def delete_deduplicate_job(
+    topic: str,
+    database: str,
+    tables: Optional[Sequence[str]] = None,
+) -> bool:
+    """删除数据库去重任务记录"""
+    key = _job_key(topic, database, tables)
+    with _lock:
+        payload = _jobs.get(key)
+        if payload is None:
+            return False
+        status = str(payload.get("status") or "")
+        if status not in {"completed", "failed", "cancelled", "error"}:
+            raise ValueError("只能删除已结束的任务")
+        del _jobs[key]
+        return True
+
+
 __all__ = [
+    "cancel_deduplicate_job",
     "create_deduplicate_job",
+    "delete_deduplicate_job",
     "get_deduplicate_job",
-    "list_deduplicate_jobs",
     "heartbeat_deduplicate_job",
+    "list_deduplicate_jobs",
     "update_deduplicate_job",
 ]

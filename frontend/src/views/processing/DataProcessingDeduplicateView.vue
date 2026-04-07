@@ -6,7 +6,7 @@
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Database Clean</p>
           <h2 class="mt-2 text-xl font-semibold text-primary">数据库去重</h2>
           <p class="mt-2 text-sm text-secondary">
-            按标准化后的 `contents` 去重，保留 `published_at` 最早、再按 `id` 最小的一条；若有删除，会自动同步本地缓存。
+            优先按链接识别明确重复；没有链接时，只合并作者、发布时间、平台和正文都一致的重复数据。缺少稳定标识的数据会保留，不再按正文单独整表删除。
           </p>
         </div>
         <button
@@ -97,6 +97,17 @@
             <p class="mt-1 text-xs text-secondary">{{ deduplicateState.message || '等待执行。' }}</p>
           </div>
 
+          <div class="rounded-2xl border border-soft bg-white px-4 py-3">
+            <p class="text-xs text-muted">最近快照</p>
+            <p class="mt-1 text-sm font-semibold text-primary">{{ latestSnapshot?.snapshot_id || '暂无快照' }}</p>
+            <p class="mt-1 text-xs text-secondary">
+              <span v-if="latestSnapshot">
+                {{ formatTimestamp(latestSnapshot.created_at) }} · {{ formatInteger(latestSnapshot.total_rows || 0) }} 条 · {{ latestSnapshot.table_count || 0 }} 张表
+              </span>
+              <span v-else>每次去重前会自动创建一次数据库快照，可用于恢复。</span>
+            </p>
+          </div>
+
           <button
             type="button"
             class="btn-primary inline-flex w-full items-center justify-center gap-2"
@@ -104,7 +115,17 @@
             @click="runDeduplicate"
           >
             <SparklesIcon class="h-4 w-4" />
-            {{ deduplicateState.running ? '去重执行中…' : '开始数据库去重' }}
+            {{ primaryActionLabel }}
+          </button>
+
+          <button
+            type="button"
+            class="inline-flex w-full items-center justify-center gap-2 rounded-full border border-soft bg-white px-4 py-2 text-sm font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="!canRestoreSnapshot || deduplicateState.running"
+            @click="restoreLatestSnapshot"
+          >
+            <ArrowPathIcon class="h-4 w-4" />
+            {{ deduplicateState.running && deduplicateState.operation === 'restore' ? '恢复执行中…' : '恢复最近快照' }}
           </button>
 
           <div class="rounded-2xl border border-soft bg-white px-4 py-4">
@@ -117,7 +138,8 @@
             </div>
             <p class="mt-3 text-xs text-secondary">
               {{ deduplicateState.progress.completed_tables }} / {{ deduplicateState.progress.total_tables }} 张表
-              <span v-if="deduplicateState.progress.deleted_rows"> · 已删除 {{ formatInteger(deduplicateState.progress.deleted_rows) }} 条</span>
+              <span v-if="deduplicateState.operation === 'restore' && deduplicateState.progress.restored_rows"> · 已恢复 {{ formatInteger(deduplicateState.progress.restored_rows) }} 条</span>
+              <span v-else-if="deduplicateState.progress.deleted_rows"> · 已删除 {{ formatInteger(deduplicateState.progress.deleted_rows) }} 条</span>
             </p>
           </div>
         </div>
@@ -135,16 +157,17 @@
       <div v-if="deduplicateResult" class="grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
         <div class="grid gap-3 sm:grid-cols-2">
           <div class="rounded-2xl border border-soft bg-surface-muted/60 px-4 py-4">
-            <p class="text-xs text-muted">删除记录</p>
-            <p class="mt-1 text-2xl font-semibold text-primary">{{ formatInteger(deduplicateResult.deleted_rows || 0) }}</p>
+            <p class="text-xs text-muted">{{ deduplicateResult.restored_rows ? '恢复记录' : '删除记录' }}</p>
+            <p class="mt-1 text-2xl font-semibold text-primary">{{ formatInteger(deduplicateResult.restored_rows || deduplicateResult.deleted_rows || 0) }}</p>
           </div>
           <div class="rounded-2xl border border-soft bg-surface-muted/60 px-4 py-4">
             <p class="text-xs text-muted">缺失表</p>
             <p class="mt-1 text-2xl font-semibold text-primary">{{ (deduplicateResult.missing_tables || []).length }}</p>
           </div>
           <div class="rounded-2xl border border-soft bg-surface-muted/60 px-4 py-4 sm:col-span-2">
-            <p class="text-xs text-muted">缓存刷新</p>
-            <p class="mt-1 text-sm font-semibold text-primary">{{ deduplicateResult.follow_up?.message || '未返回后续动作。' }}</p>
+            <p class="text-xs text-muted">操作快照</p>
+            <p class="mt-1 text-sm font-semibold text-primary">{{ deduplicateResult.snapshot?.snapshot_id || latestSnapshot?.snapshot_id || '未返回快照信息。' }}</p>
+            <p class="mt-1 text-xs text-secondary">{{ deduplicateResult.snapshot?.path || latestSnapshot?.path || '快照路径暂不可用。' }}</p>
           </div>
         </div>
 
@@ -165,7 +188,8 @@
               </div>
               <p class="mt-2 text-xs text-secondary">
                 <span v-if="table.reason">{{ table.reason }}</span>
-                <span v-else>命中 {{ formatInteger(table.duplicate_rows || 0) }} 条，删除 {{ formatInteger(table.deleted_rows || 0) }} 条。</span>
+                <span v-else-if="table.restored_rows !== undefined">恢复 {{ formatInteger(table.restored_rows || 0) }} 条。</span>
+                <span v-else>命中 {{ formatInteger(table.duplicate_rows || 0) }} 条，删除 {{ formatInteger(table.deleted_rows || 0) }} 条，保留 {{ formatInteger(table.kept_rows || 0) }} 条。</span>
               </p>
             </div>
           </div>
@@ -220,14 +244,17 @@ const {
 const selectedTables = ref([])
 const pollTimer = ref(null)
 const deduplicateState = reactive({
+  operation: 'deduplicate',
   running: false,
   success: null,
   message: '',
+  snapshots: [],
   logs: [],
   progress: {
     total_tables: 0,
     completed_tables: 0,
     deleted_rows: 0,
+    restored_rows: 0,
     current_table: '',
     percentage: 0
   },
@@ -236,11 +263,23 @@ const deduplicateState = reactive({
 
 const canRun = computed(() => Boolean(currentProjectName.value && selectedDatabase.value))
 const deduplicateResult = computed(() => deduplicateState.result && typeof deduplicateState.result === 'object' ? deduplicateState.result : null)
+const latestSnapshot = computed(() => {
+  const resultSnapshot = deduplicateResult.value?.snapshot
+  if (resultSnapshot && typeof resultSnapshot === 'object') return resultSnapshot
+  return deduplicateState.snapshots[0] || null
+})
+const canRestoreSnapshot = computed(() => Boolean(canRun.value && latestSnapshot.value?.snapshot_id))
 const statusLabel = computed(() => {
-  if (deduplicateState.running) return '正在执行'
-  if (deduplicateState.success === true) return '已完成'
+  if (deduplicateState.running) return deduplicateState.operation === 'restore' ? '恢复执行中' : '正在执行'
+  if (deduplicateState.success === true) return deduplicateState.operation === 'restore' ? '已恢复' : '已完成'
   if (deduplicateState.success === false) return '执行失败'
   return '待执行'
+})
+const primaryActionLabel = computed(() => {
+  if (deduplicateState.running) {
+    return deduplicateState.operation === 'restore' ? '恢复执行中…' : '去重执行中…'
+  }
+  return '开始数据库去重'
 })
 
 watch(tableOptions, (items) => {
@@ -307,14 +346,17 @@ function buildTableQueryParams(params, tables) {
 
 function applyPayload(payload) {
   if (!payload || typeof payload !== 'object') return
+  deduplicateState.operation = String(payload.operation || deduplicateState.operation || 'deduplicate')
   deduplicateState.running = payload.status === 'running'
   deduplicateState.success = payload.status === 'completed' ? true : payload.status === 'error' ? false : deduplicateState.success
   deduplicateState.message = String(payload.message || deduplicateState.message || '')
+  deduplicateState.snapshots = Array.isArray(payload.snapshots) ? payload.snapshots : deduplicateState.snapshots
   deduplicateState.logs = Array.isArray(payload.logs) ? payload.logs : []
   deduplicateState.progress = {
     total_tables: Number(payload.progress?.total_tables || 0),
     completed_tables: Number(payload.progress?.completed_tables || 0),
     deleted_rows: Number(payload.progress?.deleted_rows || 0),
+    restored_rows: Number(payload.progress?.restored_rows || 0),
     current_table: String(payload.progress?.current_table || ''),
     percentage: Number(payload.progress?.percentage || 0)
   }
@@ -324,15 +366,18 @@ function applyPayload(payload) {
 }
 
 function resetState() {
+  deduplicateState.operation = 'deduplicate'
   deduplicateState.running = false
   deduplicateState.success = null
   deduplicateState.message = ''
+  deduplicateState.snapshots = []
   deduplicateState.logs = []
   deduplicateState.result = null
   deduplicateState.progress = {
     total_tables: 0,
     completed_tables: 0,
     deleted_rows: 0,
+    restored_rows: 0,
     current_table: '',
     percentage: 0
   }
@@ -340,6 +385,7 @@ function resetState() {
 
 async function runDeduplicate() {
   if (!canRun.value) return
+  deduplicateState.operation = 'deduplicate'
   deduplicateState.success = null
   deduplicateState.message = ''
   try {
@@ -359,6 +405,37 @@ async function runDeduplicate() {
   } catch (error) {
     deduplicateState.success = false
     deduplicateState.message = error instanceof Error ? error.message : '启动数据库去重失败'
+  }
+}
+
+async function restoreLatestSnapshot() {
+  if (!canRestoreSnapshot.value) return
+  const snapshotId = String(latestSnapshot.value?.snapshot_id || '').trim()
+  if (!snapshotId) return
+  if (typeof window !== 'undefined') {
+    const confirmed = window.confirm(`将把数据库恢复到快照 ${snapshotId}。当前库中的对应表会被该快照覆盖，是否继续？`)
+    if (!confirmed) return
+  }
+  deduplicateState.operation = 'restore'
+  deduplicateState.success = null
+  deduplicateState.message = ''
+  try {
+    const response = await callApi('/api/database/deduplicate/restore', {
+      method: 'POST',
+      body: JSON.stringify({
+        project: currentProjectName.value,
+        dataset_id: selectedDatasetId.value || undefined,
+        database: selectedDatabase.value,
+        snapshot_id: snapshotId
+      })
+    })
+    applyPayload(response?.data || {})
+    deduplicateState.running = true
+    deduplicateState.message = response?.data?.message || '数据库恢复任务已提交。'
+    startPolling()
+  } catch (error) {
+    deduplicateState.success = false
+    deduplicateState.message = error instanceof Error ? error.message : '启动数据库恢复失败'
   }
 }
 

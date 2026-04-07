@@ -17,9 +17,14 @@
       </p>
 
       <section class="settings-section">
-        <div class="settings-section-header">
-          <h2 class="settings-section-title">API 凭证</h2>
-          <p class="settings-section-desc">保存通义千问、OpenAI 兼容接口的访问凭证和默认请求地址。</p>
+        <div class="flex items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-soft">
+            <KeyIcon class="h-4 w-4 text-brand" />
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-primary">凭证</h3>
+            <p class="text-xs text-muted">保存通义千问和 OpenAI 兼容接口的访问凭证与默认地址。</p>
+          </div>
         </div>
         <div class="space-y-8">
           <div class="grid gap-8 md:grid-cols-2">
@@ -125,18 +130,26 @@
       </section>
 
       <section class="settings-section border-t border-soft/60 pt-6">
-        <div class="settings-section-header">
-          <h2 class="settings-section-title">调用模型</h2>
-          <p class="settings-section-desc">配置默认对话、筛选和向量能力，也可以查看知识库使用说明。</p>
+        <div class="flex items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-soft">
+            <CpuChipIcon class="h-4 w-4 text-brand" />
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-primary">调用模型</h3>
+            <p class="text-xs text-muted">配置对话、筛选和向量模型，也可以查看知识库参考说明。</p>
+          </div>
         </div>
-        <div class="space-y-10">
-          <form @submit.prevent="submitLlmAssistant" class="space-y-6">
+        <div class="grid gap-6 xl:grid-cols-12">
+          <form
+            @submit.prevent="submitLlmAssistant"
+            class="space-y-5 rounded-3xl border border-soft/70 bg-surface-muted/35 p-5 xl:col-span-7"
+          >
             <div class="space-y-1">
-              <h3 class="text-lg font-semibold text-primary">对话模型</h3>
+              <h3 class="text-base font-semibold text-primary">对话模型</h3>
               <p class="text-sm text-muted">用于 AI 助手问答和知识库对话。</p>
             </div>
-            <div class="grid gap-6 md:grid-cols-2">
-              <div class="md:col-span-2">
+            <div class="grid gap-5 md:grid-cols-2">
+              <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">服务提供方</label>
                 <select
                   v-model="llmState.assistant.provider"
@@ -146,7 +159,7 @@
                 </select>
               </div>
 
-              <div class="md:col-span-2">
+              <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">模型名称</label>
                 <input
                   v-model.trim="llmState.assistant.model"
@@ -170,7 +183,7 @@
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">系统提示词</label>
                 <textarea
                   v-model.trim="llmState.assistant.system_prompt"
-                  rows="4"
+                  rows="3"
                   placeholder="如：你是一个专业的舆情分析助手，请结合提供的知识库内容回答问题。"
                   class="form-textarea w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50 resize-none"
                 ></textarea>
@@ -196,29 +209,32 @@
               </div>
             </div>
             <div class="flex justify-end">
-              <button type="submit" class="btn-primary rounded-full px-6 py-3">保存对话配置</button>
+              <button type="submit" class="btn-primary rounded-full px-5 py-2.5">保存对话配置</button>
             </div>
           </form>
 
-          <div class="border-t border-soft/60 pt-10 space-y-5">
+          <div class="space-y-4 rounded-3xl border border-soft/70 bg-surface-muted/35 p-5 xl:col-span-5">
             <div class="space-y-1">
-              <h3 class="text-lg font-semibold text-primary">知识库参考</h3>
+              <h3 class="text-base font-semibold text-primary">知识库参考</h3>
               <p class="text-sm text-muted">对话时会参考你整理好的共享资料。</p>
             </div>
-            <div class="rounded-2xl bg-base-soft p-5 space-y-3 text-sm text-secondary">
+            <div class="rounded-2xl bg-base-soft p-4 space-y-3 text-sm text-secondary">
               <p>把研究文档、业务说明或标准材料整理成共享资料后，新的提问会自动参考最新内容。</p>
-              <p>如果资料较多，优先保留最常用、最权威的版本，能让引用结果更稳定。</p>
-              <p>配合上方的系统提示词，可以让回答更贴近你的业务口径。</p>
+              <p>资料较多时，优先保留最常用、最权威的版本，引用会更稳定。</p>
+              <p>配合系统提示词一起使用，回答会更贴近你的业务口径。</p>
             </div>
           </div>
 
-          <form @submit.prevent="submitLlmFilter" class="border-t border-soft/60 pt-10 space-y-6">
+          <form
+            @submit.prevent="submitLlmFilter"
+            class="space-y-5 rounded-3xl border border-soft/70 bg-surface-muted/35 p-5 xl:col-span-6"
+          >
             <div class="space-y-1">
-              <h3 class="text-lg font-semibold text-primary">筛选模型</h3>
+              <h3 class="text-base font-semibold text-primary">筛选模型</h3>
               <p class="text-sm text-muted">用于数据清洗、相关性判断和批量筛选。</p>
             </div>
-            <div class="grid gap-6 md:grid-cols-2">
-              <div class="md:col-span-2">
+            <div class="grid gap-5 md:grid-cols-2">
+              <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">服务提供方</label>
                 <select
                   v-model="llmState.filter.provider"
@@ -227,7 +243,7 @@
                   <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                 </select>
               </div>
-              <div class="md:col-span-2">
+              <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">模型名称</label>
                 <input
                   v-model.trim="llmState.filter.model"
@@ -263,17 +279,20 @@
               </div>
             </div>
             <div class="flex justify-end">
-              <button type="submit" class="btn-primary rounded-full px-6 py-3">保存筛选配置</button>
+              <button type="submit" class="btn-primary rounded-full px-5 py-2.5">保存筛选配置</button>
             </div>
           </form>
 
-          <form @submit.prevent="submitLlmEmbedding" class="border-t border-soft/60 pt-10 space-y-6">
+          <form
+            @submit.prevent="submitLlmEmbedding"
+            class="space-y-5 rounded-3xl border border-soft/70 bg-surface-muted/35 p-5 xl:col-span-6"
+          >
             <div class="space-y-1">
-              <h3 class="text-lg font-semibold text-primary">向量模型</h3>
+              <h3 class="text-base font-semibold text-primary">向量模型</h3>
               <p class="text-sm text-muted">用于检索增强生成和向量化分析。</p>
             </div>
-            <div class="grid gap-6 md:grid-cols-2">
-              <div class="md:col-span-2">
+            <div class="grid gap-5 md:grid-cols-2">
+              <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">服务提供方</label>
                 <select
                   v-model="llmState.embedding.provider"
@@ -282,7 +301,7 @@
                   <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                 </select>
               </div>
-              <div class="md:col-span-2">
+              <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">模型名称</label>
                 <input
                   v-model.trim="llmState.embedding.model"
@@ -310,16 +329,21 @@
               </div>
             </div>
             <div class="flex justify-end">
-              <button type="submit" class="btn-primary rounded-full px-6 py-3">保存向量配置</button>
+              <button type="submit" class="btn-primary rounded-full px-5 py-2.5">保存向量配置</button>
             </div>
           </form>
         </div>
       </section>
 
       <section class="settings-section border-t border-soft/60 pt-6">
-        <div class="settings-section-header">
-          <h2 class="settings-section-title">功能模型</h2>
-          <p class="settings-section-desc">这些设置会影响报告生成、摘要整理等默认功能链路。</p>
+        <div class="flex items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-soft">
+            <AdjustmentsHorizontalIcon class="h-4 w-4 text-brand" />
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-primary">功能模型</h3>
+            <p class="text-xs text-muted">这些设置会影响报告生成、摘要整理等默认功能链路。</p>
+          </div>
         </div>
         <form @submit.prevent="submitLlmLangchain" class="space-y-6">
           <div class="space-y-1">
@@ -440,9 +464,14 @@
       </section>
 
       <section class="settings-section border-t border-soft/60 pt-6">
-        <div class="settings-section-header">
-          <h2 class="settings-section-title">报告专用接入</h2>
-          <p class="settings-section-desc">为报告单独设置模型、请求地址和专用密钥。</p>
+        <div class="flex items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-soft">
+            <DocumentTextIcon class="h-4 w-4 text-brand" />
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-primary">报告专用接入</h3>
+            <p class="text-xs text-muted">为报告单独设置模型、请求地址和专用密钥。</p>
+          </div>
         </div>
         <form @submit.prevent="submitReportRuntime" class="space-y-6">
           <div class="space-y-1">
@@ -571,7 +600,13 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { CheckBadgeIcon as CheckIcon } from '@heroicons/vue/24/outline'
+import {
+  AdjustmentsHorizontalIcon,
+  CheckBadgeIcon as CheckIcon,
+  CpuChipIcon,
+  DocumentTextIcon,
+  KeyIcon,
+} from '@heroicons/vue/24/outline'
 import { useApiBase } from '../../composables/useApiBase'
 
 const { ensureApiBase } = useApiBase()

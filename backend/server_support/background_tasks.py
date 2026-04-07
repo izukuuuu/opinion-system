@@ -14,6 +14,7 @@ from .fetch_refresh_jobs import (
 from .deduplicate_jobs import list_deduplicate_jobs
 from .postclean_jobs import list_postclean_jobs
 from .publisher_detection import load_worker_status as load_publisher_detection_worker_status
+from .rebuild_fetch_jobs import list_rebuild_fetch_jobs
 from .stopword_suggestions import load_worker_status as load_stopword_worker_status
 
 ACTIVE_STATUSES = {"queued", "running"}
@@ -64,6 +65,7 @@ def collect_background_task_payload(*, active_only: bool = True, limit: int = _D
         _collect_postclean_tasks,
         _collect_deduplicate_tasks,
         _collect_fetch_refresh_tasks,
+        _collect_rebuild_fetch_tasks,
     ):
         try:
             collector_tasks, collector_workers = collector(active_only=active_only)
@@ -211,6 +213,51 @@ def _collect_fetch_refresh_tasks(*, active_only: bool) -> Tuple[List[Dict[str, A
             continue
         tasks.append(_normalise_fetch_refresh_task(job, worker_payload))
     return tasks, [worker_payload]
+
+
+def _collect_rebuild_fetch_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    jobs = list_rebuild_fetch_jobs()
+    tasks = []
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        if not _include_task(job, active_only=active_only):
+            continue
+        tasks.append(_normalise_rebuild_fetch_task(job))
+    return tasks, []
+
+
+def _normalise_rebuild_fetch_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
+    percentage = _safe_int(progress.get("percentage"), 0)
+    total_tables = _safe_int(progress.get("total_tables"), 0)
+    completed_tables = _safe_int(progress.get("completed_tables"), 0)
+    uploaded_rows = _safe_int(progress.get("uploaded_rows"), 0)
+    progress_text = f"{completed_tables} / {total_tables} 表" if total_tables > 0 else f"{percentage}%"
+    if uploaded_rows > 0:
+        progress_text = f"{progress_text} · {uploaded_rows} 条记录"
+    status = _normalise_status(task.get("status"))
+    return {
+        "id": f"rebuild-fetch:{str(task.get('topic') or '').strip()}:{str(task.get('database') or '').strip()}:{str(task.get('fetch_date') or '').strip()}",
+        "task_id": "",
+        "source": "rebuild-fetch",
+        "source_label": "缓存重建",
+        "title": f"{str(task.get('database') or '数据库').strip()} 缓存重建",
+        "scope": f"{str(task.get('fetch_date') or '').strip()}",
+        "status": "failed" if status == "error" else status,
+        "phase": "persist" if status == "running" else status,
+        "phase_label": "重建中" if status == "running" else GENERIC_PHASE_LABELS.get(status, status or "处理中"),
+        "message": str(task.get("message") or "").strip() or "等待处理。",
+        "percentage": percentage,
+        "progress_text": progress_text,
+        "detail_text": str(progress.get("current_table") or "").strip(),
+        "updated_at": str(task.get("updated_at") or "").strip(),
+        "started_at": str(task.get("created_at") or "").strip(),
+        "finished_at": str(task.get("finished_at") or "").strip(),
+        "heartbeat_at": str(task.get("last_heartbeat") or task.get("updated_at") or "").strip(),
+        "heartbeat_stale": _is_stale_timestamp(task.get("last_heartbeat") or task.get("updated_at")),
+        "worker_pid": 0,
+    }
 
 
 def _normalise_report_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict[str, Any]:
@@ -445,20 +492,24 @@ def _normalise_deduplicate_task(task: Dict[str, Any]) -> Dict[str, Any]:
     total_tables = _safe_int(progress.get("total_tables"), 0)
     completed_tables = _safe_int(progress.get("completed_tables"), 0)
     deleted_rows = _safe_int(progress.get("deleted_rows"), 0)
+    restored_rows = _safe_int(progress.get("restored_rows"), 0)
+    operation = str(task.get("operation") or "deduplicate").strip() or "deduplicate"
     progress_text = f"{completed_tables} / {total_tables} 表" if total_tables > 0 else f"{percentage}%"
-    if deleted_rows > 0:
+    if operation == "restore" and restored_rows > 0:
+        progress_text = f"{progress_text} · 恢复 {restored_rows} 条"
+    elif deleted_rows > 0:
         progress_text = f"{progress_text} · 删除 {deleted_rows} 条"
     status = _normalise_status(task.get("status"))
     return {
         "id": f"deduplicate:{str(task.get('topic') or '').strip()}:{str(task.get('database') or '').strip()}",
         "task_id": "",
         "source": "deduplicate",
-        "source_label": "数据库去重",
-        "title": f"{str(task.get('database') or '数据库').strip()} 去重",
+        "source_label": "数据库恢复" if operation == "restore" else "数据库去重",
+        "title": f"{str(task.get('database') or '数据库').strip()} {'恢复' if operation == 'restore' else '去重'}",
         "scope": str(task.get("topic") or "").strip(),
         "status": "failed" if status == "error" else status,
-        "phase": "dedupe" if status == "running" else status,
-        "phase_label": "去重处理中" if status == "running" else GENERIC_PHASE_LABELS.get(status, status or "处理中"),
+        "phase": "restore" if operation == "restore" and status == "running" else "dedupe" if status == "running" else status,
+        "phase_label": ("恢复处理中" if operation == "restore" else "去重处理中") if status == "running" else GENERIC_PHASE_LABELS.get(status, status or "处理中"),
         "message": str(task.get("message") or "").strip() or "等待处理。",
         "percentage": percentage,
         "progress_text": progress_text,

@@ -138,11 +138,7 @@
             </div>
             <span class="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">{{ stopwordList.length }} 项</span>
           </div>
-          <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-soft bg-white px-4 py-4">
-            <div class="space-y-1">
-              <p class="text-xs text-muted">维护方式</p>
-              <p class="text-sm font-semibold text-primary">支持直接编辑，也支持打开排除词弹窗查看高频词建议。</p>
-            </div>
+          <div class="flex flex-wrap items-center justify-end gap-3 rounded-2xl border border-soft bg-white px-4 py-4">
             <button
               type="button"
               class="btn-primary inline-flex items-center gap-2"
@@ -158,6 +154,16 @@
             class="input min-h-[16rem] resize-y"
             placeholder="每行一个排除词"
           />
+          <div class="flex justify-end pt-1">
+            <button
+              type="button"
+              class="btn-primary inline-flex items-center gap-2"
+              :disabled="!currentProjectName"
+              @click="openStopwordModal"
+            >
+              打开排除词弹窗
+            </button>
+          </div>
         </div>
 
         <div class="space-y-3 rounded-3xl border border-soft bg-surface-muted/60 p-5">
@@ -168,12 +174,34 @@
             </div>
             <span class="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">{{ blacklistList.length }} 项</span>
           </div>
+          <div class="flex flex-wrap items-center justify-end gap-3 rounded-2xl border border-soft bg-white px-4 py-4">
+            <button
+              type="button"
+              class="btn-primary inline-flex items-center gap-2"
+              :disabled="!canInspectPublishers"
+              @click="openPublisherModal"
+            >
+              <ArrowPathIcon class="h-4 w-4" :class="publisherDetectionState.loading ? 'animate-spin' : ''" />
+              打开异常发布者识别弹窗
+            </button>
+          </div>
           <textarea
             v-model="sharedPromptState.publisherBlacklistText"
             rows="12"
             class="input min-h-[16rem] resize-y"
             placeholder="每行一个发布者"
           />
+          <div class="flex justify-end pt-1">
+            <button
+              type="button"
+              class="btn-primary inline-flex items-center gap-2"
+              :disabled="!canInspectPublishers"
+              @click="openPublisherModal"
+            >
+              <ArrowPathIcon class="h-4 w-4" :class="publisherDetectionState.loading ? 'animate-spin' : ''" />
+              打开异常发布者识别弹窗
+            </button>
+          </div>
         </div>
       </div>
 
@@ -187,15 +215,6 @@
           <CheckIcon class="h-4 w-4" />
           {{ sharedPromptState.saving ? '保存中…' : '保存共享配置' }}
         </button>
-        <button
-          type="button"
-          class="btn-secondary inline-flex items-center gap-2"
-          :disabled="!canInspectPublishers"
-          @click="openPublisherModal"
-        >
-          <ArrowPathIcon class="h-4 w-4" :class="publisherDetectionState.loading ? 'animate-spin' : ''" />
-          打开异常发布者识别弹窗
-        </button>
         <p v-if="sharedPromptState.error" class="text-xs text-danger">{{ sharedPromptState.error }}</p>
         <p v-else-if="sharedPromptState.success" class="text-xs text-emerald-600">{{ sharedPromptState.success }}</p>
       </div>
@@ -205,7 +224,7 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 class="text-base font-semibold text-primary">异常发布者识别</h3>
-          <p class="mt-1 text-sm text-secondary">按当前数据库与表范围统计 Top50 发布者，并在弹窗里查看样本、管理黑名单。</p>
+          <p class="mt-1 text-sm text-secondary">打开弹窗后再查看范围、状态和样本，不在页面正文重复展示。</p>
         </div>
         <button
           type="button"
@@ -213,40 +232,9 @@
           :disabled="!canInspectPublishers"
           @click="openPublisherModal"
         >
+          <ArrowPathIcon class="h-4 w-4" :class="publisherDetectionState.loading ? 'animate-spin' : ''" />
           打开识别弹窗
         </button>
-      </div>
-
-      <div class="grid gap-4 xl:grid-cols-[0.92fr,1.08fr]">
-        <div class="rounded-3xl border border-soft bg-surface-muted/60 p-5">
-          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">识别范围</p>
-          <p class="mt-2 text-sm font-semibold text-primary">{{ currentProjectName || '未选择项目' }}</p>
-          <p class="mt-2 text-sm text-secondary">
-            数据库 {{ selectedDatabase || '—' }} · 表 {{ selectedTables.length || tableOptions.length ? selectedTables.length : 0 }} / {{ tableOptions.length }}
-          </p>
-          <p class="mt-3 text-xs leading-6 text-secondary">
-            弹窗会先恢复当前范围的后台任务状态。若已有完成结果，会直接展示；若无任务，则手动点击“开始统计”后进入后台执行。
-          </p>
-        </div>
-
-        <div class="rounded-3xl border border-soft bg-white p-5">
-          <div class="grid gap-3 sm:grid-cols-3">
-            <div class="rounded-2xl border border-soft bg-surface-muted/60 px-4 py-4">
-              <p class="text-xs text-muted">任务状态</p>
-              <p class="mt-1 text-sm font-semibold text-primary">{{ publisherDetectionStatusLabel }}</p>
-            </div>
-            <div class="rounded-2xl border border-soft bg-surface-muted/60 px-4 py-4">
-              <p class="text-xs text-muted">候选发布者</p>
-              <p class="mt-1 text-sm font-semibold text-primary">{{ formatInteger(publisherDetectionPublishers.length) }}</p>
-            </div>
-            <div class="rounded-2xl border border-soft bg-surface-muted/60 px-4 py-4">
-              <p class="text-xs text-muted">最近结果</p>
-              <p class="mt-1 text-sm font-semibold text-primary">{{ publisherDetectionResultGeneratedAt ? formatTimestamp(publisherDetectionResultGeneratedAt) : '暂无' }}</p>
-            </div>
-          </div>
-          <p class="mt-4 text-sm text-secondary">{{ publisherDetectionTask?.message || '点击“打开识别弹窗”后可查看后台任务状态与发布者样本。' }}</p>
-          <p v-if="publisherDetectionState.error" class="mt-3 text-xs text-danger">{{ publisherDetectionState.error }}</p>
-        </div>
       </div>
     </section>
 
@@ -819,7 +807,10 @@ const canInspectPublishers = computed(() => Boolean(currentProjectName.value && 
 const postcleanResult = computed(() => postcleanState.result && typeof postcleanState.result === 'object' ? postcleanState.result : null)
 const statusLabel = computed(() => {
   if (postcleanState.running) return '正在执行'
-  if (postcleanState.success === true) return '已完成'
+  if (postcleanState.success === true) {
+    const deletedRows = Number(postcleanResult.value?.deleted_rows || postcleanState.progress.deleted_rows || 0)
+    return deletedRows > 0 ? '已完成' : '已完成，未命中可删除记录'
+  }
   if (postcleanState.success === false) return '执行失败'
   return '待执行'
 })

@@ -115,7 +115,7 @@
       </transition>
 
       <div class="space-y-3 pt-4">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div class="flex flex-wrap items-center gap-3">
             <button type="button"
               class="inline-flex items-center gap-3 rounded-full bg-brand-600 px-8 py-3 text-sm font-bold text-white transition-all hover:bg-brand-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
@@ -131,7 +131,49 @@
             </button>
           </div>
         </div>
-        <p class="text-[10px] text-muted pl-1 opacity-70">跳过筛选时，会先自动从 clean 层生成 filter 中间数据。</p>
+        <p class="text-[10px] text-muted pl-1 opacity-70">跳过筛选时，会从 clean 层直接生成 filter 中间数据后入库。</p>
+
+        <!-- 高级选项：由本地缓存重建 -->
+        <div class="pt-4 border-t border-soft">
+          <button type="button" @click="showAdvanced = !showAdvanced"
+            class="flex items-center gap-2 text-xs font-medium text-secondary hover:text-primary transition-colors">
+            <ChevronDownIcon class="h-4 w-4 transition-transform" :class="showAdvanced ? 'rotate-180' : ''" />
+            <span>高级选项</span>
+          </button>
+          <transition name="fade">
+            <div v-if="showAdvanced" class="mt-4 space-y-4">
+              <div class="rounded-2xl border border-amber-200 bg-amber-50/50 p-5 space-y-4">
+                <div class="space-y-1">
+                  <h3 class="text-sm font-bold text-amber-800">由本地缓存重建</h3>
+                  <p class="text-xs text-amber-600">直接从 fetch 层本地缓存数据重建数据库，不经过 merge/clean/filter 流程。</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                  <button type="button"
+                    class="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-white px-5 py-2 text-xs font-bold text-amber-700 transition-all hover:bg-amber-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="fetchDatesLoading" @click="loadFetchDates">
+                    <ArrowPathIcon class="h-4 w-4" :class="{ 'animate-spin': fetchDatesLoading }" />
+                    <span>获取缓存时间</span>
+                  </button>
+                  <template v-if="fetchDates.length > 0">
+                    <select v-model="selectedFetchDate"
+                      class="rounded-xl border border-amber-200 bg-white px-4 py-2 text-xs text-primary focus:border-amber-400 focus:outline-none">
+                      <option v-for="date in fetchDates" :key="date" :value="date">{{ date }}</option>
+                    </select>
+                    <button type="button"
+                      class="inline-flex items-center gap-2 rounded-full bg-amber-600 px-5 py-2 text-xs font-bold text-white transition-all hover:bg-amber-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                      :disabled="uploadState.running || !selectedFetchDate" @click="runUpload({ rebuildFromFetch: true, fetchDate: selectedFetchDate })">
+                      <CircleStackIcon class="h-4 w-4" />
+                      <span>{{ uploadState.running ? '重建中...' : '开始重建' }}</span>
+                    </button>
+                  </template>
+                  <span v-else-if="fetchDatesLoaded && fetchDates.length === 0" class="text-xs text-amber-600">暂无本地缓存</span>
+                </div>
+                <p v-if="fetchDatesError" class="text-xs text-rose-600">{{ fetchDatesError }}</p>
+              </div>
+            </div>
+          </transition>
+        </div>
+
         <transition name="fade">
           <div v-if="uploadState.message || parameterError" class="flex items-center gap-2 px-6 py-3 rounded-2xl border"
             :class="(uploadState.success && !parameterError) ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'">
@@ -143,68 +185,55 @@
     </section>
 
     <!-- History -->
-    <section class="mute-card-surface p-8 space-y-8">
-      <header class="flex flex-wrap items-center justify-between gap-6">
-        <div class="space-y-1">
-          <h2 class="text-lg font-bold text-primary">传输历史记录</h2>
-          <p class="text-xs text-secondary font-medium">最近完成的数据入库任务流水。</p>
-        </div>
-        <div class="flex items-center gap-2 bg-white px-4 py-2 rounded-full border border-black/5">
-          <div class="w-1.5 h-1.5 rounded-full bg-brand-500"></div>
-          <span class="text-[10px] font-bold text-secondary tracking-widest uppercase">History Logs</span>
-        </div>
+    <section class="mute-card-surface p-8 space-y-6">
+      <header class="space-y-1">
+        <h2 class="text-lg font-bold text-primary">传输历史记录</h2>
+        <p class="text-xs text-secondary font-medium">最近完成的数据入库任务流水。</p>
       </header>
 
       <div v-if="!runHistory.length"
-        class="flex flex-col items-center justify-center py-20 rounded-[2rem] border-2 border-dashed border-black/5 bg-white/50 text-secondary">
-        <ArchiveBoxIcon class="h-12 w-12 text-black/10 mb-4" />
-        <span class="text-xs font-bold opacity-40">暂无入库运行记录</span>
+        class="flex flex-col items-center justify-center rounded-3xl border border-dashed border-soft bg-surface px-6 py-16 text-center text-secondary">
+        <ArchiveBoxIcon class="mb-4 h-12 w-12 text-muted/40" />
+        <span class="text-sm font-semibold text-primary">暂无入库运行记录</span>
+        <p class="mt-2 text-xs text-secondary">完成一次入库后，最近任务会显示在这里。</p>
       </div>
 
-      <div v-else class="grid gap-4">
+      <div v-else class="space-y-4">
         <transition-group name="list">
           <article v-for="entry in runHistory" :key="entry.timestamp"
-            class="relative overflow-hidden rounded-[1.5rem] bg-white p-6 border border-black/5 transition hover:border-brand-200 group">
-            <div class="flex flex-wrap items-start justify-between gap-6">
-              <div class="space-y-3">
-                <div class="flex items-center gap-3">
-                  <div class="h-8 w-8 rounded-lg flex items-center justify-center border border-black/5"
-                    :class="entry.success ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'">
-                    <CheckIcon v-if="entry.success" class="h-4 w-4" />
-                    <XMarkIcon v-else class="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h3 class="text-sm font-black text-primary group-hover:text-brand-600 transition-colors">{{
-                      entry.topic_label || '未命名数据集' }}</h3>
-                  </div>
-                </div>
-                <div
-                  class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-bold text-secondary opacity-60 pl-11">
-                  <span class="flex items-center gap-1.5">
-                    <RectangleStackIcon class="h-3.5 w-3.5" /> {{ entry.project }}
-                  </span>
-                  <span class="flex items-center gap-1.5">
-                    <CalendarDaysIcon class="h-3.5 w-3.5" /> {{ entry.date }}
-                  </span>
-                  <span class="flex items-center gap-1.5">
-                    <ClockIcon class="h-3.5 w-3.5" /> {{ formatHistoryTimestamp(entry.timestamp).split(' ')[1] }}
-                  </span>
-                  <span class="rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-secondary/80">
-                    {{ entry.mode === 'direct' ? '跳过筛选' : '筛选入库' }}
-                  </span>
-                </div>
+            class="card-surface p-5 space-y-3">
+            <div class="flex items-start gap-3">
+              <div
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border"
+                :class="entry.success ? 'border-emerald-100 bg-emerald-50 text-emerald-600' : 'border-rose-100 bg-rose-50 text-rose-600'">
+                <CheckIcon v-if="entry.success" class="h-4 w-4" />
+                <XMarkIcon v-else class="h-4 w-4" />
               </div>
-              <div class="flex flex-col items-end gap-2 text-right">
-                <span class="text-[10px] font-black tracking-wider text-muted uppercase">{{
-                  formatHistoryTimestamp(entry.timestamp).split(' ')[0] }}</span>
-                <p class="text-xs font-bold text-secondary/80 max-w-sm leading-relaxed">
-                  {{ entry.message }}
-                </p>
+              <div class="min-w-0 flex-1 space-y-1">
+                <div class="flex items-center gap-2">
+                  <h3 class="text-sm font-bold text-primary">{{ entry.topic_label || '未命名数据集' }}</h3>
+                  <span
+                    class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                    :class="entry.success ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'">
+                    {{ entry.success ? '已完成' : '执行失败' }}
+                  </span>
+                </div>
+                <p class="text-xs text-secondary">{{ entry.message }}</p>
               </div>
             </div>
-            <!-- Decorative corner accent -->
-            <div
-              class="absolute -bottom-2 -right-2 h-10 w-10 bg-brand-50 group-hover:bg-brand-100 transition-colors rotate-45">
+            <div class="flex flex-wrap gap-2 pl-11">
+              <span class="inline-flex items-center gap-1 rounded-full border border-soft bg-base-soft px-2.5 py-1 text-[10px] font-medium text-secondary">
+                <RectangleStackIcon class="h-3 w-3" /> {{ entry.project }}
+              </span>
+              <span class="inline-flex items-center gap-1 rounded-full border border-soft bg-base-soft px-2.5 py-1 text-[10px] font-medium text-secondary">
+                <CalendarDaysIcon class="h-3 w-3" /> {{ entry.date }}
+              </span>
+              <span class="inline-flex items-center gap-1 rounded-full border border-soft bg-base-soft px-2.5 py-1 text-[10px] font-medium text-secondary">
+                <ClockIcon class="h-3 w-3" /> {{ formatHistoryTime(entry.timestamp) }}
+              </span>
+              <span class="inline-flex items-center rounded-full border border-soft bg-base-soft px-2.5 py-1 text-[10px] font-medium text-secondary">
+                {{ historyModeLabel(entry.mode) }}
+              </span>
             </div>
           </article>
         </transition-group>
@@ -226,7 +255,8 @@ import {
   CalendarDaysIcon,
   ClockIcon,
   RectangleStackIcon,
-  XMarkIcon
+  XMarkIcon,
+  CircleStackIcon
 } from '@heroicons/vue/24/outline'
 import { useApiBase } from '../../composables/useApiBase'
 import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
@@ -260,6 +290,14 @@ const uploadState = reactive({
   lastResponse: null
 })
 const runHistory = ref([])
+
+// 高级选项：本地缓存重建
+const showAdvanced = ref(false)
+const fetchDates = ref([])
+const fetchDatesLoading = ref(false)
+const fetchDatesLoaded = ref(false)
+const fetchDatesError = ref('')
+const selectedFetchDate = ref('')
 
 const slugifyName = (value) => {
   if (!value) return ''
@@ -367,6 +405,80 @@ const resetToToday = () => {
   processingDate.value = getToday()
 }
 
+const loadFetchDates = async () => {
+  if (!bucketName.value) {
+    fetchDatesError.value = '请先选择项目'
+    return
+  }
+  fetchDatesLoading.value = true
+  fetchDatesError.value = ''
+  fetchDatesLoaded.value = false
+  try {
+    const endpoint = await buildApiUrl(`/projects/${encodeURIComponent(bucketName.value)}/fetch-dates`)
+    const response = await fetch(endpoint)
+    const result = await response.json()
+    if (response.ok && result.status !== 'error') {
+      fetchDates.value = result.dates || []
+      if (fetchDates.value.length > 0 && !selectedFetchDate.value) {
+        selectedFetchDate.value = fetchDates.value[0]
+      }
+    } else {
+      fetchDatesError.value = result.message || '获取缓存时间失败'
+    }
+  } catch (error) {
+    fetchDatesError.value = error instanceof Error ? error.message : '网络错误'
+  } finally {
+    fetchDatesLoading.value = false
+    fetchDatesLoaded.value = true
+  }
+}
+
+// 轮询 rebuild fetch 任务状态
+let rebuildPollInterval = null
+
+const startPollingRebuildStatus = async (topic, project, topicLabel, fetchDate, params) => {
+  const database = topicLabel || topic
+  const poll = async () => {
+    try {
+      const endpoint = await buildApiUrl(`/upload/rebuild-fetch/status?topic=${encodeURIComponent(topic)}&project=${encodeURIComponent(project)}&database=${encodeURIComponent(database)}&fetch_date=${encodeURIComponent(fetchDate)}`)
+      const response = await fetch(endpoint)
+      const result = await response.json()
+
+      if (response.ok && result.status === 'ok') {
+        const job = result.data
+        const jobStatus = job.status
+
+        if (jobStatus === 'completed') {
+          uploadState.running = false
+          uploadState.success = true
+          uploadState.message = `本地缓存重建完成(${fetchDate})，共上传 ${job.result?.uploaded?.length || 0} 个表。`
+          pushHistoryEntry(params, true, uploadState.message, 'rebuild')
+          clearInterval(rebuildPollInterval)
+          rebuildPollInterval = null
+        } else if (jobStatus === 'error') {
+          uploadState.running = false
+          uploadState.success = false
+          uploadState.message = job.message || '本地缓存重建失败'
+          pushHistoryEntry(params, false, uploadState.message, 'rebuild')
+          clearInterval(rebuildPollInterval)
+          rebuildPollInterval = null
+        } else {
+          // 仍在运行中，更新进度消息
+          const progress = job.progress || {}
+          uploadState.message = `正在重建(${fetchDate})... ${progress.percentage || 0}% ${job.message || ''}`
+        }
+      }
+    } catch (error) {
+      // 轮询出错，继续尝试
+    }
+  }
+
+  // 立即执行一次，然后每2秒轮询
+  await poll()
+  if (rebuildPollInterval) clearInterval(rebuildPollInterval)
+  rebuildPollInterval = setInterval(poll, 2000)
+}
+
 const historyTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric',
   month: '2-digit',
@@ -387,6 +499,23 @@ const formatHistoryTimestamp = (value) => {
   } catch (error) {
     return value
   }
+}
+
+const splitHistoryTimestamp = (value) => {
+  const formatted = formatHistoryTimestamp(value)
+  if (!formatted) {
+    return { date: '', time: '' }
+  }
+  const [date = '', time = ''] = String(formatted).split(/\s+/, 2)
+  return { date, time }
+}
+
+const formatHistoryTime = (value) => splitHistoryTimestamp(value).time
+
+const historyModeLabel = (mode) => {
+  if (mode === 'direct') return '跳过筛选'
+  if (mode === 'rebuild') return 'fetch重建'
+  return '筛选入库'
 }
 
 const ensureParameters = () => {
@@ -430,6 +559,8 @@ const runUpload = async (options = {}) => {
   const params = ensureParameters()
   if (!params) return
   const prepareIntermediateFromClean = Boolean(options.prepareIntermediateFromClean)
+  const rebuildFromFetch = Boolean(options.rebuildFromFetch)
+  const fetchDate = options.fetchDate || ''
 
   const payload = {
     topic: params.topic,
@@ -443,6 +574,12 @@ const runUpload = async (options = {}) => {
   }
   if (prepareIntermediateFromClean) {
     payload.prepare_intermediate_from_clean = true
+  }
+  if (rebuildFromFetch) {
+    payload.rebuild_from_fetch = true
+    if (fetchDate) {
+      payload.fetch_date = fetchDate
+    }
   }
 
   uploadState.running = true
@@ -466,25 +603,39 @@ const runUpload = async (options = {}) => {
     } catch {
       result = { status: 'error', message: '无法解析后端响应' }
     }
+
+    // 如果是 rebuild fetch 任务且被接受（202），开始轮询状态
+    if (rebuildFromFetch && response.status === 202 && result.status === 'accepted') {
+      uploadState.message = `已提交本地缓存重建任务(${fetchDate})，正在执行...`
+      startPollingRebuildStatus(params.topic, params.project, params.topic_label, fetchDate, params)
+      return
+    }
+
     const ok = response.ok && result.status !== 'error'
     uploadState.success = ok
     uploadState.message = ok
-      ? (prepareIntermediateFromClean
+      ? (rebuildFromFetch
+        ? `已从本地缓存(${fetchDate || '默认'})重建数据并完成入库。`
+        : prepareIntermediateFromClean
         ? '已从清洗层生成中间数据并完成入库。'
         : '筛选结果已成功写入数据库。')
       : result.message || '入库失败，请查看后端日志。'
     uploadState.details = result.data ?? null
     uploadState.lastResponse = result
-    pushHistoryEntry(params, ok, uploadState.message, prepareIntermediateFromClean ? 'direct' : 'filter')
+    const mode = rebuildFromFetch ? 'rebuild' : (prepareIntermediateFromClean ? 'direct' : 'filter')
+    pushHistoryEntry(params, ok, uploadState.message, mode)
   } catch (error) {
     uploadState.success = false
     uploadState.message =
       error instanceof Error ? error.message : '入库失败，请检查网络或服务器状态。'
     uploadState.details = null
     uploadState.lastResponse = null
-    pushHistoryEntry(params, false, uploadState.message, prepareIntermediateFromClean ? 'direct' : 'filter')
+    const mode = rebuildFromFetch ? 'rebuild' : (prepareIntermediateFromClean ? 'direct' : 'filter')
+    pushHistoryEntry(params, false, uploadState.message, mode)
   } finally {
-    uploadState.running = false
+    if (!rebuildFromFetch) {
+      uploadState.running = false
+    }
   }
 }
 </script>

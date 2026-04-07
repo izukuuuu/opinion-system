@@ -178,10 +178,58 @@ def heartbeat_postclean_job(topic: str, database: str, tables: Optional[Sequence
         return dict(payload)
 
 
+def cancel_postclean_job(
+    topic: str,
+    database: str,
+    tables: Optional[Sequence[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """取消数据库后清洗任务"""
+    key = _job_key(topic, database, tables)
+    with _lock:
+        payload = _jobs.get(key)
+        if payload is None:
+            return None
+        status = str(payload.get("status") or "")
+        if status == "queued":
+            payload["status"] = "cancelled"
+            payload["message"] = "任务已取消"
+            _append_log(payload, "任务在排队阶段被取消", level="warning", event="task.cancelled")
+            _jobs[key] = payload
+            return dict(payload)
+        elif status == "running":
+            payload["cancel_requested"] = True
+            payload["message"] = "已请求取消，等待 worker 安全停止"
+            _append_log(payload, "已请求取消，等待 worker 安全停止", level="warning", event="task.cancel_requested")
+            _jobs[key] = payload
+            return dict(payload)
+        else:
+            raise ValueError(f"当前任务状态 '{status}' 不支持取消")
+
+
+def delete_postclean_job(
+    topic: str,
+    database: str,
+    tables: Optional[Sequence[str]] = None,
+) -> bool:
+    """删除数据库后清洗任务记录"""
+    key = _job_key(topic, database, tables)
+    with _lock:
+        payload = _jobs.get(key)
+        if payload is None:
+            return False
+        status = str(payload.get("status") or "")
+        if status not in {"completed", "failed", "cancelled", "error"}:
+            raise ValueError("只能删除已结束的任务")
+        del _jobs[key]
+        return True
+
+
 __all__ = [
+    "cancel_postclean_job",
     "create_postclean_job",
+    "delete_postclean_job",
     "get_postclean_job",
-    "list_postclean_jobs",
     "heartbeat_postclean_job",
+    "list_postclean_jobs",
     "update_postclean_job",
 ]

@@ -64,12 +64,23 @@
                     {{ task.source_label }}<span v-if="task.phase_label"> · {{ task.phase_label }}</span>
                   </p>
                 </div>
-                <span
-                  class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                  :class="statusBadgeClass(task.status)"
-                >
-                  {{ statusLabel(task.status) }}
-                </span>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button
+                    v-if="canCancel(task.status)"
+                    type="button"
+                    class="rounded-md bg-rose-50 px-2 py-1 text-[10px] font-medium text-rose-600 transition hover:bg-rose-100"
+                    :disabled="cancellingIds.has(task.id)"
+                    @click.stop="cancelTask(task)"
+                  >
+                    {{ cancellingIds.has(task.id) ? '取消中...' : '终止' }}
+                  </button>
+                  <span
+                    class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                    :class="statusBadgeClass(task.status)"
+                  >
+                    {{ statusLabel(task.status) }}
+                  </span>
+                </div>
               </div>
 
               <p v-if="task.scope" class="mt-2 truncate text-[11px] text-muted">{{ task.scope }}</p>
@@ -111,6 +122,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useBackgroundTasks } from '../composables/useBackgroundTasks'
+import { useApiBase } from '../composables/useApiBase'
 
 const props = defineProps({
   compact: {
@@ -120,10 +132,12 @@ const props = defineProps({
 })
 
 const { state, tasks, summary, activeCount, refresh, release } = useBackgroundTasks()
+const { callApi } = useApiBase()
 
 const open = ref(false)
 const rootEl = ref(null)
 const popupEl = ref(null)
+const cancellingIds = ref(new Set())
 const popupPosition = ref({
   top: 0,
   right: 16
@@ -239,6 +253,27 @@ const formatRelativeTime = (value) => {
   if (diffSeconds < 60) return `${diffSeconds} 秒前`
   if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} 分钟前`
   return `${Math.floor(diffSeconds / 3600)} 小时前`
+}
+
+const canCancel = (status) => {
+  const value = String(status || '').trim().toLowerCase()
+  return value === 'running' || value === 'queued'
+}
+
+const cancelTask = async (task) => {
+  const taskId = task?.id
+  if (!taskId || cancellingIds.value.has(taskId)) return
+
+  cancellingIds.value.add(taskId)
+  try {
+    await callApi(`/api/system/background-tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' })
+    await refresh()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || '取消任务失败')
+    alert(`取消任务失败: ${message}`)
+  } finally {
+    cancellingIds.value.delete(taskId)
+  }
 }
 
 function updatePopupPosition() {
