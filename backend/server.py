@@ -34,6 +34,7 @@ from src.utils.logging.rich_console import (
     start_status_spinner,
     stop_status_spinner,
     console,
+    update_active_tasks,
 )
 setup_rich_logging(log_level=logging.INFO, show_time=True, show_path=False)
 
@@ -1080,6 +1081,12 @@ def system_background_tasks():
         from server_support.background_tasks import collect_background_task_payload
 
         payload = collect_background_task_payload(active_only=active_only, limit=limit)
+        # 更新底部状态栏的活动任务数量
+        summary = payload.get("summary") if isinstance(payload, dict) else {}
+        workers = payload.get("workers") if isinstance(payload, dict) else []
+        running_workers = sum(1 for w in workers if isinstance(w, dict) and w.get("running"))
+        active_count = int(summary.get("active_count") or 0)
+        update_active_tasks(running_workers if running_workers > 0 else active_count)
     except Exception as exc:
         LOGGER.exception("Failed to collect background tasks")
         return error(f"读取后台任务状态失败: {str(exc)}", 500)
