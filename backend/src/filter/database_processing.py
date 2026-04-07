@@ -474,10 +474,15 @@ def _build_deduplicate_key_expr(
     strategies: List[str] = []
 
     # 1. 主键 ID 精确去重（优先级最高）
+    # id 字段可能是数值类型（bigint），需先 CAST 成文本再做字符串操作
     if "id" in active and "id" in normalised_columns:
         id_expr = _quote_identifier(dialect_name, "id")
-        id_condition = f"(COALESCE(TRIM({id_expr}), '') <> '')"
-        id_key = _concat_text_expressions(dialect_name, [_sql_literal("id:"), id_expr])
+        if _is_mysql_dialect(dialect_name):
+            id_text_expr = f"CAST({id_expr} AS CHAR)"
+        else:
+            id_text_expr = f"CAST({id_expr} AS TEXT)"
+        id_condition = f"(COALESCE(TRIM({id_text_expr}), '') <> '')"
+        id_key = _concat_text_expressions(dialect_name, [_sql_literal("id:"), id_text_expr])
         branches.append(f"WHEN {id_condition} THEN {id_key}")
         strategies.append("主键ID")
 
