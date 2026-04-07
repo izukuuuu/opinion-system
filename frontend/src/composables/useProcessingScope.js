@@ -57,7 +57,7 @@ export function useProcessingScope() {
   const tableOptions = computed(() =>
     (activeDatabase.value?.tables || []).map((table) => ({
       name: String(table?.name || '').trim(),
-      rowCount: Number(table?.row_count || 0),
+      rowCount: Number(table?.record_count ?? table?.row_count ?? 0),
       raw: table
     })).filter((item) => item.name)
   )
@@ -108,7 +108,7 @@ export function useProcessingScope() {
     try {
       const response = await callApi('/api/query', {
         method: 'POST',
-        body: JSON.stringify({ include_counts: false })
+        body: JSON.stringify({ include_counts: true })
       })
       if (response?.status !== 'ok') {
         throw new Error(response?.message || '读取数据库列表失败')

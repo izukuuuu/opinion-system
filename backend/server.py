@@ -388,6 +388,7 @@ def _submit_deduplicate_job(
     tables: Optional[List[str]],
     log_project: str,
     display_name: str,
+    dedup_fields: Optional[List[str]] = None,
 ) -> concurrent.futures.Future:
     def _job():
         stop_event = threading.Event()
@@ -428,6 +429,7 @@ def _submit_deduplicate_job(
                 topic_identifier,
                 database,
                 tables=tables,
+                dedup_fields=dedup_fields,
                 progress_callback=_on_progress,
             )
             success = evaluate_success(result)
@@ -2392,6 +2394,11 @@ def database_deduplicate_endpoint():
     if isinstance(raw_tables, list):
         tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
 
+    raw_dedup_fields = payload.get("dedup_fields")
+    dedup_fields: Optional[List[str]] = None
+    if isinstance(raw_dedup_fields, list):
+        dedup_fields = [str(f).strip().lower() for f in raw_dedup_fields if str(f or "").strip()]
+
     existing = get_deduplicate_job(topic_identifier, database, tables)
     if existing and existing.get("status") == "running":
         return jsonify({
@@ -2408,6 +2415,7 @@ def database_deduplicate_endpoint():
         tables=tables,
         log_project=log_project,
         display_name=display_name,
+        dedup_fields=dedup_fields,
     )
     return jsonify({
         "status": "accepted",

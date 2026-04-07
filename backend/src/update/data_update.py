@@ -321,7 +321,7 @@ def _rebuild_from_fetch(
     success_tables: List[Dict[str, Any]] = []
     try:
         with engine.begin() as conn:
-            # 创建表（如果不存在）
+            # 创建表（如果不存在），已存在则 TRUNCATE 清空（重建 = 全量覆盖）
             for file_path in jsonl_files:
                 table_name = file_path.stem
                 if not table_exists(conn, table_name, target_database):
@@ -330,6 +330,12 @@ def _rebuild_from_fetch(
                             {"channel": table_name, "file": file_path.name, "reason": "建表失败"}
                         )
                         continue
+                else:
+                    try:
+                        conn.execute(text(f"TRUNCATE TABLE `{table_name}`"))
+                        log_success(logger, f"已清空表 {table_name}（重建模式）", "Rebuild")
+                    except Exception as trunc_exc:
+                        log_error(logger, f"清空表 {table_name} 失败: {trunc_exc}", "Rebuild")
 
             # 上传数据
             total_rows = 0
@@ -348,15 +354,15 @@ def _rebuild_from_fetch(
                         result["skipped"].append({"channel": table_name, "reason": "无有效入库数据"})
                         continue
 
-                    # 去重（基于id字段）
+                    # 去重（基于id字段，先去文件内重复）
                     if "id" in df.columns:
                         before_count = len(df)
                         df = df.drop_duplicates(subset=["id"])
                         after_count = len(df)
                         if before_count != after_count:
-                            log_success(logger, f"{file_path.name} 去重: {before_count} -> {after_count}", "Rebuild")
+                            log_success(logger, f"{file_path.name} 文件内去重: {before_count} -> {after_count}", "Rebuild")
 
-                    # 写入数据库
+                    # 写入数据库（表已 TRUNCATE，直接 append 无主键冲突）
                     df.to_sql(
                         table_name,
                         con=engine,
@@ -473,6 +479,105 @@ def table_exists(conn, table_name: str, topic: str) -> bool:
         return inspector.has_table(table_name)
     except Exception:
         return False
+
+
+def dedup_database_tables(
+    database: str,
+    table_names: Optional[List[str]] = None,
+    logger=None,
+) -> Dict[str, Any]:
+    """
+    对数据库中已存在的表按 id 字段去重。
+    策略：读出全表 → drop_duplicates(id, keep='first') → TRUNCATE → 重写。
+
+    Args:
+        database: 数据库名称
+        table_names: 要处理的表名列表；为 None 时处理该库全部表
+        logger: 日志记录器
+
+    Returns:
+        Dict 包含每张表的处理结果
+    """
+    result: Dict[str, Any] = {
+        "database": database,
+        "cleaned": [],
+        "skipped": [],
+        "failed": [],
+    }
+
+    if not db_manager.ensure_database(database):
+        result["status"] = "error"
+        result["message"] = f"无法连接数据库 {database}"
+        log_error(logger, result["message"], "Dedup")
+        return result
+
+    try:
+        engine = db_manager.get_engine_for_database(database)
+    except Exception as exc:
+        result["status"] = "error"
+        result["message"] = f"获取引擎失败: {exc}"
+        log_error(logger, result["message"], "Dedup")
+        return result
+
+    try:
+        with engine.connect() as probe_conn:
+            inspector = inspect(probe_conn)
+            all_tables = inspector.get_table_names()
+
+        targets = [t for t in (table_names or all_tables) if t in all_tables]
+        if not targets:
+            result["status"] = "ok"
+            result["message"] = "没有找到需要处理的表"
+            return result
+
+        for table_name in targets:
+            try:
+                df = pd.read_sql(f"SELECT * FROM `{table_name}`", con=engine)
+                if df.empty or "id" not in df.columns:
+                    result["skipped"].append({"table": table_name, "reason": "无数据或缺少id列"})
+                    log_skip(logger, f"{table_name} 无数据或缺少id列，跳过", "Dedup")
+                    continue
+
+                before = len(df)
+                df_dedup = df.drop_duplicates(subset=["id"], keep="first")
+                after = len(df_dedup)
+                removed = before - after
+
+                if removed == 0:
+                    result["skipped"].append({"table": table_name, "reason": "无重复行", "rows": before})
+                    log_skip(logger, f"{table_name} 无重复行（{before} 条），跳过", "Dedup")
+                    continue
+
+                # 重写：TRUNCATE + 批量插入去重后数据
+                with engine.begin() as conn:
+                    conn.execute(text(f"TRUNCATE TABLE `{table_name}`"))
+                    df_dedup.to_sql(
+                        table_name,
+                        con=conn,
+                        if_exists="append",
+                        index=False,
+                        method="multi",
+                        chunksize=1000,
+                    )
+
+                result["cleaned"].append({"table": table_name, "before": before, "after": after, "removed": removed})
+                log_success(logger, f"{table_name} 去重完成: {before} → {after}（移除 {removed} 条）", "Dedup")
+
+            except Exception as exc:
+                result["failed"].append({"table": table_name, "detail": str(exc)})
+                log_error(logger, f"{table_name} 去重失败: {exc}", "Dedup")
+
+    finally:
+        engine.dispose()
+
+    result["status"] = "ok"
+    result["message"] = (
+        f"完成：{len(result['cleaned'])} 张表去重，"
+        f"{len(result['skipped'])} 张跳过，"
+        f"{len(result['failed'])} 张失败"
+    )
+    log_success(logger, result["message"], "Dedup")
+    return result
 
 
 def _summarise_upload_exception(channel: str, exc: Exception) -> Dict[str, str]:
@@ -673,7 +778,33 @@ def upload_filtered_excels(
                         df = df.drop_duplicates(subset=["id"])
                         after_count = len(df)
                         if before_count != after_count:
-                            log_success(logger, f"{file_path.name} 去重: {before_count} -> {after_count}", "Upload")
+                            log_success(logger, f"{file_path.name} 文件内去重: {before_count} -> {after_count}", "Upload")
+
+                        # 过滤数据库中已存在的ID，避免主键冲突
+                        try:
+                            existing_ids_df = pd.read_sql(
+                                text(f"SELECT id FROM `{table_name}`"), con=engine
+                            )
+                            existing_ids = set(existing_ids_df["id"].astype(str).tolist())
+                            if existing_ids:
+                                before_db = len(df)
+                                df = df[~df["id"].isin(existing_ids)]
+                                after_db = len(df)
+                                if before_db != after_db:
+                                    log_success(
+                                        logger,
+                                        f"{table_name} 过滤已存在记录: {before_db - after_db} 条，剩余 {after_db} 条待入库",
+                                        "Upload",
+                                    )
+                        except Exception as db_exc:
+                            log_skip(logger, f"查询已存在ID失败，跳过DB去重: {db_exc}", "Upload")
+
+                        if df.empty:
+                            log_skip(logger, f"{table_name} 全部记录已存在于数据库，跳过写入", "Upload")
+                            response["skipped"].append(
+                                {"channel": table_name, "file": file_path.name, "reason": "全部记录已存在"}
+                            )
+                            continue
 
                     # 上传数据
                     df.to_sql(

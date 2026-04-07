@@ -436,13 +436,28 @@ def restore_database_snapshot(
     return result
 
 
+_DEFAULT_DEDUP_STRATEGIES = frozenset({"id", "url", "contents"})
+_ALL_DEDUP_STRATEGIES = frozenset({"id", "url", "contents", "title"})
+
+
 def _build_deduplicate_key_expr(
     dialect_name: str,
     column_names: Sequence[str],
+    *,
+    enabled_strategies: Optional[frozenset] = None,
 ) -> tuple[Optional[str], str]:
+    """
+    构建去重键 SQL 表达式。
+
+    Args:
+        enabled_strategies: 启用的策略集合，可包含 "id"、"url"、"contents"、"title"。
+                            为 None 时使用默认策略（id + url + contents）。
+    """
+    active = enabled_strategies if enabled_strategies is not None else _DEFAULT_DEDUP_STRATEGIES
     normalised_columns = set(column_names)
     url_expr = _normalised_column_expr(dialect_name, "url") if "url" in normalised_columns else None
     contents_expr = _normalised_column_expr(dialect_name, "contents") if "contents" in normalised_columns else None
+    title_expr = _normalised_column_expr(dialect_name, "title") if "title" in normalised_columns else None
     author_expr = _normalised_column_expr(dialect_name, "author") if "author" in normalised_columns else None
     platform_expr = (
         _normalised_column_expr(dialect_name, "platform")
@@ -458,13 +473,23 @@ def _build_deduplicate_key_expr(
     branches: List[str] = []
     strategies: List[str] = []
 
-    if url_expr is not None:
+    # 1. 主键 ID 精确去重（优先级最高）
+    if "id" in active and "id" in normalised_columns:
+        id_expr = _quote_identifier(dialect_name, "id")
+        id_condition = f"(COALESCE(TRIM({id_expr}), '') <> '')"
+        id_key = _concat_text_expressions(dialect_name, [_sql_literal("id:"), id_expr])
+        branches.append(f"WHEN {id_condition} THEN {id_key}")
+        strategies.append("主键ID")
+
+    # 2. 链接去重
+    if "url" in active and url_expr is not None:
         url_condition = _is_meaningful_normalised_expr(url_expr, sorted(_NORMALISED_UNKNOWN_URLS))
         url_key = _concat_text_expressions(dialect_name, [_sql_literal("url:"), url_expr])
         branches.append(f"WHEN {url_condition} THEN {url_key}")
         strategies.append("链接")
 
-    if contents_expr is not None and author_expr is not None and "published_at" in normalised_columns:
+    # 3. 正文内容去重（正文+作者+发布时间+平台）
+    if "contents" in active and contents_expr is not None and author_expr is not None and "published_at" in normalised_columns:
         contents_condition = _is_meaningful_normalised_expr(contents_expr, [])
         author_condition = _is_meaningful_normalised_expr(author_expr, sorted(_NORMALISED_UNKNOWN_AUTHORS))
         published_condition = f"({published_expr}) <> ''"
@@ -484,6 +509,13 @@ def _build_deduplicate_key_expr(
         )
         branches.append(f"WHEN {composite_condition} THEN {composite_key}")
         strategies.append("正文+作者+发布时间+平台")
+
+    # 4. 标题去重（可选，兜底）
+    if "title" in active and title_expr is not None:
+        title_condition = _is_meaningful_normalised_expr(title_expr, [])
+        title_key = _concat_text_expressions(dialect_name, [_sql_literal("title:"), title_expr])
+        branches.append(f"WHEN {title_condition} THEN {title_key}")
+        strategies.append("标题")
 
     if not branches:
         return None, ""
@@ -1109,12 +1141,21 @@ def run_database_deduplicate(
     database: str,
     *,
     tables: Optional[Sequence[str]] = None,
+    dedup_fields: Optional[Sequence[str]] = None,
     logger=None,
     progress_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     target_database = str(database or "").strip()
     if not target_database:
         return {"status": "error", "message": "Missing required field(s): database"}
+
+    # 解析去重字段：None 或空列表 → 使用默认策略；否则取交集过滤非法值
+    if dedup_fields:
+        enabled_strategies = frozenset(
+            str(f).strip().lower() for f in dedup_fields if str(f).strip().lower() in _ALL_DEDUP_STRATEGIES
+        ) or _DEFAULT_DEDUP_STRATEGIES
+    else:
+        enabled_strategies = _DEFAULT_DEDUP_STRATEGIES
 
     if logger is None:
         logger = setup_logger(topic, "deduplicate")
@@ -1219,7 +1260,9 @@ def run_database_deduplicate(
                 ordered_columns = [str(column.get("name") or "").strip() for column in inspector.get_columns(table_name)]
                 quoted_columns = [_quote_identifier(dialect_name, column_name) for column_name in ordered_columns]
                 selected_columns_sql = ", ".join(quoted_columns)
-                dedupe_key_expr, strategy_label = _build_deduplicate_key_expr(dialect_name, ordered_columns)
+                dedupe_key_expr, strategy_label = _build_deduplicate_key_expr(
+                    dialect_name, ordered_columns, enabled_strategies=enabled_strategies
+                )
                 if not dedupe_key_expr:
                     report_tables.append(
                         {

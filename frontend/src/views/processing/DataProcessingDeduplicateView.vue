@@ -22,7 +22,7 @@
 
       <div class="grid gap-5 xl:grid-cols-[1.1fr,1fr]">
         <div class="space-y-4 rounded-3xl border border-soft bg-surface-muted/60 p-5">
-          <div class="grid gap-4 md:grid-cols-2">
+          <div class="grid gap-4">
             <label class="space-y-2">
               <span class="text-xs font-semibold text-muted">项目</span>
               <select v-model="selectedProjectName" class="input" :disabled="projectsLoading || !projectOptions.length">
@@ -33,15 +33,6 @@
             </label>
 
             <label class="space-y-2">
-              <span class="text-xs font-semibold text-muted">数据集</span>
-              <select v-model="selectedDatasetId" class="input" :disabled="datasetsLoading || !datasetOptions.length">
-                <option value="">项目级默认上下文</option>
-                <option v-for="option in datasetOptions" :key="option.id" :value="option.id">{{ option.label }}</option>
-              </select>
-              <p v-if="datasetsError" class="text-xs text-danger">{{ datasetsError }}</p>
-            </label>
-
-            <label class="space-y-2 md:col-span-2">
               <span class="text-xs font-semibold text-muted">数据库</span>
               <select v-model="selectedDatabase" class="input" :disabled="databasesLoading || !databaseOptions.length">
                 <option value="" disabled>{{ databaseOptions.length ? '请选择数据库' : '暂无数据库' }}</option>
@@ -51,6 +42,31 @@
               </select>
               <p v-if="databasesError" class="text-xs text-danger">{{ databasesError }}</p>
             </label>
+          </div>
+
+          <div class="rounded-2xl border border-soft bg-white p-4">
+            <p class="text-sm font-semibold text-primary">去重维度</p>
+            <p class="mt-1 text-xs text-secondary">基础维度默认启用，标题为可选附加项。</p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button
+                v-for="field in DEDUP_FIELD_OPTIONS"
+                :key="field.value"
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition"
+                :class="dedupeFields.includes(field.value)
+                  ? 'border-brand-400 bg-brand-50 text-brand-700'
+                  : 'border-soft bg-surface-muted/60 text-secondary hover:border-brand-soft hover:text-brand-600'"
+                :disabled="field.required"
+                @click="toggleDedupeField(field.value)"
+              >
+                <span
+                  class="h-1.5 w-1.5 rounded-full"
+                  :class="dedupeFields.includes(field.value) ? 'bg-brand-500' : 'bg-slate-300'"
+                />
+                {{ field.label }}
+                <span v-if="field.required" class="text-[10px] text-muted">必选</span>
+              </button>
+            </div>
           </div>
 
           <div class="rounded-2xl border border-soft bg-white p-4">
@@ -219,6 +235,13 @@ import { useProcessingScope } from '../../composables/useProcessingScope'
 
 const POLL_INTERVAL = 3000
 
+const DEDUP_FIELD_OPTIONS = [
+  { value: 'id',       label: '主键 ID',   required: true  },
+  { value: 'contents', label: '正文内容',   required: true  },
+  { value: 'url',      label: '链接',       required: false },
+  { value: 'title',    label: '标题',       required: false },
+]
+
 const {
   callApi,
   currentProjectName,
@@ -228,11 +251,6 @@ const {
   selectedProjectName,
   loadProjects,
   refreshProjects,
-  datasetOptions,
-  datasetsLoading,
-  datasetsError,
-  selectedDatasetId,
-  refreshDatasets,
   databaseOptions,
   databasesLoading,
   databasesError,
@@ -242,6 +260,7 @@ const {
 } = useProcessingScope()
 
 const selectedTables = ref([])
+const dedupeFields = ref(['id', 'contents', 'url'])
 const pollTimer = ref(null)
 const deduplicateState = reactive({
   operation: 'deduplicate',
@@ -292,7 +311,7 @@ watch(tableOptions, (items) => {
   selectedTables.value = preserved.length ? preserved : [...names]
 }, { immediate: true })
 
-watch([currentProjectName, selectedDatasetId, selectedDatabase], async ([projectName, datasetId, database]) => {
+watch([currentProjectName, selectedDatabase], async ([projectName, database]) => {
   if (!projectName || !database) {
     stopPolling()
     resetState()
@@ -300,7 +319,6 @@ watch([currentProjectName, selectedDatasetId, selectedDatabase], async ([project
   }
   await loadDeduplicateStatus({
     project: projectName,
-    datasetId,
     database,
     silent: true
   })
@@ -312,7 +330,6 @@ watch(
     if (!currentProjectName.value || !selectedDatabase.value) return
     await loadDeduplicateStatus({
       project: currentProjectName.value,
-      datasetId: selectedDatasetId.value,
       database: selectedDatabase.value,
       silent: true
     })
@@ -329,7 +346,7 @@ onBeforeUnmount(() => {
 })
 
 async function refreshAll() {
-  await Promise.all([refreshProjects(), refreshDatasets(), loadDatabases()])
+  await Promise.all([refreshProjects(), loadDatabases()])
 }
 
 function selectAllTables() {
@@ -338,6 +355,17 @@ function selectAllTables() {
 
 function clearSelectedTables() {
   selectedTables.value = []
+}
+
+function toggleDedupeField(value) {
+  const required = DEDUP_FIELD_OPTIONS.find((f) => f.value === value)?.required
+  if (required) return
+  const idx = dedupeFields.value.indexOf(value)
+  if (idx === -1) {
+    dedupeFields.value = [...dedupeFields.value, value]
+  } else {
+    dedupeFields.value = dedupeFields.value.filter((f) => f !== value)
+  }
 }
 
 function buildTableQueryParams(params, tables) {
@@ -393,9 +421,9 @@ async function runDeduplicate() {
       method: 'POST',
       body: JSON.stringify({
         project: currentProjectName.value,
-        dataset_id: selectedDatasetId.value || undefined,
         database: selectedDatabase.value,
-        tables: selectedTables.value.length ? selectedTables.value : undefined
+        tables: selectedTables.value.length ? selectedTables.value : undefined,
+        dedup_fields: dedupeFields.value
       })
     })
     applyPayload(response?.data || {})
@@ -424,7 +452,6 @@ async function restoreLatestSnapshot() {
       method: 'POST',
       body: JSON.stringify({
         project: currentProjectName.value,
-        dataset_id: selectedDatasetId.value || undefined,
         database: selectedDatabase.value,
         snapshot_id: snapshotId
       })
@@ -439,11 +466,10 @@ async function restoreLatestSnapshot() {
   }
 }
 
-async function loadDeduplicateStatus({ project, datasetId, database, silent = false }) {
+async function loadDeduplicateStatus({ project, database, silent = false }) {
   try {
     const params = new URLSearchParams()
     params.set('project', project)
-    if (datasetId) params.set('dataset_id', datasetId)
     params.set('database', database)
     buildTableQueryParams(params, selectedTables.value)
     const response = await callApi(`/api/database/deduplicate/status?${params.toString()}`)
@@ -469,7 +495,6 @@ function startPolling() {
     if (!currentProjectName.value || !selectedDatabase.value) return
     loadDeduplicateStatus({
       project: currentProjectName.value,
-      datasetId: selectedDatasetId.value,
       database: selectedDatabase.value,
       silent: true
     })
