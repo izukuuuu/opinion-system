@@ -218,6 +218,8 @@
               :description="target.subtitle"
               :option="target.option"
               :has-data="target.hasData"
+              :is-keywords="activeSection.name === 'keywords'"
+              :all-rows="target.allRows || []"
             >
               <template #default>
                 <div v-if="target.rows.length && shouldShowDataTable(activeSection.name, target.rows)" class="overflow-hidden rounded-2xl border border-soft">

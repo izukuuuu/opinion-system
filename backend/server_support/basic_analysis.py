@@ -320,7 +320,7 @@ def ensure_worker_running() -> Dict[str, Any]:
             return current
 
         _reconcile_orphaned_running_tasks({"running": False})
-        worker_script = Path(__file__).resolve().parent / "analyze_indicator_worker.py"
+        worker_script = Path(__file__).resolve().parent / "basic_analysis_worker.py"
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         process = subprocess.Popen(
             [sys.executable, str(worker_script)],

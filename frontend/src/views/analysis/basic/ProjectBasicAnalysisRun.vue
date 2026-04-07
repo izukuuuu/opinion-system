@@ -203,6 +203,7 @@ const {
   clearSelection,
   runSelectedFunctions,
   runSingleFunction,
+  rebuildAiSummary,
   changeTopic,
   availableRange
 } = useBasicAnalysis()
@@ -211,13 +212,18 @@ const combinedLogs = computed(() => [...(fetchLogs?.value || []), ...(analyzeLog
 
 const dimensionActions = [
   {
-    label: '全选',
+    label: '重新生成AI摘要',
     variant: 'ghost',
+    onClick: rebuildAiSummary
+  },
+  {
+    label: '全选',
+    variant: 'pill',
     onClick: selectAll
   },
   {
     label: '清空',
-    variant: 'ghost',
+    variant: 'pill',
     onClick: clearSelection
   }
 ]

@@ -151,9 +151,9 @@ def _analyze_keywords(df: pd.DataFrame, topic: str, channel_name: str, logger=No
         
         # 统计词频
         keyword_counts = Counter(keywords)
-        
-        # 获取top关键词，转换为要求的格式
-        top_keywords = keyword_counts.most_common(20)
+
+        # 获取top关键词，转换为要求的格式（返回100个供前端词云使用）
+        top_keywords = keyword_counts.most_common(100)
         data = [{"name": word, "value": count} for word, count in top_keywords]
         
         result = {"data": data}

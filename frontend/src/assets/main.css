@@ -388,6 +388,15 @@
     color: var(--color-text-primary);
   }
 
+  .analysis-toolbar__action--pill {
+    @apply border-soft bg-white text-secondary shadow-sm;
+  }
+
+  .analysis-toolbar__action--pill:hover {
+    border-color: rgb(var(--color-brand-200) / 1);
+    color: var(--color-text-primary);
+  }
+
   .analysis-chip {
     @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold;
   }

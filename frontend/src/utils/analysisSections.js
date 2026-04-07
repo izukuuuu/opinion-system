@@ -90,6 +90,7 @@ export const buildAnalysisSections = (functionsPayload) => {
         option: buildChartOption(func?.name, displayRows, targetTitle),
         hasData: rows.length > 0,
         rows: displayRows.slice(0, 12),
+        allRows: displayRows,
         rawText: buildRawText(target?.data),
         order: translatedTargetLabel === '总体' ? 10 : 20
       }

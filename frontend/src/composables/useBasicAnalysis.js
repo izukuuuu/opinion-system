@@ -125,6 +125,7 @@ export const useBasicAnalysis = () => {
   runFetch,
   runSelectedFunctions,
   runSingleFunction,
+  rebuildAiSummary,
     selectAll,
     clearSelection,
     loadHistory,
@@ -602,10 +603,11 @@ const invokeAnalyze = async (functions) => {
       try {
         updateLogEntry(analyzeLogs, logId, {
           status: 'running',
-          message: '正在运行…',
+          message: '正在创建后台任务…',
           time: currentTimeString()
         })
-        await callApi('/api/analyze', {
+        // 使用 run-async 端点创建后台任务，而不是同步执行
+        const response = await callApi('/api/analyze/run-async', {
           method: 'POST',
           body: JSON.stringify({
             topic,
@@ -614,9 +616,11 @@ const invokeAnalyze = async (functions) => {
             function: func
           })
         })
+        const taskId = response?.data?.task_id || ''
+        const taskStatus = response?.data?.task_status || 'queued'
         updateLogEntry(analyzeLogs, logId, {
-          status: 'ok',
-          message: '分析完成，可前往“查看分析”刷新结果。',
+          status: taskStatus === 'queued' ? 'queued' : 'running',
+          message: taskId ? `后台任务已创建 (${taskId})` : '后台任务已创建',
           time: currentTimeString()
         })
         hasSuccess = true
@@ -647,6 +651,40 @@ const runSelectedFunctions = async () => {
 
 const runSingleFunction = async (funcId) => {
   await invokeAnalyze([funcId])
+}
+
+const rebuildAiSummary = async () => {
+  const { topic, start, end } = normalizeRange(analyzeForm)
+  if (!topic || !start || !end) {
+    appendLog(analyzeLogs, { label: 'AI摘要', message: 'Topic / Start / End 为必填', status: 'error' })
+    return false
+  }
+
+  const logId = appendLog(analyzeLogs, {
+    label: 'AI摘要',
+    message: `正在重新生成 ${topic} ${start}→${end} 的AI摘要…`,
+    status: 'running'
+  })
+
+  try {
+    await callApi('/api/analyze/ai-summary/rebuild', {
+      method: 'POST',
+      body: JSON.stringify({ topic, start, end })
+    })
+    updateLogEntry(analyzeLogs, logId, {
+      status: 'ok',
+      message: 'AI摘要已重新生成，可前往"查看分析"刷新结果。',
+      time: currentTimeString()
+    })
+    return true
+  } catch (error) {
+    updateLogEntry(analyzeLogs, logId, {
+      message: error instanceof Error ? error.message : String(error),
+      status: 'error',
+      time: currentTimeString()
+    })
+    return false
+  }
 }
 
 const selectAll = () => {

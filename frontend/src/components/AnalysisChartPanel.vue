@@ -6,8 +6,29 @@
         <p v-if="description">{{ description }}</p>
       </div>
       <div class="flex items-center gap-2">
+        <!-- 关键词展示方式切换 -->
+        <div v-if="isKeywords" class="keywords-mode-switch">
+          <button
+            type="button"
+            class="keywords-mode-btn"
+            :class="{ 'keywords-mode-btn--active': keywordsChartMode === 'bar' }"
+            @click="setKeywordsMode('bar')"
+          >
+            <Bars3Icon class="h-4 w-4" />
+            <span>柱状图</span>
+          </button>
+          <button
+            type="button"
+            class="keywords-mode-btn"
+            :class="{ 'keywords-mode-btn--active': keywordsChartMode === 'wordcloud' }"
+            @click="setKeywordsMode('wordcloud')"
+          >
+            <CloudIcon class="h-4 w-4" />
+            <span>词云</span>
+          </button>
+        </div>
         <button
-          v-if="hasData && option"
+          v-if="hasData && computedOption"
           type="button"
           class="analysis-chart-card__expand-btn"
           title="展开查看"
@@ -24,96 +45,86 @@
       </div>
       <div v-else ref="chartRef" class="analysis-chart-card__canvas"></div>
     </div>
+    <!-- 词云数量选择控件 -->
+    <div v-if="isKeywords && keywordsChartMode === 'wordcloud'" class="keywords-wordcount-control">
+      <span class="keywords-wordcount-label">展示词数量：</span>
+      <div class="keywords-wordcount-options">
+        <button
+          v-for="count in wordCountOptions"
+          :key="count"
+          type="button"
+          class="keywords-wordcount-btn"
+          :class="{ 'keywords-wordcount-btn--active': keywordsWordCount === count }"
+          @click="setKeywordsWordCount(count)"
+        >
+          {{ count }}
+        </button>
+      </div>
+    </div>
     <slot />
 
     <!-- 展开图表的 Modal -->
-    <Teleport to="body">
-      <transition
-        enter-active-class="transition ease-out duration-200"
-        enter-from-class="opacity-0"
-        enter-to-class="opacity-100"
-        leave-active-class="transition ease-in duration-150"
-        leave-from-class="opacity-100"
-        leave-to-class="opacity-0"
-      >
-        <div
-          v-if="showModal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          @click.self="closeModal"
-        >
-          <div class="chart-modal" :style="modalStyle">
-            <header class="chart-modal__header">
-              <div>
-                <h2>{{ title }}</h2>
-                <p v-if="description">{{ description }}</p>
-              </div>
-              <button
-                type="button"
-                class="chart-modal__close-btn"
-                @click="closeModal"
-                aria-label="关闭"
-              >
-                <XMarkIcon class="h-5 w-5" />
-              </button>
-            </header>
-            <div class="chart-modal__toolbar">
-              <div class="chart-modal__toolbar-group">
-                <span class="chart-modal__toolbar-label">高度</span>
-                <nav class="chart-modal__size-tabs">
-                  <button
-                    v-for="size in sizeOptions"
-                    :key="`height-${size.value}`"
-                    type="button"
-                    class="chart-modal__size-tab"
-                    :class="{ 'chart-modal__size-tab--active': chartHeight === size.value }"
-                    @click="setChartHeight(size.value)"
-                  >
-                    {{ size.label }}
-                  </button>
-                </nav>
-              </div>
-              <div class="chart-modal__toolbar-group">
-                <span class="chart-modal__toolbar-label">宽度</span>
-                <nav class="chart-modal__size-tabs">
-                  <button
-                    v-for="size in sizeOptions"
-                    :key="`width-${size.value}`"
-                    type="button"
-                    class="chart-modal__size-tab"
-                    :class="{ 'chart-modal__size-tab--active': chartWidth === size.value }"
-                    @click="setChartWidth(size.value)"
-                  >
-                    {{ size.label }}
-                  </button>
-                </nav>
-              </div>
-            </div>
-            <div class="chart-modal__body">
-              <div ref="modalChartRef" class="chart-modal__canvas" :style="canvasStyle"></div>
-            </div>
-            <footer class="chart-modal__footer">
-              <div class="chart-modal__actions">
-                <button type="button" class="chart-modal__export-btn" @click="exportChart('png')">
-                  <ArrowDownTrayIcon class="h-4 w-4" />
-                  <span>导出 PNG</span>
-                </button>
-                <button type="button" class="chart-modal__export-btn" @click="exportChart('svg')">
-                  <ArrowDownTrayIcon class="h-4 w-4" />
-                  <span>导出 SVG</span>
-                </button>
-              </div>
-            </footer>
-          </div>
+    <AppModal
+      v-model="showModal"
+      :title="title"
+      :description="description"
+      :show-footer="false"
+      width="max-w-5xl"
+      scrollable
+    >
+      <div class="flex justify-center gap-6 pb-4">
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-medium text-muted">高度</span>
+          <nav class="inline-flex gap-0.5 rounded-xl bg-surface-muted p-1">
+            <button
+              v-for="size in sizeOptions"
+              :key="`height-${size.value}`"
+              type="button"
+              class="chart-size-tab"
+              :class="{ 'chart-size-tab--active': chartHeight === size.value }"
+              @click="setChartHeight(size.value)"
+            >
+              {{ size.label }}
+            </button>
+          </nav>
         </div>
-      </transition>
-    </Teleport>
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-medium text-muted">宽度</span>
+          <nav class="inline-flex gap-0.5 rounded-xl bg-surface-muted p-1">
+            <button
+              v-for="size in sizeOptions"
+              :key="`width-${size.value}`"
+              type="button"
+              class="chart-size-tab"
+              :class="{ 'chart-size-tab--active': chartWidth === size.value }"
+              @click="setChartWidth(size.value)"
+            >
+              {{ size.label }}
+            </button>
+          </nav>
+        </div>
+      </div>
+      <div ref="modalChartRef" class="mx-auto" :style="canvasStyle"></div>
+      <div class="flex justify-end gap-3 pt-4">
+        <button type="button" class="chart-export-btn" @click="exportChart('png')">
+          <ArrowDownTrayIcon class="h-4 w-4" />
+          <span>导出 PNG</span>
+        </button>
+        <button type="button" class="chart-export-btn" @click="exportChart('svg')">
+          <ArrowDownTrayIcon class="h-4 w-4" />
+          <span>导出 SVG</span>
+        </button>
+      </div>
+    </AppModal>
   </article>
 </template>
 
 <script setup>
 import { echarts } from '@/utils/echarts'
+import { buildWordCloudOption } from '@/utils/chartBuilder'
 import { onBeforeUnmount, onMounted, ref, watch, nextTick, computed } from 'vue'
-import { ArrowsPointingOutIcon, XMarkIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
+import { ArrowsPointingOutIcon, ArrowDownTrayIcon, Bars3Icon, CloudIcon } from '@heroicons/vue/24/outline'
+import AppModal from './AppModal.vue'
 
 const props = defineProps({
   title: {
@@ -135,6 +146,14 @@ const props = defineProps({
   emptyMessage: {
     type: String,
     default: '暂无可视化数据'
+  },
+  isKeywords: {
+    type: Boolean,
+    default: false
+  },
+  allRows: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -143,9 +162,13 @@ const modalChartRef = ref(null)
 const showModal = ref(false)
 const chartWidth = ref('medium')
 const chartHeight = ref('medium')
+const keywordsChartMode = ref('bar')
+const keywordsWordCount = ref(30)
 let chartInstance = null
 let modalChartInstance = null
 let resizeObserver = null
+
+const wordCountOptions = [20, 30, 50, 100]
 
 const sizeOptions = [
   { label: '小', value: 'small' },
@@ -154,9 +177,9 @@ const sizeOptions = [
 ]
 
 const sizeWidths = {
-  small: '60vw',
-  medium: '80vw',
-  large: '94vw'
+  small: '60%',
+  medium: '80%',
+  large: '100%'
 }
 
 const sizeHeights = {
@@ -165,28 +188,48 @@ const sizeHeights = {
   large: '70vh'
 }
 
-const modalStyle = computed(() => ({
-  maxWidth: sizeWidths[chartWidth.value] || sizeWidths.medium
-}))
-
 const canvasStyle = computed(() => ({
+  width: sizeWidths[chartWidth.value] || sizeWidths.medium,
   height: sizeHeights[chartHeight.value] || sizeHeights.medium
 }))
 
-const setChartWidth = async (size) => {
-  chartWidth.value = size
-  await nextTick()
-  if (modalChartInstance) {
-    modalChartInstance.resize()
-  }
+const setKeywordsMode = (mode) => {
+  if (keywordsChartMode.value === mode) return
+  keywordsChartMode.value = mode
+  nextTick(() => renderChart())
 }
 
-const setChartHeight = async (size) => {
-  chartHeight.value = size
-  await nextTick()
-  if (modalChartInstance) {
-    modalChartInstance.resize()
+const setKeywordsWordCount = (count) => {
+  if (keywordsWordCount.value === count) return
+  keywordsWordCount.value = count
+  nextTick(() => renderChart())
+}
+
+const computedOption = computed(() => {
+  if (!props.hasData) return null
+  if (props.isKeywords && keywordsChartMode.value === 'wordcloud') {
+    const slicedRows = props.allRows.slice(0, keywordsWordCount.value)
+    return buildWordCloudOption(slicedRows, props.title)
   }
+  return props.option
+})
+
+const resizeModalChart = () => {
+  setTimeout(() => {
+    if (modalChartInstance) {
+      modalChartInstance.resize()
+    }
+  }, 50)
+}
+
+const setChartWidth = (size) => {
+  chartWidth.value = size
+  resizeModalChart()
+}
+
+const setChartHeight = (size) => {
+  chartHeight.value = size
+  resizeModalChart()
 }
 
 const disposeChart = () => {
@@ -204,7 +247,7 @@ const disposeModalChart = () => {
 }
 
 const renderChart = () => {
-  if (!props.hasData || !props.option) {
+  if (!props.hasData || !computedOption.value) {
     disposeChart()
     return
   }
@@ -212,17 +255,17 @@ const renderChart = () => {
   if (!chartInstance) {
     chartInstance = echarts.init(chartRef.value)
   }
-  chartInstance.setOption(props.option, true)
+  chartInstance.setOption(computedOption.value, true)
 }
 
 const renderModalChart = async () => {
-  if (!props.option) return
+  if (!computedOption.value) return
   await nextTick()
   if (!modalChartRef.value) return
   if (!modalChartInstance) {
     modalChartInstance = echarts.init(modalChartRef.value)
   }
-  modalChartInstance.setOption(props.option, true)
+  modalChartInstance.setOption(computedOption.value, true)
 }
 
 const openModal = async () => {
@@ -231,11 +274,6 @@ const openModal = async () => {
   chartHeight.value = 'medium'
   await nextTick()
   renderModalChart()
-}
-
-const closeModal = () => {
-  showModal.value = false
-  disposeModalChart()
 }
 
 const exportChart = (type) => {
@@ -251,12 +289,6 @@ const exportChart = (type) => {
   link.click()
 }
 
-const handleKeydown = (event) => {
-  if (showModal.value && event.key === 'Escape') {
-    closeModal()
-  }
-}
-
 onMounted(() => {
   if (chartRef.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(() => {
@@ -267,16 +299,28 @@ onMounted(() => {
     resizeObserver.observe(chartRef.value)
   }
   renderChart()
-  window.addEventListener('keydown', handleKeydown)
 })
 
 watch(
-  () => [props.option, props.hasData],
+  () => [computedOption.value, props.hasData],
   () => {
     renderChart()
   },
   { deep: true }
 )
+
+watch(
+  [keywordsWordCount, keywordsChartMode],
+  () => {
+    renderChart()
+  }
+)
+
+watch(showModal, (value) => {
+  if (!value) {
+    disposeModalChart()
+  }
+})
 
 onBeforeUnmount(() => {
   if (resizeObserver && chartRef.value) {
@@ -284,7 +328,6 @@ onBeforeUnmount(() => {
   }
   disposeChart()
   disposeModalChart()
-  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -359,94 +402,11 @@ onBeforeUnmount(() => {
   border: 1px dashed var(--color-border-soft);
 }
 
-/* Modal Styles */
-.chart-modal {
-  display: flex;
-  flex-direction: column;
-  width: 90vw;
-  max-height: 90vh;
-  background: var(--color-surface);
-  border-radius: 24px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  overflow: hidden;
-  transition: max-width 0.2s ease;
-}
-
-.chart-modal__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1.5rem;
-  border-bottom: 1px solid var(--color-border-soft);
-}
-
-.chart-modal__header h2 {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: var(--color-text-primary);
-}
-
-.chart-modal__header p {
-  margin: 0.25rem 0 0;
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-}
-
-.chart-modal__close-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  border: 1px solid var(--color-border-soft);
-  color: var(--color-text-secondary);
-  background: var(--color-surface);
-  transition: all 0.15s ease;
-  cursor: pointer;
-}
-
-.chart-modal__close-btn:hover {
-  border-color: var(--color-brand-soft);
-  color: var(--color-brand-600);
-  background: var(--color-accent-faint);
-}
-
-.chart-modal__toolbar {
-  display: flex;
-  justify-content: center;
-  gap: 2rem;
-  padding: 0.75rem 1.5rem;
-  border-bottom: 1px solid var(--color-border-soft);
-}
-
-.chart-modal__toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.chart-modal__toolbar-label {
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--color-text-muted);
-}
-
-.chart-modal__size-tabs {
-  display: inline-flex;
-  gap: 0.25rem;
-  padding: 0.25rem;
-  border-radius: 12px;
-  background: var(--color-surface-muted);
-}
-
-.chart-modal__size-tab {
-  padding: 0.5rem 1.25rem;
+.chart-size-tab {
+  padding: 0.375rem 1rem;
   border-radius: 10px;
   border: none;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   color: var(--color-text-secondary);
   background: transparent;
@@ -454,42 +414,17 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.chart-modal__size-tab:hover {
+.chart-size-tab:hover {
   color: var(--color-text-primary);
 }
 
-.chart-modal__size-tab--active {
+.chart-size-tab--active {
   background: var(--color-surface);
   color: var(--color-brand-600);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.chart-modal__body {
-  flex: 1;
-  min-height: 0;
-  padding: 1.5rem;
-  overflow: auto;
-}
-
-.chart-modal__canvas {
-  width: 100%;
-  min-height: 300px;
-  transition: height 0.2s ease;
-}
-
-.chart-modal__footer {
-  display: flex;
-  justify-content: flex-end;
-  padding: 1rem 1.5rem;
-  border-top: 1px solid var(--color-border-soft);
-}
-
-.chart-modal__actions {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.chart-modal__export-btn {
+.chart-export-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -504,7 +439,83 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.chart-modal__export-btn:hover {
+.chart-export-btn:hover {
+  border-color: var(--color-brand-soft);
+  color: var(--color-brand-600);
+  background: var(--color-accent-faint);
+}
+
+.keywords-mode-switch {
+  display: inline-flex;
+  gap: 0.25rem;
+  border-radius: 0.625rem;
+  background: var(--color-surface-muted);
+  padding: 0.25rem;
+}
+
+.keywords-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  border: none;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: transparent;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.keywords-mode-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.keywords-mode-btn--active {
+  background: var(--color-surface);
+  color: var(--color-brand-600);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.keywords-wordcount-control {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0 0;
+  border-top: 1px dashed var(--color-border-soft);
+  margin-top: 0.5rem;
+}
+
+.keywords-wordcount-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.keywords-wordcount-options {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.keywords-wordcount-btn {
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border-soft);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.keywords-wordcount-btn:hover {
+  border-color: var(--color-brand-soft);
+  color: var(--color-text-primary);
+}
+
+.keywords-wordcount-btn--active {
   border-color: var(--color-brand-soft);
   color: var(--color-brand-600);
   background: var(--color-accent-faint);

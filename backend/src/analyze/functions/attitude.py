@@ -8,9 +8,8 @@ from ...utils.logging.logging import setup_logger, log_success, log_error, log_m
 from ...utils.ai import call_langchain_chat
 
 # AI 情感分类配置
-SENTIMENT_BATCH_SIZE = 15  # 每批处理的条目数
 SENTIMENT_MAX_RETRIES = 3  # 最大重试次数
-SENTIMENT_RETRY_DELAY = 2.0  # 重试间隔（秒）
+SENTIMENT_RETRY_DELAY = 1.0  # 重试间隔（秒）
 SENTIMENT_TEXT_MAX_LENGTH = 500  # 文本截断长度
 
 
@@ -80,18 +79,11 @@ def _truncate_text(text: str, max_length: int = SENTIMENT_TEXT_MAX_LENGTH) -> st
     return text[:max_length] + "..."
 
 
-def _build_sentiment_prompt(texts: List[str]) -> List[Dict[str, str]]:
-    """构建情感分类提示词"""
-    numbered_texts = []
-    for i, text in enumerate(texts, 1):
-        truncated = _truncate_text(text)
-        if truncated:
-            numbered_texts.append(f"[{i}] {truncated}")
-
-    if not numbered_texts:
+def _build_single_sentiment_prompt(text: str) -> List[Dict[str, str]]:
+    """构建单条文本的情感分类提示词"""
+    truncated = _truncate_text(text)
+    if not truncated:
         return []
-
-    text_block = "\n".join(numbered_texts)
 
     system_prompt = """你是一个专业的情感分析助手。请根据文本内容判断其情感倾向。
 
@@ -100,16 +92,9 @@ def _build_sentiment_prompt(texts: List[str]) -> List[Dict[str, str]]:
 - negative（负面）：表达批评、反对、不满、愤怒、担忧等消极情绪
 - neutral（中性）：客观陈述事实，无明显情感倾向，或情感模糊难以判断
 
-请严格按照要求输出，每条文本输出一个标签，格式为：序号:标签
-例如：1:positive 2:negative 3:neutral
+请只输出一个标签：positive、negative 或 neutral，不要输出其他内容。"""
 
-只输出标签，不要解释原因。"""
-
-    user_prompt = f"""请对以下文本进行情感分类，每条输出一个标签（positive/negative/neutral）：
-
-{text_block}
-
-请按序号输出分类结果，格式为：序号:标签（如 1:positive）"""
+    user_prompt = f"请判断以下文本的情感倾向：\n\n{truncated}"
 
     return [
         {"role": "system", "content": system_prompt},
@@ -117,93 +102,58 @@ def _build_sentiment_prompt(texts: List[str]) -> List[Dict[str, str]]:
     ]
 
 
-def _parse_sentiment_response(response: str) -> Dict[int, str]:
-    """解析 AI 返回的情感分类结果"""
+def _parse_single_sentiment_response(response: str) -> str:
+    """解析单条情感分类结果"""
     if not response:
-        return {}
+        return 'neutral'
 
-    result = {}
-    lines = response.strip().split('\n')
+    label = response.strip().lower()
 
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
+    # 标准化标签
+    if label in ['positive', 'pos', 'p', '正面', '积极']:
+        return 'positive'
+    elif label in ['negative', 'neg', 'n', '负面', '消极']:
+        return 'negative'
+    elif label in ['neutral', 'neu', '中性', '客观']:
+        return 'neutral'
 
-        # 尝试匹配格式：序号:标签 或 序号 标号 标签
-        # 支持多种分隔符：冒号、空格、逗号
-        parts = None
-        for sep in [':', '：', ' ', ',', '，', '\t']:
-            if sep in line:
-                parts = line.split(sep, 1)
-                break
+    # 尝试从文本中提取标签
+    for keyword in ['positive', '正面', '积极']:
+        if keyword in label:
+            return 'positive'
+    for keyword in ['negative', '负面', '消极']:
+        if keyword in label:
+            return 'negative'
+    for keyword in ['neutral', '中性', '客观']:
+        if keyword in label:
+            return 'neutral'
 
-        if not parts or len(parts) < 2:
-            continue
-
-        try:
-            idx = int(parts[0].strip().replace('[', '').replace(']', ''))
-            label = parts[1].strip().lower()
-
-            # 标准化标签
-            if label in ['positive', 'pos', 'p', '正面', '积极']:
-                result[idx] = 'positive'
-            elif label in ['negative', 'neg', 'n', '负面', '消极']:
-                result[idx] = 'negative'
-            elif label in ['neutral', 'neu', '中性', '客观']:
-                result[idx] = 'neutral'
-        except Exception:
-            continue
-
-    return result
+    return 'neutral'
 
 
-async def _classify_batch_with_retry(
-    texts: List[str],
+async def _classify_single_with_retry(
+    text: str,
     logger,
     max_retries: int = SENTIMENT_MAX_RETRIES,
     retry_delay: float = SENTIMENT_RETRY_DELAY,
-) -> Dict[int, str]:
-    """带重试机制的分批情感分类"""
-    if not texts:
-        return {}
-
-    messages = _build_sentiment_prompt(texts)
+) -> str:
+    """带重试机制的单条情感分类"""
+    messages = _build_single_sentiment_prompt(text)
     if not messages:
-        return {}
+        return 'neutral'
 
     for attempt in range(max_retries):
         try:
             response = await call_langchain_chat(
                 messages,
                 task="analyze",
-                max_tokens=300,
-                timeout=60,
-                max_retries=1,  # 单次请求由 LangChain 内部处理
+                max_tokens=50,
+                timeout=30,
+                max_retries=1,
             )
 
             if response:
-                parsed = _parse_sentiment_response(response)
-                if parsed:
-                    # 验证解析结果覆盖率
-                    coverage = len(parsed) / len(texts)
-                    if coverage >= 0.7:  # 70% 以上有效则接受
-                        if coverage < 1.0 and logger:
-                            log_error(
-                                logger,
-                                f"情感分类部分有效 ({len(parsed)}/{len(texts)})，已接受",
-                                "Attitude"
-                            )
-                        return parsed
-                    elif attempt < max_retries - 1:
-                        if logger:
-                            log_error(
-                                logger,
-                                f"情感分类覆盖率不足 ({coverage:.1%})，准备重试 (attempt {attempt + 1}/{max_retries})",
-                                "Attitude"
-                            )
-                        await asyncio.sleep(retry_delay)
-                        continue
+                return _parse_single_sentiment_response(response)
 
         except Exception as e:
             if logger and attempt < max_retries - 1:
@@ -216,9 +166,10 @@ async def _classify_batch_with_retry(
                 await asyncio.sleep(retry_delay)
                 continue
 
+    # 重试全部失败时，fallback 为 neutral
     if logger:
-        log_error(logger, f"情感分类失败，已重试 {max_retries} 次", "Attitude")
-    return {}
+        log_error(logger, f"单条情感分类失败，已重试 {max_retries} 次，fallback 为 neutral", "Attitude")
+    return 'neutral'
 
 
 def _run_async_classify(coro):
@@ -243,14 +194,16 @@ def _classify_unknown_sentiments(
     df: pd.DataFrame,
     logger=None,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    max_concurrent: int = 15,
 ) -> pd.DataFrame:
     """
-    对 unknown 情感的数据进行 AI 分类
+    对 unknown 情感的数据进行 AI 分类（逐条并发处理）
 
     Args:
         df: 已标准化 attitude 列的数据框
         logger: 日志记录器
         progress_callback: 进度回调函数
+        max_concurrent: 最大并发请求数，控制 QPS
 
     Returns:
         pd.DataFrame: 更新后的数据框
@@ -277,6 +230,8 @@ def _classify_unknown_sentiments(
     if text_col is None:
         if logger:
             log_error(logger, "未找到文本内容列，无法进行 AI 情感分类", "Attitude")
+        # 无文本列时全部 fallback 为 neutral
+        df.loc[unknown_mask, 'attitude'] = 'neutral'
         return df
 
     if logger:
@@ -294,58 +249,53 @@ def _classify_unknown_sentiments(
     if not texts_to_classify:
         if logger:
             log_success(logger, "所有 unknown 记录无有效文本内容，跳过 AI 分类", "Attitude")
+        # 无有效文本时全部 fallback 为 neutral
+        df.loc[unknown_mask, 'attitude'] = 'neutral'
         return df
 
     total_texts = len(texts_to_classify)
     processed = 0
+    classified_count = 0
 
-    # 分批处理
-    batch_size = SENTIMENT_BATCH_SIZE
+    async def _classify_all():
+        """并发分类所有文本"""
+        nonlocal processed, classified_count
+        semaphore = asyncio.Semaphore(max_concurrent)
 
-    for batch_start in range(0, total_texts, batch_size):
-        batch_end = min(batch_start + batch_size, total_texts)
-        batch_items = texts_to_classify[batch_start:batch_end]
-        batch_texts = [item[1] for item in batch_items]
-        batch_indices = [item[0] for item in batch_items]
+        async def _classify_one(idx: int, text: str):
+            async with semaphore:
+                result = await _classify_single_with_retry(text, logger)
+                processed += 1
+                if result != 'neutral':
+                    classified_count += 1
+                # 进度回调
+                if progress_callback:
+                    try:
+                        progress_callback({
+                            "phase": "sentiment_classify",
+                            "percentage": int(10 + (processed / max(total_texts, 1)) * 80),
+                            "message": f"正在 AI 情感分类 ({processed}/{total_texts})",
+                            "total_unknown": total_texts,
+                            "processed_unknown": processed,
+                            "sentiment_phase": "classify",
+                            "sentiment_total": total_texts,
+                            "sentiment_processed": processed,
+                            "sentiment_classified": classified_count,
+                            "sentiment_remaining": total_texts - processed,
+                        })
+                    except Exception:
+                        pass
+                return (idx, result)
 
-        # 调用 AI 分类
-        parsed = _run_async_classify(
-            _classify_batch_with_retry(batch_texts, logger)
-        )
+        tasks = [_classify_one(idx, text) for idx, text in texts_to_classify]
+        return await asyncio.gather(*tasks)
 
-        # 更新结果并统计本批次分类数
-        classified_in_batch = 0
-        for i, idx in enumerate(batch_indices, 1):
-            if i in parsed:
-                df.loc[idx, 'attitude'] = parsed[i]
-                classified_in_batch += 1
+    # 运行并发分类
+    results = _run_async_classify(_classify_all())
 
-        processed += len(batch_items)
-
-        # 进度回调：更新分类结果
-        if progress_callback:
-            try:
-                progress_callback({
-                    "phase": "sentiment_classify",
-                    "percentage": int(10 + (processed / max(total_texts, 1)) * 80),
-                    "message": f"正在 AI 情感分类 ({processed}/{total_texts})",
-                    "total_unknown": total_texts,
-                    "processed_unknown": processed,
-                    "sentiment_phase": "classify",
-                    "sentiment_total": total_texts,
-                    "sentiment_processed": processed,
-                    "sentiment_classified": classified_in_batch,
-                    "sentiment_remaining": total_texts - processed,
-                })
-            except Exception:
-                pass
-
-        if logger:
-            log_success(
-                logger,
-                f"AI 情感分类批次完成 ({processed}/{total_texts})",
-                "Attitude"
-            )
+    # 更新结果到 DataFrame
+    for idx, label in results:
+        df.loc[idx, 'attitude'] = label
 
     # 最终进度
     if progress_callback:
@@ -372,7 +322,7 @@ def _classify_unknown_sentiments(
     if logger:
         log_success(
             logger,
-            f"AI 情感分类结束 | 成功分类 {classified_count} 条，剩余 {final_unknown} 条仍为 unknown",
+            f"AI 情感分类结束 | 成功分类 {classified_count} 条，剩余 {final_unknown} 条为 neutral",
             "Attitude"
         )
 

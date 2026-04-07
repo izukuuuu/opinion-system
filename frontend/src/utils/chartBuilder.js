@@ -269,6 +269,48 @@ const buildPieOption = (title, rows) => ({
   ]
 })
 
+const WORDCLOUD_COLORS = ['#4f46e5', '#0f766e', '#d97706', '#2563eb', '#7c3aed', '#0891b2', '#65a30d', '#ea580c', '#db2777', '#6366f1']
+
+export const buildWordCloudOption = (rows, title) => {
+  if (!rows?.length) return null
+  return {
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => `${params.name}: ${params.value}`
+    },
+    series: [
+      {
+        type: 'wordCloud',
+        shape: 'circle',
+        left: 'center',
+        top: 'center',
+        width: '90%',
+        height: '90%',
+        sizeRange: [14, 56],
+        rotationRange: [-45, 45],
+        rotationStep: 15,
+        gridSize: 6,
+        drawOutOfBound: false,
+        textStyle: {
+          fontFamily: 'system-ui, sans-serif',
+          fontWeight: '600',
+          color: () => WORDCLOUD_COLORS[Math.floor(Math.random() * WORDCLOUD_COLORS.length)]
+        },
+        emphasis: {
+          textStyle: {
+            shadowBlur: 10,
+            shadowColor: '#333'
+          }
+        },
+        data: rows.map((row) => ({
+          name: rowName(row),
+          value: ensureNumber(rowValue(row))
+        }))
+      }
+    ]
+  }
+}
+
 const compareCategoryValues = (left, right) => {
   const leftTime = Date.parse(String(left))
   const rightTime = Date.parse(String(right))
