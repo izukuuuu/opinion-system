@@ -187,7 +187,7 @@ def _run_async_classify(coro):
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor() as pool:
             future = pool.submit(asyncio.run, coro)
-            return future.result(timeout=120)
+            return future.result(timeout=1800)  # 30 分钟超时，支持大量数据分类
 
 
 def _classify_unknown_sentiments(
@@ -256,6 +256,7 @@ def _classify_unknown_sentiments(
     total_texts = len(texts_to_classify)
     processed = 0
     classified_count = 0
+    last_progress_update = [0]  # 使用列表以便在嵌套函数中修改
 
     async def _classify_all():
         """并发分类所有文本"""
@@ -268,23 +269,30 @@ def _classify_unknown_sentiments(
                 processed += 1
                 if result != 'neutral':
                     classified_count += 1
-                # 进度回调
+                # 进度回调 - 节流：每处理 5% 或至少每 20 条更新一次
                 if progress_callback:
-                    try:
-                        progress_callback({
-                            "phase": "sentiment_classify",
-                            "percentage": int(10 + (processed / max(total_texts, 1)) * 80),
-                            "message": f"正在 AI 情感分类 ({processed}/{total_texts})",
-                            "total_unknown": total_texts,
-                            "processed_unknown": processed,
-                            "sentiment_phase": "classify",
-                            "sentiment_total": total_texts,
-                            "sentiment_processed": processed,
-                            "sentiment_classified": classified_count,
-                            "sentiment_remaining": total_texts - processed,
-                        })
-                    except Exception:
-                        pass
+                    update_interval = max(20, total_texts // 20)  # 5% 或至少 20 条
+                    should_update = (
+                        processed >= last_progress_update[0] + update_interval or
+                        processed == total_texts  # 最后一条必须更新
+                    )
+                    if should_update:
+                        last_progress_update[0] = processed
+                        try:
+                            progress_callback({
+                                "phase": "sentiment_classify",
+                                "percentage": int(10 + (processed / max(total_texts, 1)) * 80),
+                                "message": f"正在 AI 情感分类 ({processed}/{total_texts})",
+                                "total_unknown": total_texts,
+                                "processed_unknown": processed,
+                                "sentiment_phase": "classify",
+                                "sentiment_total": total_texts,
+                                "sentiment_processed": processed,
+                                "sentiment_classified": classified_count,
+                                "sentiment_remaining": total_texts - processed,
+                            })
+                        except Exception:
+                            pass
                 return (idx, result)
 
         tasks = [_classify_one(idx, text) for idx, text in texts_to_classify]

@@ -541,6 +541,13 @@ def _normalise_basic_analysis_task(task: Dict[str, Any], worker: Dict[str, Any])
     completed_functions = _safe_int(progress.get("completed_functions"), 0)
     current_function = str(progress.get("current_function") or "").strip()
     current_target = str(progress.get("current_target") or "").strip()
+    # 情感分析详细进度
+    sentiment_phase = str(progress.get("sentiment_phase") or "").strip()
+    sentiment_total = _safe_int(progress.get("sentiment_total"), 0)
+    sentiment_processed = _safe_int(progress.get("sentiment_processed"), 0)
+    sentiment_classified = _safe_int(progress.get("sentiment_classified"), 0)
+    sentiment_remaining = _safe_int(progress.get("sentiment_remaining"), 0)
+
     if total_functions > 0:
         progress_text = f"{completed_functions} / {total_functions} 项"
     else:
@@ -548,6 +555,16 @@ def _normalise_basic_analysis_task(task: Dict[str, Any], worker: Dict[str, Any])
     detail_text = current_function
     if current_target:
         detail_text = f"{current_function} ({current_target})" if current_function else current_target
+    # 情感分析阶段显示
+    if sentiment_phase and sentiment_total > 0:
+        sentiment_label = {
+            "normalize": "标准化",
+            "classify": "AI分类中",
+            "done": "分类完成",
+        }.get(sentiment_phase, sentiment_phase)
+        detail_text = f"情感分析: {sentiment_label} ({sentiment_processed}/{sentiment_total})"
+        progress_text = f"{sentiment_classified} 已分类 / {sentiment_total} 条"
+
     current_worker_task = str(worker.get("current_task_id") or "").strip()
     heartbeat_at = str(worker.get("last_heartbeat") or "").strip() if current_worker_task == task_id else str(task.get("last_heartbeat") or task.get("updated_at") or "").strip()
     topic_identifier = str(task.get("topic_identifier") or "").strip()
@@ -573,6 +590,12 @@ def _normalise_basic_analysis_task(task: Dict[str, Any], worker: Dict[str, Any])
         "heartbeat_at": heartbeat_at,
         "heartbeat_stale": _is_stale_timestamp(heartbeat_at),
         "worker_pid": _safe_int(task.get("worker_pid"), 0) or _safe_int(worker.get("pid"), 0),
+        # 情感分析详细进度
+        "sentiment_phase": sentiment_phase,
+        "sentiment_total": sentiment_total,
+        "sentiment_processed": sentiment_processed,
+        "sentiment_classified": sentiment_classified,
+        "sentiment_remaining": sentiment_remaining,
     }
 
 

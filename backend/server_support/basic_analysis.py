@@ -96,7 +96,7 @@ def _load_task(task_id: str) -> Optional[Dict[str, Any]]:
 
 def _save_task(task: Dict[str, Any]) -> None:
     path = task_state_path(str(task.get("id") or ""))
-    lock = FileLock(str(path) + ".lock")
+    lock = FileLock(str(path) + ".lock", timeout=10.0)
     with lock:
         task["updated_at"] = _utc_now()
         _atomic_write_json(path, task)
@@ -104,7 +104,7 @@ def _save_task(task: Dict[str, Any]) -> None:
 
 def _update_task(task_id: str, mutate: Callable[[Dict[str, Any]], None]) -> Dict[str, Any]:
     path = task_state_path(task_id)
-    lock = FileLock(str(path) + ".lock")
+    lock = FileLock(str(path) + ".lock", timeout=10.0)
     with lock:
         task = _load_json(path, {})
         if not isinstance(task, dict) or not task.get("id"):
@@ -309,43 +309,69 @@ def load_worker_status() -> Dict[str, Any]:
 def write_worker_status(payload: Dict[str, Any]) -> Dict[str, Any]:
     """写入 worker 状态。"""
     _ensure_state_dirs()
-    status = dict(payload or {})
-    status["updated_at"] = _utc_now()
-    _atomic_write_json(WORKER_STATUS_PATH, status)
-    return status
+    worker_lock = FileLock(str(WORKER_STATUS_PATH) + ".lock", timeout=5.0)
+    try:
+        with worker_lock:
+            status = dict(payload or {})
+            status["updated_at"] = _utc_now()
+            _atomic_write_json(WORKER_STATUS_PATH, status)
+            return status
+    except Exception:
+        # 锁获取失败时直接写入（依赖原子写入机制）
+        status = dict(payload or {})
+        status["updated_at"] = _utc_now()
+        _atomic_write_json(WORKER_STATUS_PATH, status)
+        return status
 
 
 def ensure_worker_running() -> Dict[str, Any]:
     """确保 worker 正在运行。"""
     _ensure_state_dirs()
-    worker_lock = FileLock(str(WORKER_STATUS_PATH) + ".lock")
-    with worker_lock:
+    worker_lock = FileLock(str(WORKER_STATUS_PATH) + ".lock", timeout=5.0)
+    try:
+        with worker_lock:
+            current = _load_json(WORKER_STATUS_PATH, {})
+            pid = _safe_int((current or {}).get("pid"), 0)
+            if pid > 0 and _is_process_alive(pid):
+                current["running"] = True
+                return current
+
+            _reconcile_orphaned_running_tasks({"running": False})
+    except Exception:
+        # 锁获取失败时，尝试直接检查进程状态
         current = _load_json(WORKER_STATUS_PATH, {})
         pid = _safe_int((current or {}).get("pid"), 0)
         if pid > 0 and _is_process_alive(pid):
-            current["running"] = True
-            return current
+            return {"running": True, "pid": pid}
+        # 继续启动 worker
 
-        _reconcile_orphaned_running_tasks({"running": False})
-        worker_script = Path(__file__).resolve().parent / "basic_analysis_worker.py"
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        process = subprocess.Popen(
-            [sys.executable, str(worker_script)],
-            cwd=str(Path(__file__).resolve().parents[1]),
-            creationflags=creation_flags,
-        )
-        status = {
-            "pid": process.pid,
-            "status": "starting",
-            "running": True,
-            "current_task_id": "",
-            "last_heartbeat": _utc_now(),
-            "started_at": _utc_now(),
-            "updated_at": _utc_now(),
-        }
+    # 在锁外启动 worker 进程，避免阻塞
+    worker_script = Path(__file__).resolve().parent / "basic_analysis_worker.py"
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    process = subprocess.Popen(
+        [sys.executable, str(worker_script)],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        creationflags=creation_flags,
+    )
+    status = {
+        "pid": process.pid,
+        "status": "starting",
+        "running": True,
+        "current_task_id": "",
+        "last_heartbeat": _utc_now(),
+        "started_at": _utc_now(),
+        "updated_at": _utc_now(),
+    }
+    # 写入状态时使用带超时的锁
+    worker_lock = FileLock(str(WORKER_STATUS_PATH) + ".lock", timeout=5.0)
+    try:
+        with worker_lock:
+            _atomic_write_json(WORKER_STATUS_PATH, status)
+    except Exception:
+        # 锁获取失败时直接写入（依赖原子写入机制）
         _atomic_write_json(WORKER_STATUS_PATH, status)
-        LOGGER.info("analyze indicator worker started | pid=%s", process.pid)
-        return status
+    LOGGER.info("analyze indicator worker started | pid=%s", process.pid)
+    return status
 
 
 def mark_task_progress(
@@ -456,7 +482,7 @@ def delete_task(task_id: str) -> None:
     if status not in TERMINAL_STATUSES:
         raise ValueError("只能删除已结束的任务")
     path = task_state_path(task_id)
-    lock = FileLock(str(path) + ".lock")
+    lock = FileLock(str(path) + ".lock", timeout=10.0)
     with lock:
         if path.exists():
             path.unlink()

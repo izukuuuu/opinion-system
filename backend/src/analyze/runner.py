@@ -902,6 +902,23 @@ def run_Analyze_with_progress(
                         log_error(logger, f"读取渠道 {channel_name} 数据失败: {e}", "Analysis")
                         return None
 
+                    # 渠道级别的进度回调
+                    def _channel_progress_cb(payload: Dict[str, Any]) -> None:
+                        sub_msg = str(payload.get("message") or "").strip()
+                        _emit_progress(
+                            "analyze", pending_percentage,
+                            f"{FUNCTION_LABELS.get(func_name, func_name)} ({channel_name}) - {sub_msg}",
+                            total_functions=total_functions,
+                            completed_functions=completed_functions,
+                            current_function=func_name,
+                            current_target=f"渠道/{channel_name}",
+                            sentiment_phase=str(payload.get("phase") or "").strip(),
+                            sentiment_total=int(payload.get("sentiment_total") or 0),
+                            sentiment_processed=int(payload.get("sentiment_processed") or 0),
+                            sentiment_classified=int(payload.get("sentiment_classified") or 0),
+                            sentiment_remaining=int(payload.get("sentiment_remaining") or 0),
+                        )
+
                     result = None
                     if func_name == 'volume':
                         result = analyze_volume_by_channel(df_channel, channel_name, topic, date, logger, end_date)
@@ -912,7 +929,7 @@ def run_Analyze_with_progress(
                     elif func_name == 'keywords':
                         result = analyze_keywords_by_channel(df_channel, topic, channel_name, logger)
                     elif func_name == 'attitude':
-                        result = analyze_attitude_by_channel(df_channel, channel_name, logger)
+                        result = analyze_attitude_by_channel(df_channel, channel_name, logger, progress_callback=_channel_progress_cb)
                     elif func_name == 'geography':
                         result = analyze_geography_by_channel(df_channel, channel_name, logger)
                     elif func_name == 'classification':
@@ -924,7 +941,7 @@ def run_Analyze_with_progress(
                     futures = {executor.submit(_process_channel, item): item for item in channel_items}
                     for future in concurrent.futures.as_completed(futures):
                         try:
-                            result = future.result(timeout=60)
+                            result = future.result(timeout=300)  # 5分钟超时，AI分类需要足够时间
                             if result is None:
                                 continue
                             channel_name, channel_result = result
