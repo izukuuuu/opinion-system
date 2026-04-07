@@ -138,16 +138,6 @@
             </div>
             <span class="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">{{ stopwordList.length }} 项</span>
           </div>
-          <div class="flex flex-wrap items-center justify-end gap-3 rounded-2xl border border-soft bg-white px-4 py-4">
-            <button
-              type="button"
-              class="btn-primary inline-flex items-center gap-2"
-              :disabled="!currentProjectName"
-              @click="openStopwordModal"
-            >
-              打开排除词弹窗
-            </button>
-          </div>
           <textarea
             v-model="sharedPromptState.projectStopwordsText"
             rows="12"
@@ -170,20 +160,9 @@
           <div class="flex items-center justify-between gap-3">
             <div>
               <h3 class="text-base font-semibold text-primary">发布者黑名单</h3>
-              <p class="mt-1 text-sm text-secondary">每行一个发布者；保存后不会立即删库，只有执行后清洗时才会生效。</p>
+              <p class="mt-1 text-sm text-secondary">每行一个发布者；执行后清洗时生效。</p>
             </div>
             <span class="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">{{ blacklistList.length }} 项</span>
-          </div>
-          <div class="flex flex-wrap items-center justify-end gap-3 rounded-2xl border border-soft bg-white px-4 py-4">
-            <button
-              type="button"
-              class="btn-primary inline-flex items-center gap-2"
-              :disabled="!canInspectPublishers"
-              @click="openPublisherModal"
-            >
-              <ArrowPathIcon class="h-4 w-4" :class="publisherDetectionState.loading ? 'animate-spin' : ''" />
-              打开异常发布者识别弹窗
-            </button>
           </div>
           <textarea
             v-model="sharedPromptState.publisherBlacklistText"
@@ -198,7 +177,6 @@
               :disabled="!canInspectPublishers"
               @click="openPublisherModal"
             >
-              <ArrowPathIcon class="h-4 w-4" :class="publisherDetectionState.loading ? 'animate-spin' : ''" />
               打开异常发布者识别弹窗
             </button>
           </div>
@@ -217,24 +195,6 @@
         </button>
         <p v-if="sharedPromptState.error" class="text-xs text-danger">{{ sharedPromptState.error }}</p>
         <p v-else-if="sharedPromptState.success" class="text-xs text-emerald-600">{{ sharedPromptState.success }}</p>
-      </div>
-    </section>
-
-    <section class="card-surface space-y-5 p-6">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 class="text-base font-semibold text-primary">异常发布者识别</h3>
-          <p class="mt-1 text-sm text-secondary">打开弹窗后再查看范围、状态和样本，不在页面正文重复展示。</p>
-        </div>
-        <button
-          type="button"
-          class="btn-primary inline-flex items-center gap-2"
-          :disabled="!canInspectPublishers"
-          @click="openPublisherModal"
-        >
-          <ArrowPathIcon class="h-4 w-4" :class="publisherDetectionState.loading ? 'animate-spin' : ''" />
-          打开识别弹窗
-        </button>
       </div>
     </section>
 
