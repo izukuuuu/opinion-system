@@ -196,13 +196,11 @@ const canvasStyle = computed(() => ({
 const setKeywordsMode = (mode) => {
   if (keywordsChartMode.value === mode) return
   keywordsChartMode.value = mode
-  nextTick(() => renderChart())
 }
 
 const setKeywordsWordCount = (count) => {
   if (keywordsWordCount.value === count) return
   keywordsWordCount.value = count
-  nextTick(() => renderChart())
 }
 
 const computedOption = computed(() => {
@@ -307,13 +305,6 @@ watch(
     renderChart()
   },
   { deep: true }
-)
-
-watch(
-  [keywordsWordCount, keywordsChartMode],
-  () => {
-    renderChart()
-  }
 )
 
 watch(showModal, (value) => {

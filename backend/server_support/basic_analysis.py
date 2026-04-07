@@ -201,6 +201,7 @@ def find_latest_task(
     start_date: str,
     *,
     end_date: Optional[str] = None,
+    only_function: Optional[str] = None,
     statuses: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """查找最近的任务。"""
@@ -214,6 +215,11 @@ def find_latest_task(
         if end_date and str(task.get("end_date") or "") != end_date:
             continue
         if desired_statuses and str(task.get("status") or "") not in desired_statuses:
+            continue
+        # 匹配 only_function（None 匹配全部/综合任务）
+        task_func = str(task.get("only_function") or "").strip() or None
+        req_func = str(only_function or "").strip() or None
+        if task_func != req_func:
             continue
         matches.append(task)
     if not matches:
@@ -232,13 +238,13 @@ def create_or_reuse_task(
 ) -> Dict[str, Any]:
     """创建或复用任务。"""
     running_task = find_latest_task(
-        topic_identifier, start_date, end_date=end_date, statuses=["queued", "running"]
+        topic_identifier, start_date, end_date=end_date, only_function=only_function, statuses=["queued", "running"]
     )
     if running_task:
         return running_task
     if not force:
         completed_task = find_latest_task(
-            topic_identifier, start_date, end_date=end_date, statuses=["completed"]
+            topic_identifier, start_date, end_date=end_date, only_function=only_function, statuses=["completed"]
         )
         if completed_task:
             return completed_task
@@ -254,9 +260,10 @@ def get_latest_task(
     start_date: str,
     *,
     end_date: Optional[str] = None,
+    only_function: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """获取最近的任务状态。"""
-    return find_latest_task(topic_identifier, start_date, end_date=end_date)
+    return find_latest_task(topic_identifier, start_date, end_date=end_date, only_function=only_function)
 
 
 def reserve_next_task() -> Optional[Dict[str, Any]]:
