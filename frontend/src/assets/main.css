@@ -229,7 +229,7 @@
 
   .analysis-hero__eyebrow {
     @apply inline-flex items-center rounded-full border border-soft px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] text-secondary;
-    background-color: rgb(255 255 255 / 0.8);
+    background-color: color-mix(in srgb, var(--color-surface) 80%, transparent);
   }
 
   .analysis-hero__title {
@@ -256,7 +256,7 @@
 
   .analysis-hero__action--secondary {
     @apply border border-soft text-secondary;
-    background-color: rgb(255 255 255 / 0.8);
+    background-color: color-mix(in srgb, var(--color-surface) 80%, transparent);
   }
 
   .analysis-hero__action--secondary:hover {
@@ -265,7 +265,7 @@
 
   .analysis-hero__panel {
     @apply rounded-[1.75rem] border border-soft p-5 backdrop-blur;
-    background-color: rgb(255 255 255 / 0.96);
+    background-color: color-mix(in srgb, var(--color-surface) 96%, transparent);
   }
 
   .analysis-hero__panel-eyebrow {
@@ -308,7 +308,7 @@
 
   .analysis-meta-list__item {
     @apply flex items-start gap-3 rounded-2xl border border-soft px-4 py-3;
-    background-color: rgb(226 233 241 / 0.6);
+    background-color: var(--color-surface-muted);
   }
 
   .analysis-meta-list__icon {
@@ -329,7 +329,7 @@
   }
 
   .analysis-section-card--soft {
-    background-color: rgb(226 233 241 / 0.45);
+    background-color: color-mix(in srgb, var(--color-surface-muted) 45%, transparent);
   }
 
   .analysis-section-card--emphasis {
@@ -394,6 +394,6 @@
 
   .analysis-chip--hero {
     @apply border border-soft text-secondary;
-    background-color: rgb(255 255 255 / 0.92);
+    background-color: color-mix(in srgb, var(--color-surface) 92%, transparent);
   }
 }

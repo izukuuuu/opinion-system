@@ -18,7 +18,7 @@
           </RouterLink>
         </nav>
         <RouterLink :to="backendEntryRoute"
-          class="justify-self-end inline-flex items-center justify-center rounded-full bg-white px-6 py-2 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary/90 hover:text-gray-600 focus-ring-accent">
+          class="justify-self-end inline-flex items-center justify-center rounded-full bg-surface px-6 py-2 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary/90 hover:text-secondary focus-ring-accent">
           进入后台
         </RouterLink>
       </header>
@@ -142,8 +142,8 @@
         enter-to-class="opacity-100 translate-y-0" leave-active-class="transition duration-150 ease-in"
         leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 -translate-y-2">
         <header v-if="showCompactHeader"
-          class="fixed inset-x-0 top-0 z-20 hidden items-center gap-3 border-b border-soft px-6 py-3 backdrop-blur lg:flex"
-          :style="[compactHeaderStyle, compactHeaderOffsetStyle]">
+          class="fixed inset-x-0 top-0 z-20 hidden items-center gap-3 border-b border-soft bg-surface/60 px-6 py-3 backdrop-blur lg:flex"
+          :style="compactHeaderOffsetStyle">
           <div class="flex min-w-0 items-center gap-2">
             <p class="shrink-0 text-xs font-semibold uppercase tracking-[0.3em] text-muted">Opinion System</p>
             <p class="truncate text-base font-semibold text-primary">{{ pageTitle || '欢迎使用 Opinion System' }}</p>
@@ -151,7 +151,7 @@
           <div class="ml-auto flex items-center gap-2">
             <BackgroundTaskIndicator compact />
             <button type="button"
-              class="hidden lg:flex h-8 w-8 items-center justify-center rounded-lg border border-soft bg-white/50 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
+              class="hidden lg:flex h-8 w-8 items-center justify-center rounded-lg border border-soft bg-surface/50 text-secondary shadow-sm transition hover:border-brand-soft hover:text-primary focus-ring-accent"
               :class="{ 'bg-brand-soft text-brand-700 border-brand-soft': isAiSidebarOpen }"
               aria-label="Toggle AI Assistant" @click="toggleAiSidebar">
               <SparklesIcon class="h-4 w-4" />
@@ -472,10 +472,6 @@ const isMainHeaderVisible = ref(true)
 const showCompactHeader = computed(
   () => isDesktop.value && !isLandingLayout.value && !isMainHeaderVisible.value
 )
-
-const compactHeaderStyle = computed(() => ({
-  background: 'rgba(255, 255, 255, 0.6)'
-}))
 
 const compactHeaderOffsetStyle = computed(() => {
   if (!isDesktop.value) return {}

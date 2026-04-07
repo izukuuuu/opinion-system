@@ -330,13 +330,13 @@ function escapeHtml(text) {
 .ai-report-body :deep(code) {
   padding: 0.1rem 0.35rem;
   border-radius: 0.45rem;
-  background: rgb(226 232 240);
+  background: var(--color-surface-muted);
   font-size: 0.92em;
 }
 
 .ai-report-body :deep(hr) {
   margin: 1.75rem 0;
   border: 0;
-  border-top: 1px solid rgb(226 232 240);
+  border-top: 1px solid var(--color-surface-muted);
 }
 </style>

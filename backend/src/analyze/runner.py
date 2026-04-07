@@ -172,10 +172,19 @@ def _generate_ai_summary(func_name: str, target: str, snapshot: str, logger) -> 
     if not snapshot.strip():
         return ""
     label = FUNCTION_LABELS.get(func_name, func_name)
+
+    # 根据模块类型添加数据定义说明
+    data_hints = ""
+    if func_name == 'geography':
+        data_hints = "\n数据定义：统计结果中的"-"表示未标注地域信息的数据条目，不属于具体地域分布。"
+    elif func_name == 'publishers':
+        data_hints = "\n数据定义：统计结果中的"-"表示无发布者信息的数据条目，通常不纳入发布者主体分析。"
+
     prompt = (
         "你是一名资深舆情分析师。基于以下统计快照，以不超过80字的中文总结核心洞察，不要输出列表或多段。"
         f"\n模块：{label}"
         f"\n范围：{target}"
+        f"{data_hints}"
         f"\n统计数据：\n{snapshot}"
         "\n请直接输出精炼结论。"
     )
@@ -653,5 +662,310 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
     log_success(logger, "模块执行完成", "Analyze")
     
     # 返回是否成功（至少有一个函数成功）
+    return success_count > 0
+
+
+def run_Analyze_with_progress(
+    topic: str,
+    date: str,
+    logger=None,
+    only_function: str = None,
+    end_date: str = None,
+    progress_callback=None,
+    max_workers: int = 4,
+) -> bool:
+    """
+    运行分析任务（支持进度回调和多线程）。
+
+    Args:
+        topic (str): 专题名称
+        date (str): 日期字符串
+        logger: 日志记录器
+        only_function (str, optional): 仅运行指定分析函数
+        end_date (str, optional): 结束日期
+        progress_callback: 进度回调函数，签名: callback(payload: Dict[str, Any]) -> None
+            payload 包含: phase, percentage, message, total_functions, completed_functions,
+                          current_function, current_target
+        max_workers: 多线程处理的最大线程数，默认4
+
+    Returns:
+        bool: 是否成功
+    """
+    import concurrent.futures
+    from datetime import datetime, timezone
+
+    def _emit_progress(
+        phase: str,
+        percentage: int,
+        message: str,
+        *,
+        total_functions: int = 0,
+        completed_functions: int = 0,
+        current_function: str = "",
+        current_target: str = "",
+        sentiment_phase: str = "",
+        sentiment_total: int = 0,
+        sentiment_processed: int = 0,
+        sentiment_classified: int = 0,
+        sentiment_remaining: int = 0,
+    ) -> None:
+        if progress_callback:
+            try:
+                progress_callback({
+                    "phase": phase,
+                    "percentage": percentage,
+                    "message": message,
+                    "total_functions": total_functions,
+                    "completed_functions": completed_functions,
+                    "current_function": current_function,
+                    "current_target": current_target,
+                    "sentiment_phase": sentiment_phase,
+                    "sentiment_total": sentiment_total,
+                    "sentiment_processed": sentiment_processed,
+                    "sentiment_classified": sentiment_classified,
+                    "sentiment_remaining": sentiment_remaining,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception:
+                pass
+
+    if logger is None:
+        logger = setup_logger(topic, date)
+
+    log_module_start(logger, "Analyze")
+
+    _emit_progress("prepare", 5, "正在加载分析配置。")
+
+    # 获取分析配置
+    analysis_config = settings.get_analysis_config()
+    functions = analysis_config.get('functions', [])
+
+    if not functions:
+        log_error(logger, "未配置分析函数", "Analysis")
+        _emit_progress("error", 0, "未配置分析函数")
+        return False
+
+    # 读取数据
+    folder_name = _compose_analyze_folder(date, end_date)
+    if not folder_name:
+        log_error(logger, "无效日期参数，无法定位分析目录", "Analysis")
+        _emit_progress("error", 0, "无效日期参数")
+        return False
+
+    fetch_dir = bucket("fetch", topic, folder_name)
+    if not fetch_dir.exists():
+        log_skip(logger, f"未找到 fetch 目录，尝试基于已有 analyze 结果补充AI摘要: {fetch_dir}", "Analysis")
+        if _supplement_ai_summary_from_analyze(topic, date, logger, only_function=only_function, end_date=end_date):
+            log_success(logger, "已基于历史 analyze 结果补充AI摘要", "Analyze")
+            _emit_progress("completed", 100, "已基于历史 analyze 结果补充AI摘要")
+            return True
+        log_error(logger, f"未找到数据目录: {fetch_dir}", "Analysis")
+        _emit_progress("error", 0, f"未找到数据目录: {fetch_dir}")
+        return False
+
+    overall_file = fetch_dir / "总体.jsonl"
+    if not overall_file.exists():
+        log_skip(logger, f"未找到总体数据文件，尝试基于已有 analyze 结果补充AI摘要: {overall_file}", "Analysis")
+        if _supplement_ai_summary_from_analyze(topic, date, logger, only_function=only_function, end_date=end_date):
+            log_success(logger, "已基于历史 analyze 结果补充AI摘要", "Analyze")
+            _emit_progress("completed", 100, "已基于历史 analyze 结果补充AI摘要")
+            return True
+        log_error(logger, f"未找到总体数据文件: {overall_file}", "Analysis")
+        _emit_progress("error", 0, f"未找到总体数据文件: {overall_file}")
+        return False
+
+    try:
+        df_overall = read_jsonl(overall_file)
+    except Exception as e:
+        log_error(logger, f"读取总体数据失败: {e}", "Analysis")
+        _emit_progress("error", 0, f"读取总体数据失败: {e}")
+        return False
+
+    # 收集渠道文件
+    channel_files: Dict[str, Path] = {}
+    for jsonl_path in fetch_dir.glob("*.jsonl"):
+        if jsonl_path.name == "总体.jsonl":
+            continue
+        channel_name = jsonl_path.stem
+        channel_files[channel_name] = jsonl_path
+
+    # 创建输出目录
+    analyze_root = bucket("analyze", topic, folder_name)
+    analyze_root.mkdir(parents=True, exist_ok=True)
+
+    ai_summary_file = analyze_root / AI_SUMMARY_FILENAME
+    ai_summary_entries, previous_main_finding = _load_existing_ai_summary(ai_summary_file)
+    ai_state = {"dirty": False}
+    main_finding = previous_main_finding
+
+    _emit_progress("prepare", 10, f"已加载配置，共 {len(functions)} 个分析项待处理。")
+
+    # 若仅运行单功能，先做一次过滤
+    if only_function:
+        alias = only_function.strip()
+        alias_norm = alias.lower()
+        functions = [f for f in functions if (f.get('name', '').strip().lower() == alias_norm)]
+        if not functions:
+            log_error(logger, f"--func 未匹配到任何分析项：{only_function}", "Analysis")
+            _emit_progress("error", 0, f"未匹配到分析项: {only_function}")
+            return False
+
+    total_functions = len(functions)
+    completed_functions = 0
+    success_count = 0
+
+    # 运行分析函数
+    for func_config in functions:
+        func_name = func_config.get('name')
+        target = func_config.get('target')
+
+        # 执行前的进度：显示当前正在处理哪个任务
+        pending_percentage = 10 + int((completed_functions / max(total_functions, 1)) * 85)
+        _emit_progress(
+            "analyze", pending_percentage,
+            f"正在运行 {FUNCTION_LABELS.get(func_name, func_name)} ({target})",
+            total_functions=total_functions,
+            completed_functions=completed_functions,
+            current_function=func_name,
+            current_target=target,
+        )
+
+        try:
+            # 情感分析子任务进度回调
+            def _attitude_progress_cb(payload: Dict[str, Any]) -> None:
+                sub_pct = int(payload.get("percentage") or 0)
+                sub_msg = str(payload.get("message") or "").strip()
+                # 情感分析详细进度
+                sent_phase = str(payload.get("phase") or "").strip()
+                sent_total = int(payload.get("total_unknown") or payload.get("sentiment_total") or 0)
+                sent_processed = int(payload.get("processed_unknown") or payload.get("sentiment_processed") or 0)
+                sent_classified = int(payload.get("classified") or payload.get("sentiment_classified") or 0)
+                sent_remaining = int(payload.get("remaining") or payload.get("sentiment_remaining") or 0)
+                # 将子任务进度映射到整体进度区间
+                sub_base = pending_percentage
+                sub_range = int(85 / max(total_functions, 1))
+                overall_pct = sub_base + int((sub_pct / 100) * sub_range)
+                _emit_progress(
+                    "analyze", overall_pct,
+                    f"{FUNCTION_LABELS.get(func_name, func_name)} ({target}) - {sub_msg}",
+                    total_functions=total_functions,
+                    completed_functions=completed_functions,
+                    current_function=func_name,
+                    current_target=target,
+                    sentiment_phase=sent_phase,
+                    sentiment_total=sent_total,
+                    sentiment_processed=sent_processed,
+                    sentiment_classified=sent_classified,
+                    sentiment_remaining=sent_remaining,
+                )
+
+            if target == '总体':
+                # 运行总体
+                result = None
+                if func_name == 'volume':
+                    result = analyze_volume_overall(df_overall, topic, date, logger, end_date)
+                elif func_name == 'attitude':
+                    result = analyze_attitude_overall(df_overall, logger, progress_callback=_attitude_progress_cb)
+                elif func_name == 'trends':
+                    result = analyze_trends_overall(df_overall, logger)
+                elif func_name == 'keywords':
+                    result = analyze_keywords_overall(df_overall, topic, logger)
+                elif func_name == 'geography':
+                    result = analyze_geography_overall(df_overall, logger)
+                elif func_name == 'publishers':
+                    result = analyze_publishers_overall(df_overall, logger)
+                elif func_name == 'classification':
+                    result = analyze_classification_overall(df_overall, logger)
+
+                # 保存总体
+                func_dir = analyze_root / func_name / '总体'
+                func_dir.mkdir(parents=True, exist_ok=True)
+                filename = _resolve_analyze_filename(func_name)
+                output_file = func_dir / filename
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(result or {}, f, ensure_ascii=False, indent=2, default=str)
+
+                _post_process_result(func_name, '总体', func_dir, result, ai_summary_entries, ai_state, logger)
+                success_count += 1
+                completed_functions += 1
+
+            elif target == '渠道':
+                # 逐渠道运行（使用线程池并行处理）
+                any_success = False
+                channel_items = list(channel_files.items())
+
+                def _process_channel(channel_item):
+                    channel_name, jsonl_path = channel_item
+                    try:
+                        df_channel = read_jsonl(jsonl_path)
+                    except Exception as e:
+                        log_error(logger, f"读取渠道 {channel_name} 数据失败: {e}", "Analysis")
+                        return None
+
+                    result = None
+                    if func_name == 'volume':
+                        result = analyze_volume_by_channel(df_channel, channel_name, topic, date, logger, end_date)
+                    elif func_name == 'trends':
+                        result = analyze_trends_by_channel(df_channel, channel_name, logger)
+                    elif func_name == 'publishers':
+                        result = analyze_publishers_by_channel(df_channel, channel_name, logger)
+                    elif func_name == 'keywords':
+                        result = analyze_keywords_by_channel(df_channel, topic, channel_name, logger)
+                    elif func_name == 'attitude':
+                        result = analyze_attitude_by_channel(df_channel, channel_name, logger)
+                    elif func_name == 'geography':
+                        result = analyze_geography_by_channel(df_channel, channel_name, logger)
+                    elif func_name == 'classification':
+                        result = analyze_classification_by_channel(df_channel, channel_name, logger)
+
+                    return (channel_name, result)
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(_process_channel, item): item for item in channel_items}
+                    for future in concurrent.futures.as_completed(futures):
+                        try:
+                            result = future.result(timeout=60)
+                            if result is None:
+                                continue
+                            channel_name, channel_result = result
+                            func_dir = analyze_root / func_name / channel_name
+                            func_dir.mkdir(parents=True, exist_ok=True)
+                            filename = _resolve_analyze_filename(func_name)
+                            output_file = func_dir / filename
+                            with open(output_file, 'w', encoding='utf-8') as f:
+                                json.dump(channel_result or {}, f, ensure_ascii=False, indent=2, default=str)
+                            _post_process_result(func_name, channel_name, func_dir, channel_result, ai_summary_entries, ai_state, logger)
+                            any_success = True
+                        except Exception as exc:
+                            log_error(logger, f"处理渠道失败: {exc}", "Analysis")
+
+                if any_success:
+                    success_count += 1
+                    completed_functions += 1
+
+        except Exception as e:
+            log_error(logger, f"{func_name}_{target}: {e}", "Analysis")
+            completed_functions += 1
+            continue
+
+    main_finding = _build_main_finding(ai_summary_entries, previous_main_finding, topic, date, end_date, logger)
+    if main_finding and main_finding is not previous_main_finding:
+        ai_state['dirty'] = True
+
+    should_save = bool(ai_state.get('dirty'))
+    if not should_save and main_finding and main_finding is not previous_main_finding:
+        should_save = True
+
+    if should_save:
+        _save_ai_summary_file(ai_summary_file, topic, date, end_date, ai_summary_entries, main_finding)
+
+    _emit_progress(
+        "completed", 100,
+        f"分析完成，共成功处理 {success_count} 个分析项。",
+        total_functions=total_functions,
+        completed_functions=total_functions,
+    )
+
+    log_success(logger, "模块执行完成", "Analyze")
     return success_count > 0
     

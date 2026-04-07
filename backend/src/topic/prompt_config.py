@@ -34,6 +34,7 @@ DEFAULT_PREFILTER_QUERY_HINT = ""
 DEFAULT_PREFILTER_NEGATIVE_HINT = ""
 DEFAULT_PROJECT_STOPWORDS: list[str] = []
 DEFAULT_PUBLISHER_BLACKLIST: list[str] = []
+DEFAULT_PUBLISHER_FUZZY_PATTERNS: list[str] = ["橱窗", "好物", "旗舰"]
 DEFAULT_GLOBAL_FILTERS = ["明星八卦", "广告推广", "抽奖转发", "求职招聘"]
 _TERM_SPLIT_PATTERN = re.compile(r"[\s,，;；]+")
 
@@ -217,6 +218,9 @@ def _default_payload(topic: str, path: Path, exists: bool = False) -> Dict[str, 
         "publisher_blacklist": list(DEFAULT_PUBLISHER_BLACKLIST),
         "publisher_blacklist_text": "",
         "publisher_blacklist_line_count": 0,
+        "publisher_fuzzy_patterns": list(DEFAULT_PUBLISHER_FUZZY_PATTERNS),
+        "publisher_fuzzy_patterns_text": "",
+        "publisher_fuzzy_patterns_line_count": 0,
         "use_multi_agent": True,
         "default_drop_rule_prompt": DEFAULT_DROP_RULE_PROMPT,
         "recluster_system_prompt": DEFAULT_RECLUSTER_SYSTEM_PROMPT,
@@ -376,6 +380,9 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
             "publisher_blacklist": _normalise_text_lines(
                 settings.get("publisher_blacklist", DEFAULT_PUBLISHER_BLACKLIST)
             ),
+            "publisher_fuzzy_patterns": _normalise_text_lines(
+                settings.get("publisher_fuzzy_patterns", DEFAULT_PUBLISHER_FUZZY_PATTERNS)
+            ),
             "use_multi_agent": use_multi_agent,
             "drop_rule_prompt": str(
                 settings.get("drop_rule_prompt") or DEFAULT_DROP_RULE_PROMPT
@@ -420,6 +427,8 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
     payload["project_stopwords_line_count"] = len(payload.get("project_stopwords", []))
     payload["publisher_blacklist_text"] = _join_text_lines(payload.get("publisher_blacklist", []))
     payload["publisher_blacklist_line_count"] = len(payload.get("publisher_blacklist", []))
+    payload["publisher_fuzzy_patterns_text"] = _join_text_lines(payload.get("publisher_fuzzy_patterns", []))
+    payload["publisher_fuzzy_patterns_line_count"] = len(payload.get("publisher_fuzzy_patterns", []))
     return payload
 
 
@@ -445,6 +454,7 @@ def persist_topic_bertopic_prompt_config(
     pre_filter_negative_hint: str = "",
     project_stopwords: Any = None,
     publisher_blacklist: Any = None,
+    publisher_fuzzy_patterns: Any = None,
     recluster_topic_limit: Any = None,
     recluster_target_coverage_ratio: Any = None,
 ) -> Dict[str, Any]:
@@ -506,6 +516,12 @@ def persist_topic_bertopic_prompt_config(
         )
     else:
         final_publisher_blacklist = _normalise_text_lines(publisher_blacklist)
+    if publisher_fuzzy_patterns is None:
+        final_publisher_fuzzy_patterns = _normalise_text_lines(
+            existing_payload.get("publisher_fuzzy_patterns", DEFAULT_PUBLISHER_FUZZY_PATTERNS)
+        )
+    else:
+        final_publisher_fuzzy_patterns = _normalise_text_lines(publisher_fuzzy_patterns)
     final_recluster_topic_limit = _coerce_positive_int(
         recluster_topic_limit,
         DEFAULT_RECLUSTER_TOPIC_LIMIT,
@@ -544,6 +560,7 @@ def persist_topic_bertopic_prompt_config(
             "pre_filter_negative_hint": final_pre_filter_negative_hint,
             "project_stopwords": final_project_stopwords,
             "publisher_blacklist": final_publisher_blacklist,
+            "publisher_fuzzy_patterns": final_publisher_fuzzy_patterns,
             "use_multi_agent": True,
             "drop_rule_prompt": final_drop_rule_prompt,
             "global_filters": final_global_filters,

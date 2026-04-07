@@ -596,7 +596,7 @@ defineExpose({
   font-size: 0.78rem;
   font-weight: 500;
   color: var(--color-text-secondary);
-  background-color: rgba(255, 255, 255, 0.68);
+  background-color: color-mix(in srgb, var(--color-surface) 68%, transparent);
   transition: all 0.15s ease;
 }
 
@@ -702,7 +702,7 @@ defineExpose({
   margin-top: 0.18rem;
   font-size: 0.78rem;
   color: var(--color-text-muted);
-  background-color: rgba(255, 255, 255, 0.8);
+  background-color: color-mix(in srgb, var(--color-surface) 80%, transparent);
   padding: 0.15rem 0.35rem;
   border-radius: 6px;
 }

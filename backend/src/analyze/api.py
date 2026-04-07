@@ -282,3 +282,137 @@ def get_analyze_results():
             LOGGER.warning("Failed to load AI summary file %s", ai_summary_path, exc_info=True)
 
     return success(response_payload)
+
+
+@analyze_bp.route('/run-async', methods=['POST'])
+def run_analyze_async():
+    """异步执行基础分析（后台worker模式）。"""
+    from server_support.basic_analysis import create_or_reuse_task, ensure_worker_running  # type: ignore
+
+    payload = request.get_json(silent=True) or {}
+    start = str(payload.get("start") or "").strip()
+    end = str(payload.get("end") or "").strip()
+    func = str(payload.get("function") or "").strip() or None
+    force = payload.get("force", False)
+
+    if not start:
+        return error("Missing required field(s): start", status_code=400)
+
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return error(str(exc), status_code=400)
+
+    try:
+        task = create_or_reuse_task(
+            topic_identifier,
+            start,
+            end_date=end or None,
+            only_function=func,
+            force=force,
+        )
+        ensure_worker_running()
+        return success({
+            "message": "任务已创建",
+            "task_id": task.get("id"),
+            "task_status": task.get("status"),
+            "task": task,
+        })
+    except Exception as e:
+        LOGGER.exception("Error creating analyze indicator task")
+        return error(str(e), status_code=500)
+
+
+@analyze_bp.route('/task/<task_id>', methods=['GET'])
+def get_analyze_task_status(task_id):
+    """获取任务状态。"""
+    from server_support.basic_analysis import get_task  # type: ignore
+
+    try:
+        task = get_task(task_id)
+        return success({"task": task})
+    except LookupError:
+        return error("Task not found", status_code=404)
+    except Exception as e:
+        LOGGER.exception("Error getting analyze indicator task")
+        return error(str(e), status_code=500)
+
+
+@analyze_bp.route('/task/<task_id>/cancel', methods=['POST'])
+def cancel_analyze_task(task_id):
+    """取消任务。"""
+    from server_support.basic_analysis import cancel_task as do_cancel_task  # type: ignore
+
+    try:
+        task = do_cancel_task(task_id)
+        return success({"task": task})
+    except LookupError:
+        return error("Task not found", status_code=404)
+    except ValueError as e:
+        return error(str(e), status_code=400)
+    except Exception as e:
+        LOGGER.exception("Error cancelling analyze indicator task")
+        return error(str(e), status_code=500)
+
+
+@analyze_bp.route('/task/<task_id>', methods=['DELETE'])
+def delete_analyze_task(task_id):
+    """删除任务。"""
+    from server_support.basic_analysis import delete_task as do_delete_task  # type: ignore
+
+    try:
+        do_delete_task(task_id)
+        return success({"message": "Task deleted"})
+    except LookupError:
+        return error("Task not found", status_code=404)
+    except ValueError as e:
+        return error(str(e), status_code=400)
+    except Exception as e:
+        LOGGER.exception("Error deleting analyze indicator task")
+        return error(str(e), status_code=500)
+
+
+@analyze_bp.route('/status', methods=['GET'])
+def get_analyze_status():
+    """获取专题的基础分析任务状态。"""
+    from server_support.basic_analysis import build_status_payload  # type: ignore
+
+    raw_topic = request.args.get("topic")
+    raw_project = request.args.get("project")
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip() or None
+
+    payload = {
+        "topic": raw_topic,
+        "project": raw_project,
+    }
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError:
+        topic_identifier = (raw_topic or "").strip()
+        if not topic_identifier:
+            return error("Missing required query parameters: topic or project")
+
+    if not start:
+        return error("Missing required query parameter: start", status_code=400)
+
+    try:
+        data = build_status_payload(topic_identifier, start, end_date=end)
+        return success({"data": data})
+    except Exception as e:
+        LOGGER.exception("Error getting analyze indicator status")
+        return error(str(e), status_code=500)
+
+
+@analyze_bp.route('/worker', methods=['GET'])
+def get_analyze_worker_status():
+    """获取 worker 状态。"""
+    from server_support.basic_analysis import load_worker_status  # type: ignore
+
+    try:
+        status = load_worker_status()
+        return success({"worker": status})
+    except Exception as e:
+        LOGGER.exception("Error getting analyze indicator worker status")
+        return error(str(e), status_code=500)

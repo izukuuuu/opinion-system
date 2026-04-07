@@ -2367,7 +2367,7 @@ const updateTopN = (value) => {
 .llm-cluster-card {
   border-radius: 1rem;
   border: 1px solid var(--color-border-soft);
-  background: linear-gradient(135deg, rgba(67, 97, 238, 0.05) 0%, rgba(255, 255, 255, 0.9) 100%);
+  background: linear-gradient(135deg, rgb(var(--color-brand-600) / 0.05) 0%, color-mix(in srgb, var(--color-surface) 90%, transparent) 100%);
   padding: 1.25rem;
 }
 
@@ -2417,9 +2417,9 @@ const updateTopN = (value) => {
   line-height: 1.6;
   margin: 0 0 1rem 0;
   padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.7);
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
   border-radius: 0.5rem;
-  border-left: 3px solid #4361ee;
+  border-left: 3px solid var(--color-brand-600-hex);
 }
 
 .llm-cluster-card__original,

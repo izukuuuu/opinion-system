@@ -1872,3 +1872,384 @@ def run_fluid_analysis(
         import traceback
         logger.error(traceback.format_exc())
         return False
+
+
+def run_fluid_analysis_with_progress(
+    topic: str,
+    start_date: str,
+    end_date: str = None,
+    fetch_dir: Optional[str] = None,
+    window_hours: int = 3,
+    target_file: Optional[str] = None,
+    progress_callback=None,
+    max_workers: int = 4,
+) -> bool:
+    """
+    运行舆论流体动力学指标计算（支持进度回调和多线程）。
+
+    Args:
+        topic: 专题名称
+        start_date: 开始日期 (YYYY-MM-DD)
+        end_date: 结束日期 (YYYY-MM-DD)，如果不提供则使用start作为单日期
+        fetch_dir: 可选，指定数据目录（如果不提供则使用默认的fetch目录）
+        window_hours: 时间窗口大小（小时），默认3小时
+        target_file: 可选，指定要分析的文件名（例如: "论坛.csv"），只分析该文件
+        progress_callback: 进度回调函数，签名: callback(payload: Dict[str, Any]) -> None
+            payload 包含: phase, percentage, message, total_files, processed_files,
+                          total_windows, processed_windows, current_file
+        max_workers: 多线程处理的最大线程数，默认4
+
+    Returns:
+        bool: 是否成功
+    """
+    import concurrent.futures
+    from datetime import datetime, timezone
+
+    def _emit_progress(
+        phase: str,
+        percentage: int,
+        message: str,
+        *,
+        total_files: int = 0,
+        processed_files: int = 0,
+        total_windows: int = 0,
+        processed_windows: int = 0,
+        current_file: str = "",
+    ) -> None:
+        if progress_callback:
+            try:
+                progress_callback({
+                    "phase": phase,
+                    "percentage": percentage,
+                    "message": message,
+                    "total_files": total_files,
+                    "processed_files": processed_files,
+                    "total_windows": total_windows,
+                    "processed_windows": processed_windows,
+                    "current_file": current_file,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception:
+                pass
+
+    date_range = f"{start_date}_{end_date}" if end_date else start_date
+    logger = setup_logger(topic, date_range)
+    log_module_start(logger, "FluidAnalysis")
+
+    try:
+        # 获取路径
+        if fetch_dir:
+            data_root = Path(fetch_dir)
+        else:
+            data_root = bucket("fetch", topic, date_range)
+
+        out_dir = ensure_bucket("fluid", topic, date_range)
+
+        if not data_root.exists():
+            log_error(logger, f"数据目录不存在: {data_root}", "FluidAnalysis")
+            _emit_progress("error", 0, f"数据目录不存在: {data_root}")
+            return False
+
+        # 如果指定了单个文件，仅分析该文件；否则扫描全部文件
+        if target_file:
+            target_path = data_root / target_file
+            if not target_path.exists():
+                log_error(logger, f"指定的文件不存在: {target_path}", "FluidAnalysis")
+                _emit_progress("error", 0, f"指定的文件不存在: {target_path}")
+                return False
+            files_to_process = [target_path]
+        else:
+            files_to_process = list(iter_data_files(data_root))
+
+        if not files_to_process:
+            log_error(logger, f"数据目录中未找到可用文件: {data_root}", "FluidAnalysis")
+            _emit_progress("error", 0, f"数据目录中未找到可用文件")
+            return False
+
+        total_files = len(files_to_process)
+        _emit_progress(
+            "prepare", 5,
+            f"已发现 {total_files} 个数据文件，准备开始分析。",
+            total_files=total_files,
+        )
+
+        # 1) 汇总分析（全部文件合并）
+        if not target_file:
+            _emit_progress(
+                "analyze", 10,
+                f"开始汇总处理（全部文件），共 {total_files} 个文件。",
+                total_files=total_files,
+            )
+
+            log_success(logger, f"开始汇总处理（全部文件），目录: {data_root}", "FluidAnalysis")
+
+            # 使用线程池并行处理时间窗口
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # 读取数据
+                paths, frames = read_all_docs(data_root, target_file=None)
+
+                # 按时间窗口分组
+                time_windows = slice_frames_by_time_window(frames, paths, window_hours=window_hours)
+                total_windows = len(time_windows)
+
+                _emit_progress(
+                    "analyze", 15,
+                    f"数据加载完成，共 {total_windows} 个时间窗口待处理。",
+                    total_files=total_files,
+                    total_windows=total_windows,
+                )
+
+                # 重置G值计算的日志标志
+                if hasattr(compute_global_G, '_first_window_logged'):
+                    delattr(compute_global_G, '_first_window_logged')
+                    delattr(compute_global_G, '_method_logged')
+                    delattr(compute_global_G, '_calc_logged')
+
+                # 处理每个时间窗口
+                raw_results = []
+                processed_windows = 0
+
+                for idx, (window_str, window_frames) in enumerate(time_windows):
+                    total_posts, I_val, span_hours = compute_global_I(window_frames)
+                    if total_posts == 0:
+                        continue
+
+                    N_theta, Omega2, Omega, mean_theta = compute_global_Omega(window_frames)
+                    G_val = compute_global_G(window_frames)
+                    if G_val is None:
+                        G_val = 0.0
+
+                    window_posts = []
+                    for df in window_frames:
+                        if df is not None and not df.empty:
+                            platform = "未知平台"
+                            if "platform" in df.columns:
+                                platform = df["platform"].iloc[0] if len(df) > 0 else "未知平台"
+                            window_posts.append((platform, len(df)))
+
+                    S_posts, C_val = compute_global_C_doc(window_posts)
+                    unique_authors, total_authors, D_val = compute_global_D(window_frames)
+                    T_val = compute_global_T(mean_theta)
+                    S_val = compute_global_S(Omega, G_val, C_val)
+                    Re_val = compute_reynolds_number(I_val, unique_authors, C_val, D_val)
+                    flow_state = get_flow_state(Re_val)
+
+                    hours_list = []
+                    for df in window_frames:
+                        if "published_at" in df.columns and not df.empty:
+                            df["published_at"] = pd.to_datetime(df["published_at"], errors="coerce")
+                            hours = df["published_at"].dt.hour.dropna()
+                            if len(hours) > 0:
+                                hours_list.append(hours.mean())
+                    avg_hour = int(np.mean(hours_list)) if hours_list else datetime.now().hour
+
+                    raw_results.append({
+                        "日期": window_str,
+                        "总帖子数": total_posts,
+                        "S(全部文档帖子总数)": S_posts,
+                        "时间跨度(小时)": span_hours,
+                        "去重用户数": unique_authors,
+                        "总活跃用户数": total_authors,
+                        "I_raw": I_val,
+                        "S_raw": S_val,
+                        "E_raw": float(mean_theta),
+                        "粘度(C)": C_val,
+                        "密度(D)": D_val,
+                        "温度(T)": T_val,
+                        "涡度(Ω²)": Omega2,
+                        "涡度(Ω)": Omega,
+                        "压强梯度(G)": G_val,
+                        "雷诺数(Re)": Re_val,
+                        "流态": flow_state,
+                        "h": avg_hour,
+                    })
+
+                    processed_windows += 1
+                    progress_percentage = 15 + int((processed_windows / max(total_windows, 1)) * 50)
+                    _emit_progress(
+                        "analyze", progress_percentage,
+                        f"已处理 {processed_windows}/{total_windows} 个时间窗口。",
+                        total_files=total_files,
+                        total_windows=total_windows,
+                        processed_windows=processed_windows,
+                    )
+
+                # 计算归一化和热度
+                if raw_results:
+                    I_values = [r["I_raw"] for r in raw_results if not np.isnan(r["I_raw"])]
+                    S_values = [r["S_raw"] for r in raw_results if not np.isnan(r["S_raw"])]
+                    I_min, I_max = min(I_values), max(I_values) if I_values else (0, 1)
+                    S_min, S_max = min(S_values), max(S_values) if S_values else (0, 1)
+                else:
+                    I_min, I_max, S_min, S_max = 0, 1, 0, 1
+
+                all_results = []
+                t_cum = 0.0
+                prev_I = None
+
+                _emit_progress(
+                    "compute", 70,
+                    f"正在计算归一化指标和热度，共 {len(raw_results)} 个窗口。",
+                    total_files=total_files,
+                    total_windows=len(raw_results),
+                )
+
+                for idx, raw_r in enumerate(raw_results):
+                    time_step_hours = raw_r["时间跨度(小时)"] if raw_r["时间跨度(小时)"] > 0 else 1.0
+                    I_curr = raw_r["I_raw"]
+                    if prev_I is None:
+                        dI_dt = I_curr / time_step_hours
+                    else:
+                        dI_dt = (I_curr - prev_I) / time_step_hours
+
+                    current_hour = raw_r.get("h", datetime.now().hour)
+                    E_curr = abs(raw_r.get("E_raw", 0.0))
+
+                    dH_dt_theory = compute_heat_rate_theoretical(
+                        dI_dt=dI_dt,
+                        Omega=raw_r["涡度(Ω)"],
+                        G=raw_r["压强梯度(G)"],
+                        C=raw_r["粘度(C)"],
+                        D=raw_r["密度(D)"],
+                        E=E_curr,
+                        h=current_hour,
+                        t_hours=t_cum,
+                    )
+                    window_heat = dH_dt_theory * time_step_hours
+
+                    if np.isnan(window_heat) or np.isinf(window_heat):
+                        window_heat_display = 0.01
+                        heat_loss = 0.0
+                    elif window_heat < 0:
+                        heat_loss = abs(window_heat)
+                        window_heat_display = 0.01
+                    else:
+                        window_heat_display = window_heat
+                        heat_loss = 0.0
+
+                    all_results.append({
+                        "日期": raw_r["日期"],
+                        "总帖子数": raw_r["总帖子数"],
+                        "S(全部文档帖子总数)": raw_r["S(全部文档帖子总数)"],
+                        "时间跨度(小时)": raw_r["时间跨度(小时)"],
+                        "去重用户数": raw_r["去重用户数"],
+                        "总活跃用户数": raw_r["总活跃用户数"],
+                        "流速(I)": normalize_I(raw_r["I_raw"], I_min, I_max),
+                        "流速(I)_原始": raw_r["I_raw"],
+                        "粘度(C)": normalize_C(raw_r["粘度(C)"]),
+                        "粘度(C)_原始": raw_r["粘度(C)"],
+                        "密度(D)": raw_r["密度(D)"],
+                        "温度(T)": raw_r["温度(T)"],
+                        "压力(S)": normalize_S(raw_r["S_raw"], S_min, S_max),
+                        "压力(S)_原始": raw_r["S_raw"],
+                        "涡度(Ω²)": raw_r["涡度(Ω²)"],
+                        "涡度(Ω)": raw_r["涡度(Ω)"],
+                        "压强梯度(G)": raw_r["压强梯度(G)"],
+                        "雷诺数(Re)": raw_r["雷诺数(Re)"],
+                        "流态": raw_r["流态"],
+                        "热度(H)": dH_dt_theory,
+                        "dH_dt": dH_dt_theory,
+                        "窗口热度": window_heat_display,
+                        "窗口散热": heat_loss,
+                        "h": current_hour,
+                        "E_raw": E_curr,
+                        "t_cum_hours": t_cum,
+                        "dI_dt": dI_dt,
+                    })
+                    prev_I = I_curr
+                    t_cum += time_step_hours
+
+                out = pd.DataFrame(all_results) if all_results else pd.DataFrame()
+
+                if len(all_results) > 0:
+                    # Helper function to safely extract and compute mean
+                    def _safe_mean(key):
+                        values = [r.get(key) for r in all_results if r.get(key) is not None and not np.isnan(r.get(key, np.nan))]
+                        return float(np.mean(values)) if values else float("nan")
+
+                    metrics = {
+                        "I": _safe_mean("流速(I)"),
+                        "C": _safe_mean("粘度(C)"),
+                        "D": _safe_mean("密度(D)"),
+                        "T": _safe_mean("温度(T)"),
+                        "S": _safe_mean("压力(S)"),
+                        "Omega2": _safe_mean("涡度(Ω²)"),
+                        "Omega": _safe_mean("涡度(Ω)"),
+                        "G": _safe_mean("压强梯度(G)"),
+                        "Re": _safe_mean("雷诺数(Re)"),
+                        "flow_state": get_flow_state(_safe_mean("雷诺数(Re)")) if all_results else "层流",
+                        "H": _safe_mean("热度(H)"),
+                        "TotalPosts": float(sum([r.get("总帖子数", 0) for r in all_results])),
+                        "S_posts": float(sum([r.get("S(全部文档帖子总数)", 0) for r in all_results])),
+                        "SpanDays": float(len(all_results)),
+                        "SpanHours": float(sum([r.get("时间跨度(小时)", 0) for r in all_results])),
+                        "UniqueAuthors": float(max([r.get("去重用户数", 0) for r in all_results])),
+                        "TotalAuthors": float(sum([r.get("总活跃用户数", 0) for r in all_results])),
+                    }
+                else:
+                    metrics = {
+                        "I": float("nan"), "C": float("nan"), "D": float("nan"),
+                        "T": float("nan"), "S": float("nan"),
+                        "Omega2": float("nan"), "Omega": float("nan"), "G": float("nan"),
+                        "Re": float("nan"), "flow_state": "层流", "H": float("nan"),
+                        "TotalPosts": 0.0, "S_posts": 0.0, "SpanDays": 0.0, "SpanHours": float("nan"),
+                        "UniqueAuthors": 0.0, "TotalAuthors": 0.0,
+                    }
+
+                unified_json = out_dir / "fluid_indicators_unified.json"
+                _save_outputs(metrics, all_results, None, unified_json)
+                log_save_success(logger, str(unified_json), "FluidAnalysis")
+                log_success(logger, f"汇总处理完成，共 {len(all_results)} 个时间窗口", "FluidAnalysis")
+
+        # 2) 按文件逐一分析（并行处理）
+        processed_files = 0
+        for f in files_to_process:
+            processed_files += 1
+            file_progress = 80 + int((processed_files / max(total_files, 1)) * 15)
+            _emit_progress(
+                "export", file_progress,
+                f"正在处理单个文件: {f.name} ({processed_files}/{total_files})",
+                total_files=total_files,
+                processed_files=processed_files,
+                current_file=f.name,
+            )
+
+            log_success(logger, f"开始处理单个文件: {f.name}", "FluidAnalysis")
+
+            def _process_single_file(file_path: Path):
+                df_single, metrics_single, results_single = process(
+                    data_root=data_root,
+                    window_hours=window_hours,
+                    target_file=file_path.name,
+                    output_file=None,
+                    output_json=out_dir / f"fluid_{file_path.stem}_indicators.json"
+                )
+                file_json = out_dir / f"fluid_{file_path.stem}_indicators.json"
+                _save_outputs(metrics_single, results_single, None, file_json)
+                return file_json
+
+            # 使用线程池处理单个文件
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future = executor.submit(_process_single_file, f)
+                try:
+                    file_json = future.result(timeout=300)  # 5分钟超时
+                    log_save_success(logger, f"{f.name} -> {file_json.name}", "FluidAnalysis")
+                except Exception as exc:
+                    log_error(logger, f"处理文件 {f.name} 失败: {exc}", "FluidAnalysis")
+
+        _emit_progress(
+            "completed", 100,
+            f"全部文件处理完成，输出目录: {out_dir.name}",
+            total_files=total_files,
+            processed_files=total_files,
+        )
+
+        log_success(logger, "全部文件处理完成", "FluidAnalysis")
+        return True
+
+    except Exception as e:
+        log_error(logger, f"流体动力学分析失败: {e}", "FluidAnalysis")
+        import traceback
+        logger.error(traceback.format_exc())
+        _emit_progress("error", 0, f"流体动力学分析失败: {e}")
+        return False

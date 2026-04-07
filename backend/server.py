@@ -25,7 +25,17 @@ for path in (BACKEND_DIR, SRC_DIR):
         sys.path.insert(0, s_path)
 
 LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+
+# 配置 Rich 现代化日志界面
+# 将 background-tasks 轮询状态显示在底部栏，不占用主日志流
+from src.utils.logging.rich_console import (
+    setup_rich_logging,
+    print_startup_banner,
+    start_status_spinner,
+    stop_status_spinner,
+    console,
+)
+setup_rich_logging(log_level=logging.INFO, show_time=True, show_path=False)
 
 from src.project import (  # type: ignore
     get_dataset_date_summary,
@@ -95,6 +105,7 @@ from server_support import (  # type: ignore
     update_deduplicate_job,
     update_fetch_refresh_job,
     update_fetch_refresh_worker,
+    load_fetch_refresh_worker_status,
     update_postclean_job,
     update_rebuild_fetch_job,
     get_default_rag_config,
@@ -1085,6 +1096,8 @@ def system_cancel_background_task(task_id: str):
     - report:report-20250101-120000-abc123
     - stopword:sw-20250101-120000-abc123
     - publisher-detection:pd-20250101-120000-abc123
+    - fluid-analysis:fa-20250101-120000-abc123
+    - basic-analysis:ba-20250101-120000-abc123
     - deduplicate:<topic>:<database>
     - postclean:<topic>:<database>
     - fetch-refresh:<topic>:<database>
@@ -1113,6 +1126,16 @@ def system_cancel_background_task(task_id: str):
 
         elif source == "publisher-detection":
             task = cancel_publisher_detection_task(actual_id)
+            return success({"data": task})
+
+        elif source == "fluid-analysis":
+            from server_support.fluid_analysis import cancel_task as cancel_fluid_analysis_task
+            task = cancel_fluid_analysis_task(actual_id)
+            return success({"data": task})
+
+        elif source == "basic-analysis":
+            from server_support.basic_analysis import cancel_task as cancel_basic_analysis_task
+            task = cancel_basic_analysis_task(actual_id)
             return success({"data": task})
 
         elif source == "deduplicate":
@@ -1178,6 +1201,16 @@ def system_delete_background_task(task_id: str):
 
         elif source == "publisher-detection":
             delete_publisher_detection_task(actual_id)
+            return success({"data": {"deleted": task_id}})
+
+        elif source == "fluid-analysis":
+            from server_support.fluid_analysis import delete_task as delete_fluid_analysis_task
+            delete_fluid_analysis_task(actual_id)
+            return success({"data": {"deleted": task_id}})
+
+        elif source == "basic-analysis":
+            from server_support.basic_analysis import delete_task as delete_basic_analysis_task
+            delete_basic_analysis_task(actual_id)
             return success({"data": {"deleted": task_id}})
 
         elif source == "deduplicate":
@@ -2361,7 +2394,32 @@ def database_postclean_status_endpoint():
         "logs": [],
         "result": None,
     }
-    return jsonify({"status": "ok", "operation": "database-postclean-status", "data": payload}), 200
+    # 动态更新 follow_up.task 状态
+    if isinstance(payload.get("result"), dict):
+        follow_up = payload["result"].get("follow_up")
+        if isinstance(follow_up, dict):
+            fetch_task = get_fetch_refresh_job(topic_identifier, database)
+            if fetch_task:
+                follow_up["task"] = fetch_task
+                task_status = str(fetch_task.get("status") or "").strip()
+                if task_status == "completed":
+                    follow_up["status"] = "completed"
+                    follow_up["message"] = "本地缓存刷新已完成。"
+                elif task_status == "running":
+                    follow_up["status"] = "running"
+                    follow_up["message"] = "本地缓存刷新正在执行中..."
+                elif task_status in {"failed", "error"}:
+                    follow_up["status"] = "failed"
+                    follow_up["message"] = "本地缓存刷新执行失败，请检查日志。"
+                elif task_status == "cancelled":
+                    follow_up["status"] = "cancelled"
+                    follow_up["message"] = "本地缓存刷新任务已取消。"
+    return jsonify({
+        "status": "ok",
+        "operation": "database-postclean-status",
+        "data": payload,
+        "fetch_refresh_worker": load_fetch_refresh_worker_status(),
+    }), 200
 
 
 @app.post("/api/database/deduplicate")
@@ -3435,7 +3493,13 @@ register_settings_endpoints(app, PROJECT_MANAGER)
 
 def main() -> None:
     host, port = _resolve_runtime_binding()
-    LOGGER.info("Starting OpinionSystem backend on %s:%s (set OPINION_BACKEND_PORT to override)", host, port)
+    # 使用 Rich 显示启动横幅
+    print_startup_banner(app_name="Opinion System Backend", host=host, port=port)
+    LOGGER.info("Starting server on %s:%s (set OPINION_BACKEND_PORT to override)", host, port)
+
+    # 启动底部状态栏（显示 background-tasks 轮询状态）
+    start_status_spinner()
+
     try:
         app.run(host=host, port=port)
     except OSError as exc:  # pragma: no cover - defensive handling for production issues
@@ -3450,8 +3514,12 @@ def main() -> None:
                 host,
                 port,
             )
+            stop_status_spinner()
             raise SystemExit(1) from exc
+        stop_status_spinner()
         raise
+    finally:
+        stop_status_spinner()
 
 
 

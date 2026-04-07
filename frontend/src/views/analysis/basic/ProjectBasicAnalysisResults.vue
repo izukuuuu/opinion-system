@@ -4,8 +4,6 @@
       eyebrow="基础分析"
       title="查看分析结果"
       description="选择专题与分析记录，浏览图表、AI 摘要与各分析模块结果。"
-      :meta-items="headerMetaItems"
-      :actions="headerActions"
     />
 
     <AnalysisSectionCard
@@ -136,36 +134,6 @@
             </div>
           </form>
         </div>
-
-        <div v-if="analysisSummary" class="grid gap-3 border-t border-soft pt-4 sm:grid-cols-2 xl:grid-cols-3">
-          <div class="analysis-meta-list__item">
-            <span class="analysis-meta-list__icon">
-              <BookmarkSquareIcon class="h-4 w-4" />
-            </span>
-            <div class="space-y-1">
-              <p class="analysis-meta-list__label">专题</p>
-              <p class="analysis-meta-list__value">{{ analysisSummary.topic }}</p>
-            </div>
-          </div>
-          <div class="analysis-meta-list__item">
-            <span class="analysis-meta-list__icon">
-              <CalendarDaysIcon class="h-4 w-4" />
-            </span>
-            <div class="space-y-1">
-              <p class="analysis-meta-list__label">分析区间</p>
-              <p class="analysis-meta-list__value">{{ analysisSummary.range?.start || '未提供' }} → {{ analysisSummary.range?.end || '未提供' }}</p>
-            </div>
-          </div>
-          <div class="analysis-meta-list__item">
-            <span class="analysis-meta-list__icon">
-              <Squares2X2Icon class="h-4 w-4" />
-            </span>
-            <div class="space-y-1">
-              <p class="analysis-meta-list__label">分析模块</p>
-              <p class="analysis-meta-list__value">{{ analysisSummary.functionCount }}</p>
-            </div>
-          </div>
-        </div>
       </div>
     </AnalysisSectionCard>
 
@@ -252,7 +220,7 @@
               :has-data="target.hasData"
             >
               <template #default>
-                <div v-if="target.rows.length" class="overflow-hidden rounded-2xl border border-soft">
+                <div v-if="target.rows.length && shouldShowDataTable(activeSection.name, target.rows)" class="overflow-hidden rounded-2xl border border-soft">
                   <table class="min-w-full text-sm">
                     <thead class="bg-surface-muted text-xs uppercase tracking-wide text-muted">
                       <tr>
@@ -272,11 +240,7 @@
                     </tbody>
                   </table>
                 </div>
-                <details class="rounded-2xl border border-dashed border-soft px-3 py-2 text-xs">
-                  <summary class="cursor-pointer text-brand-600">查看原始 JSON</summary>
-                  <pre class="mt-2 max-h-56 overflow-auto bg-slate-900/90 p-3 text-brand-soft">{{ target.rawText }}</pre>
-                </details>
-              </template>
+                              </template>
             </AnalysisChartPanel>
           </div>
         </div>
@@ -290,7 +254,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Teleport } from 'vue'
 import {
-  ArrowPathIcon,
   BookmarkSquareIcon,
   CalendarDaysIcon,
   ChartBarIcon,
@@ -391,41 +354,6 @@ const aiMainFinding = computed(() => {
     updatedAt: formatTimestamp(main?.updated_at || aiSummaryMeta.value?.generated_at)
   }
 })
-
-const headerMetaItems = computed(() => [
-  {
-    label: '当前专题',
-    value: viewSelection.topic || '未选择',
-    icon: BookmarkSquareIcon
-  },
-  {
-    label: '已载入区间',
-    value: viewSelection.start && viewSelection.end ? `${viewSelection.start} → ${viewSelection.end}` : '等待选择记录',
-    icon: CalendarDaysIcon
-  },
-  {
-    label: '最近加载',
-    value: lastLoaded.value || '尚未加载',
-    icon: SparklesIcon
-  }
-])
-
-const headerActions = computed(() => [
-  {
-    label: historyState.loading ? '刷新中…' : '刷新记录',
-    icon: ArrowPathIcon,
-    variant: 'secondary',
-    onClick: refreshHistory
-  },
-  {
-    label: showManualInput.value ? '收起手动输入' : '手动输入',
-    icon: CalendarDaysIcon,
-    variant: 'ghost',
-    onClick: () => {
-      showManualInput.value = !showManualInput.value
-    }
-  }
-])
 
 const getChineseTitle = (label) => {
   if (!label) return '未命名'
@@ -591,6 +519,20 @@ const formatRowValue = (row) => {
   if (!row) return 0
   if (row.displayValue != null) return row.displayValue
   return row.value ?? row.count ?? row.total ?? 0
+}
+
+const isPureDateRows = (rows) => {
+  if (!Array.isArray(rows) || !rows.length) return false
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/
+  return rows.every((row) => {
+    const name = row.displayName ?? row.name ?? row.label ?? row.key ?? ''
+    return datePattern.test(name)
+  })
+}
+
+const shouldShowDataTable = (sectionName, rows) => {
+  if (sectionName === 'trends' && isPureDateRows(rows)) return false
+  return true
 }
 
 const toggleManualInput = (event) => {

@@ -141,14 +141,14 @@
                 <span
                   v-for="id in activeDimensionIds"
                   :key="id"
-                  class="analysis-chip rounded-xl border border-soft bg-white text-[11px] text-secondary"
+                  class="analysis-chip rounded-xl border border-soft bg-surface text-[11px] text-secondary"
                 >
                   # {{ id }}
                 </span>
               </div>
             </div>
 
-            <div class="rounded-[1.5rem] border border-white/70 bg-white p-4">
+            <div class="rounded-[1.5rem] border border-soft bg-surface p-4">
               <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted">核心发现</p>
               <ul class="mt-3 space-y-2 text-sm text-secondary">
                 <li class="flex items-center gap-2">
@@ -172,7 +172,7 @@
           <article
             v-for="example in examples"
             :key="example.title"
-            class="rounded-[1.5rem] border border-soft bg-white p-4 transition hover:border-brand-soft hover:bg-brand-soft-muted"
+            class="rounded-[1.5rem] border border-soft bg-surface p-4 transition hover:border-brand-soft hover:bg-brand-soft-muted"
           >
             <div class="mb-4 flex items-center justify-between">
               <div class="flex h-10 w-10 items-center justify-center rounded-2xl" :class="example.colorClass">

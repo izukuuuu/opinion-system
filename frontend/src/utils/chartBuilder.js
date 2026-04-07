@@ -280,6 +280,66 @@ const compareCategoryValues = (left, right) => {
   return String(left).localeCompare(String(right))
 }
 
+const calculateOptimalWindowSize = (dateCount) => {
+  // 目标是让最终数据点不超过 12 个
+  if (dateCount <= 12) return 1
+  if (dateCount <= 24) return 2
+  if (dateCount <= 36) return 3
+  if (dateCount <= 48) return 4
+  if (dateCount <= 60) return 5
+  if (dateCount <= 84) return 7
+  if (dateCount <= 120) return 10
+  if (dateCount <= 180) return 15
+  return Math.ceil(dateCount / 12)
+}
+
+const isDateString = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value))
+
+const getWindowLabel = (dates, startIndex, windowSize) => {
+  const start = dates[startIndex]
+  const endIndex = Math.min(startIndex + windowSize - 1, dates.length - 1)
+  const end = dates[endIndex]
+  if (startIndex === endIndex) return start.slice(5) // 只显示 MM-DD
+  // 显示 MM-DD ~ MM-DD
+  return `${start.slice(5)}~${end.slice(5)}`
+}
+
+const aggregateByWindow = (dates, series, windowSize) => {
+  if (windowSize <= 1 || !dates.length) return { dates, series }
+
+  const windowedDates = []
+  const windowedSeries = series.map((entry) => ({
+    name: entry.name,
+    total: entry.total,
+    values: [],
+    shares: []
+  }))
+
+  for (let i = 0; i < dates.length; i += windowSize) {
+    const windowLabel = getWindowLabel(dates, i, windowSize)
+    windowedDates.push(windowLabel)
+
+    const windowSliceIndices = []
+    for (let j = i; j < Math.min(i + windowSize, dates.length); j++) {
+      windowSliceIndices.push(j)
+    }
+
+    windowedSeries.forEach((newEntry, seriesIndex) => {
+      const originalEntry = series[seriesIndex]
+      const windowValues = windowSliceIndices.map((idx) => ensureNumber(originalEntry.values[idx]))
+      const windowShares = windowSliceIndices.map((idx) => ensureNumber(originalEntry.shares[idx]))
+
+      const aggregatedValue = windowValues.reduce((sum, val) => sum + val, 0)
+      const aggregatedShare = windowShares.reduce((sum, val) => sum + val, 0) / windowSliceIndices.length
+
+      newEntry.values.push(aggregatedValue)
+      newEntry.shares.push(Number(aggregatedShare.toFixed(2)))
+    })
+  }
+
+  return { dates: windowedDates, series: windowedSeries }
+}
+
 export const buildTrendFlowDataset = (targets) => {
   const comparableTargets = Array.isArray(targets)
     ? targets.filter((target) => {
@@ -403,6 +463,11 @@ export const buildTrendStackedAreaOption = (title, dataset) => {
 
 export const buildTrendStackedShareOption = (title, dataset) => {
   if (!dataset?.dates?.length || !dataset?.series?.length) return null
+
+  const allDatesAreValid = dataset.dates.every(isDateString)
+  const windowSize = allDatesAreValid ? calculateOptimalWindowSize(dataset.dates.length) : 1
+  const aggregated = aggregateByWindow(dataset.dates, dataset.series, windowSize)
+
   return {
     color: STACKED_SERIES_COLORS,
     tooltip: {
@@ -419,7 +484,7 @@ export const buildTrendStackedShareOption = (title, dataset) => {
     grid: { left: 36, right: 18, top: 58, bottom: 30, containLabel: true },
     xAxis: {
       type: 'category',
-      data: dataset.dates,
+      data: aggregated.dates,
       axisLabel: { color: '#303d47' },
       axisLine: { lineStyle: { color: '#d0d5d9' } }
     },
@@ -433,7 +498,7 @@ export const buildTrendStackedShareOption = (title, dataset) => {
       },
       splitLine: { lineStyle: { color: '#e2e9f1' } }
     },
-    series: dataset.series.map((entry) => ({
+    series: aggregated.series.map((entry) => ({
       name: entry.name,
       type: 'bar',
       stack: 'share',

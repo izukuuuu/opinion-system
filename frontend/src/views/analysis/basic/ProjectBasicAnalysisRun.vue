@@ -81,49 +81,59 @@
             v-for="func in analysisFunctions"
             :key="func.id"
             type="button"
-            class="group relative flex min-h-[176px] flex-col justify-between rounded-[1.6rem] border p-4 text-left transition"
-            :class="selectedFunctions.includes(func.id)
-              ? 'border-transparent bg-white ring-2 ring-brand-500'
-              : 'border-soft bg-surface-muted hover:border-brand-soft hover:bg-white'"
+            class="group relative flex min-h-[140px] flex-col justify-between rounded-[1.4rem] border p-3.5 text-left transition"
+            :style="selectedFunctions.includes(func.id) ? {
+              borderColor: getColor(func.id).border,
+              backgroundColor: getColor(func.id).bg,
+              boxShadow: `0 0 0 2px ${getColor(func.id).border}`
+            } : undefined"
+            :class="!selectedFunctions.includes(func.id) && 'border-soft bg-surface-muted hover:bg-surface'"
             @click="toggleSelection(func.id)"
           >
-            <span class="absolute right-4 top-4">
+            <span class="absolute right-3 top-3">
               <span
-                class="flex h-6 w-6 items-center justify-center rounded-full border transition"
-                :class="selectedFunctions.includes(func.id)
-                  ? 'border-brand-600 bg-brand-600 text-white'
-                  : 'border-soft bg-white text-transparent'"
+                class="flex h-5 w-5 items-center justify-center rounded-full border transition"
+                :style="{
+                  borderColor: selectedFunctions.includes(func.id) ? getColor(func.id).border : undefined,
+                  backgroundColor: selectedFunctions.includes(func.id) ? getColor(func.id).border : undefined,
+                  color: selectedFunctions.includes(func.id) ? '#fff' : undefined
+                }"
+                :class="!selectedFunctions.includes(func.id) && 'border-soft bg-surface text-transparent'"
               >
-                <CheckIcon class="h-4 w-4" />
+                <CheckIcon class="h-3.5 w-3.5" />
               </span>
             </span>
 
-            <div class="space-y-4">
+            <div class="space-y-2.5">
               <div
-                class="flex h-11 w-11 items-center justify-center rounded-2xl transition"
-                :class="selectedFunctions.includes(func.id)
-                  ? 'bg-brand-soft text-brand-700'
-                  : 'bg-white text-secondary group-hover:bg-brand-soft-muted group-hover:text-brand-700'"
+                class="flex h-9 w-9 items-center justify-center rounded-xl transition"
+                :style="{
+                  backgroundColor: selectedFunctions.includes(func.id) ? '#fff' : getColor(func.id).bg,
+                  color: getColor(func.id).icon
+                }"
               >
                 <component :is="getIcon(func.id)" class="h-5 w-5" />
               </div>
 
-              <div class="space-y-2">
-                <h3 class="text-base font-semibold text-primary">{{ func.label }}</h3>
-                <p class="text-sm leading-6 text-secondary">{{ func.description }}</p>
+              <div class="space-y-1">
+                <h3 class="text-sm font-semibold text-primary">{{ func.label }}</h3>
+                <p class="text-xs leading-5 text-secondary">{{ func.description }}</p>
               </div>
             </div>
 
-            <div class="mt-5 flex items-center justify-between border-t border-dashed border-soft pt-3 text-xs">
-              <span class="text-muted">支持单独运行</span>
-              <button
-                type="button"
-                class="font-semibold text-brand-700 transition hover:text-brand-800"
-                @click.stop="runSingleFunction(func.id)"
-                :disabled="analyzeState.running"
-              >
-                仅运行此项
-              </button>
+            <div class="mt-3 flex items-center justify-end border-t border-dashed border-soft pt-2.5 text-xs">
+              <span class="rounded-full bg-white px-3 py-1">
+                <button
+                  type="button"
+                  class="font-semibold transition"
+                  :class="!selectedFunctions.includes(func.id) && 'text-muted'"
+                  :style="selectedFunctions.includes(func.id) ? { color: getColor(func.id).icon } : undefined"
+                  @click.stop="runSingleFunction(func.id)"
+                  :disabled="analyzeState.running"
+                >
+                  仅运行此项
+                </button>
+              </span>
             </div>
           </button>
         </div>
@@ -222,7 +232,19 @@ const iconMap = {
   volume: SparklesIcon
 }
 
+// 莫兰迪色调色表
+const colorMap = {
+  attitude: { border: '#8aafa0', bg: '#f0f6f4', iconBg: '#e0ebe8', icon: '#8aafa0' },
+  classification: { border: '#9abbcc', bg: '#f0f4f6', iconBg: '#e8eef2', icon: '#9abbcc' },
+  geography: { border: '#d0b890', bg: '#f4f0e8', iconBg: '#e8e4d8', icon: '#d0b890' },
+  keywords: { border: '#b8b0d0', bg: '#f4f2f6', iconBg: '#eceaf0', icon: '#b8b0d0' },
+  publishers: { border: '#d0aa9a', bg: '#f4f0ee', iconBg: '#e8e4e0', icon: '#d0aa9a' },
+  trends: { border: '#9aaec0', bg: '#f0f4f6', iconBg: '#e4e8ec', icon: '#9aaec0' },
+  volume: { border: '#8ac0b0', bg: '#f0f6f4', iconBg: '#e4ece8', icon: '#8ac0b0' }
+}
+
 const getIcon = (id) => iconMap[id] || SparklesIcon
+const getColor = (id) => colorMap[id] || colorMap.volume
 
 const toggleSelection = (id) => {
   if (analyzeState.running) return

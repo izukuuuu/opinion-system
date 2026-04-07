@@ -373,7 +373,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 }
 
 .card {
-  background: #ffffff;
+  background: var(--color-surface);
   border-radius: 20px;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
   padding: 2rem;
@@ -389,7 +389,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 
 .card__header p {
   margin: 0.35rem 0 0;
-  color: #64748b;
+  color: var(--color-text-muted);
 }
 
 .form {
@@ -438,7 +438,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 
 .form__actions button {
   border: none;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  background: linear-gradient(135deg, var(--color-brand-500-hex) 0%, var(--color-brand-400-hex) 100%);
   color: #fff;
   padding: 0.6rem 1.4rem;
   border-radius: 999px;
@@ -448,14 +448,14 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 }
 
 .form__actions button.form__secondary {
-  background: rgba(99, 102, 241, 0.1);
-  color: #4c1d95;
+  background: rgb(var(--color-brand-100) / 0.8);
+  color: var(--color-brand-800);
 }
 
 .form__actions button.form__secondary:hover {
   box-shadow: none;
   transform: none;
-  background: rgba(99, 102, 241, 0.18);
+  background: rgb(var(--color-brand-100) / 1);
 }
 
 .form__actions button:disabled {
@@ -465,7 +465,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 
 .form__actions button:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 25px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 10px 25px rgb(var(--color-brand-500) / 0.25);
 }
 
 .form__message {
@@ -474,17 +474,17 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 }
 
 .form__message--error {
-  color: #dc2626;
+  color: var(--color-danger-500-hex);
 }
 
 .form__message--success {
-  color: #059669;
+  color: var(--color-success-500-hex);
 }
 
 .card__hint {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
-  color: #6366f1;
+  color: var(--color-brand-600-hex);
 }
 
 .form__row input[readonly],
@@ -503,10 +503,10 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 }
 
 .project-card__summary {
-  background: #f8fafc;
+  background: var(--color-bg-base);
   border-radius: 16px;
   padding: 1.25rem 1.5rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border-soft);
 }
 
 .summary-grid {
@@ -525,22 +525,22 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   font-size: 0.75rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #94a3b8;
+  color: var(--color-text-muted);
 }
 
 .summary-item__value {
   font-size: 1.05rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--color-text-primary);
   word-break: break-word;
 }
 
 .summary-item__value[data-status='success'] {
-  color: #047857;
+  color: var(--color-success-500-hex);
 }
 
 .summary-item__value[data-status='error'] {
-  color: #b91c1c;
+  color: var(--color-danger-500-hex);
 }
 
 .project-card__tabs {
@@ -549,8 +549,8 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   gap: 0.5rem;
   padding: 0.35rem;
   border-radius: 999px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-border-soft);
   align-self: flex-start;
 }
 
@@ -560,7 +560,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   padding: 0.45rem 1.1rem;
   border-radius: 999px;
   font-weight: 600;
-  color: #475569;
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -568,14 +568,14 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 .project-card__tab:hover,
 .project-card__tab:focus-visible {
   outline: none;
-  background: rgba(99, 102, 241, 0.12);
-  color: #4338ca;
+  background: rgb(var(--color-brand-100) / 0.8);
+  color: var(--color-brand-700-hex);
 }
 
 .project-card__tab--active {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, var(--color-brand-500-hex), var(--color-brand-400-hex));
   color: #ffffff;
-  box-shadow: 0 10px 24px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 10px 24px rgb(var(--color-brand-500) / 0.25);
 }
 
 .project-card__body {
@@ -602,8 +602,8 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 
 .details__placeholder {
   margin: 0;
-  color: #64748b;
-  background: rgba(248, 250, 252, 0.8);
+  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
   padding: 0.75rem 1rem;
   border-radius: 12px;
 }
@@ -611,7 +611,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 .details__placeholder--muted {
   background: transparent;
   padding: 0;
-  color: #94a3b8;
+  color: var(--color-text-muted);
 }
 
 .details__dates {
@@ -623,7 +623,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 .details__dates h3 {
   margin: 0;
   font-size: 1rem;
-  color: #1f2937;
+  color: var(--color-text-primary);
 }
 
 .details__dates ul {
@@ -638,8 +638,8 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 .details__dates li {
   padding: 0.4rem 0.75rem;
   border-radius: 999px;
-  background: rgba(99, 102, 241, 0.12);
-  color: #4338ca;
+  background: rgb(var(--color-brand-100) / 0.8);
+  color: var(--color-brand-700-hex);
   font-weight: 600;
   font-size: 0.85rem;
 }
@@ -648,10 +648,10 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  background: rgba(248, 250, 252, 0.85);
+  background: color-mix(in srgb, var(--color-surface) 85%, transparent);
   border-radius: 16px;
   padding: 1rem 1.25rem;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid rgb(var(--color-border-soft) / 0.8);
 }
 
 .details__metadata h3 {
@@ -665,11 +665,11 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .details__metadata li strong {
-  color: #1f2937;
+  color: var(--color-text-primary);
 }
 
 .project-card__panel--timeline {
@@ -690,15 +690,15 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 .project-card__panel--timeline li {
   padding: 1rem;
   border-radius: 16px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid rgb(var(--color-border-soft) / 0.8);
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
 }
 
 .project-card__panel--timeline li[data-success='false'] {
-  border-color: rgba(220, 38, 38, 0.35);
+  border-color: rgb(var(--color-danger-500) / 0.5);
 }
 
 .timeline__header {
@@ -715,24 +715,24 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 }
 
 .timeline__timestamp {
-  color: #64748b;
+  color: var(--color-text-muted);
   font-size: 0.85rem;
 }
 
 .timeline__status {
   margin: 0;
   font-weight: 600;
-  color: #059669;
+  color: var(--color-success-500-hex);
 }
 
 .project-card__panel--timeline li[data-success='false'] .timeline__status {
-  color: #dc2626;
+  color: var(--color-danger-500-hex);
 }
 
 .timeline__params {
   margin: 0;
-  background: #0f172a;
-  color: #e0e7ff;
+  background: var(--color-text-primary);
+  color: rgb(var(--color-brand-200) / 1);
   padding: 0.75rem;
   border-radius: 12px;
   font-size: 0.85rem;
@@ -741,7 +741,7 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 
 .timeline__empty {
   margin: 0;
-  color: #64748b;
+  color: var(--color-text-muted);
 }
 
 @media (min-width: 1280px) {
@@ -753,13 +753,13 @@ const prettyParams = (params) => JSON.stringify(params, null, 2)
 .placeholder {
   padding: 2rem;
   border-radius: 16px;
-  background: rgba(248, 250, 252, 0.8);
-  color: #475569;
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  color: var(--color-text-secondary);
 }
 
 .placeholder__error {
   margin-top: 1rem;
-  color: #dc2626;
+  color: var(--color-danger-500-hex);
 }
 
 @media (max-width: 960px) {

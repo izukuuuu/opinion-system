@@ -86,6 +86,17 @@
               <p v-if="task.scope" class="mt-2 truncate text-[11px] text-muted">{{ task.scope }}</p>
               <p class="mt-2 text-xs leading-5 text-secondary">{{ task.message }}</p>
 
+              <!-- 情感分析进度详情 -->
+              <div v-if="hasSentimentProgress(task)" class="mt-2 flex items-center gap-2 text-[11px]">
+                <span class="rounded px-1.5 py-0.5 bg-blue-50 text-blue-600">AI 情感分类</span>
+                <span class="text-secondary">
+                  {{ task.progress?.sentiment_processed || 0 }}/{{ task.progress?.sentiment_total || 0 }}
+                </span>
+                <span v-if="task.progress?.sentiment_classified" class="text-emerald-600">
+                  (成功 {{ task.progress.sentiment_classified }})
+                </span>
+              </div>
+
               <div class="mt-3">
                 <div class="flex items-center justify-between gap-3 text-[11px] text-secondary">
                   <span class="truncate">{{ task.detail_text || task.progress_text }}</span>
@@ -243,6 +254,15 @@ const progressClass = (status) => {
   return 'bg-slate-400'
 }
 
+const hasSentimentProgress = (task) => {
+  const progress = task?.progress
+  if (!progress) return false
+  const phase = String(progress.sentiment_phase || '').trim()
+  const total = Number(progress.sentiment_total || 0)
+  // 有情感分析阶段或总数大于0时显示
+  return phase !== '' || total > 0
+}
+
 const formatRelativeTime = (value) => {
   const text = String(value || '').trim()
   if (!text) return ''
@@ -311,21 +331,21 @@ function updatePopupPosition() {
 }
 
 .task-indicator-ring__track {
-  border: 1px solid rgb(203 213 225 / 0.9);
+  border: 1px solid color-mix(in srgb, var(--color-surface-muted) 90%, transparent);
 }
 
 .task-indicator-ring__spinner {
   inset: 2px;
-  border: 2px solid rgb(226 232 240 / 0.9);
+  border: 2px solid color-mix(in srgb, var(--color-surface-muted) 90%, transparent);
 }
 
 .task-indicator-ring__spinner--active {
-  border-color: rgb(191 219 254 / 0.55);
-  border-top-color: rgb(59 130 246 / 0.95);
+  border-color: rgb(var(--color-brand-200) / 0.55);
+  border-top-color: rgb(var(--color-brand-600) / 0.95);
 }
 
 .task-indicator-ring--active .task-indicator-ring__track {
-  border-color: rgb(147 197 253 / 0.9);
+  border-color: rgb(var(--color-brand-300) / 0.9);
 }
 
 .background-task-popup {

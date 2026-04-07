@@ -16,6 +16,8 @@ from .postclean_jobs import list_postclean_jobs
 from .publisher_detection import load_worker_status as load_publisher_detection_worker_status
 from .rebuild_fetch_jobs import list_rebuild_fetch_jobs
 from .stopword_suggestions import load_worker_status as load_stopword_worker_status
+from .fluid_analysis import load_worker_status as load_fluid_analysis_worker_status
+from .basic_analysis import load_worker_status as load_basic_analysis_worker_status
 
 ACTIVE_STATUSES = {"queued", "running"}
 TERMINAL_STATUSES = {"completed", "failed", "cancelled", "error"}
@@ -62,6 +64,8 @@ def collect_background_task_payload(*, active_only: bool = True, limit: int = _D
         _collect_netinsight_tasks,
         _collect_stopword_tasks,
         _collect_publisher_detection_tasks,
+        _collect_fluid_analysis_tasks,
+        _collect_basic_analysis_tasks,
         _collect_postclean_tasks,
         _collect_deduplicate_tasks,
         _collect_fetch_refresh_tasks,
@@ -171,6 +175,44 @@ def _collect_publisher_detection_tasks(*, active_only: bool) -> Tuple[List[Dict[
         if not _include_task(payload, active_only=active_only):
             continue
         tasks.append(_normalise_publisher_detection_task(payload, worker_payload))
+    return tasks, [worker_payload]
+
+
+def _collect_fluid_analysis_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    task_dir = get_data_root() / "_fluid_analysis" / "tasks"
+    raw_worker = load_fluid_analysis_worker_status()
+    worker_payload = _normalise_worker(
+        source="fluid-analysis",
+        source_label="流体指标 Worker",
+        payload=raw_worker,
+    )
+    tasks: List[Dict[str, Any]] = []
+    for path in sorted(task_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        payload = _load_json(path)
+        if not isinstance(payload, dict):
+            continue
+        if not _include_task(payload, active_only=active_only):
+            continue
+        tasks.append(_normalise_fluid_analysis_task(payload, worker_payload))
+    return tasks, [worker_payload]
+
+
+def _collect_basic_analysis_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    task_dir = get_data_root() / "_basic_analysis" / "tasks"
+    raw_worker = load_basic_analysis_worker_status()
+    worker_payload = _normalise_worker(
+        source="basic-analysis",
+        source_label="基础分析 Worker",
+        payload=raw_worker,
+    )
+    tasks: List[Dict[str, Any]] = []
+    for path in sorted(task_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        payload = _load_json(path)
+        if not isinstance(payload, dict):
+            continue
+        if not _include_task(payload, active_only=active_only):
+            continue
+        tasks.append(_normalise_basic_analysis_task(payload, worker_payload))
     return tasks, [worker_payload]
 
 
@@ -437,6 +479,94 @@ def _normalise_publisher_detection_task(task: Dict[str, Any], worker: Dict[str, 
         "percentage": percentage,
         "progress_text": progress_text,
         "detail_text": str(progress.get("current_table") or "").strip() or (publishers and f"{len(publishers)} 个候选发布者" or ""),
+        "updated_at": str(task.get("updated_at") or "").strip(),
+        "started_at": str(task.get("started_at") or "").strip(),
+        "finished_at": str(task.get("finished_at") or "").strip(),
+        "heartbeat_at": heartbeat_at,
+        "heartbeat_stale": _is_stale_timestamp(heartbeat_at),
+        "worker_pid": _safe_int(task.get("worker_pid"), 0) or _safe_int(worker.get("pid"), 0),
+    }
+
+
+def _normalise_fluid_analysis_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict[str, Any]:
+    task_id = str(task.get("id") or "").strip()
+    progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
+    phase = str(task.get("phase") or task.get("status") or "").strip() or "queued"
+    percentage = _safe_int(task.get("percentage"), 0)
+    total_files = _safe_int(progress.get("total_files"), 0)
+    processed_files = _safe_int(progress.get("processed_files"), 0)
+    total_windows = _safe_int(progress.get("total_windows"), 0)
+    processed_windows = _safe_int(progress.get("processed_windows"), 0)
+    current_file = str(progress.get("current_file") or "").strip()
+    if total_windows > 0:
+        progress_text = f"{processed_windows} / {total_windows} 窗口"
+    elif total_files > 0:
+        progress_text = f"{processed_files} / {total_files} 文件"
+    else:
+        progress_text = f"{percentage}%"
+    current_worker_task = str(worker.get("current_task_id") or "").strip()
+    heartbeat_at = str(worker.get("last_heartbeat") or "").strip() if current_worker_task == task_id else str(task.get("last_heartbeat") or task.get("updated_at") or "").strip()
+    topic_identifier = str(task.get("topic_identifier") or "").strip()
+    start_date = str(task.get("start_date") or "").strip()
+    end_date = str(task.get("end_date") or "").strip()
+    return {
+        "id": f"fluid-analysis:{task_id}",
+        "task_id": task_id,
+        "source": "fluid-analysis",
+        "source_label": "流体指标分析",
+        "title": f"{topic_identifier or '专题'} 流体指标",
+        "scope": f"{start_date}" + (f" 至 {end_date}" if end_date else ""),
+        "status": _normalise_status(task.get("status")),
+        "phase": phase,
+        "phase_label": GENERIC_PHASE_LABELS.get(phase, phase or "处理中"),
+        "message": str(task.get("message") or "").strip() or "等待处理。",
+        "percentage": percentage,
+        "progress_text": progress_text,
+        "detail_text": current_file,
+        "updated_at": str(task.get("updated_at") or "").strip(),
+        "started_at": str(task.get("started_at") or "").strip(),
+        "finished_at": str(task.get("finished_at") or "").strip(),
+        "heartbeat_at": heartbeat_at,
+        "heartbeat_stale": _is_stale_timestamp(heartbeat_at),
+        "worker_pid": _safe_int(task.get("worker_pid"), 0) or _safe_int(worker.get("pid"), 0),
+    }
+
+
+def _normalise_basic_analysis_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict[str, Any]:
+    task_id = str(task.get("id") or "").strip()
+    progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
+    phase = str(task.get("phase") or task.get("status") or "").strip() or "queued"
+    percentage = _safe_int(task.get("percentage"), 0)
+    total_functions = _safe_int(progress.get("total_functions"), 0)
+    completed_functions = _safe_int(progress.get("completed_functions"), 0)
+    current_function = str(progress.get("current_function") or "").strip()
+    current_target = str(progress.get("current_target") or "").strip()
+    if total_functions > 0:
+        progress_text = f"{completed_functions} / {total_functions} 项"
+    else:
+        progress_text = f"{percentage}%"
+    detail_text = current_function
+    if current_target:
+        detail_text = f"{current_function} ({current_target})" if current_function else current_target
+    current_worker_task = str(worker.get("current_task_id") or "").strip()
+    heartbeat_at = str(worker.get("last_heartbeat") or "").strip() if current_worker_task == task_id else str(task.get("last_heartbeat") or task.get("updated_at") or "").strip()
+    topic_identifier = str(task.get("topic_identifier") or "").strip()
+    start_date = str(task.get("start_date") or "").strip()
+    end_date = str(task.get("end_date") or "").strip()
+    return {
+        "id": f"basic-analysis:{task_id}",
+        "task_id": task_id,
+        "source": "basic-analysis",
+        "source_label": "基础分析",
+        "title": f"{topic_identifier or '专题'} 基础分析",
+        "scope": f"{start_date}" + (f" 至 {end_date}" if end_date else ""),
+        "status": _normalise_status(task.get("status")),
+        "phase": phase,
+        "phase_label": GENERIC_PHASE_LABELS.get(phase, phase or "处理中"),
+        "message": str(task.get("message") or "").strip() or "等待处理。",
+        "percentage": percentage,
+        "progress_text": progress_text,
+        "detail_text": detail_text,
         "updated_at": str(task.get("updated_at") or "").strip(),
         "started_at": str(task.get("started_at") or "").strip(),
         "finished_at": str(task.get("finished_at") or "").strip(),

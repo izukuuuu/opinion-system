@@ -23,22 +23,13 @@
       <div class="grid gap-5 xl:grid-cols-[1.1fr,1fr]">
         <div class="space-y-4 rounded-3xl border border-soft bg-surface-muted/60 p-5">
           <div class="grid gap-4 md:grid-cols-2">
-            <label class="space-y-2">
+            <label class="space-y-2 md:col-span-2">
               <span class="text-xs font-semibold text-muted">项目</span>
               <select v-model="selectedProjectName" class="input" :disabled="projectsLoading || !projectOptions.length">
                 <option value="" disabled>请选择项目</option>
                 <option v-for="option in projectOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
               <p v-if="projectsError" class="text-xs text-danger">{{ projectsError }}</p>
-            </label>
-
-            <label class="space-y-2">
-              <span class="text-xs font-semibold text-muted">数据集</span>
-              <select v-model="selectedDatasetId" class="input" :disabled="datasetsLoading || !datasetOptions.length">
-                <option value="">项目级默认上下文</option>
-                <option v-for="option in datasetOptions" :key="option.id" :value="option.id">{{ option.label }}</option>
-              </select>
-              <p v-if="datasetsError" class="text-xs text-danger">{{ datasetsError }}</p>
             </label>
 
             <label class="space-y-2 md:col-span-2">
@@ -129,19 +120,18 @@
     </section>
 
     <section class="card-surface space-y-5 p-6">
-      <div class="grid gap-5 xl:grid-cols-2">
-        <div class="space-y-3 rounded-3xl border border-soft bg-surface-muted/60 p-5">
+      <div class="grid gap-5 xl:grid-cols-3">
+        <div class="flex min-h-[24rem] flex-col space-y-3 rounded-3xl border border-soft bg-surface-muted/60 p-5">
           <div class="flex items-center justify-between gap-3">
             <div>
               <h3 class="text-base font-semibold text-primary">排除词后清洗</h3>
               <p class="mt-1 text-sm text-secondary">每行一个词；命中标题、正文或命中词字段时会被删除。</p>
             </div>
-            <span class="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">{{ stopwordList.length }} 项</span>
+            <span class="shrink-0 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">{{ stopwordList.length }} 项</span>
           </div>
           <textarea
             v-model="sharedPromptState.projectStopwordsText"
-            rows="12"
-            class="input min-h-[16rem] resize-y"
+            class="input min-h-0 flex-1 resize-y"
             placeholder="每行一个排除词"
           />
           <div class="flex justify-end pt-1">
@@ -156,18 +146,17 @@
           </div>
         </div>
 
-        <div class="space-y-3 rounded-3xl border border-soft bg-surface-muted/60 p-5">
+        <div class="flex min-h-[24rem] flex-col space-y-3 rounded-3xl border border-soft bg-surface-muted/60 p-5">
           <div class="flex items-center justify-between gap-3">
             <div>
               <h3 class="text-base font-semibold text-primary">发布者黑名单</h3>
               <p class="mt-1 text-sm text-secondary">每行一个发布者；执行后清洗时生效。</p>
             </div>
-            <span class="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">{{ blacklistList.length }} 项</span>
+            <span class="shrink-0 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">{{ blacklistList.length }} 项</span>
           </div>
           <textarea
             v-model="sharedPromptState.publisherBlacklistText"
-            rows="12"
-            class="input min-h-[16rem] resize-y"
+            class="input min-h-0 flex-1 resize-y"
             placeholder="每行一个发布者"
           />
           <div class="flex justify-end pt-1">
@@ -180,6 +169,21 @@
               打开异常发布者识别弹窗
             </button>
           </div>
+        </div>
+
+        <div class="flex min-h-[24rem] flex-col space-y-3 rounded-3xl border border-soft bg-surface-muted/60 p-5">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-base font-semibold text-primary">发布者模糊识别</h3>
+              <p class="mt-1 text-sm text-secondary">发布者名称包含这些词时会被匹配；默认包含橱窗、好物、旗舰。</p>
+            </div>
+            <span class="shrink-0 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">{{ fuzzyPatternList.length }} 项</span>
+          </div>
+          <textarea
+            v-model="sharedPromptState.publisherFuzzyPatternsText"
+            class="input min-h-0 flex-1 resize-y"
+            placeholder="每行一个模糊匹配词"
+          />
         </div>
       </div>
 
@@ -225,11 +229,30 @@
             <p class="mt-1 text-2xl font-semibold text-primary">{{ formatInteger(postcleanResult.reason_breakdown?.author_only || 0) }}</p>
           </div>
           <div class="rounded-2xl border border-soft bg-surface-muted/60 px-4 py-4 sm:col-span-2">
-            <p class="text-xs text-muted">双重命中 / 缓存刷新</p>
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-xs text-muted">双重命中 / 缓存刷新</p>
+              <div v-if="fetchRefreshWorkerRunning" class="flex items-center gap-2 rounded-full bg-emerald-50 px-2 py-1">
+                <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span class="text-xs font-medium text-emerald-700">Worker 运行中</span>
+              </div>
+            </div>
             <p class="mt-1 text-sm font-semibold text-primary">
               双重命中 {{ formatInteger(postcleanResult.reason_breakdown?.both || 0) }} 条
             </p>
-            <p class="mt-1 text-xs text-secondary">{{ postcleanResult.follow_up?.message || '未返回后续动作。' }}</p>
+            <p class="mt-1 text-xs text-secondary">{{ getFollowUpMessage(postcleanResult.follow_up) }}</p>
+            <div v-if="fetchRefreshWorkerRunning && fetchRefreshTaskProgress" class="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/50 px-3 py-2">
+              <div class="flex items-center justify-between gap-2 text-xs text-emerald-700">
+                <span>缓存刷新进度</span>
+                <span>{{ fetchRefreshTaskProgress.percentage }}%</span>
+              </div>
+              <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-emerald-100">
+                <div class="h-full rounded-full bg-emerald-500 transition-all duration-300" :style="{ width: `${fetchRefreshTaskProgress.percentage}%` }" />
+              </div>
+              <p class="mt-1.5 text-xs text-emerald-600">
+                {{ fetchRefreshTaskProgress.completed_ranges }} / {{ fetchRefreshTaskProgress.total_ranges }} 批次
+                <span v-if="fetchRefreshTaskProgress.refreshed_rows"> · 已刷新 {{ formatInteger(fetchRefreshTaskProgress.refreshed_rows) }} 条</span>
+              </p>
+            </div>
           </div>
         </div>
 
@@ -714,7 +737,8 @@ const sharedPromptState = reactive({
   error: '',
   success: '',
   projectStopwordsText: '',
-  publisherBlacklistText: ''
+  publisherBlacklistText: '',
+  publisherFuzzyPatternsText: ''
 })
 
 const stopwordSuggestionArchivesState = reactive({
@@ -756,12 +780,14 @@ const postcleanState = reactive({
     current_table: '',
     percentage: 0
   },
-  result: null
+  result: null,
+  fetchRefreshWorker: null
 })
 
 const stopwordList = computed(() => splitStopwordText(sharedPromptState.projectStopwordsText))
 const stopwordSet = computed(() => new Set(stopwordList.value))
 const blacklistList = computed(() => splitBlacklistText(sharedPromptState.publisherBlacklistText))
+const fuzzyPatternList = computed(() => splitBlacklistText(sharedPromptState.publisherFuzzyPatternsText))
 const canRun = computed(() => Boolean(currentProjectName.value && selectedDatabase.value))
 const canInspectPublishers = computed(() => Boolean(currentProjectName.value && selectedDatabase.value))
 const postcleanResult = computed(() => postcleanState.result && typeof postcleanState.result === 'object' ? postcleanState.result : null)
@@ -773,6 +799,24 @@ const statusLabel = computed(() => {
   }
   if (postcleanState.success === false) return '执行失败'
   return '待执行'
+})
+const fetchRefreshWorkerRunning = computed(() => {
+  const worker = postcleanState.fetchRefreshWorker
+  return worker && (worker.status === 'running' || worker.running === true)
+})
+const fetchRefreshTask = computed(() => postcleanResult.value?.follow_up?.task || null)
+const fetchRefreshTaskProgress = computed(() => {
+  const task = fetchRefreshTask.value
+  if (!task || typeof task !== 'object') return null
+  const progress = task.progress
+  if (!progress || typeof progress !== 'object') return null
+  return {
+    total_ranges: Number(progress.total_ranges || 0),
+    completed_ranges: Number(progress.completed_ranges || 0),
+    refreshed_rows: Number(progress.refreshed_rows || 0),
+    current_range: String(progress.current_range || ''),
+    percentage: Number(progress.percentage || 0)
+  }
 })
 const publisherDetectionTask = computed(() => (
   publisherDetectionState.task && typeof publisherDetectionState.task === 'object'
@@ -1068,6 +1112,7 @@ function resetSharedPromptState() {
   sharedPromptState.success = ''
   sharedPromptState.projectStopwordsText = ''
   sharedPromptState.publisherBlacklistText = ''
+  sharedPromptState.publisherFuzzyPatternsText = ''
 }
 
 function resetPublisherDetectionState() {
@@ -1130,6 +1175,7 @@ async function loadSharedPromptConfig() {
     const payload = response?.data || {}
     sharedPromptState.projectStopwordsText = splitStopwordText(payload.project_stopwords_text || payload.project_stopwords || '').join('\n')
     sharedPromptState.publisherBlacklistText = splitBlacklistText(payload.publisher_blacklist_text || payload.publisher_blacklist || '').join('\n')
+    sharedPromptState.publisherFuzzyPatternsText = splitBlacklistText(payload.publisher_fuzzy_patterns_text || payload.publisher_fuzzy_patterns || '').join('\n')
   } catch (error) {
     sharedPromptState.error = error instanceof Error ? error.message : '读取共享配置失败'
   } finally {
@@ -1151,12 +1197,14 @@ async function saveSharedPromptConfig({ silent = false } = {}) {
         project: currentProjectName.value,
         dataset_id: selectedDatasetId.value || undefined,
         project_stopwords: sharedPromptState.projectStopwordsText,
-        publisher_blacklist: sharedPromptState.publisherBlacklistText
+        publisher_blacklist: sharedPromptState.publisherBlacklistText,
+        publisher_fuzzy_patterns: sharedPromptState.publisherFuzzyPatternsText
       })
     })
     const payload = response?.data || {}
     sharedPromptState.projectStopwordsText = splitStopwordText(payload.project_stopwords_text || sharedPromptState.projectStopwordsText).join('\n')
     sharedPromptState.publisherBlacklistText = splitBlacklistText(payload.publisher_blacklist_text || sharedPromptState.publisherBlacklistText).join('\n')
+    sharedPromptState.publisherFuzzyPatternsText = splitBlacklistText(payload.publisher_fuzzy_patterns_text || sharedPromptState.publisherFuzzyPatternsText).join('\n')
     if (!silent) {
       sharedPromptState.success = '共享配置已保存。'
     }
@@ -1378,7 +1426,7 @@ async function startPublisherDetectionTask(force = true) {
   }
 }
 
-function applyPostcleanPayload(payload) {
+function applyPostcleanPayload(payload, worker = null) {
   if (!payload || typeof payload !== 'object') return
   postcleanState.running = payload.status === 'running'
   postcleanState.success = payload.status === 'completed' ? true : payload.status === 'error' ? false : postcleanState.success
@@ -1394,6 +1442,9 @@ function applyPostcleanPayload(payload) {
   if (payload.result && typeof payload.result === 'object') {
     postcleanState.result = payload.result
   }
+  if (worker && typeof worker === 'object') {
+    postcleanState.fetchRefreshWorker = worker
+  }
 }
 
 function resetPostcleanState() {
@@ -1402,6 +1453,7 @@ function resetPostcleanState() {
   postcleanState.message = ''
   postcleanState.logs = []
   postcleanState.result = null
+  postcleanState.fetchRefreshWorker = null
   postcleanState.progress = {
     total_tables: 0,
     completed_tables: 0,
@@ -1447,7 +1499,7 @@ async function loadPostcleanStatus({ project, datasetId, database, silent = fals
     params.set('database', database)
     buildTableQueryParams(params, selectedTables.value)
     const response = await callApi(`/api/database/postclean/status?${params.toString()}`)
-    applyPostcleanPayload(response?.data || {})
+    applyPostcleanPayload(response?.data || {}, response?.fetch_refresh_worker || null)
     if (postcleanState.running) {
       startPolling()
     } else {
@@ -1520,5 +1572,41 @@ function formatTimestamp(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
   return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function getFollowUpMessage(followUp) {
+  if (!followUp) return '未返回后续动作。'
+  // 优先检查 task 的实时状态
+  const taskStatus = followUp.task?.status || ''
+  const status = followUp.status || ''
+  const message = followUp.message || ''
+
+  // 根据 task 状态判断
+  if (taskStatus === 'completed') {
+    return '本地缓存刷新已完成。'
+  }
+  if (taskStatus === 'running') {
+    return '本地缓存刷新正在执行中...'
+  }
+  if (taskStatus === 'failed' || taskStatus === 'error') {
+    return '本地缓存刷新执行失败，请检查日志。'
+  }
+  if (taskStatus === 'cancelled') {
+    return '本地缓存刷新任务已取消。'
+  }
+
+  // 根据 follow_up 的初始状态判断
+  if (status === 'completed') {
+    return '本地缓存刷新已完成。'
+  }
+  if (status === 'skipped' && message.includes('未删除记录')) {
+    return '本次后清洗未删除记录，未触发本地缓存刷新。'
+  }
+  if (status === 'skipped') {
+    return message || '当前项目暂无可刷新的本地缓存批次。'
+  }
+
+  // queued 状态
+  return message || '缓存刷新任务状态未知。'
 }
 </script>

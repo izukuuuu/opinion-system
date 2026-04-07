@@ -67,6 +67,21 @@ def load_shared_publisher_blacklist(topic: str) -> Dict[str, Any]:
     }
 
 
+def load_publisher_fuzzy_patterns(topic: str) -> Dict[str, Any]:
+    """加载发布者模糊匹配模式。"""
+    payload = load_topic_bertopic_prompt_config(topic)
+    raw_values = payload.get("publisher_fuzzy_patterns", [])
+    # 如果配置为空，使用默认值
+    if not raw_values:
+        raw_values = ["橱窗", "好物", "旗舰"]
+    values = _normalise_terms(raw_values)
+    return {
+        "patterns": values,
+        "path": str(payload.get("path") or ""),
+        "topic": str(payload.get("topic") or topic).strip() or topic,
+    }
+
+
 def _quote_identifier(dialect_name: str, name: str) -> str:
     if _is_mysql_dialect(dialect_name):
         return f"`{name.replace('`', '``')}`"
@@ -552,14 +567,28 @@ def _build_author_match_condition(
     dialect_name: str,
     column_name: str,
     authors: Sequence[str],
+    fuzzy_patterns: Optional[Sequence[str]] = None,
 ) -> tuple[str, Dict[str, Any]]:
+    """构建发布者匹配条件，支持精确匹配和模糊匹配。"""
     expr = _normalised_column_expr(dialect_name, column_name)
     params: Dict[str, Any] = {}
     clauses: List[str] = []
+
+    # 精确匹配
     for idx, author in enumerate(authors):
         param_name = f"author_{idx}"
         params[param_name] = _normalise_match_text(author)
         clauses.append(f"{expr} = :{param_name}")
+
+    # 模糊匹配 - 使用 LIKE 模式匹配
+    if fuzzy_patterns:
+        escape_clause = _like_escape_clause(dialect_name)
+        for idx, pattern in enumerate(fuzzy_patterns):
+            param_name = f"fuzzy_{idx}"
+            # 在模式前后添加 % 进行模糊匹配
+            params[param_name] = f"%{_escape_like_term(pattern)}%"
+            clauses.append(f"{expr} LIKE :{param_name}{escape_clause}")
+
     return " OR ".join(clauses) if clauses else "1=0", params
 
 
@@ -893,6 +922,8 @@ def run_database_postclean(
     terms = list(terms_payload.get("terms") or [])
     publisher_payload = load_shared_publisher_blacklist(topic)
     blacklisted_authors = list(publisher_payload.get("authors") or [])
+    fuzzy_payload = load_publisher_fuzzy_patterns(topic)
+    fuzzy_patterns = list(fuzzy_payload.get("patterns") or [])
 
     engine = None
     try:
@@ -979,7 +1010,7 @@ def run_database_postclean(
                     if column_name in column_names
                 ]
                 has_keyword_match = bool(terms and matched_columns)
-                has_author_match = bool(blacklisted_authors and "author" in column_names)
+                has_author_match = bool((blacklisted_authors or fuzzy_patterns) and "author" in column_names)
 
                 if not has_keyword_match and not has_author_match:
                     report_tables.append(
@@ -1017,6 +1048,7 @@ def run_database_postclean(
                         dialect_name,
                         "author",
                         blacklisted_authors,
+                        fuzzy_patterns=fuzzy_patterns,
                     )
 
                 where_clauses = [clause for clause in (keyword_condition, author_condition) if clause]
