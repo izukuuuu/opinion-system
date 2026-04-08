@@ -576,7 +576,8 @@ const ensureFetchReadyForRange = async (range) => {
   return true
 }
 
-const invokeAnalyze = async (functions) => {
+const invokeAnalyze = async (functions, options = {}) => {
+  const { force = false } = options
   const { topic, start, end } = normalizeRange(analyzeForm)
   if (!topic || !start || !end) {
     appendLog(analyzeLogs, { label: '参数校验', message: 'Topic / Start / End 为必填', status: 'error' })
@@ -613,14 +614,28 @@ const invokeAnalyze = async (functions) => {
             topic,
             start,
             end,
-            function: func
+            function: func,
+            force
           })
         })
         const taskId = response?.data?.task_id || ''
         const taskStatus = response?.data?.task_status || 'queued'
+        // 根据实际任务状态更新日志
+        let displayStatus = 'queued'
+        let displayMessage = taskId ? `后台任务已创建 (${taskId})` : '后台任务已创建'
+        if (taskStatus === 'completed') {
+          displayStatus = 'ok'
+          displayMessage = taskId ? `任务已完成 (${taskId})，结果可查看` : '任务已完成'
+        } else if (taskStatus === 'running') {
+          displayStatus = 'running'
+          displayMessage = taskId ? `任务运行中 (${taskId})` : '任务运行中'
+        } else if (taskStatus === 'failed') {
+          displayStatus = 'error'
+          displayMessage = taskId ? `任务失败 (${taskId})` : '任务失败'
+        }
         updateLogEntry(analyzeLogs, logId, {
-          status: taskStatus === 'queued' ? 'queued' : 'running',
-          message: taskId ? `后台任务已创建 (${taskId})` : '后台任务已创建',
+          status: displayStatus,
+          message: displayMessage,
           time: currentTimeString()
         })
         hasSuccess = true
@@ -650,7 +665,7 @@ const runSelectedFunctions = async () => {
 }
 
 const runSingleFunction = async (funcId) => {
-  await invokeAnalyze([funcId])
+  await invokeAnalyze([funcId], { force: true })
 }
 
 const rebuildAiSummary = async () => {

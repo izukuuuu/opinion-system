@@ -264,6 +264,7 @@ def _classify_unknown_sentiments(
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def _classify_one(idx: int, text: str):
+            nonlocal processed, classified_count
             async with semaphore:
                 result = await _classify_single_with_retry(text, logger)
                 processed += 1
@@ -283,8 +284,6 @@ def _classify_unknown_sentiments(
                                 "phase": "sentiment_classify",
                                 "percentage": int(10 + (processed / max(total_texts, 1)) * 80),
                                 "message": f"正在 AI 情感分类 ({processed}/{total_texts})",
-                                "total_unknown": total_texts,
-                                "processed_unknown": processed,
                                 "sentiment_phase": "classify",
                                 "sentiment_total": total_texts,
                                 "sentiment_processed": processed,
