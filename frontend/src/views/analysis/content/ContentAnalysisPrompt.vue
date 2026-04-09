@@ -22,12 +22,12 @@
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <label class="flex items-center gap-2">
             <span class="text-xs font-semibold text-muted">专题</span>
-            <select v-model="selectedTopic"
-              class="rounded-2xl border border-soft px-3 py-2 text-sm focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200"
-              :disabled="topicsState.loading || !topicOptions.length">
-              <option value="" disabled>请选择专题</option>
-              <option v-for="option in topicOptions" :key="option" :value="option">{{ option }}</option>
-            </select>
+            <AppSelect
+              :options="topicSelectOptions"
+              :value="selectedTopic"
+              :disabled="topicsState.loading || !topicOptions.length"
+              @change="selectedTopic = $event"
+            />
           </label>
           <button type="button" class="btn-ghost px-3 py-1" :disabled="topicsState.loading" @click="loadTopics">
             <ArrowPathIcon class="h-4 w-4" :class="topicsState.loading ? 'animate-spin' : ''" />
@@ -91,19 +91,19 @@
                   </label>
                   <label class="flex flex-col gap-1 text-xs text-muted">
                     <span>编码层级</span>
-                    <select v-model="block.level"
-                      class="h-10 rounded-2xl border border-soft bg-surface px-3 text-sm font-medium focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200">
-                      <option value="level1">一级编码</option>
-                      <option value="level2">二级编码</option>
-                    </select>
+                    <AppSelect
+                      :options="levelOptions"
+                      :value="block.level"
+                      @change="block.level = $event"
+                    />
                   </label>
                   <label class="flex flex-col gap-1 text-xs text-muted">
                     <span>选项类型</span>
-                    <select v-model="block.selection"
-                      class="h-10 rounded-2xl border border-soft bg-surface px-3 text-sm font-medium focus:border-brand-soft focus:outline-none focus:ring-2 focus:ring-brand-200">
-                      <option value="single">单选（唯一）</option>
-                      <option value="multi">多选（可多项）</option>
-                    </select>
+                    <AppSelect
+                      :options="selectionOptions"
+                      :value="block.selection"
+                      @change="block.selection = $event"
+                    />
                   </label>
                   <div class="flex flex-col justify-end gap-2">
                     <button type="button" class="btn-ghost h-10 px-3 text-sm font-medium" @click="addCode(block)">
@@ -282,6 +282,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { AdjustmentsHorizontalIcon, ArrowPathIcon, Squares2X2Icon, TrashIcon, PlusSmallIcon } from '@heroicons/vue/24/outline'
+import AppSelect from '../../../components/AppSelect.vue'
 import { useApiBase } from '../../../composables/useApiBase'
 import { contentAnalysisPreset } from '../../../data/contentAnalysisPreset'
 
@@ -308,6 +309,20 @@ const promptState = reactive({
 })
 
 const currentTopic = computed(() => (selectedTopic.value || '').trim())
+
+const topicSelectOptions = computed(() =>
+  topicOptions.value.map(option => ({ value: option, label: option }))
+)
+
+const levelOptions = [
+  { value: 'level1', label: '一级编码' },
+  { value: 'level2', label: '二级编码' }
+]
+
+const selectionOptions = [
+  { value: 'single', label: '单选（唯一）' },
+  { value: 'multi', label: '多选（可多项）' }
+]
 
 const builder = reactive({
   blocks: [],

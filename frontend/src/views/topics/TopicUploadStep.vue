@@ -195,26 +195,30 @@
               <div class="mt-6 border-t border-emerald-200/50 pt-4">
                 <h4 class="text-sm font-bold text-emerald-900 mb-2">字段映射</h4>
                 <div class="grid grid-cols-2 gap-3">
-                  <select v-model="columnMappingForm.date"
-                    class="rounded-xl border-0 bg-white/60 py-2 pl-3 pr-8 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/50 focus:ring-2 focus:ring-emerald-500">
-                    <option value="">日期列 (未指定)</option>
-                    <option v-for="col in datasetColumns" :key="col" :value="col">{{ col }}</option>
-                  </select>
-                  <select v-model="columnMappingForm.title"
-                    class="rounded-xl border-0 bg-white/60 py-2 pl-3 pr-8 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/50 focus:ring-2 focus:ring-emerald-500">
-                    <option value="">标题列 (未指定)</option>
-                    <option v-for="col in datasetColumns" :key="col" :value="col">{{ col }}</option>
-                  </select>
-                  <select v-model="columnMappingForm.content"
-                    class="rounded-xl border-0 bg-white/60 py-2 pl-3 pr-8 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/50 focus:ring-2 focus:ring-emerald-500">
-                    <option value="">正文列 (未指定)</option>
-                    <option v-for="col in datasetColumns" :key="col" :value="col">{{ col }}</option>
-                  </select>
-                  <select v-model="columnMappingForm.author"
-                    class="rounded-xl border-0 bg-white/60 py-2 pl-3 pr-8 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/50 focus:ring-2 focus:ring-emerald-500">
-                    <option value="">作者列 (未指定)</option>
-                    <option v-for="col in datasetColumns" :key="col" :value="col">{{ col }}</option>
-                  </select>
+                  <AppSelect
+                    :options="columnSelectOptions"
+                    :value="columnMappingForm.date"
+                    placeholder="日期列 (未指定)"
+                    @change="columnMappingForm.date = $event"
+                  />
+                  <AppSelect
+                    :options="columnSelectOptions"
+                    :value="columnMappingForm.title"
+                    placeholder="标题列 (未指定)"
+                    @change="columnMappingForm.title = $event"
+                  />
+                  <AppSelect
+                    :options="columnSelectOptions"
+                    :value="columnMappingForm.content"
+                    placeholder="正文列 (未指定)"
+                    @change="columnMappingForm.content = $event"
+                  />
+                  <AppSelect
+                    :options="columnSelectOptions"
+                    :value="columnMappingForm.author"
+                    placeholder="作者列 (未指定)"
+                    @change="columnMappingForm.author = $event"
+                  />
                 </div>
                 <div class="mt-4 flex justify-end">
                   <button type="button"
@@ -244,6 +248,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { CloudArrowUpIcon, DocumentArrowUpIcon, TagIcon } from '@heroicons/vue/24/outline'
+import AppSelect from '../../components/AppSelect.vue'
 import { useApiBase } from '../../composables/useApiBase'
 
 const { ensureApiBase } = useApiBase()
@@ -332,6 +337,10 @@ const datasetColumns = computed(() => {
     return acc.filter((column) => columns.includes(column))
   }, columnSets[0])
 })
+
+const columnSelectOptions = computed(() =>
+  datasetColumns.value.map(col => ({ value: col, label: col }))
+)
 
 const mappingTargets = computed(() => uploadedDatasets.value)
 

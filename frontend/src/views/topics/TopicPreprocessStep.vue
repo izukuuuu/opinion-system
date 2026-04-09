@@ -26,19 +26,13 @@
         <div class="space-y-6">
           <div class="space-y-2">
             <label class="text-xs font-bold text-primary ml-1">选择项目</label>
-            <div class="relative">
-              <select v-if="projectOptions.length" v-model="selectedProjectName"
-                class="input w-full appearance-none py-4 pl-4 pr-10 disabled:opacity-60"
-                :disabled="projectsLoading">
-                <option disabled value="">请选择项目</option>
-                <option v-for="option in projectOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
-                <ChevronDownIcon class="w-4 h-4" />
-              </div>
-            </div>
+            <AppSelect
+              :options="projectSelectOptions"
+              :value="selectedProjectName"
+              :disabled="projectsLoading"
+              searchable
+              @change="selectedProjectName = $event"
+            />
           </div>
 
           <div class="space-y-3">
@@ -117,23 +111,16 @@
 
           <div class="space-y-3">
             <label class="text-xs font-bold text-primary ml-1">Clean 存档来源</label>
-            <div class="relative w-full">
-              <select v-if="mergeArchiveOptions.length" v-model="archiveSelection.cleanDate"
-                class="input w-full appearance-none py-4 pl-4 pr-10 disabled:opacity-60">
-                <option disabled value="">请选择 Merge 存档</option>
-                <option v-for="option in mergeArchiveOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-              <div v-else
-                class="flex w-full items-center justify-center rounded-2xl bg-brand-50/20 py-4 px-4 text-xs text-secondary italic">
-                {{ archivesState.loading ? '正在同步存档...' : '需执行 Merge 后方可见有效存档' }}
-              </div>
-
-              <div v-if="mergeArchiveOptions.length"
-                class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
-                <ChevronDownIcon class="h-4 w-4" />
-              </div>
+            <AppSelect
+              v-if="mergeArchiveOptions.length"
+              :options="mergeArchiveSelectOptions"
+              :value="archiveSelection.cleanDate"
+              searchable
+              @change="archiveSelection.cleanDate = $event"
+            />
+            <div v-else
+              class="flex w-full items-center justify-center rounded-2xl bg-brand-50/20 py-4 px-4 text-xs text-secondary italic">
+              {{ archivesState.loading ? '正在同步存档...' : '需执行 Merge 后方可见有效存档' }}
             </div>
             <p class="text-[10px] text-muted pl-1 opacity-70">系统通常会自动关联最新的 Merge 结果参与清洗。</p>
           </div>
@@ -244,6 +231,7 @@ import {
   ChevronDownIcon,
   ClockIcon
 } from '@heroicons/vue/24/outline'
+import AppSelect from '../../components/AppSelect.vue'
 import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
 
 const { ensureApiBase } = useApiBase()
@@ -257,6 +245,14 @@ const {
   loadProjects,
   refreshProjects
 } = useTopicCreationProject()
+
+// AppSelect options
+const projectSelectOptions = computed(() => {
+  const placeholder = { value: '', label: '请选择项目', disabled: true }
+  if (!projectOptions.value.length) return [placeholder]
+  return [placeholder, ...projectOptions.value]
+})
+
 const datasets = ref([])
 const datasetsLoading = ref(false)
 const datasetsError = ref('')
@@ -404,6 +400,10 @@ const mergeArchiveOptions = computed(() => {
       }
     })
     .filter(Boolean)
+})
+const mergeArchiveSelectOptions = computed(() => {
+  const placeholder = { value: '', label: '请选择 Merge 存档', disabled: true }
+  return [placeholder, ...mergeArchiveOptions.value]
 })
 const mergeDateInput = computed({
   get: () => dateKeyToInputValue(archiveSelection.mergeDate),

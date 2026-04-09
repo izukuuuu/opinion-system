@@ -14,17 +14,12 @@
         <div class="grid gap-4 lg:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.2fr)] lg:items-start">
           <label class="space-y-2 text-secondary">
             <span class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">专题</span>
-            <select
-              v-model="viewSelection.topic"
-              class="input h-12 rounded-2xl"
+            <AppSelect
+              :options="topicSelectOptions"
+              :value="viewSelection.topic"
               :disabled="topicsState.loading || !selectableTopicOptions.length"
-              required
-            >
-              <option value="" disabled>请选择专题</option>
-              <option v-for="option in selectableTopicOptions" :key="`view-topic-${option}`" :value="option">
-                {{ option }}
-              </option>
-            </select>
+              @change="viewSelection.topic = $event"
+            />
           </label>
 
           <div class="space-y-2">
@@ -175,26 +170,62 @@
       :id="analysisSections.length ? 'analysis-section-content' : undefined"
     >
       <div v-if="analysisSections.length" class="space-y-5">
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-for="section in analysisSections"
-            :key="section.name"
-            type="button"
-            class="inline-flex flex-none items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition sm:text-[13px]"
-            :class="section.name === activeSectionName
-              ? 'border-transparent bg-brand-soft-muted text-secondary ring-1 ring-brand-200'
-              : 'border-soft text-secondary hover:border-brand-soft hover:bg-surface-muted'"
-            @click="setActiveSection(section.name)"
-          >
-            <span
-              class="flex h-6 w-6 items-center justify-center rounded-full"
-              :class="section.name === activeSectionName ? 'bg-brand-600/10 text-brand-600' : 'bg-surface-muted text-muted'"
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex flex-wrap gap-2">
+            <div
+              v-for="section in analysisSections"
+              :key="section.name"
+              class="group relative flex"
             >
-              <component :is="getSectionIcon(section.name)" class="h-4 w-4" />
-            </span>
-            <span class="text-primary">{{ getChineseTitle(section.label) }}</span>
-          </button>
+            <button
+              type="button"
+              class="analysis-section-tab inline-flex flex-none items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition sm:text-[13px]"
+              :class="section.name === activeSectionName
+                ? 'border-transparent bg-brand-soft-muted text-secondary ring-1 ring-brand-200'
+                : 'border-soft text-secondary hover:border-brand-soft hover:bg-surface-muted'"
+              @click="setActiveSection(section.name)"
+            >
+                <span
+                  class="flex h-6 w-6 items-center justify-center rounded-full"
+                  :class="section.name === activeSectionName ? 'bg-brand-600/10 text-brand-600' : 'bg-surface-muted text-muted'"
+                >
+                  <component :is="getSectionIcon(section.name)" class="h-4 w-4" />
+                </span>
+                <span class="text-primary">{{ getChineseTitle(section.label) }}</span>
+              </button>
+            <Transition
+              enter-active-class="transition duration-200 ease-out"
+              enter-from-class="translate-y-1 scale-75 opacity-0"
+              enter-to-class="translate-y-0 scale-100 opacity-100"
+              leave-active-class="transition duration-150 ease-in"
+              leave-from-class="translate-y-0 scale-100 opacity-100"
+              leave-to-class="translate-y-1 scale-75 opacity-0"
+            >
+              <button
+                v-if="isSectionEditMode"
+                type="button"
+                class="analysis-section-delete-button absolute -right-1.5 -top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-danger/30 bg-danger-soft text-danger transition hover:border-danger/50 hover:bg-danger-soft/90"
+                :disabled="deletingSectionName === section.name"
+                :aria-label="`删除${getChineseTitle(section.label)}`"
+                @click.stop="openDeleteSectionModal(section)"
+              >
+                <XMarkIcon class="h-3.5 w-3.5" />
+              </button>
+            </Transition>
+          </div>
         </div>
+
+        <button
+          type="button"
+          class="analysis-section-edit-toggle inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-soft bg-surface text-secondary transition hover:border-brand-soft hover:bg-surface-muted hover:text-primary"
+          :class="isSectionEditMode ? 'border-brand-soft bg-brand-soft-muted text-brand-700 ring-1 ring-brand-200' : ''"
+          :aria-label="isSectionEditMode ? '完成模块编辑' : '进入模块编辑'"
+          :title="isSectionEditMode ? '完成编辑' : '编辑模块'"
+          @click="toggleSectionEditMode"
+        >
+          <component :is="isSectionEditMode ? CheckIcon : PencilSquareIcon" class="analysis-section-edit-toggle__icon h-4 w-4" />
+        </button>
+      </div>
 
         <div v-if="activeSection" class="space-y-4 border-t border-soft pt-4">
           <header class="flex flex-wrap items-center justify-between gap-3">
@@ -249,6 +280,34 @@
       </div>
       <p v-else class="text-sm text-muted">暂无分析结果。请先运行分析并刷新。</p>
     </AnalysisSectionCard>
+
+    <AppModal
+      v-model="showDeleteSectionModal"
+      title="删除分析模块"
+      eyebrow="结果管理"
+      description="删除后，这个模块的图表结果和 AI 解读会一起移除。"
+      confirm-text="确认删除"
+      confirm-loading-text="删除中…"
+      confirm-tone="danger"
+      :confirm-loading="deletingSectionName !== ''"
+      :confirm-disabled="!pendingDeleteSection"
+      @confirm="confirmDeleteSection"
+      @cancel="resetDeleteSectionModal"
+    >
+      <div class="space-y-3">
+        <p class="text-sm text-primary">
+          确认删除
+          <span class="font-semibold">{{ pendingDeleteSection ? getChineseTitle(pendingDeleteSection.label) : '' }}</span>
+          吗？
+        </p>
+        <p class="text-sm text-secondary">
+          删除后将同步更新当前结果页，相关 AI 摘要与总体发现也会重新整理。
+        </p>
+        <p v-if="deleteSectionError" class="rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-sm text-danger">
+          {{ deleteSectionError }}
+        </p>
+      </div>
+    </AppModal>
   </div>
 </template>
 
@@ -256,19 +315,22 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Teleport } from 'vue'
 import {
-  BookmarkSquareIcon,
   CalendarDaysIcon,
   ChartBarIcon,
   ChartPieIcon,
+  CheckIcon,
   ChevronDownIcon,
   GlobeAltIcon,
   HashtagIcon,
   MegaphoneIcon,
+  PencilSquareIcon,
   SparklesIcon,
-  Squares2X2Icon,
-  UsersIcon
+  UsersIcon,
+  XMarkIcon
 } from '@heroicons/vue/24/outline'
 import AnalysisChartPanel from '../../../components/AnalysisChartPanel.vue'
+import AppModal from '../../../components/AppModal.vue'
+import AppSelect from '../../../components/AppSelect.vue'
 import AnalysisPageHeader from '../../../components/analysis/AnalysisPageHeader.vue'
 import AnalysisSectionCard from '../../../components/analysis/AnalysisSectionCard.vue'
 import AiSummaryList from '../../../components/analysis/AiSummaryList.vue'
@@ -291,11 +353,16 @@ const {
   selectedHistoryId,
   applyHistorySelection,
   loadState,
-  lastLoaded
+  lastLoaded,
+  deleteAnalysisSection
 } = useBasicAnalysis()
 
 const selectableTopicOptions = computed(() =>
   Array.isArray(topicOptions.value) ? topicOptions.value.slice() : []
+)
+
+const topicSelectOptions = computed(() =>
+  selectableTopicOptions.value.map(option => ({ value: option, label: option }))
 )
 
 const autoSelectedTopic = ref('')
@@ -304,6 +371,11 @@ const showTimeRange = ref(false)
 const timeRangeRef = ref(null)
 const showManualInput = ref(false)
 const manualInputRef = ref(null)
+const isSectionEditMode = ref(false)
+const showDeleteSectionModal = ref(false)
+const pendingDeleteSection = ref(null)
+const deletingSectionName = ref('')
+const deleteSectionError = ref('')
 
 const sectionIconMap = {
   classification: ChartPieIcon,
@@ -378,6 +450,45 @@ const setActiveSection = async (sectionName) => {
       top: offset > 0 ? offset : 0,
       behavior: 'smooth'
     })
+  }
+}
+
+const toggleSectionEditMode = () => {
+  isSectionEditMode.value = !isSectionEditMode.value
+  if (!isSectionEditMode.value) {
+    resetDeleteSectionModal()
+  }
+}
+
+const openDeleteSectionModal = (section) => {
+  pendingDeleteSection.value = section
+  deleteSectionError.value = ''
+  showDeleteSectionModal.value = true
+}
+
+const resetDeleteSectionModal = () => {
+  showDeleteSectionModal.value = false
+  pendingDeleteSection.value = null
+  deleteSectionError.value = ''
+}
+
+const confirmDeleteSection = async () => {
+  const section = pendingDeleteSection.value
+  if (!section?.name) return
+  deletingSectionName.value = section.name
+  deleteSectionError.value = ''
+  try {
+    await deleteAnalysisSection(section.name, {
+      topic: viewSelection.topic,
+      start: viewSelection.start,
+      end: viewSelection.end
+    })
+    resetDeleteSectionModal()
+    isSectionEditMode.value = false
+  } catch (error) {
+    deleteSectionError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    deletingSectionName.value = ''
   }
 }
 
@@ -568,3 +679,25 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', updateTimeRangePosition)
 })
 </script>
+
+<style scoped>
+.analysis-section-tab {
+  transform: translateY(0);
+}
+
+.analysis-section-edit-toggle {
+  transform: translateY(0) rotate(0deg);
+}
+
+.analysis-section-edit-toggle__icon {
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.analysis-section-edit-toggle:active .analysis-section-edit-toggle__icon {
+  transform: scale(0.92);
+}
+
+.analysis-section-delete-button {
+  box-shadow: none;
+}
+</style>

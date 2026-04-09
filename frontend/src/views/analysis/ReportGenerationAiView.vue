@@ -25,25 +25,24 @@
       <div class="grid gap-4 lg:grid-cols-[1.2fr,1fr,1fr,1fr]">
         <label class="space-y-2 text-secondary">
           <span class="text-xs font-semibold text-muted">专题</span>
-          <select v-model="reportForm.topic" class="input" :disabled="topicsState.loading || !topicOptions.length" required>
-            <option value="" disabled>请选择专题</option>
-            <option v-for="option in topicOptions" :key="`full-report-topic-${option}`" :value="option">
-              {{ option }}
-            </option>
-          </select>
+          <AppSelect
+            :options="topicSelectOptions"
+            :value="reportForm.topic"
+            :disabled="topicsState.loading || !topicOptions.length"
+            @change="reportForm.topic = $event"
+          />
           <p v-if="topicsState.error" class="text-xs text-danger">{{ topicsState.error }}</p>
         </label>
 
         <label class="space-y-2 text-secondary">
           <span class="text-xs font-semibold text-muted">历史记录</span>
-          <select :value="selectedHistoryId" class="input" :disabled="historyState.loading || !reportHistory.length" @change="handleSelectHistory">
-            <option value="" disabled>
-              {{ historyState.loading ? '加载历史中…' : reportHistory.length ? '选择历史记录' : '暂无历史记录' }}
-            </option>
-            <option v-for="record in reportHistory" :key="record.id" :value="record.id">
-              {{ record.start }} → {{ record.end }}
-            </option>
-          </select>
+          <AppSelect
+            :options="historySelectOptions"
+            :value="selectedHistoryId"
+            :disabled="historyState.loading || !reportHistory.length"
+            :placeholder="historyState.loading ? '加载历史中…' : reportHistory.length ? '选择历史记录' : '暂无历史记录'"
+            @change="handleSelectHistory"
+          />
           <p v-if="historyState.error" class="text-xs text-muted">{{ historyState.error }}</p>
         </label>
 
@@ -148,6 +147,7 @@ import {
   PlayCircleIcon,
   SparklesIcon
 } from '@heroicons/vue/24/outline'
+import AppSelect from '../../components/AppSelect.vue'
 import { useReportGeneration } from '../../composables/useReportGeneration'
 import { exportableAiMarkdown, extractMarkdownToc, renderAiReportMarkdown } from '../../utils/aiReportMarkdown'
 
@@ -181,8 +181,19 @@ const renderedHtml = computed(() => renderAiReportMarkdown(fullReport.value?.mar
 
 const knowledgeTermsText = computed(() => fullMeta.value.knowledgeTerms.length ? fullMeta.value.knowledgeTerms.join('、') : '暂无')
 
-const handleSelectHistory = (event) => {
-  applyHistorySelection(event?.target?.value || '')
+const topicSelectOptions = computed(() =>
+  topicOptions.value.map(option => ({ value: option, label: option }))
+)
+
+const historySelectOptions = computed(() =>
+  reportHistory.value.map(record => ({
+    value: record.id,
+    label: `${record.start} → ${record.end}`
+  }))
+)
+
+const handleSelectHistory = (historyId) => {
+  applyHistorySelection(historyId || '')
 }
 
 const handleRefreshHistory = async () => {

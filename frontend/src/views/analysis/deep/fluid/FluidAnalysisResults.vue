@@ -5,16 +5,22 @@
             <div class="flex flex-wrap gap-4">
                 <label class="flex flex-col text-xs font-semibold text-secondary">
                     <span>专题 Topic</span>
-                    <select v-model="currentTopic" class="input mt-1 min-w-[150px]" @change="loadArchives">
-                        <option v-for="t in topicOptions" :key="t" :value="t">{{ t }}</option>
-                    </select>
+                    <AppSelect
+                        :options="topicSelectOptions"
+                        :value="currentTopic"
+                        class="mt-1 min-w-[150px]"
+                        @change="handleTopicChange"
+                    />
                 </label>
                 <label class="flex flex-col text-xs font-semibold text-secondary">
                     <span>分析存档 Archive</span>
-                    <select v-model="selectedArchive" class="input mt-1 min-w-[200px]" @change="onArchiveChange">
-                        <option value="" disabled>请选择分析存档</option>
-                        <option v-for="arc in archiveOptions" :key="arc" :value="arc">{{ arc }}</option>
-                    </select>
+                    <AppSelect
+                        :options="archiveSelectOptions"
+                        :value="selectedArchive"
+                        class="mt-1 min-w-[200px]"
+                        placeholder="请选择分析存档"
+                        @change="handleArchiveChange"
+                    />
                 </label>
                 <!-- Hidden inputs for compatibility or display if needed, but not user editable -->
                 <div v-if="startDate && endDate" class="flex flex-col text-xs text-secondary mt-1">
@@ -45,11 +51,12 @@
                     <h3 class="text-lg font-semibold text-primary">舆论场五维状态面板</h3>
                     <div class="flex items-center gap-2 text-sm text-secondary">
                         <span>选择时间窗口: </span>
-                        <select v-model="selectedWindowIndex" class="input py-1 px-2">
-                            <option v-for="(item, index) in calculationResults" :key="index" :value="index">
-                                {{ item['日期'] || `窗口 ${index + 1}` }}
-                            </option>
-                        </select>
+                        <AppSelect
+                            :options="windowSelectOptions"
+                            :value="selectedWindowIndex"
+                            class="py-1 px-2"
+                            @change="selectedWindowIndex = Number($event)"
+                        />
                     </div>
                 </div>
 
@@ -186,6 +193,7 @@ import { ref, reactive, onMounted, watch, computed, nextTick } from 'vue'
 import { ArrowPathIcon } from '@heroicons/vue/24/outline'
 import { useRoute } from 'vue-router'
 import { echarts } from '@/utils/echarts'
+import AppSelect from '../../../../components/AppSelect.vue'
 
 const route = useRoute()
 const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
@@ -248,6 +256,31 @@ const getNumericVal = (v) => (v && typeof v === 'object') ? (v.值 || 0) : (v ||
 const currentVortex = computed(() => getNumericVal(currentDateRec.value['涡度(Ω)'] || currentDateRec.value['涡度']))
 const currentPressure = computed(() => getNumericVal(currentDateRec.value['压强梯度(G)'] || currentDateRec.value['压强梯度']))
 const currentReynolds = computed(() => getNumericVal(currentDateRec.value['雷诺数(Re)'] || currentDateRec.value['雷诺数']))
+
+const topicSelectOptions = computed(() =>
+    topicOptions.value.map(t => ({ value: t, label: t }))
+)
+
+const archiveSelectOptions = computed(() =>
+    archiveOptions.value.map(arc => ({ value: arc, label: arc }))
+)
+
+const windowSelectOptions = computed(() =>
+    calculationResults.value.map((item, index) => ({
+        value: index,
+        label: item['日期'] || `窗口 ${index + 1}`
+    }))
+)
+
+const handleTopicChange = (value) => {
+    currentTopic.value = value
+    loadArchives()
+}
+
+const handleArchiveChange = (value) => {
+    selectedArchive.value = value
+    onArchiveChange()
+}
 
 watch(selectedWindowIndex, () => {
     updateRadarChart()

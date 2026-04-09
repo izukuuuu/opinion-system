@@ -151,12 +151,11 @@
             <div class="grid gap-5 md:grid-cols-2">
               <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">服务提供方</label>
-                <select
-                  v-model="llmState.assistant.provider"
-                  class="form-select w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 cursor-pointer"
-                >
-                  <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                </select>
+                <AppSelect
+                  :options="providerOptions"
+                  :value="llmState.assistant.provider"
+                  @change="llmState.assistant.provider = $event"
+                />
               </div>
 
               <div>
@@ -236,12 +235,11 @@
             <div class="grid gap-5 md:grid-cols-2">
               <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">服务提供方</label>
-                <select
-                  v-model="llmState.filter.provider"
-                  class="form-select w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 cursor-pointer"
-                >
-                  <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                </select>
+                <AppSelect
+                  :options="providerOptions"
+                  :value="llmState.filter.provider"
+                  @change="llmState.filter.provider = $event"
+                />
               </div>
               <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">模型名称</label>
@@ -294,12 +292,11 @@
             <div class="grid gap-5 md:grid-cols-2">
               <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">服务提供方</label>
-                <select
-                  v-model="llmState.embedding.provider"
-                  class="form-select w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 cursor-pointer"
-                >
-                  <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                </select>
+                <AppSelect
+                  :options="providerOptions"
+                  :value="llmState.embedding.provider"
+                  @change="llmState.embedding.provider = $event"
+                />
               </div>
               <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">模型名称</label>
@@ -354,14 +351,11 @@
           <div class="space-y-5">
             <div>
               <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">调用入口</label>
-              <select
-                v-model="langchainBaseUrlMode"
-                class="form-select w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 cursor-pointer"
-              >
-                <option value="dashscope">阿里云 DashScope</option>
-                <option value="openai">OpenAI 官方</option>
-                <option value="custom">自定义兼容接口</option>
-              </select>
+              <AppSelect
+                :options="langchainBaseUrlOptions"
+                :value="langchainBaseUrlMode"
+                @change="langchainBaseUrlMode = $event"
+              />
             </div>
 
             <div>
@@ -483,12 +477,11 @@
             <div class="grid gap-6 md:grid-cols-2">
               <div>
                 <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">服务提供方</label>
-                <select
-                  v-model="reportRuntime.provider"
-                  class="form-select w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 cursor-pointer"
-                >
-                  <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                </select>
+                <AppSelect
+                  :options="providerOptions"
+                  :value="reportRuntime.provider"
+                  @change="reportRuntime.provider = $event"
+                />
               </div>
 
               <div>
@@ -608,6 +601,7 @@ import {
   KeyIcon,
 } from '@heroicons/vue/24/outline'
 import { useApiBase } from '../../composables/useApiBase'
+import AppSelect from '../../components/AppSelect.vue'
 
 const { ensureApiBase } = useApiBase()
 const buildApiUrl = async (path) => {
@@ -618,6 +612,12 @@ const buildApiUrl = async (path) => {
 const providerOptions = [
   { label: '阿里通义千问（DashScope）', value: 'qwen' },
   { label: 'OpenAI / 兼容 API', value: 'openai' }
+]
+
+const langchainBaseUrlOptions = [
+  { value: 'dashscope', label: '阿里云 DashScope' },
+  { value: 'openai', label: 'OpenAI 官方' },
+  { value: 'custom', label: '自定义兼容接口' }
 ]
 
 const LANGCHAIN_DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'

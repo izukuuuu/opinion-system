@@ -19,18 +19,12 @@
                         <div class="flex items-center h-5">
                             <label class="text-xs font-semibold text-muted tracking-wide uppercase">专题 Topic *</label>
                         </div>
-                        <div class="relative">
-                            <select v-model="form.topic" class="input w-full appearance-none pr-8 h-11"
-                                :disabled="topicsState.loading || !topicOptions.length" required>
-                                <option value="" disabled>请选择远程专题</option>
-                                <option v-for="option in topicOptions" :key="`fluid-${option}`" :value="option">
-                                    {{ option }}
-                                </option>
-                            </select>
-                            <div class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted">
-                                <ChevronUpDownIcon class="h-4 w-4" />
-                            </div>
-                        </div>
+                        <AppSelect
+                            :options="topicSelectOptions"
+                            :value="form.topic"
+                            :disabled="topicsState.loading || !topicOptions.length"
+                            @change="form.topic = $event"
+                        />
                         <p v-if="topicsState.error" class="text-xs text-danger">{{ topicsState.error }}</p>
                     </div>
 
@@ -97,13 +91,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import {
     ArrowPathIcon,
-    ChevronUpDownIcon,
     CheckBadgeIcon,
     ExclamationCircleIcon
 } from '@heroicons/vue/24/solid'
+import AppSelect from '../../../../components/AppSelect.vue'
 
 const topicsState = reactive({
     loading: false,
@@ -111,6 +105,10 @@ const topicsState = reactive({
 })
 const topicOptions = ref([])
 const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+
+const topicSelectOptions = computed(() =>
+    topicOptions.value.map(option => ({ value: option, label: option }))
+)
 
 const loadTopics = async () => {
     topicsState.loading = true

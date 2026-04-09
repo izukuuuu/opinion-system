@@ -119,19 +119,19 @@
         </label>
         <label class="space-y-1.5 text-sm">
           <span class="font-medium text-secondary">默认排序</span>
-          <select v-model="form.sort" class="input">
-            <option value="comments_desc">按评论热度</option>
-            <option value="relevance">按相关度</option>
-            <option value="hot">按热度</option>
-          </select>
+          <AppSelect
+            :options="sortOptions"
+            :value="form.sort"
+            @change="form.sort = $event"
+          />
         </label>
         <label class="space-y-1.5 text-sm">
           <span class="font-medium text-secondary">默认内容类型</span>
-          <select v-model="form.infoType" class="input">
-            <option value="2">内容</option>
-            <option value="1">全部</option>
-            <option value="3">评论</option>
-          </select>
+          <AppSelect
+            :options="infoTypeOptions"
+            :value="form.infoType"
+            @change="form.infoType = $event"
+          />
         </label>
         <label class="space-y-1.5 text-sm">
           <span class="font-medium text-secondary">浏览器通道</span>
@@ -225,9 +225,23 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { KeyIcon, Cog6ToothIcon as CogIcon, CalendarDaysIcon } from '@heroicons/vue/24/outline'
 
+import AppSelect from '../../components/AppSelect.vue'
 import { useApiBase } from '../../composables/useApiBase'
 
 const { callApi } = useApiBase()
+
+// Select options
+const sortOptions = [
+  { value: 'comments_desc', label: '按评论热度' },
+  { value: 'relevance', label: '按相关度' },
+  { value: 'hot', label: '按热度' }
+]
+
+const infoTypeOptions = [
+  { value: '2', label: '内容' },
+  { value: '1', label: '全部' },
+  { value: '3', label: '评论' }
+]
 
 const loading = ref(false)
 const credentialsSummary = reactive({

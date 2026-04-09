@@ -3,6 +3,7 @@
 """
 import asyncio
 import json
+import shutil
 from datetime import datetime, timezone
 import pandas as pd
 from pathlib import Path
@@ -88,6 +89,33 @@ def _extract_rows(result: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _is_placeholder_dimension_value(func_name: str, value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return True
+    lowered = text.lower()
+    if func_name == 'publishers':
+        return lowered in {"-", "--", "—", "未知", "nan", "none", "null"}
+    if func_name == 'geography':
+        return lowered in {"-", "--", "—", "未知", "nan", "none", "null"}
+    return False
+
+
+def _prepare_snapshot_rows(func_name: str, result: Any) -> List[Dict[str, Any]]:
+    rows = _extract_rows(result)
+    if func_name not in {'publishers', 'geography'}:
+        return rows
+    prepared: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = row.get('name') or row.get('label') or row.get('key') or ''
+        if _is_placeholder_dimension_value(func_name, name):
+            continue
+        prepared.append(row)
+    return prepared
+
+
 def _format_row_pair(row: Dict[str, Any]) -> str:
     if not isinstance(row, dict):
         return str(row)
@@ -109,7 +137,7 @@ def _build_text_snapshot(
     ellipsis: bool = True,
 ) -> str:
     label = FUNCTION_LABELS.get(func_name, func_name)
-    rows = _extract_rows(result)
+    rows = _prepare_snapshot_rows(func_name, result)
     lines = [f"{label}（{target}）分析概览", f"记录数：{len(rows)}"]
     if rows:
         lines.append("关键条目：")
@@ -176,9 +204,17 @@ def _generate_ai_summary(func_name: str, target: str, snapshot: str, logger) -> 
     # 根据模块类型添加数据定义说明
     data_hints = ""
     if func_name == 'geography':
-        data_hints = "\n数据定义：统计结果中的"-"表示未标注地域信息的数据条目，不属于具体地域分布。"
+        data_hints = (
+            "\n数据定义：统计结果中的“-”“--”“—”“未知”“none”“null”“nan”"
+            "都表示未标注地域信息的数据条目，不属于具体地域分布，"
+            "不要把它们写成真实地域主体。"
+        )
     elif func_name == 'publishers':
-        data_hints = "\n数据定义：统计结果中的"-"表示无发布者信息的数据条目，通常不纳入发布者主体分析。"
+        data_hints = (
+            "\n数据定义：统计结果中的“-”“--”“—”“未知”“none”“null”“nan”"
+            "都表示无发布者信息的数据条目，不属于真实发布者主体，"
+            "不要把它们写成“匿名发布者占主导”这类结论。"
+        )
 
     prompt = (
         "你是一名资深舆情分析师。基于以下统计快照，以不超过80字的中文总结核心洞察，不要输出列表或多段。"
@@ -483,6 +519,50 @@ def rebuild_ai_summary_from_analyze_folder(
         log_skip(logger, "AI摘要无变化，跳过写入", "Analysis")
 
     return True
+
+
+def delete_analyze_function_from_folder(
+    topic: str,
+    folder_name: str,
+    function_name: str,
+    logger=None,
+) -> Dict[str, Any]:
+    if logger is None:
+        log_date, _ = _split_analyze_folder(folder_name)
+        logger = setup_logger(topic, log_date or str(folder_name or "").strip() or "analyze")
+
+    folder_name = str(folder_name or "").strip()
+    function_name = str(function_name or "").strip()
+    if not folder_name or not function_name:
+        raise ValueError("缺少分析目录或模块名称")
+
+    analyze_root = bucket("analyze", topic, folder_name)
+    if not analyze_root.exists() or not analyze_root.is_dir():
+        raise FileNotFoundError("未找到对应的分析结果目录")
+
+    target_dir = analyze_root / function_name
+    if not target_dir.exists() or not target_dir.is_dir():
+        raise FileNotFoundError("未找到对应的分析模块目录")
+
+    shutil.rmtree(target_dir)
+    log_success(logger, f"已删除分析模块目录: {target_dir}", "Analysis")
+
+    remaining_dirs = sorted([child for child in analyze_root.iterdir() if child.is_dir()], key=lambda path: path.name)
+    ai_summary_file = analyze_root / AI_SUMMARY_FILENAME
+
+    if remaining_dirs:
+        rebuild_ai_summary_from_analyze_folder(topic, folder_name, logger=logger)
+    else:
+        if ai_summary_file.exists():
+            ai_summary_file.unlink()
+            log_success(logger, f"已删除空摘要文件: {ai_summary_file}", "Analysis")
+
+    return {
+        "analyze_root": str(analyze_root),
+        "deleted_function": function_name,
+        "remaining_functions": [item.name for item in remaining_dirs],
+        "ai_summary_exists": ai_summary_file.exists(),
+    }
 
 
 def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, end_date: str = None) -> bool:

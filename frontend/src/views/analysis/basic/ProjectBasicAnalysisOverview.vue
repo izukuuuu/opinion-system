@@ -2,11 +2,11 @@
   <div class="space-y-6 pb-12">
     <section class="relative overflow-hidden rounded-3xl border border-soft bg-surface p-1">
       <div
-        class="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-brand-600 via-brand-700 to-indigo-900 px-6 py-10 text-white sm:px-10 sm:py-12"
+        class="relative isolate overflow-hidden rounded-[22px] bg-gradient-to-br from-brand-600 via-brand-500 to-accent-500 px-6 py-10 text-white sm:px-10 sm:py-12"
       >
-        <div class="absolute inset-0 overflow-hidden opacity-20 pointer-events-none">
-          <div class="absolute -top-1/4 -left-1/4 h-[400px] w-[400px] rounded-full bg-white/30 blur-[100px]"></div>
-          <div class="absolute -bottom-1/4 -right-1/4 h-[300px] w-[300px] rounded-full bg-brand-400 blur-[80px]"></div>
+        <div class="absolute inset-0 opacity-30 mix-blend-overlay">
+          <div class="absolute -top-32 -left-32 h-96 w-96 rounded-full bg-white/20 blur-[100px]"></div>
+          <div class="absolute bottom-0 right-0 h-[30rem] w-[30rem] translate-x-1/3 translate-y-1/3 rounded-full bg-accent-300/30 blur-[120px]"></div>
         </div>
 
         <div class="relative z-10 grid gap-8 lg:grid-cols-2 lg:items-center">
@@ -57,9 +57,12 @@
           </div>
 
           <div class="hidden lg:block">
-            <div class="relative rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
-              <h3 class="mb-3 text-xs font-bold text-brand-200">核心分析能力 (Core Capabilities)</h3>
-              <ul class="space-y-2.5 text-[13px] text-white/70">
+            <div
+              class="glass-inner-glow-card rounded-2xl p-5"
+            >
+              <div class="relative z-10">
+                <h3 class="mb-3 text-xs font-bold text-brand-200">核心分析能力 (Core Capabilities)</h3>
+                <ul class="space-y-2.5 text-[13px] text-white/70">
                 <li class="flex items-start gap-3">
                   <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
                   <span>声量趋势与异常峰值识别，快速定位传播拐点</span>
@@ -72,46 +75,49 @@
                   <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
                   <span>AI 摘要联动图表结果，辅助团队快速形成判断</span>
                 </li>
-              </ul>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="workflow-section" class="topic-prep-workflow">
-      <header class="topic-prep-workflow__header px-0">
-        <h2 class="topic-prep-workflow__title">分析流程</h2>
-        <p class="topic-prep-workflow__description">
+    <section id="workflow-section" class="space-y-6 scroll-mt-6">
+      <div class="text-center space-y-1">
+        <h2 class="text-2xl font-bold text-primary tracking-tight">分析流程</h2>
+        <p class="mx-auto max-w-xl text-secondary text-sm">
           从配置任务到查看结果，基础分析保持统一的三段式工作流。
         </p>
-      </header>
+      </div>
 
-      <div class="topic-prep-workflow__grid topic-prep-workflow__grid--compact">
-        <article
-          v-for="step in steps"
-          :key="step.title"
-          class="topic-prep-workflow__card"
-        >
-          <div class="topic-prep-workflow__index">{{ step.index }}</div>
-          <div class="topic-prep-workflow__body">
-            <div class="topic-prep-workflow__meta topic-prep-workflow__meta--tight">
-              <h3 class="topic-prep-workflow__step-title">{{ step.title }}</h3>
-              <p class="topic-prep-workflow__step-subtitle topic-prep-workflow__step-subtitle--muted text-[11px] tracking-[0.25em]">
-                {{ step.subtitle }}
-              </p>
-            </div>
-            <p class="topic-prep-workflow__step-description">{{ step.description }}</p>
-          </div>
-          <button
-            type="button"
-            class="topic-prep-workflow__action opacity-100 translate-x-0"
-            @click="router.push(step.route)"
+      <div class="topic-prep-workflow">
+        <div class="topic-prep-workflow__grid topic-prep-workflow__grid--compact">
+          <article
+            v-for="step in steps"
+            :key="step.title"
+            class="topic-prep-workflow__card"
           >
-            <span>前往执行</span>
-            <ArrowSmallRightIcon class="topic-prep-workflow__action-icon" />
-          </button>
-        </article>
+            <div class="topic-prep-workflow__index">{{ step.index }}</div>
+            <div class="topic-prep-workflow__body">
+              <div class="topic-prep-workflow__meta topic-prep-workflow__meta--tight">
+                <h3 class="topic-prep-workflow__step-title">{{ step.title }}</h3>
+                <p class="topic-prep-workflow__step-subtitle topic-prep-workflow__step-subtitle--muted text-[11px] tracking-[0.25em]">
+                  {{ step.subtitle }}
+                </p>
+              </div>
+              <p class="topic-prep-workflow__step-description">{{ step.description }}</p>
+            </div>
+            <button
+              type="button"
+              class="topic-prep-workflow__action opacity-100 translate-x-0"
+              @click="router.push(step.route)"
+            >
+              <span>前往执行</span>
+              <ArrowSmallRightIcon class="topic-prep-workflow__action-icon" />
+            </button>
+          </article>
+        </div>
       </div>
     </section>
 

@@ -146,27 +146,19 @@
         <div class="grid gap-3 sm:grid-cols-3">
           <label class="space-y-1">
             <span class="text-xs text-secondary">本地项目</span>
-            <select
-              v-model="newMapping.localProject"
-              class="input"
-            >
-              <option value="">选择项目...</option>
-              <option v-for="p in localProjects" :key="p.name" :value="p.name">
-                {{ p.display_name || p.name }}
-              </option>
-            </select>
+            <AppSelect
+              :options="localProjectOptions"
+              :value="newMapping.localProject"
+              @change="newMapping.localProject = $event"
+            />
           </label>
           <label class="space-y-1">
             <span class="text-xs text-secondary">远程专题</span>
-            <select
-              v-model="newMapping.remoteTopic"
-              class="input"
-            >
-              <option value="">选择专题...</option>
-              <option v-for="t in remoteTopics" :key="t.name" :value="t.name">
-                {{ t.name }}
-              </option>
-            </select>
+            <AppSelect
+              :options="remoteTopicOptions"
+              :value="newMapping.remoteTopic"
+              @change="newMapping.remoteTopic = $event"
+            />
           </label>
           <div class="flex items-end">
             <button
@@ -263,6 +255,7 @@ import {
   CodeBracketIcon
 } from '@heroicons/vue/24/outline'
 import { useApiBase } from '../../composables/useApiBase'
+import AppSelect from '../../components/AppSelect.vue'
 
 const { callApi } = useApiBase()
 
@@ -285,6 +278,17 @@ const newMapping = reactive({
   localProject: '',
   remoteTopic: ''
 })
+
+// AppSelect options
+const localProjectOptions = computed(() => [
+  { value: '', label: '选择项目...' },
+  ...localProjects.value.map(p => ({ value: p.name, label: p.display_name || p.name }))
+])
+
+const remoteTopicOptions = computed(() => [
+  { value: '', label: '选择专题...' },
+  ...remoteTopics.value.map(t => ({ value: t.name, label: t.name }))
+])
 
 // 从 localStorage 加载已保存的数据
 const STORAGE_KEY_TOPICS = 'opinion-system-remote-topics-snapshot'

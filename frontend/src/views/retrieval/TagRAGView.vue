@@ -25,17 +25,11 @@
           <div class="group relative flex items-center overflow-hidden rounded-2xl bg-base-soft/90 p-2 ring-1 ring-brand-100/50 transition focus-within:ring-2 focus-within:ring-brand-500/20">
             <!-- 专题选择 (作为前置过滤器) -->
             <div class="relative flex items-center border-r border-gray-100 pr-2">
-              <select
-                v-model="ragSearchForm.topic"
-                class="h-full w-32 cursor-pointer appearance-none rounded-xl border-none bg-transparent py-3 pl-4 pr-8 text-sm font-medium text-primary focus:outline-none focus:ring-0"
-                required
-              >
-                <option value="" disabled>选择专题</option>
-                <option v-for="topic in tagragTopicOptions" :key="topic" :value="topic">{{ topic }}</option>
-              </select>
-              <svg class="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-              </svg>
+              <AppSelect
+                :options="searchTopicSelectOptions"
+                :value="ragSearchForm.topic"
+                @change="ragSearchForm.topic = $event"
+              />
             </div>
 
             <!-- 输入框 -->
@@ -209,16 +203,12 @@
             </div>
 
             <div class="space-y-3 rounded-xl bg-blue-50/50 p-4 border border-blue-100">
-              <select
-                v-model="ragBuildForm.topic"
-                class="w-full rounded-lg border-gray-300 text-sm focus:border-brand-500 focus:ring-brand-500"
+              <AppSelect
+                :options="remoteTopicSelectOptions"
+                :value="ragBuildForm.topic"
                 :disabled="remoteTopicsState.loading"
-              >
-                <option value="" disabled>选择远程数据源...</option>
-                <option v-for="topic in remoteTopicOptions" :key="`remote-${topic}`" :value="topic">
-                  {{ topic }}
-                </option>
-              </select>
+                @change="ragBuildForm.topic = $event"
+              />
 
               <button
                 @click="handleBuild"
@@ -245,6 +235,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowPathIcon } from '@heroicons/vue/24/outline'
 import { useRAGTopics } from '../../composables/useRAGTopics'
 import RagCacheToast from '../../components/rag/RagCacheToast.vue'
+import AppSelect from '../../components/AppSelect.vue'
 
 const {
   ragTopicsState,
@@ -264,6 +255,17 @@ const {
 
 const hasSearched = computed(() => ragRetrievalState.error !== '' || ragRetrievalState.results.length > 0)
 const showManageModal = ref(false)
+
+// Select options
+const searchTopicSelectOptions = computed(() => [
+  { value: '', label: '选择专题' },
+  ...tagragTopicOptions.value.map(t => ({ value: t, label: t }))
+])
+
+const remoteTopicSelectOptions = computed(() => [
+  { value: '', label: '选择远程数据源...' },
+  ...remoteTopicOptions.value.map(t => ({ value: t, label: t }))
+])
 
 // Methods
 const loadTopics = async () => {

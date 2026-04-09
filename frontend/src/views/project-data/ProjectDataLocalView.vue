@@ -74,43 +74,39 @@
             <div class="grid gap-4 sm:grid-cols-2">
               <label class="space-y-1 text-xs">
                 <span class="font-medium text-slate-600">日期列</span>
-                <select v-model="mappingForm.date"
-                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                  <option value="">未指定</option>
-                  <option v-for="column in selectedDatasetColumns" :key="`preview-date-${column}`" :value="column">
-                    {{ column }}
-                  </option>
-                </select>
+                <AppSelect
+                  :options="columnSelectOptions"
+                  :value="mappingForm.date"
+                  @change="mappingForm.date = $event"
+                  placeholder="未指定"
+                />
               </label>
               <label class="space-y-1 text-xs">
                 <span class="font-medium text-slate-600">标题列</span>
-                <select v-model="mappingForm.title"
-                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                  <option value="">未指定</option>
-                  <option v-for="column in selectedDatasetColumns" :key="`preview-title-${column}`" :value="column">
-                    {{ column }}
-                  </option>
-                </select>
+                <AppSelect
+                  :options="columnSelectOptions"
+                  :value="mappingForm.title"
+                  @change="mappingForm.title = $event"
+                  placeholder="未指定"
+                />
               </label>
               <label class="space-y-1 text-xs">
                 <span class="font-medium text-slate-600">正文列</span>
-                <select v-model="mappingForm.content"
-                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                  <option value="">未指定</option>
-                  <option v-for="column in selectedDatasetColumns" :key="`preview-content-${column}`" :value="column">
-                    {{ column }}
-                  </option>
-                </select>
+                <AppSelect
+                  :options="columnSelectOptions"
+                  :value="mappingForm.content"
+                  @change="mappingForm.content = $event"
+                  placeholder="未指定"
+                />
               </label>
               <label class="space-y-1 text-xs">
                 <span class="font-medium text-slate-600">作者列</span>
-                <select v-model="mappingForm.author"
-                  class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                  <option value="">未指定</option>
-                  <option v-for="column in selectedDatasetColumns" :key="`preview-author-${column}`" :value="column">
-                    {{ column }}
-                  </option>
-                </select>
+                <AppSelect
+                  :options="columnSelectOptions"
+                  :value="mappingForm.author"
+                  @change="mappingForm.author = $event"
+                  placeholder="未指定"
+                />
               </label>
             </div>
             <div class="flex flex-wrap items-center gap-3 text-xs">
@@ -134,11 +130,12 @@
             <div class="flex items-center gap-3">
               <label class="text-xs font-medium text-slate-500">
                 每页
-                <select
-                  class="ml-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm text-slate-600  focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                  :value="previewPageSize" @change="changePreviewPageSize($event.target.value)">
-                  <option v-for="size in previewPageSizeOptions" :key="size" :value="size">{{ size }}</option>
-                </select>
+                <AppSelect
+                  :options="pageSizeSelectOptions"
+                  :value="previewPageSize"
+                  class="ml-1"
+                  @change="changePreviewPageSize($event)"
+                />
               </label>
               <button type="button"
                 class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
@@ -688,6 +685,12 @@ const selectedDatasetColumns = computed(() =>
     ? selectedDataset.value.columns.map((column) => column.toString())
     : []
 )
+
+const columnSelectOptions = computed(() =>
+  selectedDatasetColumns.value.map(col => ({ value: col, label: col }))
+)
+
+const pageSizeSelectOptions = previewPageSizeOptions.map(size => ({ value: size, label: String(size) }))
 const selectedDatasetMapping = computed(() =>
   selectedDataset.value && typeof selectedDataset.value.column_mapping === 'object'
     ? selectedDataset.value.column_mapping || {}

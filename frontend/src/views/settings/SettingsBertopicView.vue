@@ -11,24 +11,11 @@
           <h3 class="settings-section-title">配置项</h3>
           <p class="settings-section-desc">在嵌入配置和停用词之间切换。</p>
         </div>
-        <div class="settings-tabbar">
-          <button
-            type="button"
-            class="settings-tab"
-            :class="activeTab === 'embedding' ? 'settings-tab-active' : ''"
-            @click="activeTab = 'embedding'"
-          >
-            嵌入配置
-          </button>
-          <button
-            type="button"
-            class="settings-tab"
-            :class="activeTab === 'stopwords' ? 'settings-tab-active' : ''"
-            @click="activeTab = 'stopwords'"
-          >
-            停用词
-          </button>
-        </div>
+        <TabSwitch
+          :tabs="[{ value: 'embedding', label: '嵌入配置' }, { value: 'stopwords', label: '停用词' }]"
+          :active="activeTab"
+          @change="activeTab = $event"
+        />
       </div>
 
       <div>
@@ -63,12 +50,11 @@
             <div class="grid gap-6 md:grid-cols-2">
               <div class="space-y-2 md:col-span-2">
                 <label class="text-xs font-semibold text-muted">嵌入模型 (Embedding Model)</label>
-                <select v-model="selectedModelOption" class="input">
-                  <option v-for="option in embeddingModelOptions" :key="option.value" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                  <option :value="CUSTOM_MODEL_OPTION">自定义模型 (手动输入)</option>
-                </select>
+                <AppSelect
+                  :options="embeddingModelSelectOptions"
+                  :value="selectedModelOption"
+                  @change="selectedModelOption = $event"
+                />
                 <p class="text-xs text-muted">
                   常用模型列表由后端接口提供，失败时自动回退到内置推荐列表。BERTopic 实际运行会读取这里保存的全局配置。
                 </p>
@@ -91,11 +77,11 @@
 
               <div class="space-y-2">
                 <label class="text-xs font-semibold text-muted">运行设备 (Device)</label>
-                <select v-model="configForm.embedding.device" class="input">
-                  <option value="cpu">CPU (通用)</option>
-                  <option value="cuda">GPU (CUDA)</option>
-                  <option value="auto">自动选择</option>
-                </select>
+                <AppSelect
+                  :options="deviceOptions"
+                  :value="configForm.embedding.device"
+                  @change="configForm.embedding.device = $event"
+                />
                 <p class="text-xs text-muted">指定模型运行的硬件设备。</p>
               </div>
 
@@ -166,8 +152,17 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useBertopicConfig } from '../../composables/useBertopicConfig'
+import TabSwitch from '../../components/TabSwitch.vue'
+import AppSelect from '../../components/AppSelect.vue'
 
 const CUSTOM_MODEL_OPTION = '__custom_model__'
+
+// Device options for AppSelect
+const deviceOptions = [
+  { value: 'cpu', label: 'CPU (通用)' },
+  { value: 'cuda', label: 'GPU (CUDA)' },
+  { value: 'auto', label: '自动选择' }
+]
 
 const {
   configForm,
@@ -188,6 +183,12 @@ const statusMessage = ref('')
 const statusType = ref('success')
 const selectedModelOption = ref(CUSTOM_MODEL_OPTION)
 const activeTab = ref('embedding')
+
+// Computed options for embedding model select
+const embeddingModelSelectOptions = computed(() => [
+  ...embeddingModelOptions.value,
+  { value: CUSTOM_MODEL_OPTION, label: '自定义模型 (手动输入)' }
+])
 
 const normalizedModelName = computed(() => String(configForm.embedding.model_name || '').trim())
 const isCustomModelSelected = computed(() => selectedModelOption.value === CUSTOM_MODEL_OPTION)

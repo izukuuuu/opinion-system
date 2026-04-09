@@ -11,21 +11,11 @@
           <h3 class="settings-section-title">配置分类</h3>
           <p class="settings-section-desc">切换不同分组并调整相应参数。</p>
         </div>
-        <nav class="settings-tabbar">
-          <button
-            v-for="tab in tabs"
-            :key="tab.key"
-            @click="activeTab = tab.key"
-            :class="[
-              'settings-tab',
-              activeTab === tab.key
-                ? 'settings-tab-active'
-                : ''
-            ]"
-          >
-            {{ tab.label }}
-          </button>
-        </nav>
+        <TabSwitch
+          :tabs="tabsNormalized"
+          :active="activeTab"
+          @change="activeTab = $event"
+        />
       </div>
 
       <div>
@@ -49,14 +39,16 @@
           <div class="grid gap-6 md:grid-cols-2">
             <div class="space-y-2">
               <label class="text-xs font-semibold text-muted">分块策略</label>
-              <select
+              <AppSelect
                 v-model="ragState.configForm.chunking.strategy"
-                class="input"
-              >
-                <option value="size">按大小分块</option>
-                <option value="count">按数量分块</option>
-                <option value="semantic">语义分块 (实验性)</option>
-              </select>
+                :options="[
+                  { value: 'size', label: '按大小分块' },
+                  { value: 'count', label: '按数量分块' },
+                  { value: 'semantic', label: '语义分块 (实验性)' }
+                ]"
+                :value="ragState.configForm.chunking.strategy"
+                @change="ragState.configForm.chunking.strategy = $event"
+              />
               <p class="text-xs text-muted">选择文本分块的方式</p>
             </div>
 
@@ -131,14 +123,15 @@
           <div class="grid gap-6 md:grid-cols-2">
             <div class="space-y-2">
               <label class="text-xs font-semibold text-muted">检索类型</label>
-              <select
-                v-model="ragState.configForm.retrieval.search_type"
-                class="input"
-              >
-                <option value="vector">向量检索</option>
-                <option value="hybrid">混合检索</option>
-                <option value="bm25">BM25检索</option>
-              </select>
+              <AppSelect
+                :options="[
+                  { value: 'vector', label: '向量检索' },
+                  { value: 'hybrid', label: '混合检索' },
+                  { value: 'bm25', label: 'BM25检索' }
+                ]"
+                :value="ragState.configForm.retrieval.search_type"
+                @change="ragState.configForm.retrieval.search_type = $event"
+              />
               <p class="text-xs text-muted">检索算法类型</p>
             </div>
 
@@ -174,14 +167,15 @@
 
             <div class="space-y-2">
               <label class="text-xs font-semibold text-muted">相似度计算方式</label>
-              <select
-                v-model="ragState.configForm.retrieval.score_type"
-                class="input"
-              >
-                <option value="cosine">余弦相似度</option>
-                <option value="dot">点积</option>
-                <option value="euclidean">欧氏距离</option>
-              </select>
+              <AppSelect
+                :options="[
+                  { value: 'cosine', label: '余弦相似度' },
+                  { value: 'dot', label: '点积' },
+                  { value: 'euclidean', label: '欧氏距离' }
+                ]"
+                :value="ragState.configForm.retrieval.score_type"
+                @change="ragState.configForm.retrieval.score_type = $event"
+              />
             </div>
           </div>
 
@@ -240,13 +234,15 @@
 
               <div v-if="ragState.configForm.retrieval.enable_llm_summary" class="ml-6 space-y-2">
                 <label class="text-xs font-semibold text-muted">总结模式</label>
-                <select
-                  v-model="ragState.configForm.retrieval.llm_summary_mode"
-                  class="input text-xs py-1"
-                >
-                  <option value="strict">严格模式 (仅限参考资料)</option>
-                  <option value="supplement">补充模式 (结合通用知识)</option>
-                </select>
+                <AppSelect
+                  size="sm"
+                  :options="[
+                    { value: 'strict', label: '严格模式 (仅限参考资料)' },
+                    { value: 'supplement', label: '补充模式 (结合通用知识)' }
+                  ]"
+                  :value="ragState.configForm.retrieval.llm_summary_mode"
+                  @change="ragState.configForm.retrieval.llm_summary_mode = $event"
+                />
                 <p class="text-xs text-muted">选择生成总结时的限制程度</p>
               </div>
             </div>
@@ -260,41 +256,44 @@
           <div class="grid gap-6 md:grid-cols-2">
             <div class="space-y-2">
               <label class="text-xs font-semibold text-muted">存储类型</label>
-              <select
-                v-model="ragState.configForm.storage.storage_type"
-                class="input"
-              >
-                <option value="file">文件存储</option>
-                <option value="lance">LanceDB</option>
-                <option value="faiss">FAISS</option>
-                <option value="chroma">ChromaDB</option>
-              </select>
+              <AppSelect
+                :options="[
+                  { value: 'file', label: '文件存储' },
+                  { value: 'lance', label: 'LanceDB' },
+                  { value: 'faiss', label: 'FAISS' },
+                  { value: 'chroma', label: 'ChromaDB' }
+                ]"
+                :value="ragState.configForm.storage.storage_type"
+                @change="ragState.configForm.storage.storage_type = $event"
+              />
               <p class="text-xs text-muted">向量数据库类型</p>
             </div>
 
             <div class="space-y-2">
               <label class="text-xs font-semibold text-muted">索引类型</label>
-              <select
-                v-model="ragState.configForm.storage.index_type"
-                class="input"
-              >
-                <option value="flat">Flat (精确)</option>
-                <option value="ivf">IVF (倒排)</option>
-                <option value="hnsw">HNSW (层次)</option>
-              </select>
+              <AppSelect
+                :options="[
+                  { value: 'flat', label: 'Flat (精确)' },
+                  { value: 'ivf', label: 'IVF (倒排)' },
+                  { value: 'hnsw', label: 'HNSW (层次)' }
+                ]"
+                :value="ragState.configForm.storage.index_type"
+                @change="ragState.configForm.storage.index_type = $event"
+              />
               <p class="text-xs text-muted">向量索引类型</p>
             </div>
 
             <div class="space-y-2">
               <label class="text-xs font-semibold text-muted">距离度量</label>
-              <select
-                v-model="ragState.configForm.storage.metric"
-                class="input"
-              >
-                <option value="cosine">余弦距离</option>
-                <option value="l2">欧氏距离</option>
-                <option value="ip">内积</option>
-              </select>
+              <AppSelect
+                :options="[
+                  { value: 'cosine', label: '余弦距离' },
+                  { value: 'l2', label: '欧氏距离' },
+                  { value: 'ip', label: '内积' }
+                ]"
+                :value="ragState.configForm.storage.metric"
+                @change="ragState.configForm.storage.metric = $event"
+              />
             </div>
 
             <div class="space-y-2">
@@ -409,14 +408,14 @@
           <div class="flex items-center justify-between">
             <h2 class="text-lg font-semibold text-primary">RAG 提示词配置 (RouterRAG)</h2>
             <div class="flex items-center gap-2">
-              <select
-                v-model="selectedPromptTopic"
-                class="input w-48 py-1.5 text-sm"
-                @change="loadPromptsForTopic"
-              >
-                <option value="" disabled>选择专题...</option>
-                <option v-for="topic in promptTopics" :key="topic" :value="topic">{{ topic }}</option>
-              </select>
+              <AppSelect
+                class="w-48"
+                size="sm"
+                :options="promptTopicSelectOptions"
+                :value="selectedPromptTopic"
+                searchable
+                @change="selectedPromptTopic = $event; loadPromptsForTopic()"
+              />
               <button
                 @click="loadPromptsForTopic"
                 class="btn-secondary py-1.5 text-xs"
@@ -650,6 +649,8 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useRAGSimple } from '../../composables/useRAGSimple'
 import { useRAGTopics } from '../../composables/useRAGTopics'
 import { useApiBase } from '../../composables/useApiBase'
+import TabSwitch from '../../components/TabSwitch.vue'
+import AppSelect from '../../components/AppSelect.vue'
 
 const ragState = useRAGSimple()
 const { ragTopicsState, loadRAGTopics } = useRAGTopics()
@@ -675,7 +676,15 @@ const tabs = [
   { key: 'prompts', label: '提示词' }
 ]
 
+const tabsNormalized = computed(() => tabs.map(t => ({ value: t.key, label: t.label })))
+
 const promptTopics = computed(() => ragTopicsState.router)
+
+const promptTopicSelectOptions = computed(() => {
+  const placeholder = { value: '', label: '选择专题...', disabled: true }
+  const options = promptTopics.value.map(topic => ({ value: topic, label: topic }))
+  return [placeholder, ...options]
+})
 
 // Methods
 const saveConfig = async () => {

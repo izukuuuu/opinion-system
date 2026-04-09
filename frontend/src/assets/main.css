@@ -35,6 +35,15 @@
     border-color: var(--color-border-soft);
   }
 
+  .glass-inner-glow-card {
+    @apply relative overflow-hidden backdrop-blur-md;
+    background-color: var(--glass-surface-tint);
+    border: 1px solid var(--glass-border-soft);
+    box-shadow:
+      inset 0 0 36px var(--glass-inner-glow),
+      inset 0 0 96px var(--glass-inner-glow-soft);
+  }
+
   .settings-route-shell > .card-surface {
     background:
       linear-gradient(
@@ -388,15 +397,6 @@
     color: var(--color-text-primary);
   }
 
-  .analysis-toolbar__action--pill {
-    @apply border-soft bg-white text-secondary shadow-sm;
-  }
-
-  .analysis-toolbar__action--pill:hover {
-    border-color: rgb(var(--color-brand-200) / 1);
-    color: var(--color-text-primary);
-  }
-
   .analysis-chip {
     @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold;
   }
@@ -405,4 +405,17 @@
     @apply border border-soft text-secondary;
     background-color: color-mix(in srgb, var(--color-surface) 92%, transparent);
   }
+}
+
+/* Override Tailwind preflight button background */
+.analysis-toolbar__action--pill {
+  border: 1px solid var(--color-border-soft);
+  background-color: #ffffff;
+  color: var(--color-text-secondary);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.analysis-toolbar__action--pill:hover {
+  border-color: rgb(var(--color-brand-200) / 1);
+  color: var(--color-text-primary);
 }

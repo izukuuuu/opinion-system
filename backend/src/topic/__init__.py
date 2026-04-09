@@ -1,5 +1,5 @@
 """
-BERTopic + Qwen 主题分析功能模块
+主题智能聚类功能模块
 """
 from .data_bertopic_qwen import run_topic_bertopic
 

@@ -85,20 +85,11 @@
       <form class="space-y-4" @submit.prevent>
         <!-- Mode Toggle -->
         <div class="flex justify-center pb-2">
-          <div class="settings-tabbar">
-            <button type="button" class="settings-tab" :class="databaseInputMode === 'structured'
-              ? 'settings-tab-active'
-              : ''
-              " @click="databaseInputMode = 'structured'">
-              配置模式
-            </button>
-            <button type="button" class="settings-tab" :class="databaseInputMode === 'url'
-              ? 'settings-tab-active'
-              : ''
-              " @click="databaseInputMode = 'url'">
-              URL 模式
-            </button>
-          </div>
+          <TabSwitch
+            :tabs="[{ value: 'structured', label: '配置模式' }, { value: 'url', label: 'URL 模式' }]"
+            :active="databaseInputMode"
+            @change="databaseInputMode = $event"
+          />
         </div>
 
         <div class="max-h-[60vh] overflow-y-auto px-1 py-1">
@@ -117,13 +108,11 @@
 
             <label class="flex flex-col gap-2 text-sm font-medium text-secondary md:col-span-2">
               <span>数据库类型</span>
-              <select v-model="databaseForm.engine"
-                class="input"
-                @change="handleEngineChange">
-                <option value="" disabled>选择数据库类型</option>
-                <option value="mysql">MySQL</option>
-                <option value="postgresql">PostgreSQL</option>
-              </select>
+              <AppSelect
+                :options="databaseEngineOptions"
+                :value="databaseForm.engine"
+                @change="handleEngineChange"
+              />
             </label>
 
             <!-- Structured Mode Inputs -->
@@ -200,6 +189,8 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import AppModal from "../../components/AppModal.vue";
+import AppSelect from "../../components/AppSelect.vue";
+import TabSwitch from "../../components/TabSwitch.vue";
 import { useApiBase } from "../../composables/useApiBase";
 
 const { ensureApiBase } = useApiBase();
@@ -247,6 +238,12 @@ const defaultPort = computed(() => {
 
 // Auto-build URL when in structured mode
 import { watch } from "vue";
+
+const databaseEngineOptions = [
+  { value: 'mysql', label: 'MySQL' },
+  { value: 'postgresql', label: 'PostgreSQL' }
+];
+
 watch(
   [
     () => databaseInputMode.value,
@@ -282,11 +279,8 @@ watch(
   { deep: true }
 );
 
-const handleEngineChange = () => {
-  // If user switches engine, maybe reset port if it matches the old default
-  if (!databaseStructured.port) {
-    // placeholder handles it
-  }
+const handleEngineChange = (value) => {
+  databaseForm.engine = value;
 };
 
 const databaseFormState = reactive({

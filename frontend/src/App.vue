@@ -291,13 +291,6 @@ const navigationGroups = [
         to: { name: 'processing-deduplicate' },
         match: ['processing-deduplicate', 'processing-postclean'],
         icon: PencilSquareIcon
-      },
-      {
-        label: '项目数据',
-        description: '本地项目数据管理',
-        to: { name: 'project-data' },
-        match: ['project-data', 'project-data-remote-cache'],
-        icon: DocumentArrowUpIcon
       }
     ]
   },
@@ -367,6 +360,13 @@ const navigationGroups = [
   {
     label: '工具',
     links: [
+      {
+        label: '项目数据',
+        description: '本地数据管理',
+        to: { name: 'project-data' },
+        match: ['project-data', 'project-data-remote-cache'],
+        icon: DocumentArrowUpIcon
+      },
       {
         label: '数据库管理',
         description: '舆情数据库连接',

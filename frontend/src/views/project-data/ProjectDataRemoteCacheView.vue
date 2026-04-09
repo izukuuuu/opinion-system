@@ -11,14 +11,12 @@
       <div class="grid gap-4 lg:grid-cols-2">
         <label class="space-y-2 text-sm">
           <span class="font-medium text-slate-700">专题名称</span>
-          <select
-            class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700  transition focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            :disabled="topicsLoading" :value="selectedTopic" @change="handleTopicChange($event.target.value)">
-            <option value="">请选择远程专题</option>
-            <option v-for="topic in topics" :key="topic" :value="topic">
-              {{ topic }}
-            </option>
-          </select>
+          <AppSelect
+            :options="topicSelectOptions"
+            :value="selectedTopic"
+            :disabled="topicsLoading"
+            @change="handleTopicChange($event)"
+          />
           <p v-if="topicsError" class="text-xs text-rose-600">{{ topicsError }}</p>
           <p v-else-if="topicsLoading" class="text-xs text-slate-500">正在加载远程专题列表…</p>
         </label>
@@ -156,7 +154,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-
+import AppSelect from '../../components/AppSelect.vue'
 import { useApiBase } from '../../composables/useApiBase'
 
 const { backendBase, callApi } = useApiBase()
@@ -170,6 +168,11 @@ const availability = reactive({
   start: '',
   end: '',
   loading: false,
+
+const topicSelectOptions = computed(() => [
+  { value: '', label: '请选择远程专题' },
+  ...topics.value.map(t => ({ value: t, label: t }))
+])
   error: '',
 })
 let availabilityRequestId = 0

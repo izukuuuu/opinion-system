@@ -26,21 +26,12 @@
               </button>
             </div>
             <div class="relative">
-              <select
-                v-model="analyzeForm.topic"
-                class="input h-12 w-full appearance-none rounded-2xl pr-10"
+              <AppSelect
+                :options="topicSelectOptions"
+                :value="analyzeForm.topic"
                 :disabled="topicsState.loading || !topicOptions.length"
-                required
-                @change="changeTopic($event.target.value)"
-              >
-                <option value="" disabled>请选择远程专题数据源</option>
-                <option v-for="option in topicOptions" :key="`analyze-${option}`" :value="option">
-                  {{ option }}
-                </option>
-              </select>
-              <div class="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-muted">
-                <ChevronUpDownIcon class="h-4 w-4" />
-              </div>
+                @change="handleTopicChange"
+              />
             </div>
             <p v-if="analyzeForm.topic && (availableRange.start || availableRange.end)" class="text-xs text-muted">
               可用区间：{{ availableRange.start || '--' }} 至 {{ availableRange.end || '--' }}
@@ -87,7 +78,7 @@
               backgroundColor: getColor(func.id).bg,
               boxShadow: `0 0 0 2px ${getColor(func.id).border}`
             } : undefined"
-            :class="!selectedFunctions.includes(func.id) && 'border-soft bg-surface-muted hover:bg-surface'"
+            :class="!selectedFunctions.includes(func.id) && 'border-soft bg-surface hover:bg-surface-muted'"
             @click="toggleSelection(func.id)"
           >
             <span class="absolute right-3 top-3">
@@ -141,19 +132,22 @@
 
       <AnalysisSectionCard
         title="日志与执行"
-        description="执行前会先完成基础拉取校验。日志卡会合并显示预拉取与分析执行过程。"
+        description="系统会按所选维度创建后台任务，并按真实 worker 状态持续刷新执行阶段。"
       >
         <div class="space-y-5">
-          <AnalysisLogList
-            :logs="combinedLogs"
-            class="max-h-44 overflow-y-auto"
-            empty-label="准备就绪。配置完成后点击下方按钮开始分析任务。"
+          <BasicAnalysisExecutionPanel
+            :tasks="analyzeTasks"
+            :worker="analyzeWorkerState"
+            :loading="analyzeTaskState.loading"
+            :error="analyzeTaskState.error"
+            :notice="analyzeTaskState.notice"
+            empty-label="准备就绪。配置完成后点击下方按钮创建后台分析任务。"
           />
 
           <div class="flex flex-col gap-3 rounded-[1.5rem] border border-soft bg-surface-muted px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
             <p class="text-sm text-secondary">
-              <span v-if="analyzeState.running" class="font-semibold text-secondary">系统任务处理中，请稍候...</span>
-              <span v-else>确认配置后即可统一执行所选分析维度。</span>
+              <span v-if="analyzeState.running" class="font-semibold text-secondary">后台任务已启动，可留在当前页查看，也可稍后回来。</span>
+              <span v-else>确认配置后即可创建当前范围的分析任务。</span>
             </p>
             <button
               type="submit"
@@ -161,7 +155,7 @@
               :disabled="analyzeState.running || !selectedFunctions.length"
             >
               <ArrowPathIcon v-if="analyzeState.running" class="h-5 w-5 animate-spin" />
-              <span>{{ analyzeState.running ? '正在执行' : `立即开始分析 (${selectedFunctions.length})` }}</span>
+              <span>{{ analyzeState.running ? '任务执行中' : `创建分析任务 (${selectedFunctions.length})` }}</span>
             </button>
           </div>
         </div>
@@ -171,7 +165,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { onMounted } from 'vue'
 import {
   ArrowPathIcon,
   CheckIcon,
@@ -186,17 +180,19 @@ import {
 } from '@heroicons/vue/24/outline'
 import AnalysisPageHeader from '../../../components/analysis/AnalysisPageHeader.vue'
 import AnalysisSectionCard from '../../../components/analysis/AnalysisSectionCard.vue'
-import AnalysisLogList from '../../../components/analysis/AnalysisLogList.vue'
+import BasicAnalysisExecutionPanel from '../../../components/analysis/BasicAnalysisExecutionPanel.vue'
+import AppSelect from '../../../components/AppSelect.vue'
 import { useBasicAnalysis } from '../../../composables/useBasicAnalysis'
 
 const {
   topicsState,
   topicOptions,
-  fetchLogs,
   loadTopics,
   analyzeForm,
   analyzeState,
-  analyzeLogs,
+  analyzeTaskState,
+  analyzeWorkerState,
+  analyzeTasks,
   analysisFunctions,
   selectedFunctions,
   selectAll,
@@ -207,8 +203,6 @@ const {
   changeTopic,
   availableRange
 } = useBasicAnalysis()
-
-const combinedLogs = computed(() => [...(fetchLogs?.value || []), ...(analyzeLogs?.value || [])])
 
 const dimensionActions = [
   {
@@ -251,6 +245,15 @@ const colorMap = {
 
 const getIcon = (id) => iconMap[id] || SparklesIcon
 const getColor = (id) => colorMap[id] || colorMap.volume
+
+const topicSelectOptions = computed(() =>
+  topicOptions.value.map(option => ({ value: option, label: option }))
+)
+
+const handleTopicChange = (value) => {
+  analyzeForm.topic = value
+  changeTopic(value)
+}
 
 const toggleSelection = (id) => {
   if (analyzeState.running) return

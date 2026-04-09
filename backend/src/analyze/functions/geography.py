@@ -5,6 +5,9 @@ import pandas as pd
 from typing import Dict, List, Any
 from ...utils.logging.logging import setup_logger, log_success, log_error, log_module_start
 
+
+INVALID_REGION_VALUES = {"", "-", "--", "—", "未知", "nan", "none", "null"}
+
 def _detect_region_col(df: pd.DataFrame) -> str:
     """
     检测地域列名
@@ -32,9 +35,8 @@ def _count_regions(df: pd.DataFrame) -> Dict[str, int]:
     region_col = _detect_region_col(df)
     if region_col is None:
         return {}
-    series = df[region_col].fillna('未知')
-    # 去除空白
-    series = series.astype(str).str.strip()
+    series = df[region_col].dropna().astype(str).str.strip()
+    series = series[~series.str.lower().isin(INVALID_REGION_VALUES)]
     counts = series.value_counts().to_dict()
     return counts
 

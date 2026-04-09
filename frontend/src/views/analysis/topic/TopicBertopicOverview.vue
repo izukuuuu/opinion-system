@@ -1,13 +1,15 @@
 <template>
   <div class="space-y-12 pb-12">
     <!-- Hero Section -->
-    <section class="relative overflow-hidden rounded-3xl bg-surface border border-soft p-1">
+    <section class="relative overflow-hidden rounded-3xl border border-soft bg-surface p-1">
       <div
-        class="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-brand-600 via-brand-700 to-indigo-900 px-6 py-10 text-white sm:px-10 sm:py-12">
+        class="relative isolate overflow-hidden rounded-[22px] bg-gradient-to-br from-brand-600 via-brand-500 to-accent-500 px-6 py-10 text-white sm:px-10 sm:py-12">
         <!-- Abstract background elements -->
-        <div class="absolute inset-0 overflow-hidden opacity-20 pointer-events-none">
-          <div class="absolute -top-1/4 -left-1/4 h-[400px] w-[400px] rounded-full bg-white/30 blur-[100px]"></div>
-          <div class="absolute -bottom-1/4 -right-1/4 h-[300px] w-[300px] rounded-full bg-brand-400 blur-[80px]"></div>
+        <div class="absolute inset-0 opacity-30 mix-blend-overlay">
+          <div class="absolute -top-32 -left-32 h-96 w-96 rounded-full bg-white/20 blur-[100px]"></div>
+          <div
+            class="absolute bottom-0 right-0 h-[30rem] w-[30rem] translate-x-1/3 translate-y-1/3 rounded-full bg-accent-300/30 blur-[120px]">
+          </div>
         </div>
 
         <div class="relative z-10 grid gap-8 lg:grid-cols-2 lg:items-center">
@@ -18,7 +20,7 @@
                 Advanced Topic Modeling
               </div>
               <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
-                BERTopic + Qwen 分析
+                主题智能聚类
               </h1>
               <p class="max-w-xl text-base text-brand-50/80 leading-relaxed font-medium">
                 结合最先进的深度学习框架，实现语义化的主题聚类与大模型智能命名。精准捕捉舆情底层逻辑。
@@ -51,7 +53,7 @@
 
           <!-- Feature highlight -->
           <div class="hidden lg:block">
-            <div class="relative rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
+            <div class="glass-inner-glow-card rounded-2xl p-5">
               <h3 class="mb-3 text-xs font-bold text-brand-200">引擎核心能力 (Engine Core)</h3>
               <ul class="space-y-2.5 text-[13px] text-white/70">
                 <li class="flex items-start gap-3">
@@ -60,7 +62,7 @@
                 </li>
                 <li class="flex items-start gap-3">
                   <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
-                  <span>Qwen 大模型驱动的主题聚类与语义降噪</span>
+                  <span>大模型驱动的主题聚类与语义降噪</span>
                 </li>
                 <li class="flex items-start gap-3">
                   <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
@@ -95,11 +97,8 @@
                 {{ step.description }}
               </p>
             </div>
-            <button
-              type="button"
-              class="topic-prep-workflow__action opacity-100 translate-x-0"
-              @click="router.push(step.route)"
-            >
+            <button type="button" class="topic-prep-workflow__action opacity-100 translate-x-0"
+              @click="router.push(step.route)">
               前往执行分析
               <ArrowSmallRightIcon class="topic-prep-workflow__action-icon" />
             </button>
@@ -113,23 +112,35 @@
       <div class="flex items-center justify-between">
         <h2 class="text-xl font-bold text-primary tracking-tight">多智能体协同架构 (Multi-Agent Workflow)</h2>
         <div class="h-px flex-1 bg-soft mx-4 hidden sm:block"></div>
-        <span class="text-[10px] font-bold text-brand-600 uppercase tracking-widest bg-brand-50 px-2 py-1 rounded-full">LangGraph Pipeline</span>
+        <span
+          class="text-[10px] font-bold text-brand-600 uppercase tracking-widest bg-brand-50 px-2 py-1 rounded-full">LangGraph
+          Pipeline</span>
       </div>
 
       <div class="card-surface p-8 relative overflow-hidden bg-gradient-to-br from-slate-50/50 to-white">
         <!-- Background Decoration -->
-        <div class="absolute -right-20 -top-20 w-64 h-64 bg-brand-50 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
-        <div class="absolute -left-20 -bottom-20 w-64 h-64 bg-indigo-50 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
+        <div
+          class="absolute -right-20 -top-20 w-64 h-64 bg-brand-50 rounded-full blur-3xl opacity-50 pointer-events-none">
+        </div>
+        <div
+          class="absolute -left-20 -bottom-20 w-64 h-64 bg-indigo-50 rounded-full blur-3xl opacity-50 pointer-events-none">
+        </div>
 
         <div class="relative z-10 flex flex-col items-center max-w-4xl mx-auto pl-4 sm:pl-0">
-          
+
           <!-- Node 1 -->
-          <div class="w-full max-w-md bg-white rounded-2xl border border-brand-100/50 shadow-sm p-5 relative group hover:shadow-md transition-shadow">
-            <div class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-bold text-[11px] ring-4 ring-white">1</div>
+          <div
+            class="w-full max-w-md bg-white rounded-2xl border border-brand-100/50 shadow-sm p-5 relative group hover:shadow-md transition-shadow">
+            <div
+              class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-bold text-[11px] ring-4 ring-white">
+              1</div>
             <div class="ml-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-              <div class="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0"><MagnifyingGlassIcon class="w-5 h-5"/></div>
+              <div class="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0">
+                <MagnifyingGlassIcon class="w-5 h-5" />
+              </div>
               <div>
-                <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Scope Analyst <span class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">范围分析师</span></h3>
+                <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Scope Analyst <span
+                    class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">范围分析师</span></h3>
                 <p class="text-xs text-gray-500 mt-1.5 leading-relaxed shrink">基于原始主题的词袋与样本分布，动态推荐合理的聚类数量上限，避免“一刀切”。</p>
               </div>
             </div>
@@ -139,10 +150,13 @@
           <div class="w-0.5 h-8 bg-gradient-to-b from-brand-200 to-indigo-200"></div>
 
           <!-- Multi-agent Loop Container -->
-          <div class="w-full relative bg-indigo-50/30 rounded-3xl border border-indigo-100/50 p-6 pt-9 pb-8 mt-2 shadow-[inset_0_2px_10px_rgba(0,0,0,0.01)]">
-            <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-white text-indigo-600 text-[10px] font-bold px-3.5 py-1 rounded-full uppercase tracking-widest border border-indigo-100 shadow-sm flex items-center gap-1.5 whitespace-nowrap">
+          <div
+            class="w-full relative bg-indigo-50/30 rounded-3xl border border-indigo-100/50 p-6 pt-9 pb-8 mt-2 shadow-[inset_0_2px_10px_rgba(0,0,0,0.01)]">
+            <div
+              class="absolute -top-3 left-1/2 -translate-x-1/2 bg-white text-indigo-600 text-[10px] font-bold px-3.5 py-1 rounded-full uppercase tracking-widest border border-indigo-100 shadow-sm flex items-center gap-1.5 whitespace-nowrap">
               <span class="relative flex h-2 w-2">
-                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span
+                  class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
                 <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
               </span>
               Core Refinement Loop (Max 3 Iters)
@@ -150,32 +164,49 @@
 
             <div class="flex flex-col items-center gap-6">
               <!-- Node 2 -->
-              <div class="w-full max-w-md bg-white rounded-2xl border border-indigo-100/50 shadow-sm p-5 relative hover:shadow-md transition-shadow z-10">
-                <div class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-[11px] ring-4 ring-indigo-50">2</div>
+              <div
+                class="w-full max-w-md bg-white rounded-2xl border border-indigo-100/50 shadow-sm p-5 relative hover:shadow-md transition-shadow z-10">
+                <div
+                  class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-[11px] ring-4 ring-indigo-50">
+                  2</div>
                 <div class="ml-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                  <div class="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl shrink-0"><SparklesIcon class="w-5 h-5"/></div>
+                  <div class="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl shrink-0">
+                    <SparklesIcon class="w-5 h-5" />
+                  </div>
                   <div>
-                    <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Cluster Strategist <span class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">聚类策略师</span></h3>
-                    <p class="text-xs text-gray-500 mt-1.5 leading-relaxed">整合由主导视角、手工种子词、强制合并构成的业务规则，将碎片化主题进行高维语义聚类。</p>
+                    <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Cluster Strategist
+                      <span class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">聚类策略师</span>
+                    </h3>
+                    <p class="text-xs text-gray-500 mt-1.5 leading-relaxed">整合由主导视角、手工种子词、强制合并构成的业务规则，将碎片化主题进行高维语义聚类。
+                    </p>
                   </div>
                 </div>
               </div>
 
               <!-- Internal Arrow -->
               <div class="flex flex-col items-center relative gap-1">
-                <ArrowSmallDownIcon class="w-5 h-5 text-indigo-300"/>
+                <ArrowSmallDownIcon class="w-5 h-5 text-indigo-300" />
               </div>
 
               <!-- Node 3 -->
-              <div class="w-full max-w-md bg-white rounded-2xl border border-pink-100/50 shadow-sm p-4 sm:p-5 relative hover:shadow-md transition-shadow z-10">
-                <div class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-pink-100 flex items-center justify-center text-pink-700 font-bold text-[11px] ring-4 ring-indigo-50">3</div>
+              <div
+                class="w-full max-w-md bg-white rounded-2xl border border-pink-100/50 shadow-sm p-4 sm:p-5 relative hover:shadow-md transition-shadow z-10">
+                <div
+                  class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-pink-100 flex items-center justify-center text-pink-700 font-bold text-[11px] ring-4 ring-indigo-50">
+                  3</div>
                 <div class="ml-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                  <div class="p-2.5 bg-pink-50 text-pink-600 rounded-xl shrink-0"><ScaleIcon class="w-5 h-5"/></div>
+                  <div class="p-2.5 bg-pink-50 text-pink-600 rounded-xl shrink-0">
+                    <ScaleIcon class="w-5 h-5" />
+                  </div>
                   <div>
-                    <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Relevance Judge <span class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">相关性裁判</span></h3>
+                    <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Relevance Judge
+                      <span class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">相关性裁判</span>
+                    </h3>
                     <p class="text-[11px] sm:text-xs text-gray-600 mt-1.5 divide-y divide-gray-100 leading-relaxed">
                       <span class="block pb-1.5">搭载 <strong>Sentence-BERT</strong> 语义向量审查。对不相关的残余底料执行一票否决。</span>
-                      <span class="block pt-1.5 text-emerald-600 font-medium"><ShieldCheckIcon class="w-3.5 h-3.5 inline mr-1 -mt-0.5"/>触发大主题保护及最大丢弃率限制兜底</span>
+                      <span class="block pt-1.5 text-emerald-600 font-medium">
+                        <ShieldCheckIcon class="w-3.5 h-3.5 inline mr-1 -mt-0.5" />触发大主题保护及最大丢弃率限制兜底
+                      </span>
                     </p>
                   </div>
                 </div>
@@ -183,12 +214,16 @@
             </div>
 
             <!-- Loopback visual -->
-            <div class="hidden sm:flex absolute left-6 lg:left-8 top-[88px] bottom-[94px] w-12 border-l-2 border-t-2 border-b-2 border-dashed border-indigo-300 rounded-l-2xl items-center opacity-60 z-0">
-              <div class="absolute -left-[19px] bg-indigo-50 p-1 text-indigo-500 rotate-90 text-[9px] font-bold tracking-widest rounded shadow-sm border border-indigo-100">RETRY</div>
+            <div
+              class="hidden sm:flex absolute left-6 lg:left-8 top-[88px] bottom-[94px] w-12 border-l-2 border-t-2 border-b-2 border-dashed border-indigo-300 rounded-l-2xl items-center opacity-60 z-0">
+              <div
+                class="absolute -left-[19px] bg-indigo-50 p-1 text-indigo-500 rotate-90 text-[9px] font-bold tracking-widest rounded shadow-sm border border-indigo-100">
+                RETRY</div>
             </div>
             <!-- Arrow head for loopback -->
-            <div class="hidden sm:block absolute left-[54px] lg:left-[62px] top-[79px] text-indigo-400 transform -translate-x-1/2 -rotate-90">
-              <ArrowSmallRightIcon class="w-4 h-4"/>
+            <div
+              class="hidden sm:block absolute left-[54px] lg:left-[62px] top-[79px] text-indigo-400 transform -translate-x-1/2 -rotate-90">
+              <ArrowSmallRightIcon class="w-4 h-4" />
             </div>
 
           </div>
@@ -197,29 +232,47 @@
           <div class="w-0.5 h-8 bg-gradient-to-b from-indigo-200 to-purple-200"></div>
 
           <!-- Node 4 -->
-          <div class="w-full max-w-md bg-white rounded-2xl border border-purple-100/50 shadow-sm p-5 relative hover:shadow-md transition-shadow pt-6 border-t-purple-200">
-            <div class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold text-[11px] ring-4 ring-white">4</div>
+          <div
+            class="w-full max-w-md bg-white rounded-2xl border border-purple-100/50 shadow-sm p-5 relative hover:shadow-md transition-shadow pt-6 border-t-purple-200">
+            <div
+              class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold text-[11px] ring-4 ring-white">
+              4</div>
             <div class="ml-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-              <div class="p-2.5 bg-purple-50 text-purple-600 rounded-xl shrink-0"><FunnelIcon class="w-5 h-5"/></div>
+              <div class="p-2.5 bg-purple-50 text-purple-600 rounded-xl shrink-0">
+                <FunnelIcon class="w-5 h-5" />
+              </div>
               <div>
-                <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Custom Filter Judge <span class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">定制过滤器</span></h3>
+                <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Custom Filter Judge
+                  <span class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">定制过滤器</span>
+                </h3>
                 <p class="text-xs text-gray-500 mt-1.5 leading-relaxed">执行系统级及项目级的排除规则（如：排除"无关噪音"）。逐一对聚类执行语义核对裁剪。</p>
               </div>
             </div>
-            <div class="absolute right-3 -top-2.5 bg-gray-50 text-gray-400 border border-gray-100 text-[9px] px-2 py-0.5 rounded uppercase font-bold tracking-wider shadow-sm">Optional</div>
+            <div
+              class="absolute right-3 -top-2.5 bg-gray-50 text-gray-400 border border-gray-100 text-[9px] px-2 py-0.5 rounded uppercase font-bold tracking-wider shadow-sm">
+              Optional</div>
           </div>
 
           <!-- Arrow -->
           <div class="w-0.5 h-8 bg-gradient-to-b from-purple-200 to-emerald-200"></div>
 
           <!-- Node 5 -->
-          <div class="w-full max-w-md bg-white rounded-2xl border border-emerald-100/50 shadow-sm p-5 relative hover:shadow-md transition-shadow overflow-hidden">
-            <div class="absolute right-0 top-0 w-24 h-24 bg-gradient-to-br from-emerald-50/50 to-transparent rounded-bl-[100px] pointer-events-none"></div>
-            <div class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-[11px] ring-4 ring-white">5</div>
+          <div
+            class="w-full max-w-md bg-white rounded-2xl border border-emerald-100/50 shadow-sm p-5 relative hover:shadow-md transition-shadow overflow-hidden">
+            <div
+              class="absolute right-0 top-0 w-24 h-24 bg-gradient-to-br from-emerald-50/50 to-transparent rounded-bl-[100px] pointer-events-none">
+            </div>
+            <div
+              class="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-[11px] ring-4 ring-white">
+              5</div>
             <div class="ml-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 relative z-10">
-              <div class="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl shrink-0"><TagIcon class="w-5 h-5"/></div>
+              <div class="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+                <TagIcon class="w-5 h-5" />
+              </div>
               <div>
-                <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Naming & Keywords <span class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">文采润色师</span></h3>
+                <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5 break-words">Naming & Keywords
+                  <span class="text-[11px] font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">文采润色师</span>
+                </h3>
                 <p class="text-xs text-gray-500 mt-1.5 leading-relaxed">对经过层层筛选的高质量聚类进行最终语义化包装，生成高可读性的名称和精准摘要标签。</p>
               </div>
             </div>
@@ -323,7 +376,7 @@ const steps = [
     index: 1,
     title: '参数配置',
     subtitle: '配置分析引擎',
-    description: '选择数据源并指定时间区间。系统将自动调用 BERTopic 算法与 Qwen 大模型进行联合计算。',
+    description: '选择数据源并指定时间区间。系统将自动调用 BERTopic 算法与 大模型进行联合计算。',
     route: { name: 'topic-analysis-bertopic-run' }
   },
   {

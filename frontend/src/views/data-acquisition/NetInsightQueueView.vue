@@ -25,23 +25,11 @@
       <div class="mx-1 h-4 w-px bg-slate-200" />
 
       <!-- Status tabs -->
-      <nav class="flex items-center gap-0.5">
-        <button
-          v-for="tab in statusTabs"
-          :key="tab.key"
-          type="button"
-          class="rounded-lg px-3 py-1.5 text-xs font-medium transition"
-          :class="activeTab === tab.key
-            ? 'bg-slate-200 text-slate-900'
-            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'"
-          @click="activeTab = tab.key"
-        >
-          {{ tab.label }}
-          <span class="ml-1 font-mono text-[11px]" :class="activeTab === tab.key ? 'text-slate-600' : 'text-slate-400'">
-            {{ tab.count }}
-          </span>
-        </button>
-      </nav>
+      <TabSwitch
+        :tabs="statusTabsNormalized"
+        :active="activeTab"
+        @change="activeTab = $event"
+      />
 
       <!-- Right side -->
       <div class="ml-auto flex items-center gap-3">
@@ -426,15 +414,11 @@
           </label>
           <label class="space-y-2 text-sm">
             <span class="font-medium text-slate-700">关联项目</span>
-            <select
-              v-model="taskForm.project"
-              class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            >
-              <option value="">不关联项目</option>
-              <option v-for="project in projects" :key="project.name" :value="project.name">
-                {{ project.name }}
-              </option>
-            </select>
+            <AppSelect
+              :options="projectSelectOptions"
+              :value="taskForm.project"
+              @change="taskForm.project = $event"
+            />
           </label>
         </div>
 
@@ -535,25 +519,19 @@
               </label>
               <label class="space-y-2 text-sm">
                 <span class="font-medium text-slate-700">排序</span>
-                <select
-                  v-model="taskForm.sort"
-                  class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                >
-                  <option value="comments_desc">按评论热度</option>
-                  <option value="relevance">按相关度</option>
-                  <option value="hot">按热度</option>
-                </select>
+                <AppSelect
+                  :options="sortOptions"
+                  :value="taskForm.sort"
+                  @change="taskForm.sort = $event"
+                />
               </label>
               <label class="space-y-2 text-sm">
                 <span class="font-medium text-slate-700">内容类型</span>
-                <select
-                  v-model="taskForm.infoType"
-                  class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                >
-                  <option value="2">内容</option>
-                  <option value="1">全部</option>
-                  <option value="3">评论</option>
-                </select>
+                <AppSelect
+                  :options="infoTypeOptions"
+                  :value="taskForm.infoType"
+                  @change="taskForm.infoType = $event"
+                />
               </label>
             </div>
             <label class="inline-flex items-center gap-2 text-sm text-slate-600">
@@ -569,6 +547,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import TabSwitch from '../../components/TabSwitch.vue'
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
@@ -579,10 +558,29 @@ import {
 } from '@heroicons/vue/24/outline'
 
 import AppModal from '../../components/AppModal.vue'
+import AppSelect from '../../components/AppSelect.vue'
 import { useActiveProject } from '../../composables/useActiveProject'
 import { useApiBase } from '../../composables/useApiBase'
 
 const platformOptions = ['微博', '微信', '新闻网站', '新闻APP', '论坛', '视频', '自媒体号', '全部']
+
+// Select options
+const sortOptions = [
+  { value: 'comments_desc', label: '按评论热度' },
+  { value: 'relevance', label: '按相关度' },
+  { value: 'hot', label: '按热度' }
+]
+
+const infoTypeOptions = [
+  { value: '2', label: '内容' },
+  { value: '1', label: '全部' },
+  { value: '3', label: '评论' }
+]
+
+const projectSelectOptions = computed(() => [
+  { value: '', label: '不关联项目' },
+  ...projects.value.map(p => ({ value: p.name, label: p.name }))
+])
 
 const router = useRouter()
 const { backendBase, callApi } = useApiBase()
@@ -660,6 +658,10 @@ const statusTabs = computed(() => {
     { key: 'failed', label: '失败/取消', count: base.filter((t) => t.status === 'failed' || t.status === 'cancelled').length },
   ]
 })
+
+const statusTabsNormalized = computed(() =>
+  statusTabs.value.map(t => ({ value: t.key, label: t.label, badge: t.count }))
+)
 
 const tabFilteredTasks = computed(() => {
   const base = projectFiltered.value

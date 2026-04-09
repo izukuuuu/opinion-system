@@ -1,11 +1,35 @@
 ---
 name: Frontend Design Standards
-description: Enforces strict design rules including color usage, hover effects restrictions, and theme prioritization.
+description: Enforces strict frontend visual rules for Opinion System. Prioritize this skill for any visual changes under frontend/src/**, especially when requests mention hover, shadows, buttons, tabs, cards, or colors.
 ---
 
 # Frontend Design Standards
 
 This skill defines the strict design standards for the frontend of the Opinion System. All frontend changes must adhere to these rules.
+
+## Trigger Guidance
+
+Prefer reading this skill first for any visual or interaction polish work under `frontend/src/**`.
+
+### Strong Match Keywords
+
+- hover
+- 阴影
+- shadow
+- 按钮
+- button
+- tab
+- 卡片
+- card
+- 颜色
+- color
+
+### Preferred Scenarios
+
+- Any UI styling or layout change in `frontend/src/**`
+- Requests to adjust button, tab, card, modal, or input appearance
+- Requests to remove or soften hover effects, shadows, borders, or animations
+- Requests to align frontend visuals with the Opinion System design language
 
 ## 0. Design Philosophy: Material You (M3) with Strict Constraints
 

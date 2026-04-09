@@ -7,11 +7,11 @@
       </div>
       <div class="flex items-center gap-2">
         <!-- 关键词展示方式切换 -->
-        <div v-if="isKeywords" class="keywords-mode-switch">
+        <div v-if="isKeywords" class="tab-switch">
           <button
             type="button"
-            class="keywords-mode-btn"
-            :class="{ 'keywords-mode-btn--active': keywordsChartMode === 'bar' }"
+            class="tab-switch-btn"
+            :class="{ 'tab-switch-btn--active': keywordsChartMode === 'bar' }"
             @click="setKeywordsMode('bar')"
           >
             <Bars3Icon class="h-4 w-4" />
@@ -19,8 +19,8 @@
           </button>
           <button
             type="button"
-            class="keywords-mode-btn"
-            :class="{ 'keywords-mode-btn--active': keywordsChartMode === 'wordcloud' }"
+            class="tab-switch-btn"
+            :class="{ 'tab-switch-btn--active': keywordsChartMode === 'wordcloud' }"
             @click="setKeywordsMode('wordcloud')"
           >
             <CloudIcon class="h-4 w-4" />
@@ -434,39 +434,6 @@ onBeforeUnmount(() => {
   border-color: var(--color-brand-soft);
   color: var(--color-brand-600);
   background: var(--color-accent-faint);
-}
-
-.keywords-mode-switch {
-  display: inline-flex;
-  gap: 0.25rem;
-  border-radius: 0.625rem;
-  background: var(--color-surface-muted);
-  padding: 0.25rem;
-}
-
-.keywords-mode-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.75rem;
-  border-radius: 0.5rem;
-  border: none;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  background: transparent;
-  transition: all 0.15s ease;
-  cursor: pointer;
-}
-
-.keywords-mode-btn:hover {
-  color: var(--color-text-primary);
-}
-
-.keywords-mode-btn--active {
-  background: var(--color-surface);
-  color: var(--color-brand-600);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .keywords-wordcount-control {

@@ -26,19 +26,14 @@
         <label class="space-y-2 block">
           <span class="text-xs font-bold text-primary ml-1">选择项目</span>
           <div class="flex gap-2">
-            <div class="relative flex-1">
-              <select v-if="projectOptions.length" v-model="selectedProjectName"
-                class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60"
-                :disabled="projectsLoading">
-                <option disabled value="">请选择项目</option>
-                <option v-for="option in projectOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
-                <ChevronDownIcon class="w-4 h-4" />
-              </div>
-            </div>
+            <AppSelect
+              class="flex-1"
+              :options="projectSelectOptions"
+              :value="selectedProjectName"
+              :disabled="projectsLoading"
+              searchable
+              @change="selectedProjectName = $event"
+            />
             <button type="button"
               class="shrink-0 rounded-2xl bg-brand-50/30 px-4 text-secondary hover:text-brand-600 hover:bg-brand-50 transition-colors"
               :disabled="projectsLoading" @click.prevent="refreshProjects" title="刷新项目">
@@ -53,13 +48,12 @@
           <span class="text-xs font-bold text-primary ml-1">处理日期</span>
           <div class="relative">
             <template v-if="availableDates.length">
-              <select v-model="processingDate"
-                class="w-full appearance-none rounded-2xl border-0 bg-base-soft py-4 pl-4 pr-10 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20">
-                <option v-for="date in availableDates" :key="date" :value="date">{{ date }}</option>
-              </select>
-              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-secondary/50">
-                <ChevronDownIcon class="w-4 h-4" />
-              </div>
+              <AppSelect
+                :options="availableDateSelectOptions"
+                :value="processingDate"
+                searchable
+                @change="processingDate = $event"
+              />
             </template>
             <template v-else>
               <div class="flex items-center gap-2">
@@ -155,10 +149,12 @@
                     <span>获取缓存时间</span>
                   </button>
                   <template v-if="fetchDates.length > 0">
-                    <select v-model="selectedFetchDate"
-                      class="rounded-xl border border-amber-200 bg-white px-4 py-2 text-xs text-primary focus:border-amber-400 focus:outline-none">
-                      <option v-for="date in fetchDates" :key="date" :value="date">{{ date }}</option>
-                    </select>
+                    <AppSelect
+                      :options="fetchDateSelectOptions"
+                      :value="selectedFetchDate"
+                      searchable
+                      @change="selectedFetchDate = $event"
+                    />
                     <button type="button"
                       class="inline-flex items-center gap-2 rounded-full bg-amber-600 px-5 py-2 text-xs font-bold text-white transition-all hover:bg-amber-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
                       :disabled="uploadState.running || !selectedFetchDate" @click="runUpload({ rebuildFromFetch: true, fetchDate: selectedFetchDate })">
@@ -258,6 +254,7 @@ import {
   XMarkIcon,
   CircleStackIcon
 } from '@heroicons/vue/24/outline'
+import AppSelect from '../../components/AppSelect.vue'
 import { useApiBase } from '../../composables/useApiBase'
 import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
 
@@ -340,6 +337,21 @@ const availableDates = computed(() => {
     .filter(Boolean)
     .sort()
 })
+
+// AppSelect options
+const projectSelectOptions = computed(() => {
+  const placeholder = { value: '', label: '请选择项目', disabled: true }
+  if (!projectOptions.value.length) return [placeholder]
+  return [placeholder, ...projectOptions.value]
+})
+
+const availableDateSelectOptions = computed(() =>
+  availableDates.value.map(date => ({ value: date, label: date }))
+)
+
+const fetchDateSelectOptions = computed(() =>
+  fetchDates.value.map(date => ({ value: date, label: date }))
+)
 
 const bucketName = computed(() => activeProjectBucket.value || '')
 

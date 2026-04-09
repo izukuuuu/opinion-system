@@ -29,9 +29,10 @@ def _analyze_publishers(df: pd.DataFrame, channel_name: str, logger=None) -> Dic
             log_error(logger, "数据缺少 author 列", "Analyze")
             return {"data": []}
 
-        # 计算发布机构统计（过滤 "未知"）
+        # 计算发布机构统计，过滤缺失占位值，避免把未获取到的 author 当成真实发布者主体
         _clean = df['author'].dropna().astype(str).map(lambda x: x.strip())
-        _clean = _clean[_clean != "未知"]
+        invalid_publishers = {"", "-", "--", "—", "未知", "nan", "none", "null"}
+        _clean = _clean[~_clean.str.lower().isin(invalid_publishers)]
         publisher_counts = _clean.value_counts().to_dict()
         top_publishers = list(publisher_counts.items())[:20]
         
@@ -72,4 +73,3 @@ def analyze_publishers_by_channel(df: pd.DataFrame, channel_name: str, logger=No
         Dict[str, Any]: 发布机构分析结果
     """
     return _analyze_publishers(df, channel_name, logger)
-

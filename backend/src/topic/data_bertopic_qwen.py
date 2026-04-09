@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-BERTopic + Qwen 主题分析数据处理模块
+主题智能聚类数据处理模块
 输入: data/fetch/{topic}/{date_range}/各渠道.csv（包含 contents 列，自动合并所有渠道）
 依赖: configs/stopwords.txt, configs/userdict.txt(可选)
 输出: data/topic/{topic}/{date_range}/{1..5}.json

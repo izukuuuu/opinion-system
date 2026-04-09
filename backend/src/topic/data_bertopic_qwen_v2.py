@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-BERTopic + Qwen 主题分析数据处理模块 (V2)
+主题智能聚类数据处理模块 (V2)
 集成数据拉取流程，从远程数据库获取数据
 """
 import re

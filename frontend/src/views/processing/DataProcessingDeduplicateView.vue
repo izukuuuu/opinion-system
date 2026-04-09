@@ -25,21 +25,25 @@
           <div class="grid gap-4">
             <label class="space-y-2">
               <span class="text-xs font-semibold text-muted">项目</span>
-              <select v-model="selectedProjectName" class="input" :disabled="projectsLoading || !projectOptions.length">
-                <option value="" disabled>请选择项目</option>
-                <option v-for="option in projectOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
+              <AppSelect
+                :options="projectSelectOptions"
+                :value="selectedProjectName"
+                :disabled="projectsLoading"
+                searchable
+                @change="selectedProjectName = $event"
+              />
               <p v-if="projectsError" class="text-xs text-danger">{{ projectsError }}</p>
             </label>
 
             <label class="space-y-2">
               <span class="text-xs font-semibold text-muted">数据库</span>
-              <select v-model="selectedDatabase" class="input" :disabled="databasesLoading || !databaseOptions.length">
-                <option value="" disabled>{{ databaseOptions.length ? '请选择数据库' : '暂无数据库' }}</option>
-                <option v-for="option in databaseOptions" :key="option.name" :value="option.name">
-                  {{ option.name }} · {{ option.tableCount }} 张表
-                </option>
-              </select>
+              <AppSelect
+                :options="databaseSelectOptions"
+                :value="selectedDatabase"
+                :disabled="databasesLoading"
+                searchable
+                @change="selectedDatabase = $event"
+              />
               <p v-if="databasesError" class="text-xs text-danger">{{ databasesError }}</p>
             </label>
           </div>
@@ -231,6 +235,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline'
+import AppSelect from '../../components/AppSelect.vue'
 import { useProcessingScope } from '../../composables/useProcessingScope'
 
 const POLL_INTERVAL = 3000
@@ -258,6 +263,22 @@ const {
   tableOptions,
   loadDatabases
 } = useProcessingScope()
+
+// AppSelect options
+const projectSelectOptions = computed(() => {
+  const placeholder = { value: '', label: '请选择项目', disabled: true }
+  if (!projectOptions.value.length) return [placeholder]
+  return [placeholder, ...projectOptions.value]
+})
+
+const databaseSelectOptions = computed(() => {
+  const placeholder = { value: '', label: databaseOptions.value.length ? '请选择数据库' : '暂无数据库', disabled: true }
+  const options = databaseOptions.value.map(db => ({
+    value: db.name,
+    label: `${db.name} · ${db.tableCount} 张表`
+  }))
+  return [placeholder, ...options]
+})
 
 const selectedTables = ref([])
 const dedupeFields = ref(['id', 'contents', 'url'])

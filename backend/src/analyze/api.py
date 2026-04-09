@@ -284,6 +284,59 @@ def get_analyze_results():
     return success(response_payload)
 
 
+@analyze_bp.route('/results/function', methods=['DELETE'])
+def delete_analyze_result_function():
+    payload = request.get_json(silent=True) or {}
+    start = str(payload.get("start") or "").strip()
+    end = str(payload.get("end") or "").strip() or None
+    function_name = str(payload.get("function") or "").strip()
+
+    if not start or not function_name:
+        return error("Missing required field(s): start, function", status_code=400)
+
+    try:
+        topic_identifier, display_name, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return error(str(exc), status_code=400)
+
+    ctx = resolve_context(payload, PROJECT_MANAGER)
+    analyze_root = _resolve_analyze_root_via_locator(ctx, start, end)
+    if not analyze_root:
+        return error("未找到对应的分析结果目录", status_code=404)
+
+    from src.analyze import delete_analyze_function_from_folder  # type: ignore
+
+    try:
+        result = delete_analyze_function_from_folder(
+            topic_identifier,
+            analyze_root.name,
+            function_name,
+        )
+    except FileNotFoundError as exc:
+        return error(str(exc), status_code=404)
+    except ValueError as exc:
+        return error(str(exc), status_code=400)
+    except Exception as exc:
+        LOGGER.exception("Error deleting analyze function result")
+        return error(str(exc), status_code=500)
+
+    resolved_start, resolved_end = split_folder_range(analyze_root.name)
+    return success(
+        {
+            "data": {
+                "topic": display_name or topic_identifier,
+                "topic_identifier": topic_identifier,
+                "folder": analyze_root.name,
+                "range": {
+                    "start": resolved_start,
+                    "end": resolved_end,
+                },
+                **result,
+            }
+        }
+    )
+
+
 @analyze_bp.route('/run-async', methods=['POST'])
 def run_analyze_async():
     """异步执行基础分析（后台worker模式）。"""
@@ -402,6 +455,89 @@ def get_analyze_status():
         return success({"data": data})
     except Exception as e:
         LOGGER.exception("Error getting analyze indicator status")
+        return error(str(e), status_code=500)
+
+
+@analyze_bp.route('/tasks', methods=['GET'])
+def list_analyze_tasks():
+    """按专题与时间范围列出基础分析任务。"""
+    from server_support.basic_analysis import list_tasks as do_list_tasks  # type: ignore
+
+    raw_topic = request.args.get("topic")
+    raw_project = request.args.get("project")
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip() or None
+    only_function = (request.args.get("function") or "").strip() or None
+    latest_only = str(request.args.get("latest") or "true").strip().lower() != "false"
+    limit = max(1, min(200, int(request.args.get("limit") or 50)))
+
+    payload = {
+        "topic": raw_topic,
+        "project": raw_project,
+    }
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError:
+        topic_identifier = (raw_topic or "").strip()
+        if not topic_identifier:
+            return error("Missing required query parameters: topic or project")
+
+    if not start:
+        return error("Missing required query parameter: start", status_code=400)
+
+    try:
+        listing = do_list_tasks(limit=limit)
+        tasks = listing.get("tasks") if isinstance(listing, dict) else []
+        worker = listing.get("worker") if isinstance(listing, dict) else {}
+        if not isinstance(tasks, list):
+            tasks = []
+
+        filtered: List[Dict[str, Any]] = []
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            if str(task.get("topic_identifier") or "").strip() != topic_identifier:
+                continue
+            if str(task.get("start_date") or "").strip() != start:
+                continue
+            task_end = str(task.get("end_date") or "").strip() or None
+            if (task_end or None) != end:
+                continue
+            task_function = str(task.get("only_function") or "").strip() or None
+            if only_function and task_function != only_function:
+                continue
+            filtered.append(task)
+
+        if latest_only:
+            latest_by_function: Dict[str, Dict[str, Any]] = {}
+            for task in filtered:
+                key = str(task.get("only_function") or "").strip() or "__all__"
+                previous = latest_by_function.get(key)
+                if previous is None or str(task.get("created_at") or "") > str(previous.get("created_at") or ""):
+                    latest_by_function[key] = task
+            filtered = list(latest_by_function.values())
+
+        filtered.sort(
+            key=lambda item: (
+                str(item.get("only_function") or "").strip(),
+                str(item.get("created_at") or ""),
+            )
+        )
+
+        return success(
+            {
+                "data": {
+                    "topic_identifier": topic_identifier,
+                    "start": start,
+                    "end": end or start,
+                    "tasks": filtered,
+                    "worker": worker,
+                }
+            }
+        )
+    except Exception as e:
+        LOGGER.exception("Error listing analyze indicator tasks")
         return error(str(e), status_code=500)
 
 

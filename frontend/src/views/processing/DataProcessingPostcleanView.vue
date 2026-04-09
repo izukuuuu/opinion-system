@@ -25,21 +25,25 @@
           <div class="grid gap-4 md:grid-cols-2">
             <label class="space-y-2 md:col-span-2">
               <span class="text-xs font-semibold text-muted">项目</span>
-              <select v-model="selectedProjectName" class="input" :disabled="projectsLoading || !projectOptions.length">
-                <option value="" disabled>请选择项目</option>
-                <option v-for="option in projectOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
+              <AppSelect
+                :options="projectSelectOptions"
+                :value="selectedProjectName"
+                :disabled="projectsLoading"
+                searchable
+                @change="selectedProjectName = $event"
+              />
               <p v-if="projectsError" class="text-xs text-danger">{{ projectsError }}</p>
             </label>
 
             <label class="space-y-2 md:col-span-2">
               <span class="text-xs font-semibold text-muted">数据库</span>
-              <select v-model="selectedDatabase" class="input" :disabled="databasesLoading || !databaseOptions.length">
-                <option value="" disabled>{{ databaseOptions.length ? '请选择数据库' : '暂无数据库' }}</option>
-                <option v-for="option in databaseOptions" :key="option.name" :value="option.name">
-                  {{ option.name }} · {{ option.tableCount }} 张表
-                </option>
-              </select>
+              <AppSelect
+                :options="databaseSelectOptions"
+                :value="selectedDatabase"
+                :disabled="databasesLoading"
+                searchable
+                @change="selectedDatabase = $event"
+              />
               <p v-if="databasesError" class="text-xs text-danger">{{ databasesError }}</p>
             </label>
           </div>
@@ -476,33 +480,19 @@
       <div class="space-y-4">
         <div class="rounded-3xl border border-soft bg-surface-muted/35 p-4">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="inline-flex rounded-2xl border border-soft bg-white p-1 gap-0.5">
-              <button
-                v-for="option in stopwordStageOptions"
-                :key="option.value"
-                type="button"
-                class="rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-150"
-                :class="stopwordSuggestionStage === option.value ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'text-secondary hover:text-primary hover:bg-surface-muted/70'"
-                @click="stopwordSuggestionStage = option.value; seedStopwordSuggestionDate(); loadStopwordSuggestionStatus({ syncTopK: true })"
-              >
-                {{ option.label }}
-              </button>
-            </div>
+            <TabSwitch
+              :tabs="stopwordStageOptions"
+              :active="stopwordSuggestionStage"
+              @change="handleStopwordStageChange"
+            />
 
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-xs font-medium text-secondary">获取数量</span>
-              <div class="inline-flex rounded-2xl border border-soft bg-white p-1 gap-0.5">
-                <button
-                  v-for="option in stopwordSuggestionTopKOptions"
-                  :key="option.value"
-                  type="button"
-                  class="rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-150"
-                  :class="stopwordSuggestionTopKMode === option.value ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'text-secondary hover:text-primary hover:bg-surface-muted/70'"
-                  @click="stopwordSuggestionTopKMode = option.value"
-                >
-                  {{ option.label }}
-                </button>
-              </div>
+              <TabSwitch
+                :tabs="stopwordSuggestionTopKOptions"
+                :active="stopwordSuggestionTopKMode"
+                @change="stopwordSuggestionTopKMode = $event"
+              />
               <input
                 v-if="stopwordSuggestionUsesCustomTopK"
                 v-model.trim="stopwordSuggestionCustomTopK"
@@ -516,17 +506,13 @@
           </div>
 
           <div class="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr),auto,auto] lg:items-center">
-            <select
-              v-model="currentStopwordSuggestionDate"
-              class="input w-full min-w-0"
-              :disabled="stopwordSuggestionArchivesState.loading || !stopwordSuggestionArchiveOptions.length"
-              @change="loadStopwordSuggestionStatus({ syncTopK: true })"
-            >
-              <option value="" disabled>{{ stopwordSuggestionArchiveOptions.length ? '选择存档范围' : '暂无可用存档' }}</option>
-              <option v-for="option in stopwordSuggestionArchiveOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
+            <AppSelect
+              :options="stopwordSuggestionArchiveSelectOptions"
+              :value="currentStopwordSuggestionDate"
+              :disabled="stopwordSuggestionArchivesState.loading"
+              searchable
+              @change="currentStopwordSuggestionDate = $event; loadStopwordSuggestionStatus({ syncTopK: true })"
+            />
             <button type="button" class="btn-secondary inline-flex items-center justify-center gap-2 whitespace-nowrap" :disabled="stopwordSuggestionArchivesState.loading" @click="loadStopwordSuggestionArchives">
               <ArrowPathIcon class="h-4 w-4" :class="stopwordSuggestionArchivesState.loading ? 'animate-spin' : ''" />
               刷新存档
@@ -681,6 +667,8 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowPathIcon, CheckIcon, SparklesIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import AppModal from '../../components/AppModal.vue'
+import TabSwitch from '../../components/TabSwitch.vue'
+import AppSelect from '../../components/AppSelect.vue'
 import { useProcessingScope } from '../../composables/useProcessingScope'
 
 const POLL_INTERVAL = 3000
@@ -693,6 +681,27 @@ const STOPWORD_SUGGESTION_TOP_K_OPTIONS = [
   { value: '500', label: '500' },
   { value: 'custom', label: '自定义' }
 ]
+
+// AppSelect options
+const projectSelectOptions = computed(() => {
+  const placeholder = { value: '', label: '请选择项目', disabled: true }
+  if (!projectOptions.value.length) return [placeholder]
+  return [placeholder, ...projectOptions.value]
+})
+
+const databaseSelectOptions = computed(() => {
+  const placeholder = { value: '', label: databaseOptions.value.length ? '请选择数据库' : '暂无数据库', disabled: true }
+  const options = databaseOptions.value.map(db => ({
+    value: db.name,
+    label: `${db.name} · ${db.tableCount} 张表`
+  }))
+  return [placeholder, ...options]
+})
+
+const stopwordSuggestionArchiveSelectOptions = computed(() => {
+  const placeholder = { value: '', label: stopwordSuggestionArchiveOptions.value.length ? '选择存档范围' : '暂无可用存档', disabled: true }
+  return [placeholder, ...stopwordSuggestionArchiveOptions.value]
+})
 
 const {
   callApi,
@@ -890,6 +899,11 @@ const stopwordStageOptions = [
   { value: 'pre', label: '预处理词频' },
   { value: 'post', label: '后处理词频' }
 ]
+function handleStopwordStageChange(value) {
+  stopwordSuggestionStage.value = value
+  seedStopwordSuggestionDate()
+  loadStopwordSuggestionStatus({ syncTopK: true })
+}
 const stopwordSuggestionTopKOptions = STOPWORD_SUGGESTION_TOP_K_OPTIONS
 const currentStopwordSuggestionDate = computed({
   get: () => stopwordSuggestionDateByStage[stopwordSuggestionStage.value] || '',

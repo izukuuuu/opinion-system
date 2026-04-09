@@ -16,28 +16,25 @@
         <!-- 专题选择 -->
         <label class="flex flex-col gap-2">
           <span class="text-sm font-medium text-primary">专题 Topic</span>
-          <select v-model="viewSelection.topic" class="input"
-            :disabled="topicsState.loading || topicOptions.length === 0">
-            <option value="" disabled>请选择专题</option>
-            <option v-for="option in topicOptions" :key="option.bucket" :value="option.bucket">
-              {{ option.display_name || option.name }}
-            </option>
-          </select>
+          <AppSelect
+            :options="topicSelectOptions"
+            :value="viewSelection.topic"
+            :disabled="topicsState.loading || topicOptions.length === 0"
+            @change="viewSelection.topic = $event"
+          />
         </label>
 
         <!-- 存档日期范围选择 -->
         <div v-if="viewSelection.topic" class="space-y-2">
           <label class="flex flex-col gap-2">
             <span class="text-sm font-medium text-primary">存档日期范围</span>
-            <select v-model="selectedHistoryId" class="input"
+            <AppSelect
+              :options="historySelectOptions"
+              :value="selectedHistoryId"
               :disabled="historyState.loading || analysisHistory.length === 0"
-              @change="applyHistorySelection(selectedHistoryId)">
-              <option value="">{{ historyState.loading ? '加载中…' : analysisHistory.length === 0 ? '暂无存档' : '请选择存档日期范围' }}
-              </option>
-              <option v-for="record in analysisHistory" :key="record.id" :value="record.id">
-                {{ record.start }} ~ {{ record.end }}
-              </option>
-            </select>
+              :placeholder="historyState.loading ? '加载中…' : analysisHistory.length === 0 ? '暂无存档' : '请选择存档日期范围'"
+              @change="handleHistoryChange"
+            />
           </label>
 
           <!-- 无存档提示 -->
@@ -94,12 +91,11 @@
             <ArrowsUpDownIcon class="h-4 w-4" />
             排序方式
           </span>
-          <select v-model="controls.sort">
-            <option value="docCount-desc">文档数 ↓</option>
-            <option value="docCount-asc">文档数 ↑</option>
-            <option value="name-asc">主题名称 A-Z</option>
-            <option value="name-desc">主题名称 Z-A</option>
-          </select>
+          <AppSelect
+            :options="sortSelectOptions"
+            :value="controls.sort"
+            @change="controls.sort = $event"
+          />
         </label>
         <label class="topic-dashboard__range">
           <span class="inline-flex items-center gap-1.5">
@@ -278,6 +274,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import AnalysisChartPanel from '@/components/AnalysisChartPanel.vue'
 import PlotlyChartPanel from '@/components/PlotlyChartPanel.vue'
+import AppSelect from '@/components/AppSelect.vue'
 import { useTopicBertopicView } from '@/composables/useTopicBertopicView'
 import { useActiveProject } from '@/composables/useActiveProject'
 import { echarts } from '@/utils/echarts'
@@ -445,6 +442,32 @@ const filteredTopics = computed(() => {
 })
 
 const maxTopN = computed(() => Math.max(1, filteredTopics.value.length || 1))
+
+const topicSelectOptions = computed(() =>
+  topicOptions.map(option => ({
+    value: option.bucket,
+    label: option.display_name || option.name
+  }))
+)
+
+const historySelectOptions = computed(() =>
+  analysisHistory.map(record => ({
+    value: record.id,
+    label: `${record.start} ~ ${record.end}`
+  }))
+)
+
+const sortSelectOptions = [
+  { value: 'docCount-desc', label: '文档数 ↓' },
+  { value: 'docCount-asc', label: '文档数 ↑' },
+  { value: 'name-asc', label: '主题名称 A-Z' },
+  { value: 'name-desc', label: '主题名称 Z-A' }
+]
+
+const handleHistoryChange = (value) => {
+  selectedHistoryId.value = value
+  applyHistorySelection(value)
+}
 
 watch(
   () => maxTopN.value,

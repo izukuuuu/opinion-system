@@ -9,6 +9,10 @@ import {
 import { analysisFunctions, buildAnalysisSections } from '../utils/analysisSections'
 
 const MAX_HISTORY = 12
+const ANALYZE_TASK_POLL_INTERVAL = 2000
+const ANALYZE_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
+const ANALYZE_ACTIVE_STATUSES = new Set(['queued', 'running'])
+const ANALYZE_FUNCTION_ORDER = new Map(analysisFunctions.map((item, index) => [item.id, index]))
 
 const { callApi } = useApiBase()
 
@@ -43,10 +47,26 @@ let availabilityRequestId = 0
 const fetchState = reactive({ loading: false })
 const analyzeState = reactive({ running: false })
 const loadState = reactive({ loading: false })
+const analyzeTaskState = reactive({
+  loading: false,
+  error: '',
+  notice: ''
+})
+const analyzeWorkerState = reactive({
+  pid: 0,
+  status: 'stopped',
+  running: false,
+  active_count: 0,
+  current_task_id: '',
+  last_heartbeat: '',
+  started_at: '',
+  updated_at: ''
+})
 
 const fetchLogs = ref([])
 const analyzeLogs = ref([])
 const viewLogs = ref([])
+const analyzeTasks = ref([])
 
 const selectedFunctions = ref(analysisFunctions.map((f) => f.id))
 
@@ -88,6 +108,8 @@ const analysisAiSummary = computed(() => analysisData.value?.ai_summary || null)
 const analysisSections = computed(() => buildAnalysisSections(analysisData.value?.functions))
 
 let initialized = false
+let analyzeTaskPollTimer = null
+let analyzeSubmissionCount = 0
 
 export const useBasicAnalysis = () => {
   if (!initialized) {
@@ -104,10 +126,13 @@ export const useBasicAnalysis = () => {
     availableRange,
     fetchState,
     analyzeState,
+    analyzeTaskState,
+    analyzeWorkerState,
     loadState,
     fetchLogs,
     analyzeLogs,
     viewLogs,
+    analyzeTasks,
     selectedFunctions,
     analysisData,
     lastLoaded,
@@ -125,7 +150,9 @@ export const useBasicAnalysis = () => {
   runFetch,
   runSelectedFunctions,
   runSingleFunction,
+  deleteAnalysisSection,
   rebuildAiSummary,
+    loadAnalyzeTasks,
     selectAll,
     clearSelection,
     loadHistory,
@@ -210,6 +237,32 @@ function initializeStore() {
       }
     },
     { immediate: true }
+  )
+
+  watch(
+    () => [analyzeForm.topic, analyzeForm.start, analyzeForm.end],
+    ([topic, start, end]) => {
+      const normalizedTopic = String(topic || '').trim()
+      const normalizedStart = String(start || '').trim()
+      const normalizedEnd = String(end || '').trim() || normalizedStart
+      if (!normalizedTopic || !normalizedStart || !normalizedEnd) {
+        analyzeTasks.value = []
+        resetAnalyzeWorkerState()
+        syncAnalyzeRunningState()
+        stopAnalyzeTaskPolling()
+        return
+      }
+      loadAnalyzeTasks({ topic: normalizedTopic, start: normalizedStart, end: normalizedEnd }, { silent: true })
+    },
+    { immediate: true }
+  )
+
+  watch(
+    analyzeTasks,
+    () => {
+      syncAnalyzeRunningState()
+    },
+    { deep: true }
   )
 }
 
@@ -376,6 +429,149 @@ const resetFetchForm = () => {
 }
 
 const currentTimeString = () => new Date().toLocaleTimeString()
+
+const resolveAnalyzeTaskPayload = (response) => response?.data?.task || response?.task || null
+
+const isAnalyzeTaskActive = (status) => !ANALYZE_TERMINAL_STATUSES.has(String(status || '').trim().toLowerCase())
+
+const resetAnalyzeWorkerState = () => {
+  analyzeWorkerState.pid = 0
+  analyzeWorkerState.status = 'stopped'
+  analyzeWorkerState.running = false
+  analyzeWorkerState.active_count = 0
+  analyzeWorkerState.current_task_id = ''
+  analyzeWorkerState.last_heartbeat = ''
+  analyzeWorkerState.started_at = ''
+  analyzeWorkerState.updated_at = ''
+}
+
+const applyAnalyzeWorkerState = (worker) => {
+  const payload = worker && typeof worker === 'object' ? worker : {}
+  analyzeWorkerState.pid = Number(payload.pid || 0)
+  analyzeWorkerState.status = String(payload.status || '').trim() || 'stopped'
+  analyzeWorkerState.running = Boolean(payload.running)
+  analyzeWorkerState.active_count = Number(payload.active_count || 0)
+  analyzeWorkerState.current_task_id = String(payload.current_task_id || '').trim()
+  analyzeWorkerState.last_heartbeat = String(payload.last_heartbeat || '').trim()
+  analyzeWorkerState.started_at = String(payload.started_at || '').trim()
+  analyzeWorkerState.updated_at = String(payload.updated_at || '').trim()
+}
+
+const formatDateTime = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString()
+}
+
+const normalizeAnalyzeTask = (task) => {
+  const payload = task && typeof task === 'object' ? task : {}
+  const progress = payload.progress && typeof payload.progress === 'object' ? payload.progress : {}
+  const functionId = String(payload.only_function || progress.current_function || '').trim()
+  const meta = analysisFunctions.find((item) => item.id === functionId)
+  const status = String(payload.status || '').trim().toLowerCase() || 'queued'
+  const percentage = Math.max(0, Math.min(100, Number(payload.percentage || 0)))
+  return {
+    id: String(payload.id || '').trim(),
+    functionId,
+    label: meta?.label || functionId || '基础分析',
+    status,
+    phase: String(payload.phase || '').trim() || status,
+    percentage,
+    message: String(payload.message || '').trim(),
+    currentTarget: String(progress.current_target || '').trim(),
+    updatedAt: formatDateTime(payload.updated_at),
+    createdAt: String(payload.created_at || '').trim(),
+    sentimentPhase: String(progress.sentiment_phase || '').trim(),
+    sentimentTotal: Number(progress.sentiment_total || 0),
+    sentimentProcessed: Number(progress.sentiment_processed || 0),
+    sentimentClassified: Number(progress.sentiment_classified || 0),
+    raw: payload
+  }
+}
+
+const sortAnalyzeTasks = (tasks) =>
+  [...tasks].sort((left, right) => {
+    const orderDiff =
+      (ANALYZE_FUNCTION_ORDER.get(left.functionId) ?? 999) - (ANALYZE_FUNCTION_ORDER.get(right.functionId) ?? 999)
+    if (orderDiff !== 0) return orderDiff
+    return String(right.createdAt || '').localeCompare(String(left.createdAt || ''))
+  })
+
+const syncAnalyzeRunningState = () => {
+  analyzeState.running =
+    analyzeSubmissionCount > 0 ||
+    analyzeTasks.value.some((task) => ANALYZE_ACTIVE_STATUSES.has(String(task.status || '').trim().toLowerCase()))
+}
+
+const stopAnalyzeTaskPolling = () => {
+  if (typeof window !== 'undefined' && analyzeTaskPollTimer) {
+    window.clearTimeout(analyzeTaskPollTimer)
+  }
+  analyzeTaskPollTimer = null
+}
+
+const applyAnalyzeTaskSnapshot = (payload) => {
+  const data = payload && typeof payload === 'object' ? payload : {}
+  const tasks = Array.isArray(data.tasks) ? data.tasks.map(normalizeAnalyzeTask) : []
+  analyzeTasks.value = sortAnalyzeTasks(tasks)
+  applyAnalyzeWorkerState(data.worker)
+  syncAnalyzeRunningState()
+}
+
+const scheduleAnalyzeTaskPolling = () => {
+  if (typeof window === 'undefined' || analyzeTaskPollTimer) return
+  if (!analyzeTasks.value.some((task) => ANALYZE_ACTIVE_STATUSES.has(task.status))) return
+  analyzeTaskPollTimer = window.setTimeout(async () => {
+    analyzeTaskPollTimer = null
+    await loadAnalyzeTasks(null, { silent: true })
+  }, ANALYZE_TASK_POLL_INTERVAL)
+}
+
+const loadAnalyzeTasks = async (rangeOverride = null, { silent = false } = {}) => {
+  const range = normalizeRange(rangeOverride || analyzeForm)
+  const { topic, start, end } = range
+  if (!topic || !start || !end) {
+    analyzeTasks.value = []
+    resetAnalyzeWorkerState()
+    stopAnalyzeTaskPolling()
+    syncAnalyzeRunningState()
+    return
+  }
+
+  if (!silent) {
+    analyzeTaskState.loading = true
+    analyzeTaskState.error = ''
+  }
+
+  try {
+    const params = new URLSearchParams({
+      topic,
+      start,
+      end,
+      latest: 'true',
+      limit: '50'
+    })
+    const response = await callApi(`/api/analyze/tasks?${params.toString()}`, { method: 'GET' })
+    applyAnalyzeTaskSnapshot(response?.data || {})
+    const hasActiveTasks = analyzeTasks.value.some((task) => ANALYZE_ACTIVE_STATUSES.has(task.status))
+    if (!hasActiveTasks && analyzeTasks.value.some((task) => task.status === 'completed')) {
+      await loadHistory(topic)
+    }
+    stopAnalyzeTaskPolling()
+    scheduleAnalyzeTaskPolling()
+  } catch (error) {
+    analyzeTasks.value = []
+    resetAnalyzeWorkerState()
+    analyzeTaskState.error = error instanceof Error ? error.message : String(error)
+    stopAnalyzeTaskPolling()
+  } finally {
+    if (!silent) {
+      analyzeTaskState.loading = false
+    }
+    syncAnalyzeRunningState()
+  }
+}
 
 const appendLog = (collection, payload) => {
   const entry = {
@@ -576,38 +772,47 @@ const ensureFetchReadyForRange = async (range) => {
   return true
 }
 
+const validateAnalyzeRange = (range) => {
+  const target = normalizeRange(range)
+  const { topic, start, end } = target
+  if (!topic || !start || !end) {
+    return 'Topic / Start / End 为必填'
+  }
+
+  const availStart = parseDateValue(availableRange.start)
+  const availEnd = parseDateValue(availableRange.end)
+  const reqStart = parseDateValue(start)
+  const reqEnd = parseDateValue(end)
+  if (availStart && availEnd && reqStart && reqEnd) {
+    const withinRange = reqStart >= availStart && reqEnd <= availEnd
+    if (!withinRange) {
+      return `当前专题可用区间为 ${availableRange.start}→${availableRange.end}，请调整时间。`
+    }
+  }
+  return ''
+}
+
 const invokeAnalyze = async (functions, options = {}) => {
   const { force = false } = options
   const { topic, start, end } = normalizeRange(analyzeForm)
-  if (!topic || !start || !end) {
-    appendLog(analyzeLogs, { label: '参数校验', message: 'Topic / Start / End 为必填', status: 'error' })
+  analyzeTaskState.error = ''
+  analyzeTaskState.notice = ''
+
+  const validationError = validateAnalyzeRange({ topic, start, end })
+  if (validationError) {
+    analyzeTaskState.error = validationError
     return
   }
 
-  const fetchReady = await ensureFetchReadyForRange({ topic, start, end })
-  if (!fetchReady) {
-    appendLog(analyzeLogs, { label: '数据准备', message: '未能完成数据拉取，已停止本次分析。', status: 'error' })
-    return
-  }
-
-  analyzeState.running = true
+  analyzeSubmissionCount += 1
+  syncAnalyzeRunningState()
   let hasSuccess = false
+  const failedLabels = []
   try {
     for (const func of functions) {
       const meta = analysisFunctions.find((item) => item.id === func)
       const label = meta?.label || func
-      const logId = appendLog(analyzeLogs, {
-        label,
-        message: '排队中，等待执行…',
-        status: 'queued'
-      })
       try {
-        updateLogEntry(analyzeLogs, logId, {
-          status: 'running',
-          message: '正在创建后台任务…',
-          time: currentTimeString()
-        })
-        // 使用 run-async 端点创建后台任务，而不是同步执行
         const response = await callApi('/api/analyze/run-async', {
           method: 'POST',
           body: JSON.stringify({
@@ -618,47 +823,44 @@ const invokeAnalyze = async (functions, options = {}) => {
             force
           })
         })
-        const taskId = response?.data?.task_id || ''
-        const taskStatus = response?.data?.task_status || 'queued'
-        // 根据实际任务状态更新日志
-        let displayStatus = 'queued'
-        let displayMessage = taskId ? `后台任务已创建 (${taskId})` : '后台任务已创建'
-        if (taskStatus === 'completed') {
-          displayStatus = 'ok'
-          displayMessage = taskId ? `任务已完成 (${taskId})，结果可查看` : '任务已完成'
-        } else if (taskStatus === 'running') {
-          displayStatus = 'running'
-          displayMessage = taskId ? `任务运行中 (${taskId})` : '任务运行中'
-        } else if (taskStatus === 'failed') {
-          displayStatus = 'error'
-          displayMessage = taskId ? `任务失败 (${taskId})` : '任务失败'
+        const task = resolveAnalyzeTaskPayload(response)
+        if (task && typeof task === 'object') {
+          const normalizedTask = normalizeAnalyzeTask(task)
+          analyzeTasks.value = sortAnalyzeTasks([
+            ...analyzeTasks.value.filter((item) => item.functionId !== normalizedTask.functionId),
+            normalizedTask
+          ])
         }
-        updateLogEntry(analyzeLogs, logId, {
-          status: displayStatus,
-          message: displayMessage,
-          time: currentTimeString()
-        })
         hasSuccess = true
       } catch (error) {
-        updateLogEntry(analyzeLogs, logId, {
-          message: error instanceof Error ? error.message : String(error),
-          status: 'error',
-          time: currentTimeString()
-        })
+        failedLabels.push(`${label}：${error instanceof Error ? error.message : String(error)}`)
       }
     }
   } finally {
-    analyzeState.running = false
+    analyzeSubmissionCount = Math.max(0, analyzeSubmissionCount - 1)
+    syncAnalyzeRunningState()
   }
+
+  if (failedLabels.length) {
+    analyzeTaskState.error = failedLabels.join('；')
+  }
+
   if (hasSuccess) {
+    analyzeTaskState.notice =
+      functions.length > 1
+        ? `已提交 ${functions.length} 个后台任务，下方会按真实任务状态持续刷新。`
+        : '后台任务已创建，下方会持续刷新真实执行状态。'
     recordAnalysisRun({ topic, start, end })
-    await loadHistory(topic)
+    await Promise.all([
+      loadHistory(topic),
+      loadAnalyzeTasks({ topic, start, end }, { silent: true })
+    ])
   }
 }
 
 const runSelectedFunctions = async () => {
   if (!selectedFunctions.value.length) {
-    appendLog(analyzeLogs, { label: '提示', message: '请至少选择一个函数', status: 'error' })
+    analyzeTaskState.error = '请至少选择一个分析维度。'
     return
   }
   await invokeAnalyze([...selectedFunctions.value])
@@ -671,35 +873,72 @@ const runSingleFunction = async (funcId) => {
 const rebuildAiSummary = async () => {
   const { topic, start, end } = normalizeRange(analyzeForm)
   if (!topic || !start || !end) {
-    appendLog(analyzeLogs, { label: 'AI摘要', message: 'Topic / Start / End 为必填', status: 'error' })
+    analyzeTaskState.error = 'Topic / Start / End 为必填'
     return false
   }
-
-  const logId = appendLog(analyzeLogs, {
-    label: 'AI摘要',
-    message: `正在重新生成 ${topic} ${start}→${end} 的AI摘要…`,
-    status: 'running'
-  })
+  analyzeTaskState.error = ''
+  analyzeTaskState.notice = '正在重新生成当前范围的 AI 摘要。'
 
   try {
     await callApi('/api/analyze/ai-summary/rebuild', {
       method: 'POST',
       body: JSON.stringify({ topic, start, end })
     })
-    updateLogEntry(analyzeLogs, logId, {
-      status: 'ok',
-      message: 'AI摘要已重新生成，可前往"查看分析"刷新结果。',
-      time: currentTimeString()
-    })
+    analyzeTaskState.notice = 'AI 摘要已重新生成，可前往“查看分析”刷新结果。'
     return true
   } catch (error) {
-    updateLogEntry(analyzeLogs, logId, {
-      message: error instanceof Error ? error.message : String(error),
-      status: 'error',
-      time: currentTimeString()
-    })
+    analyzeTaskState.error = error instanceof Error ? error.message : String(error)
     return false
   }
+}
+
+const deleteAnalysisSection = async (sectionName, rangeOverride = null) => {
+  const normalizedSection = String(sectionName || '').trim()
+  if (!normalizedSection) {
+    throw new Error('缺少要删除的分析模块')
+  }
+
+  const range = normalizeRange(
+    rangeOverride || {
+      topic: analysisData.value?.topic || viewSelection.topic || viewManualForm.topic || analyzeForm.topic,
+      start: analysisData.value?.range?.start || viewSelection.start || viewManualForm.start,
+      end: analysisData.value?.range?.end || viewSelection.end || viewManualForm.end
+    }
+  )
+
+  const { topic, start, end } = range
+  if (!topic || !start) {
+    throw new Error('缺少专题或时间范围，无法删除分析模块')
+  }
+
+  const response = await callApi('/api/analyze/results/function', {
+    method: 'DELETE',
+    body: JSON.stringify({
+      topic,
+      start,
+      end,
+      function: normalizedSection
+    })
+  })
+
+  const payload = response?.data || {}
+  const remainingFunctions = Array.isArray(payload.remaining_functions) ? payload.remaining_functions : []
+
+  if (remainingFunctions.length) {
+    await loadResults({ topic, start, end })
+  } else {
+    analysisData.value = {
+      status: 'ok',
+      topic,
+      range: { start, end: end || start },
+      functions: [],
+      ai_summary: payload.ai_summary_exists ? (analysisData.value?.ai_summary || null) : null
+    }
+    lastLoaded.value = new Date().toLocaleString()
+  }
+
+  await loadHistory(topic)
+  return payload
 }
 
 const selectAll = () => {
