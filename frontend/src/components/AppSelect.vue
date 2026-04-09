@@ -54,13 +54,18 @@ const selectedIndex = ref(-1)
 const isSearchFocused = ref(false)
 const triggerRef = ref(null)
 const dropdownRef = ref(null)
+const optionsRef = ref(null)
 const dropdownStyle = ref({})
+const dropdownPlacement = ref('bottom')
+let scrollContainers = []
 
 const DROPDOWN_OFFSET = 6
 const DROPDOWN_VIEWPORT_MARGIN = 12
 const DEFAULT_DROPDOWN_MAX_HEIGHT = 280
-const MIN_OPTIONS_HEIGHT = 120
+const MIN_OPTIONS_HEIGHT = 96
 const SEARCH_BAR_HEIGHT = 56
+const CLIPPING_OVERFLOW_RE = /(auto|scroll|overlay|hidden|clip)/
+const SCROLLABLE_OVERFLOW_RE = /(auto|scroll|overlay)/
 
 const selectedOption = computed(() =>
   props.options.find(opt => opt.value === props.value)
@@ -97,6 +102,8 @@ function closeDropdown() {
   selectedIndex.value = -1
   isSearchFocused.value = false
   dropdownStyle.value = {}
+  dropdownPlacement.value = 'bottom'
+  cleanupScrollListeners()
 }
 
 function selectOption(option) {
@@ -156,45 +163,123 @@ function handleClickOutside(e) {
   }
 }
 
+function getOverflowAncestors(element) {
+  const clippingAncestors = []
+  const nextScrollContainers = []
+  let current = element?.parentElement
+
+  while (current && current !== document.body && current !== document.documentElement) {
+    const style = window.getComputedStyle(current)
+    const overflowValue = `${style.overflow} ${style.overflowX} ${style.overflowY}`
+
+    if (CLIPPING_OVERFLOW_RE.test(overflowValue)) {
+      clippingAncestors.push(current)
+    }
+    if (SCROLLABLE_OVERFLOW_RE.test(overflowValue)) {
+      nextScrollContainers.push(current)
+    }
+
+    current = current.parentElement
+  }
+
+  return { clippingAncestors, scrollContainers: nextScrollContainers }
+}
+
+function intersectRects(baseRect, nextRect) {
+  return {
+    top: Math.max(baseRect.top, nextRect.top),
+    right: Math.min(baseRect.right, nextRect.right),
+    bottom: Math.min(baseRect.bottom, nextRect.bottom),
+    left: Math.max(baseRect.left, nextRect.left)
+  }
+}
+
+function getBoundaryRect() {
+  const viewportRect = {
+    top: 0,
+    right: window.innerWidth,
+    bottom: window.innerHeight,
+    left: 0
+  }
+
+  if (!triggerRef.value) {
+    return viewportRect
+  }
+
+  const { clippingAncestors } = getOverflowAncestors(triggerRef.value)
+
+  return clippingAncestors.reduce((rect, ancestor) => {
+    const ancestorRect = ancestor.getBoundingClientRect()
+    return intersectRects(rect, ancestorRect)
+  }, viewportRect)
+}
+
+function cleanupScrollListeners() {
+  scrollContainers.forEach(container => {
+    container.removeEventListener('scroll', handleViewportChange)
+  })
+  scrollContainers = []
+}
+
+function syncScrollListeners() {
+  cleanupScrollListeners()
+
+  if (!triggerRef.value) return
+
+  const { scrollContainers: nextContainers } = getOverflowAncestors(triggerRef.value)
+  scrollContainers = nextContainers
+  scrollContainers.forEach(container => {
+    container.addEventListener('scroll', handleViewportChange, { passive: true })
+  })
+}
+
 function updateDropdownPosition() {
   if (!triggerRef.value || !isOpen.value) return
 
   const rect = triggerRef.value.getBoundingClientRect()
-  const viewportHeight = window.innerHeight
-  const viewportWidth = window.innerWidth
+  const boundaryRect = getBoundaryRect()
   const horizontalMargin = DROPDOWN_VIEWPORT_MARGIN
   const verticalMargin = DROPDOWN_VIEWPORT_MARGIN
+  const boundaryTop = boundaryRect.top + verticalMargin
+  const boundaryBottom = boundaryRect.bottom - verticalMargin
+  const boundaryLeft = boundaryRect.left + horizontalMargin
+  const boundaryRight = boundaryRect.right - horizontalMargin
+  const reservedHeight = props.searchable ? SEARCH_BAR_HEIGHT : 0
 
-  const availableBelow = Math.max(
-    viewportHeight - rect.bottom - DROPDOWN_OFFSET - verticalMargin,
-    MIN_OPTIONS_HEIGHT
+  const availableBelow = Math.max(boundaryBottom - rect.bottom - DROPDOWN_OFFSET, 0)
+  const availableAbove = Math.max(rect.top - boundaryTop - DROPDOWN_OFFSET, 0)
+  const optionsNaturalHeight = optionsRef.value?.scrollHeight ?? MIN_OPTIONS_HEIGHT
+  const desiredOptionsHeight = Math.min(
+    optionsNaturalHeight,
+    DEFAULT_DROPDOWN_MAX_HEIGHT,
+    DEFAULT_DROPDOWN_MAX_HEIGHT - reservedHeight
   )
-  const availableAbove = Math.max(
-    rect.top - DROPDOWN_OFFSET - verticalMargin,
-    MIN_OPTIONS_HEIGHT
+  const desiredDropdownHeight = Math.min(
+    DEFAULT_DROPDOWN_MAX_HEIGHT,
+    reservedHeight + desiredOptionsHeight
   )
 
   const shouldOpenAbove =
-    availableBelow < DEFAULT_DROPDOWN_MAX_HEIGHT && availableAbove > availableBelow
+    availableBelow < desiredDropdownHeight && availableAbove >= MIN_OPTIONS_HEIGHT
 
-  const dropdownMaxHeight = Math.min(
-    DEFAULT_DROPDOWN_MAX_HEIGHT,
-    shouldOpenAbove ? availableAbove : availableBelow
-  )
-  const optionsMaxHeight = Math.max(
-    MIN_OPTIONS_HEIGHT,
-    dropdownMaxHeight - (props.searchable ? SEARCH_BAR_HEIGHT : 0)
-  )
+  const placementSpace = shouldOpenAbove ? availableAbove : availableBelow
+  const dropdownMaxHeight = Math.min(DEFAULT_DROPDOWN_MAX_HEIGHT, placementSpace)
+  const renderedDropdownHeight = Math.min(desiredDropdownHeight, dropdownMaxHeight)
+  const optionsMaxHeight = Math.max(0, dropdownMaxHeight - reservedHeight)
+  dropdownPlacement.value = shouldOpenAbove ? 'top' : 'bottom'
 
-  const width = Math.min(rect.width, viewportWidth - horizontalMargin * 2)
+  const width = Math.min(
+    rect.width,
+    Math.max(0, boundaryRight - boundaryLeft)
+  )
   const left = Math.min(
-    Math.max(rect.left, horizontalMargin),
-    viewportWidth - width - horizontalMargin
+    Math.max(rect.left, boundaryLeft),
+    boundaryRight - width
   )
   const top = shouldOpenAbove
-    ? Math.max(verticalMargin, rect.top - dropdownMaxHeight - DROPDOWN_OFFSET)
+    ? Math.max(boundaryTop, rect.top - renderedDropdownHeight - DROPDOWN_OFFSET)
     : Math.min(
-        viewportHeight - dropdownMaxHeight - verticalMargin,
+        boundaryBottom - dropdownMaxHeight,
         rect.bottom + DROPDOWN_OFFSET
       )
 
@@ -203,6 +288,7 @@ function updateDropdownPosition() {
     left: `${left}px`,
     width: `${width}px`,
     maxHeight: `${dropdownMaxHeight}px`,
+    transformOrigin: shouldOpenAbove ? 'bottom center' : 'top center',
     '--app-select-options-max-height': `${optionsMaxHeight}px`
   }
 }
@@ -216,13 +302,14 @@ function handleViewportChange() {
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   window.addEventListener('resize', handleViewportChange)
-  window.addEventListener('scroll', handleViewportChange, true)
+  window.addEventListener('scroll', handleViewportChange, { passive: true })
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('resize', handleViewportChange)
-  window.removeEventListener('scroll', handleViewportChange, true)
+  window.removeEventListener('scroll', handleViewportChange)
+  cleanupScrollListeners()
 })
 
 // Reset search when options change
@@ -237,6 +324,7 @@ watch(() => props.options, () => {
 watch(() => isOpen.value, async (open) => {
   if (!open) return
   await nextTick()
+  syncScrollListeners()
   updateDropdownPosition()
 })
 </script>
@@ -291,7 +379,7 @@ watch(() => isOpen.value, async (open) => {
           />
 
           <!-- Options -->
-          <div class="app-select-options">
+          <div ref="optionsRef" class="app-select-options">
             <button
               v-for="(option, idx) in filteredOptions"
               :key="option.value"

@@ -560,6 +560,7 @@
   position: relative;
   width: 100%;
   --app-select-radius: 1rem;
+  --app-select-option-radius: 0.875rem;
 }
 
 /* Trigger 继承 .input 基础样式 */
@@ -570,7 +571,7 @@
   gap: 0.5rem;
   cursor: pointer;
   text-align: left;
-  border-radius: var(--app-select-radius);
+  border-radius: var(--app-select-radius, 1rem);
 }
 
 .app-select-trigger:focus {
@@ -624,10 +625,10 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: var(--app-select-radius);
+  border-radius: var(--app-select-radius, 1rem);
   border: 1px solid var(--color-border-soft);
   background-color: var(--color-surface);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 16px 40px rgb(15 23 42 / 0.12);
   transform-origin: top center;
   will-change: opacity, transform;
 }
@@ -666,6 +667,8 @@
 }
 
 .app-select-options {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   max-height: var(--app-select-options-max-height, 220px);
   padding: 0.375rem 0.5rem;
@@ -697,14 +700,15 @@
   display: block;
   width: 100%;
   padding: 0.4rem 0.75rem;
-  border-radius: 0.75rem;
+  border-radius: var(--app-select-option-radius, 0.875rem);
   font-size: 0.875rem;
   text-align: left;
   color: var(--color-text-primary);
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  background-clip: padding-box;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .app-select-option:hover:not(:disabled),
