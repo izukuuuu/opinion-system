@@ -1,119 +1,171 @@
 <template>
-  <div class="bertopic-run pt-0 pb-12 space-y-6">
+  <div class="bertopic-run space-y-6 pb-12">
+    <AnalysisPageHeader
+      eyebrow="BERTopic 主题分析"
+      title="运行分析"
+      description="选择专题、时间范围与智能体策略，然后提交主题分析任务。"
+    />
+
     <form class="space-y-6" @submit.prevent="handleRun">
-
-      <!-- Basic Config -->
-      <section class="card-surface space-y-6 p-6">
-        <div class="mb-6 flex items-center justify-between">
-          <h2 class="text-lg font-semibold text-primary">新建分析任务</h2>
-          <button type="button"
-            class="flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50 transition-colors"
-            :disabled="topicsState.loading" @click="loadTopics(true)">
-            <ArrowPathIcon class="h-3.5 w-3.5" :class="{ 'animate-spin': topicsState.loading }" />
-            {{ topicsState.loading ? '同步中...' : '刷新专题列表' }}
-          </button>
-        </div>
-
-        <div class="grid gap-6 md:grid-cols-2">
-          <div class="space-y-2">
-            <label class="text-xs font-bold text-muted uppercase tracking-wider">专题 Topic *</label>
-            <AppSelect
-              :options="topicSelectOptions"
-              :value="form.topic"
-              :disabled="topicsState.loading || topicOptions.length === 0"
-              @change="handleTopicChange"
-            />
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
+      <AnalysisSectionCard
+        title="基础配置"
+        description="先选择专题与时间范围。系统会自动检查当前专题的数据覆盖区间，并在提交前完成基础校验。"
+      >
+        <div class="space-y-6">
+          <div class="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
             <div class="space-y-2">
-              <label class="text-xs font-bold text-muted uppercase tracking-wider">开始日期 Start *</label>
-              <input v-model.trim="form.startDate" type="date" class="input w-full" required
-                :disabled="availableRange.loading" />
+              <div class="flex items-center justify-between gap-3">
+                <label class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">分析专题</label>
+                <button
+                  type="button"
+                  class="analysis-toolbar__action analysis-toolbar__action--ghost px-3 py-1.5 text-xs focus-ring-accent"
+                  :disabled="topicsState.loading"
+                  @click="loadTopics(true)"
+                >
+                  <ArrowPathIcon class="h-4 w-4" :class="{ 'animate-spin': topicsState.loading }" />
+                  <span>{{ topicsState.loading ? '同步中…' : '刷新专题' }}</span>
+                </button>
+              </div>
+              <AppSelect
+                :options="topicSelectOptions"
+                :value="form.topic"
+                :disabled="topicsState.loading || topicOptions.length === 0"
+                @change="handleTopicChange"
+              />
+              <p class="text-xs text-secondary">选择要执行 BERTopic 的专题，运行前会自动加载对应配置。</p>
             </div>
+
             <div class="space-y-2">
-              <label class="text-xs font-bold text-muted uppercase tracking-wider">结束日期 End</label>
-              <input v-model.trim="form.endDate" type="date" class="input w-full" :disabled="availableRange.loading"
-                :min="form.startDate" />
+              <label class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">分析时间范围</label>
+              <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center">
+                <label class="space-y-2">
+                  <span class="text-xs font-medium text-muted">开始日期</span>
+                  <input
+                    v-model.trim="form.startDate"
+                    type="date"
+                    class="input h-12 w-full"
+                    required
+                    :disabled="availableRange.loading"
+                  />
+                </label>
+                <span class="hidden text-muted sm:inline">→</span>
+                <label class="space-y-2">
+                  <span class="text-xs font-medium text-muted">结束日期</span>
+                  <input
+                    v-model.trim="form.endDate"
+                    type="date"
+                    class="input h-12 w-full"
+                    :disabled="availableRange.loading"
+                    :min="form.startDate"
+                  />
+                </label>
+              </div>
+              <p class="text-xs text-secondary">未填写结束日期时，默认分析从开始日期起的全部可用数据。</p>
             </div>
           </div>
-        </div>
 
-        <div v-if="availableRange.start || availableRange.error" class="state-banner"
-          :class="availableRange.error ? 'state-banner-danger' : 'state-banner-info'">
-          <div class="flex items-start gap-3">
-            <InformationCircleIcon v-if="!availableRange.error" class="h-5 w-5 shrink-0 state-banner__icon-info" />
-            <ExclamationTriangleIcon v-else class="h-5 w-5 shrink-0 state-banner__icon-danger" />
-            <div class="space-y-1">
-              <p class="font-bold text-primary">数据可用性检查</p>
-              <p class="text-xs opacity-90">
-                {{ availableRange.error || `当前专题数据覆盖范围：${availableRange.start} ~ ${availableRange.end}` }}
-              </p>
+          <div
+            v-if="availableRange.start || availableRange.error"
+            class="state-banner"
+            :class="availableRange.error ? 'state-banner-danger' : 'state-banner-info'"
+          >
+            <div class="flex items-start gap-3">
+              <InformationCircleIcon v-if="!availableRange.error" class="h-5 w-5 shrink-0 state-banner__icon-info" />
+              <ExclamationTriangleIcon v-else class="h-5 w-5 shrink-0 state-banner__icon-danger" />
+              <div class="space-y-1">
+                <p class="font-semibold text-primary">数据可用性检查</p>
+                <p class="text-xs opacity-90">
+                  {{ availableRange.error || `当前专题数据覆盖范围：${availableRange.start} ~ ${availableRange.end}` }}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="mt-8 flex items-center justify-between border-t border-soft pt-6">
-          <button type="button"
-            class="flex items-center gap-2 text-sm font-medium text-secondary hover:text-primary transition-colors"
-            @click="showAdvancedSettings = !showAdvancedSettings">
-            <CpuChipIcon class="h-5 w-5" />
-            <span>{{ showAdvancedSettings ? '收起 AI 智能体配置' : '展开 AI 智能体配置' }}</span>
-            <ChevronDownIcon class="h-4 w-4 transition-transform duration-200"
-              :class="{ 'rotate-180': showAdvancedSettings }" />
-          </button>
+          <div class="run-footer">
+            <div class="space-y-2">
+              <button
+                type="button"
+                class="analysis-toolbar__action analysis-toolbar__action--pill bertopic-toggle focus-ring-accent"
+                @click="showAdvancedSettings = !showAdvancedSettings"
+              >
+                <CpuChipIcon class="h-4 w-4" />
+                <span>{{ showAdvancedSettings ? '收起智能体配置' : '展开智能体配置' }}</span>
+                <ChevronDownIcon class="h-4 w-4 transition-transform duration-200" :class="{ 'rotate-180': showAdvancedSettings }" />
+              </button>
+              <p class="text-xs text-secondary">默认配置可直接运行；展开后可继续细调聚类、过滤与命名规则。</p>
+            </div>
 
-          <div class="flex items-center gap-3">
-            <button type="button" class="btn btn-ghost text-muted hover:text-primary" @click="resetAll"
-              :disabled="runState.running">重置</button>
-            <button type="submit" class="btn btn-primary min-w-[140px]" :disabled="!canSubmit">
-              <span v-if="runState.running" class="flex items-center gap-2">
-                <ArrowPathIcon class="h-4 w-4 animate-spin" />
-                <span>分析中...</span>
-              </span>
-              <span v-else>开始分析</span>
-            </button>
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                class="btn btn-ghost text-muted hover:text-primary"
+                @click="resetAll"
+                :disabled="runState.running"
+              >
+                重置
+              </button>
+              <button type="submit" class="btn btn-primary min-w-[148px]" :disabled="!canSubmit">
+                <span v-if="runState.running" class="flex items-center gap-2">
+                  <ArrowPathIcon class="h-4 w-4 animate-spin" />
+                  <span>分析中…</span>
+                </span>
+                <span v-else>开始分析</span>
+              </button>
+            </div>
           </div>
-        </div>
-      </section>
+          </div>
+        </AnalysisSectionCard>
 
-      <!-- Multi-Agent Pipeline Configuration -->
-      <div v-show="showAdvancedSettings" class="space-y-4 animate-in slide-in-from-top-2 duration-200">
-
-        <!-- Pipeline Banner -->
-        <div class="pipeline-banner">
-          <div class="pipeline-banner-left">
-            <div class="pipeline-banner-icon">
+      <AnalysisSectionCard
+        v-if="showAdvancedSettings"
+        title="智能体工作流配置"
+        description="按阶段调整聚类策略、过滤规则与命名提示。没有特殊需求时，保留默认值即可。"
+        tone="soft"
+      >
+        <div class="space-y-4">
+          <div class="workflow-summary">
+            <div class="workflow-summary__icon">
               <SparklesIcon class="h-5 w-5" />
             </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="pipeline-banner-title">Multi-Agent Workflow</span>
-                <span class="pipeline-banner-subtitle">多智能体协同架构</span>
+            <div class="min-w-0 space-y-1">
+              <div class="workflow-summary__title-row">
+                <span class="workflow-summary__title">多智能体工作流</span>
+                <span class="analysis-chip analysis-chip--hero">5 个阶段</span>
+                <span class="analysis-chip analysis-chip--hero">顺序执行</span>
               </div>
-              <div class="text-xs text-secondary mt-0.5">LangGraph Pipeline · 5 专业智能体依次协作，从聚类到润色全流程自动化</div>
+              <p class="workflow-summary__description">
+                从聚类范围判断、主题收敛到关键词润色，按固定阶段逐步收紧结果，避免一次性堆叠过多人工参数。
+              </p>
+            </div>
+            <div class="analysis-toolbar workflow-summary__actions">
+              <button
+                type="button"
+                class="analysis-toolbar__action analysis-toolbar__action--ghost px-3 py-1.5 text-xs focus-ring-accent"
+                :disabled="bertopicPromptState.loading || !form.topic.trim()"
+                @click="loadBertopicPrompt(form.topic)"
+              >
+                {{ bertopicPromptState.loading ? '加载中…' : '重载配置' }}
+              </button>
+              <button
+                type="button"
+                class="analysis-toolbar__action analysis-toolbar__action--pill px-3.5 py-1.5 text-xs focus-ring-accent"
+                :disabled="!canSavePrompt"
+                @click="handleSavePrompt"
+              >
+                {{ bertopicPromptState.saving ? '保存中…' : '保存配置' }}
+              </button>
             </div>
           </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <button type="button" class="btn btn-ghost btn-sm whitespace-nowrap"
-              :disabled="bertopicPromptState.loading || !form.topic.trim()"
-              @click="loadBertopicPrompt(form.topic)">
-              {{ bertopicPromptState.loading ? '加载中…' : '重载配置' }}
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" :disabled="!canSavePrompt"
-              @click="handleSavePrompt">
-              {{ bertopicPromptState.saving ? '保存中…' : '保存配置' }}
-            </button>
+
+          <div
+            v-if="bertopicPromptState.error || bertopicPromptState.message"
+            class="state-banner text-xs"
+            :class="bertopicPromptState.error ? 'state-banner-danger' : 'state-banner-success'"
+          >
+            {{ bertopicPromptState.error || bertopicPromptState.message }}
           </div>
-        </div>
 
-        <div v-if="bertopicPromptState.error || bertopicPromptState.message" class="state-banner text-xs"
-          :class="bertopicPromptState.error ? 'state-banner-danger' : 'state-banner-success'">
-          {{ bertopicPromptState.error || bertopicPromptState.message }}
-        </div>
-
-        <!-- Pipeline Flow -->
-        <div class="pipeline-flow">
+          <div class="pipeline-flow">
 
           <!-- ── Agent 1: Scope Analyst ── -->
           <div class="agent-card agent-card-scope">
@@ -193,17 +245,12 @@
                   <!-- Mode Switch -->
                   <div class="flex items-center justify-between mb-4">
                     <span class="text-xs font-semibold text-secondary">配置模式</span>
-                    <div class="mode-switch">
-                      <button type="button" class="mode-switch__btn"
-                        :class="promptMode === 'analyst' ? 'mode-switch__btn--active' : 'mode-switch__btn--idle'"
-                        @click="promptMode = 'analyst'">业务调整模式</button>
-                      <button type="button" class="mode-switch__btn mode-switch__btn--with-icon"
-                        :class="promptMode === 'expert' ? 'mode-switch__btn--active' : 'mode-switch__btn--idle'"
-                        @click="promptMode = 'expert'">
-                        <CommandLineIcon class="h-3 w-3" />
-                        专家指令引擎
-                      </button>
-                    </div>
+                    <TabSwitch
+                      :tabs="promptModeTabs"
+                      :active="promptMode"
+                      size="sm"
+                      @change="promptMode = $event"
+                    />
                   </div>
 
                   <!-- Analyst Mode -->
@@ -212,7 +259,7 @@
                     <div class="space-y-3">
                       <div class="flex items-center justify-between gap-2">
                         <label class="text-xs font-bold text-primary flex items-center gap-2">
-                          <ViewColumnsIcon class="h-4 w-4 text-purple-500" />
+                          <ViewColumnsIcon class="h-4 w-4 text-brand" />
                           聚类主导视角
                         </label>
                         <div class="relative group">
@@ -248,7 +295,7 @@
                       <!-- Must Separate -->
                       <div class="space-y-2">
                         <label class="text-xs font-bold text-primary flex items-center gap-2">
-                          <ArrowsPointingOutIcon class="h-4 w-4 text-accent-600" />
+                          <ArrowsPointingOutIcon class="h-4 w-4 text-brand" />
                           自定义识别主题
                         </label>
                         <p class="text-[11px] text-secondary">输入关键主题种子，语义相近内容优先归入同一类。</p>
@@ -270,7 +317,7 @@
                       <!-- Must Merge -->
                       <div class="space-y-2">
                         <label class="text-xs font-bold text-primary flex items-center gap-2">
-                          <ArrowsPointingInIcon class="h-4 w-4 text-success-600" />
+                          <ArrowsPointingInIcon class="h-4 w-4 text-success" />
                           重点合并专题
                         </label>
                         <p class="text-[11px] text-secondary">高度相关的冗余子主题，提示 AI 尽可能合并。</p>
@@ -299,15 +346,21 @@
                     </div>
                     <label class="block">
                       <span class="config-label">System Prompt (可选)</span>
-                      <textarea v-model="bertopicPromptState.reclusterSystemPrompt" rows="2"
-                        class="input run-textarea w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+                      <textarea
+                        v-model="bertopicPromptState.reclusterSystemPrompt"
+                        rows="2"
+                        class="input run-textarea w-full mt-1.5 resize-y font-mono text-xs leading-relaxed"
+                      ></textarea>
                     </label>
                     <label class="block">
                       <span class="config-label">User Prompt 主体 *</span>
-                      <textarea v-model="bertopicPromptState.reclusterUserPrompt" rows="10"
-                        class="input run-textarea w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+                      <textarea
+                        v-model="bertopicPromptState.reclusterUserPrompt"
+                        rows="10"
+                        class="input run-textarea w-full mt-1.5 resize-y font-mono text-xs leading-relaxed"
+                      ></textarea>
                     </label>
-                    <div class="bg-purple-50/60 rounded-lg p-3 border border-purple-100 text-[11px] text-purple-700/80 space-y-1">
+                    <div class="workflow-note workflow-note--brand space-y-1">
                       <p class="font-semibold">可用变量：</p>
                       <p class="font-mono">{TARGET_TOPICS}, {input_data}, {topic_list}, {business_rules_hint}, {iteration_hint}</p>
                     </div>
@@ -343,7 +396,7 @@
                       <span class="runtime-field-label">启用预过滤</span>
                       <span class="runtime-field-key">pre_filter_enabled</span>
                       <div class="runtime-toggle-row">
-                        <input v-model="bertopicPromptState.preFilterEnabled" type="checkbox" class="checkbox-custom" />
+                        <AppCheckbox v-model="bertopicPromptState.preFilterEnabled" />
                         <span class="runtime-toggle-text">启用</span>
                       </div>
                     </label>
@@ -367,15 +420,21 @@
                   <div class="grid gap-4 md:grid-cols-2">
                     <label class="block">
                       <span class="config-label">查询增强词</span>
-                      <textarea v-model="bertopicPromptState.preFilterQueryHint" rows="3"
+                      <textarea
+                        v-model="bertopicPromptState.preFilterQueryHint"
+                        rows="3"
                         class="input run-textarea w-full mt-1.5 resize-y text-xs leading-relaxed"
-                        placeholder="补充专题锚点，例如：吸烟、戒烟、控烟政策、二手烟..." />
+                        placeholder="补充专题锚点，例如：吸烟、戒烟、控烟政策、二手烟..."
+                      ></textarea>
                     </label>
                     <label class="block">
                       <span class="config-label">排除词 / 负向约束</span>
-                      <textarea v-model="bertopicPromptState.preFilterNegativeHint" rows="3"
+                      <textarea
+                        v-model="bertopicPromptState.preFilterNegativeHint"
+                        rows="3"
                         class="input run-textarea w-full mt-1.5 resize-y text-xs leading-relaxed"
-                        placeholder="命中这些词且未命中专题锚点时会优先剔除" />
+                        placeholder="命中这些词且未命中专题锚点时会优先剔除"
+                      ></textarea>
                     </label>
                   </div>
                 </div>
@@ -409,16 +468,16 @@
                       </label>
                       <p class="text-[11px] text-secondary leading-relaxed">系统内置的常态化噪声，适用于绝大多数分析场景。</p>
                       <div class="noise-card">
-                        <div v-for="gf in ['明星八卦', '广告推广', '抽奖转发', '求职招聘']" :key="gf"
+                        <div v-for="(gf, gfIndex) in ['明星八卦', '广告推广', '抽奖转发', '求职招聘']" :key="gf"
                           class="global-filter-row">
                           <span class="text-xs font-semibold text-primary">{{ gf }}</span>
-                          <button type="button" class="switch-track"
-                            :class="bertopicPromptState.globalFilters.includes(gf) ? 'switch-track--on' : 'switch-track--off'"
-                            @click="toggleGlobalFilter(gf)">
-                            <span class="sr-only">Toggle</span>
-                            <span aria-hidden="true" class="switch-thumb"
-                              :class="bertopicPromptState.globalFilters.includes(gf) ? 'switch-thumb--on' : 'switch-thumb--off'" />
-                          </button>
+                          <AppCheckbox
+                            :id="`global-filter-switch-${gfIndex}`"
+                            :model-value="bertopicPromptState.globalFilters.includes(gf)"
+                            :aria-label="`切换${gf}`"
+                            input-class="shadow-none"
+                            @change="toggleGlobalFilter(gf)"
+                          />
                         </div>
                       </div>
                     </div>
@@ -464,7 +523,7 @@
                   <!-- Core Drop Rules -->
                   <div class="space-y-2">
                     <label class="text-xs font-bold text-primary flex items-center gap-2">
-                      <AdjustmentsHorizontalIcon class="h-4 w-4 text-danger-500" />
+                      <AdjustmentsHorizontalIcon class="h-4 w-4 text-danger" />
                       相关性补充指令
                     </label>
                     <p class="text-[11px] text-secondary leading-relaxed">非纯净类别的细粒度甄别（例如："如果是提及品牌但作为负面竞品对比，一律剔除"）。</p>
@@ -491,9 +550,12 @@
                       <button type="button" class="btn-secondary px-3 py-1.5 text-xs"
                         @click="restoreDefaultDropRulePrompt">恢复通用模板</button>
                     </div>
-                    <textarea v-model="bertopicPromptState.dropRulePrompt" rows="12"
-                      class="input run-textarea w-full resize-y font-mono text-xs leading-relaxed" />
-                    <div class="bg-red-50/60 rounded-lg p-3 border border-red-100 text-[11px] text-red-700/80">
+                    <textarea
+                      v-model="bertopicPromptState.dropRulePrompt"
+                      rows="12"
+                      class="input run-textarea w-full resize-y font-mono text-xs leading-relaxed"
+                    ></textarea>
+                    <div class="workflow-note workflow-note--danger">
                       <p class="font-semibold">可用变量：</p>
                       <p class="font-mono">{FOCUS_TOPIC}</p>
                     </div>
@@ -526,50 +588,70 @@
             <div v-show="agentExpanded[5]" class="agent-config space-y-4">
               <label class="block">
                 <span class="config-label">关键词 System Prompt (可选)</span>
-                <textarea v-model="bertopicPromptState.keywordSystemPrompt" rows="2"
-                  class="input run-textarea w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+                <textarea
+                  v-model="bertopicPromptState.keywordSystemPrompt"
+                  rows="2"
+                  class="input run-textarea w-full mt-1.5 resize-y font-mono text-xs leading-relaxed"
+                ></textarea>
               </label>
               <label class="block">
                 <span class="config-label">关键词 User Prompt *</span>
-                <textarea v-model="bertopicPromptState.keywordUserPrompt" rows="8"
-                  class="input run-textarea w-full mt-1.5 resize-y font-mono text-xs leading-relaxed" />
+                <textarea
+                  v-model="bertopicPromptState.keywordUserPrompt"
+                  rows="8"
+                  class="input run-textarea w-full mt-1.5 resize-y font-mono text-xs leading-relaxed"
+                ></textarea>
               </label>
-              <div class="bg-emerald-50/60 rounded-lg p-3 border border-emerald-100 text-[11px] text-emerald-700/80 space-y-1">
+              <div class="workflow-note workflow-note--success space-y-1">
                 <p class="font-semibold">可用变量：</p>
                 <p class="font-mono">{cluster_name}, {topics}, {topics_csv}, {topics_json}, {description}</p>
               </div>
             </div>
           </div>
 
-        </div><!-- /pipeline-flow -->
-
-        <!-- Project Stopwords -->
-        <section class="card-surface p-6 space-y-4 mt-4">
-          <div class="space-y-1">
-            <h3 class="text-sm font-bold text-primary flex items-center gap-2">
-              <DocumentTextIcon class="h-4 w-4 text-muted" />
-              <span>项目停用词配置</span>
-            </h3>
-            <p class="text-xs text-secondary">仅对当前专题生效，会和全局 <code>configs/stopwords.txt</code> 合并后一起参与 BERTopic 分词。</p>
           </div>
-          <div class="flex flex-wrap items-center gap-4 text-xs text-secondary">
-            <span>当前行数：{{ projectStopwordCount }}</span>
-            <span>仅对当前专题生效</span>
-            <span>保存后可直接参与 BERTopic 分析</span>
-          </div>
-          <textarea v-model="bertopicPromptState.projectStopwordsText" rows="12"
-            class="input min-h-[320px] w-full resize-y font-mono text-sm leading-6" placeholder="一行一个项目停用词" />
-        </section>
+        </div>
+      </AnalysisSectionCard>
 
-        <!-- Algorithm Parameters -->
-        <section class="runtime-compact card-surface p-4 md:p-5 mt-4">
-          <div class="mb-3 flex items-center justify-between">
-            <h3 class="flex items-center gap-2 text-sm font-bold text-primary">
+      <AnalysisSectionCard
+        v-if="showAdvancedSettings"
+        title="项目停用词"
+        description="仅对当前专题生效，会与共享停用词设置一并参与分词。"
+        tone="soft"
+      >
+        <div class="space-y-4">
+          <div class="flex justify-end">
+            <span class="analysis-chip analysis-chip--hero">当前行数：{{ projectStopwordCount }}</span>
+          </div>
+          <textarea
+            v-model="bertopicPromptState.projectStopwordsText"
+            rows="12"
+            class="input min-h-[320px] w-full resize-y font-mono text-sm leading-6"
+            placeholder="一行一个项目停用词"
+          ></textarea>
+        </div>
+      </AnalysisSectionCard>
+
+      <AnalysisSectionCard
+        v-if="showAdvancedSettings"
+        title="底层算法参数"
+        description="仅在需要微调聚类效果时再修改。多数场景保持默认值即可。"
+        tone="soft"
+      >
+        <div class="runtime-compact space-y-5">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2 text-sm font-semibold text-primary">
               <CpuChipIcon class="h-4 w-4 text-muted" />
-              <span>底层算法参数</span>
-            </h3>
-            <button type="button" class="text-xs text-brand-600 hover:text-brand-700" @click="resetRunParams"
-              :disabled="runState.running">恢复默认值</button>
+              <span>当前运行参数</span>
+            </div>
+            <button
+              type="button"
+              class="analysis-toolbar__action analysis-toolbar__action--ghost px-3 py-1.5 text-xs focus-ring-accent"
+              @click="resetRunParams"
+              :disabled="runState.running"
+            >
+              恢复默认值
+            </button>
           </div>
           <div class="space-y-5">
             <!-- CountVectorizer -->
@@ -691,8 +773,7 @@
                   <span class="runtime-field-label">计算文档-主题概率</span>
                   <span class="runtime-field-key">calculate_probabilities</span>
                   <div class="runtime-toggle-row">
-                    <input v-model="form.runParams.bertopic.calculate_probabilities" type="checkbox"
-                      class="checkbox-custom" />
+                    <AppCheckbox v-model="form.runParams.bertopic.calculate_probabilities" />
                     <span class="runtime-toggle-text">启用</span>
                   </div>
                 </label>
@@ -700,22 +781,24 @@
                   <span class="runtime-field-label">输出详细日志</span>
                   <span class="runtime-field-key">verbose</span>
                   <div class="runtime-toggle-row">
-                    <input v-model="form.runParams.bertopic.verbose" type="checkbox" class="checkbox-custom" />
+                    <AppCheckbox v-model="form.runParams.bertopic.verbose" />
                     <span class="runtime-toggle-text">启用</span>
                   </div>
                 </label>
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      </AnalysisSectionCard>
 
-      </div><!-- /showAdvancedSettings -->
-
-      <!-- Logs -->
-      <section v-if="logs.length > 0" class="card-surface p-6">
-        <h3 class="text-sm font-bold text-muted uppercase tracking-widest mb-4">运行日志</h3>
-        <AnalysisLogList :logs="logs" class="max-h-[300px] overflow-y-auto" empty-label="等待执行..." />
-      </section>
+      <AnalysisSectionCard
+        v-if="logs.length > 0"
+        title="运行日志"
+        description="展示最近一次提交后返回的运行状态。"
+        tone="soft"
+      >
+        <AnalysisLogList :logs="logs" class="max-h-[300px] overflow-y-auto" empty-label="等待执行…" />
+      </AnalysisSectionCard>
 
       <!-- Failure Warning -->
       <section v-if="logs.some(log => log.status === 'error')"
@@ -747,7 +830,6 @@
           </div>
         </div>
       </section>
-
     </form>
   </div>
 </template>
@@ -769,15 +851,17 @@ import {
   ExclamationCircleIcon,
   AdjustmentsHorizontalIcon,
   DocumentTextIcon,
-  ShieldExclamationIcon,
   ArrowRightIcon,
   CpuChipIcon,
-  FunnelIcon,
   FolderOpenIcon,
   GlobeAltIcon,
   ArrowUturnUpIcon
 } from '@heroicons/vue/24/outline'
+import AppCheckbox from '@/components/AppCheckbox.vue'
 import AppSelect from '@/components/AppSelect.vue'
+import TabSwitch from '@/components/TabSwitch.vue'
+import AnalysisPageHeader from '@/components/analysis/AnalysisPageHeader.vue'
+import AnalysisSectionCard from '@/components/analysis/AnalysisSectionCard.vue'
 import { useTopicBertopicAnalysis } from '@/composables/useTopicBertopicAnalysis'
 import { useActiveProject } from '@/composables/useActiveProject'
 import AnalysisLogList from '@/components/analysis/AnalysisLogList.vue'
@@ -802,6 +886,10 @@ const {
 
 const { activeProjectName } = useActiveProject()
 const promptMode = ref('analyst')
+const promptModeTabs = [
+  { value: 'analyst', label: '业务调整模式' },
+  { value: 'expert', label: '专家指令引擎', icon: CommandLineIcon }
+]
 
 const draftSeparateRule = ref('')
 const draftMergeRule = ref('')
@@ -988,284 +1076,872 @@ const handleSavePrompt = async () => {
   background-color: var(--color-bg-base-soft);
   box-shadow: none;
 }
+
 .bertopic-run :deep(.input:focus) {
   border-color: rgb(var(--color-brand-400) / 1);
   background-color: var(--color-surface);
   box-shadow: 0 0 0 2px rgb(var(--color-brand-500) / 0.2);
 }
-.bertopic-run :deep(.btn-primary) { background-color: rgb(var(--color-brand-600) / 1); box-shadow: none; }
-.bertopic-run :deep(.btn-primary:hover:not(:disabled)) { background-color: rgb(var(--color-brand-500) / 1); }
-.bertopic-run :deep(.btn-secondary), .bertopic-run :deep(.btn-ghost) { box-shadow: none; }
-.bertopic-run :deep(.checkbox-custom) { position: relative; display: inline-grid; place-items: center; border-color: var(--color-border-soft); background-color: var(--color-surface); }
-.bertopic-run :deep(.checkbox-custom::after) { content: ''; width: 0.45rem; height: 0.25rem; border-left: 2px solid var(--color-surface); border-bottom: 2px solid var(--color-surface); transform: rotate(-45deg) scale(0); transform-origin: center; transition: transform 0.15s ease; }
-.bertopic-run :deep(.checkbox-custom:checked::after) { transform: rotate(-45deg) scale(1); }
-.run-textarea { line-height: 1.55; }
+.bertopic-run :deep(.btn-primary) {
+  background-color: rgb(var(--color-brand-600) / 1);
+  box-shadow: none;
+}
 
-/* ── Pipeline Banner ── */
-.pipeline-banner {
+.bertopic-run :deep(.btn-primary:hover:not(:disabled)) {
+  background-color: rgb(var(--color-brand-500) / 1);
+}
+
+.bertopic-run :deep(.btn-secondary),
+.bertopic-run :deep(.btn-ghost) {
+  box-shadow: none;
+}
+
+.run-textarea {
+  line-height: 1.55;
+}
+
+.run-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--color-border-soft);
+  padding-top: 1.25rem;
+}
+
+.bertopic-toggle {
+  min-height: 2.75rem;
+}
+
+.workflow-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+  border: 1px solid rgb(var(--color-brand-200) / 0.75);
   border-radius: 1.25rem;
-  border: 1px solid rgb(var(--color-brand-200) / 0.6);
-  background: linear-gradient(135deg, rgb(var(--color-brand-50) / 0.6) 0%, rgb(var(--color-accent-50) / 0.3) 100%);
-}
-.pipeline-banner-left { display: flex; align-items: center; gap: 0.875rem; }
-.pipeline-banner-icon {
-  display: flex; align-items: center; justify-content: center;
-  width: 2.25rem; height: 2.25rem; border-radius: 0.75rem;
-  background: linear-gradient(135deg, rgb(var(--color-brand-500) / 1), rgb(var(--color-accent-500) / 1));
-  color: white; flex-shrink: 0;
-}
-.pipeline-banner-title { font-size: 0.9rem; font-weight: 700; color: var(--color-text-primary); }
-.pipeline-banner-subtitle { font-size: 0.75rem; color: var(--color-text-secondary); font-weight: 500; }
-
-/* ── Pipeline Flow ── */
-.pipeline-flow { display: flex; flex-direction: column; gap: 0; }
-
-/* ── Pipeline Connector ── */
-.pipeline-connector { display: flex; justify-content: center; height: 1.75rem; }
-.loop-connector { display: flex; justify-content: center; height: 1.25rem; position: relative; }
-.connector-line {
-  width: 2px;
-  background: linear-gradient(to bottom, var(--color-border-soft), var(--color-border-soft));
-  height: 100%;
-  border-radius: 1px;
+  background: linear-gradient(135deg, rgb(var(--color-brand-100) / 0.4), rgb(var(--color-accent-50) / 0.35));
+  padding: 1rem 1.125rem;
 }
 
-/* ── RETRY annotation ── */
-.retry-annotation {
-  position: absolute;
-  right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
+.workflow-summary__icon {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  font-size: 10px;
-  font-weight: 600;
-  color: rgb(var(--color-accent-600) / 1);
-  background-color: rgb(var(--color-accent-50) / 0.8);
-  border: 1px solid rgb(var(--color-accent-200) / 1);
-  border-radius: 999px;
-  padding: 0.15rem 0.5rem;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgb(var(--color-brand-200) / 1);
+  background-color: rgb(var(--color-brand-100) / 0.9);
+  color: rgb(var(--color-brand-700) / 1);
 }
 
-/* ── Agent Card ── */
+.workflow-summary__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.workflow-summary__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.workflow-summary__description {
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.workflow-summary__actions {
+  justify-content: flex-end;
+}
+
+.pipeline-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.pipeline-connector,
+.loop-connector {
+  display: flex;
+  justify-content: center;
+  position: relative;
+}
+
+.pipeline-connector {
+  height: 1.5rem;
+}
+
+.loop-connector {
+  min-height: 1.25rem;
+}
+
+.connector-line {
+  width: 1px;
+  height: 100%;
+  border-radius: 999px;
+  background-color: var(--color-border-soft);
+}
+
+.retry-annotation {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  justify-content: center;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgb(var(--color-accent-700) / 1);
+  white-space: nowrap;
+  text-align: center;
+}
+
 .agent-card {
-  border-radius: 1.25rem;
-  border: 1.5px solid var(--color-border-soft);
+  --agent-accent: rgb(var(--color-brand-700) / 1);
+  --agent-border: var(--color-border-soft);
+  --agent-surface: rgb(var(--color-brand-100) / 0.26);
+  --agent-surface-hover: rgb(var(--color-brand-100) / 0.4);
+  position: relative;
+  border: 1px solid var(--agent-border);
+  border-radius: 1.35rem;
   background-color: var(--color-surface);
   overflow: hidden;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.agent-card:focus-within { box-shadow: 0 0 0 3px rgb(var(--color-brand-500) / 0.08); }
+
+.agent-card:focus-within {
+  box-shadow: 0 0 0 2px rgb(var(--color-brand-200) / 0.3);
+}
 
 .agent-card-header {
   display: flex;
   align-items: flex-start;
   gap: 0.875rem;
   width: 100%;
+  border: none;
+  background-color: var(--agent-surface);
   padding: 1rem 1.125rem;
   text-align: left;
-  background: none;
-  border: none;
   cursor: pointer;
   transition: background-color 0.15s ease;
 }
-.agent-card-header:hover { background-color: rgb(var(--color-brand-50) / 0.4); }
+
+.agent-card-header:hover {
+  background-color: var(--agent-surface-hover);
+}
 
 .agent-config {
-  padding: 0 1.125rem 1.125rem;
-  border-top: 1px solid var(--color-border-soft);
-  padding-top: 1rem;
+  border-top: 1px solid var(--agent-border);
+  padding: 1rem 1.125rem 1.125rem;
   animation: fadeDown 0.18s ease;
 }
-@keyframes fadeDown { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 
-/* ── Agent Step Badges ── */
-.agent-step {
-  display: flex; align-items: center; justify-content: center;
-  width: 1.875rem; height: 1.875rem; border-radius: 0.625rem;
-  font-size: 0.8rem; font-weight: 800; flex-shrink: 0; margin-top: 0.1rem;
-  color: white;
+@keyframes fadeDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.agent-step-scope  { background: linear-gradient(135deg, #3b82f6, #2563eb); }
-.agent-step-cluster { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
-.agent-step-judge  { background: linear-gradient(135deg, #f59e0b, #d97706); }
-.agent-step-filter { background: linear-gradient(135deg, #ef4444, #dc2626); }
-.agent-step-naming { background: linear-gradient(135deg, #10b981, #059669); }
 
-/* Agent card accent borders */
-.agent-card-scope   { border-color: rgba(59,130,246,0.25); }
-.agent-card-cluster { border-color: rgba(139,92,246,0.25); }
-.agent-card-judge   { border-color: rgba(245,158,11,0.25); }
-.agent-card-filter  { border-color: rgba(239,68,68,0.25); }
-.agent-card-naming  { border-color: rgba(16,185,129,0.25); }
+.agent-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.95rem;
+  height: 1.95rem;
+  margin-top: 0.05rem;
+  flex-shrink: 0;
+  border: 1px solid var(--agent-border);
+  border-radius: 0.7rem;
+  background-color: var(--agent-surface-hover);
+  color: var(--agent-accent);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
 
-.agent-card-scope:focus-within   { box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
-.agent-card-cluster:focus-within { box-shadow: 0 0 0 3px rgba(139,92,246,0.1); }
-.agent-card-judge:focus-within   { box-shadow: 0 0 0 3px rgba(245,158,11,0.1); }
-.agent-card-filter:focus-within  { box-shadow: 0 0 0 3px rgba(239,68,68,0.1); }
-.agent-card-naming:focus-within  { box-shadow: 0 0 0 3px rgba(16,185,129,0.1); }
+.agent-card-scope {
+  --agent-accent: rgb(var(--color-brand-700) / 1);
+  --agent-border: rgb(var(--color-brand-200) / 0.95);
+  --agent-surface: rgb(var(--color-brand-100) / 0.28);
+  --agent-surface-hover: rgb(var(--color-brand-100) / 0.5);
+}
 
-/* Agent name / desc */
-.agent-name-row { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.2rem; flex-wrap: wrap; }
-.agent-en { font-size: 0.875rem; font-weight: 700; color: var(--color-text-primary); }
-.agent-zh { font-size: 0.75rem; font-weight: 600; color: var(--color-text-secondary); }
-.agent-desc { font-size: 11px; color: var(--color-text-secondary); line-height: 1.45; margin: 0; }
-.agent-chevron { width: 1.125rem; height: 1.125rem; flex-shrink: 0; margin-top: 0.25rem; color: var(--color-text-muted); transition: transform 0.2s ease; }
+.agent-card-cluster {
+  --agent-accent: rgb(var(--color-accent-700) / 1);
+  --agent-border: rgb(var(--color-accent-200) / 0.95);
+  --agent-surface: rgb(var(--color-accent-100) / 0.28);
+  --agent-surface-hover: rgb(var(--color-accent-100) / 0.48);
+}
+
+.agent-card-judge {
+  --agent-accent: rgb(var(--color-warning-700) / 1);
+  --agent-border: rgb(var(--color-warning-200) / 1);
+  --agent-surface: rgb(var(--color-warning-100) / 0.3);
+  --agent-surface-hover: rgb(var(--color-warning-100) / 0.5);
+}
+
+.agent-card-filter {
+  --agent-accent: rgb(var(--color-danger-700) / 1);
+  --agent-border: rgb(var(--color-danger-200) / 1);
+  --agent-surface: rgb(var(--color-danger-100) / 0.28);
+  --agent-surface-hover: rgb(var(--color-danger-100) / 0.48);
+}
+
+.agent-card-naming {
+  --agent-accent: rgb(var(--color-success-700) / 1);
+  --agent-border: rgb(var(--color-success-200) / 1);
+  --agent-surface: rgb(var(--color-success-100) / 0.28);
+  --agent-surface-hover: rgb(var(--color-success-100) / 0.48);
+}
+
+.agent-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.agent-en {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.agent-zh {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.agent-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+.agent-chevron {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+  color: var(--color-text-muted);
+  transition: transform 0.2s ease;
+}
 
 /* ── Core Refinement Loop ── */
 .loop-wrapper {
+  border: 1px dashed rgb(var(--color-accent-200) / 1);
   border-radius: 1.5rem;
-  border: 1.5px dashed rgb(var(--color-accent-300) / 0.7);
-  background: linear-gradient(to bottom, rgb(var(--color-accent-50) / 0.18), transparent);
+  background: linear-gradient(180deg, rgb(var(--color-accent-50) / 0.45), transparent 14rem);
   overflow: hidden;
 }
+
 .loop-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0.6rem 1rem;
-  background: rgb(var(--color-accent-50) / 0.5);
-  border-bottom: 1px dashed rgb(var(--color-accent-200) / 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px dashed rgb(var(--color-accent-200) / 0.95);
+  background-color: rgb(var(--color-accent-50) / 0.78);
 }
-.loop-header-left { display: flex; align-items: center; gap: 0.5rem; }
+
+.loop-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .loop-icon {
-  display: flex; align-items: center; justify-content: center;
-  width: 1.375rem; height: 1.375rem; border-radius: 0.4rem;
-  background-color: rgb(var(--color-accent-500) / 1); color: white;
-}
-.loop-title { font-size: 0.7rem; font-weight: 700; color: rgb(var(--color-accent-700) / 1); letter-spacing: 0.02em; text-transform: uppercase; }
-.loop-badge {
-  font-size: 10px; font-weight: 700;
-  padding: 0.15rem 0.5rem; border-radius: 999px;
-  background-color: rgb(var(--color-accent-100) / 0.8);
-  border: 1px solid rgb(var(--color-accent-200) / 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 0.5rem;
+  background-color: rgb(var(--color-accent-100) / 1);
   color: rgb(var(--color-accent-700) / 1);
 }
-.retry-rail {
-  display: flex; align-items: center; gap: 0.25rem;
-  font-size: 10px; font-weight: 700;
-  color: rgb(var(--color-accent-600) / 1);
-  padding: 0.2rem 0.5rem; border-radius: 999px;
-  background-color: rgb(var(--color-accent-100) / 0.7);
-  border: 1px solid rgb(var(--color-accent-200) / 1);
+
+.loop-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(var(--color-accent-700) / 1);
 }
-.loop-body { padding: 0.875rem; display: flex; flex-direction: column; gap: 0; }
+
+.loop-badge,
+.retry-rail {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid rgb(var(--color-accent-200) / 1);
+  border-radius: 999px;
+  background-color: rgb(var(--color-accent-100) / 0.75);
+  padding: 0.18rem 0.55rem;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: rgb(var(--color-accent-700) / 1);
+}
+
+.loop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0.875rem;
+}
 
 /* ── Optional Badge ── */
 .optional-badge {
   position: absolute;
-  top: 0.75rem; right: 0.875rem;
-  font-size: 10px; font-weight: 700;
-  padding: 0.15rem 0.5rem; border-radius: 999px;
-  background-color: rgb(var(--color-success-100) / 0.8);
+  top: 0.75rem;
+  right: 0.875rem;
   border: 1px solid rgb(var(--color-success-200) / 1);
+  border-radius: 999px;
+  background-color: rgb(var(--color-success-100) / 0.85);
+  padding: 0.18rem 0.55rem;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
   color: rgb(var(--color-success-700) / 1);
-  letter-spacing: 0.03em; text-transform: uppercase;
 }
 
 /* ── Config label / hint ── */
-.config-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
-.config-hint { font-size: 11px; color: var(--color-text-muted); margin-top: 0.25rem; display: block; }
+.config-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.config-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* ── Runtime field base ── */
+.runtime-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.runtime-field-label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--color-text-primary);
+}
+
+.runtime-field-key {
+  display: none;
+}
+
+:deep(.runtime-input) {
+  min-height: 2.05rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.875rem;
+  font-size: 0.82rem;
+}
+
+.runtime-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding-top: 0.15rem;
+}
+
+.runtime-toggle-text {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
 
 /* ── Runtime compact ── */
-.runtime-compact .runtime-group-title { margin-bottom: 0.4rem; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
-.runtime-compact .runtime-field { display: flex; flex-direction: column; gap: 0.2rem; }
-.runtime-compact .runtime-field-label { display: block; font-size: 12px; font-weight: 600; line-height: 1.2; color: var(--color-text-primary); }
-.runtime-compact .runtime-field-key { display: block; font-size: 10px; line-height: 1.2; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--color-text-muted); }
-.runtime-compact :deep(.runtime-input) { min-height: 2.05rem; padding: 0.4rem 0.8rem; border-radius: 0.875rem; font-size: 0.82rem; }
-.runtime-compact .runtime-toggle-row { display: flex; align-items: center; gap: 0.45rem; padding-top: 0.15rem; }
-.runtime-compact .runtime-toggle-text { font-size: 0.75rem; color: var(--color-text-secondary); }
+.runtime-compact .runtime-group-title {
+  margin-bottom: 0.45rem;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.runtime-compact .runtime-field {
+  gap: 0.2rem;
+}
+
+.runtime-compact .runtime-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.runtime-compact :deep(.runtime-input) {
+  font-size: 0.82rem;
+}
+
+.runtime-compact .runtime-toggle-row {
+  padding-top: 0.15rem;
+}
+
+.runtime-compact .runtime-toggle-text {
+  font-size: 0.75rem;
+}
 
 /* ── State Banners ── */
-.state-banner { border-width: 1px; border-style: solid; border-radius: 1rem; padding: 1rem; }
-.state-banner-info { border-color: rgb(var(--color-accent-200) / 1); background-color: rgb(var(--color-accent-50) / 0.72); color: rgb(var(--color-accent-700) / 1); }
-.state-banner-danger { border-color: rgb(var(--color-danger-200) / 1); background-color: rgb(var(--color-danger-50) / 1); color: rgb(var(--color-danger-700) / 1); }
-.state-banner-success { border-color: rgb(var(--color-success-200) / 1); background-color: rgb(var(--color-success-50) / 0.85); color: rgb(var(--color-success-700) / 1); }
-.state-banner__icon-info { color: rgb(var(--color-accent-500) / 1); }
-.state-banner__icon-danger { color: rgb(var(--color-danger-500) / 1); }
-.state-note { border-width: 1px; border-style: solid; border-radius: 0.75rem; padding: 0.75rem; font-size: 11px; }
-.state-note-accent { border-color: rgb(var(--color-accent-200) / 1); background-color: rgb(var(--color-accent-50) / 0.75); color: rgb(var(--color-accent-700) / 1); }
+.state-banner {
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 1rem;
+  padding: 1rem;
+}
 
-/* ── Mode Switch ── */
-.mode-switch { display: flex; align-items: center; border: 1px solid var(--color-border-soft); border-radius: 0.75rem; background-color: rgb(var(--color-brand-100) / 0.4); padding: 0.25rem; }
-.mode-switch__btn { border: 1px solid transparent; border-radius: 0.5rem; padding: 0.375rem 0.75rem; color: var(--color-text-secondary); font-size: 0.75rem; font-weight: 600; transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
-.mode-switch__btn--with-icon { display: inline-flex; align-items: center; gap: 0.25rem; }
-.mode-switch__btn--active { border-color: rgb(var(--color-brand-400) / 1); background-color: var(--color-surface); color: rgb(var(--color-brand-700) / 1); }
-.mode-switch__btn--idle:hover { color: rgb(var(--color-brand-600) / 1); background-color: rgb(var(--color-brand-100) / 0.35); }
+.state-banner-info {
+  border-color: rgb(var(--color-accent-200) / 1);
+  background-color: rgb(var(--color-accent-50) / 0.72);
+  color: rgb(var(--color-accent-700) / 1);
+}
+
+.state-banner-danger {
+  border-color: rgb(var(--color-danger-200) / 1);
+  background-color: rgb(var(--color-danger-50) / 1);
+  color: rgb(var(--color-danger-700) / 1);
+}
+
+.state-banner-success {
+  border-color: rgb(var(--color-success-200) / 1);
+  background-color: rgb(var(--color-success-50) / 0.85);
+  color: rgb(var(--color-success-700) / 1);
+}
+
+.state-banner__icon-info {
+  color: rgb(var(--color-accent-500) / 1);
+}
+
+.state-banner__icon-danger {
+  color: rgb(var(--color-danger-500) / 1);
+}
+
+.state-note,
+.workflow-note {
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 0.85rem;
+  padding: 0.75rem;
+  font-size: 11px;
+}
+
+.state-note-accent {
+  border-color: rgb(var(--color-accent-200) / 1);
+  background-color: rgb(var(--color-accent-50) / 0.75);
+  color: rgb(var(--color-accent-700) / 1);
+}
+
+.workflow-note--brand {
+  border-color: rgb(var(--color-brand-200) / 1);
+  background-color: rgb(var(--color-brand-100) / 0.55);
+  color: rgb(var(--color-brand-700) / 1);
+}
+
+.workflow-note--danger {
+  border-color: rgb(var(--color-danger-200) / 1);
+  background-color: rgb(var(--color-danger-100) / 0.55);
+  color: rgb(var(--color-danger-700) / 1);
+}
+
+.workflow-note--success {
+  border-color: rgb(var(--color-success-200) / 1);
+  background-color: rgb(var(--color-success-100) / 0.55);
+  color: rgb(var(--color-success-700) / 1);
+}
 
 /* ── Pill Buttons ── */
-.pill-btn { border: 1px solid var(--color-border-soft); border-radius: 999px; padding: 0.375rem 0.75rem; font-size: 0.75rem; font-weight: 600; transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease; }
-.pill-btn--active { border-color: rgb(var(--color-brand-500) / 1); background-color: rgb(var(--color-brand-600) / 1); color: var(--color-surface); }
-.pill-btn--idle { background-color: var(--color-surface); color: var(--color-text-secondary); }
-.pill-btn--idle:hover { border-color: rgb(var(--color-brand-200) / 1); background-color: rgb(var(--color-brand-100) / 0.4); color: rgb(var(--color-brand-700) / 1); }
+.pill-btn {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 999px;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease;
+}
+
+.pill-btn--active {
+  border-color: rgb(var(--color-brand-300) / 1);
+  background-color: rgb(var(--color-brand-100) / 0.8);
+  color: rgb(var(--color-brand-700) / 1);
+}
+
+.pill-btn--idle {
+  background-color: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+
+.pill-btn--idle:hover {
+  border-color: rgb(var(--color-brand-200) / 1);
+  background-color: rgb(var(--color-brand-100) / 0.35);
+  color: rgb(var(--color-brand-700) / 1);
+}
 
 /* ── Dimension Popover ── */
-.dimension-info-trigger { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border: 1px solid var(--color-border-soft); border-radius: 999px; color: var(--color-text-muted); background-color: var(--color-surface); transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease; }
-.dimension-info-trigger:hover, .group:focus-within .dimension-info-trigger { color: rgb(var(--color-brand-600) / 1); border-color: rgb(var(--color-brand-300) / 1); background-color: rgb(var(--color-brand-100) / 0.35); }
-.dimension-info-popover { position: absolute; top: calc(100% + 0.5rem); right: 0; width: 22rem; max-width: 85vw; border: 1px solid var(--color-border-soft); border-radius: 0.75rem; background: linear-gradient(to bottom, var(--color-surface), rgb(var(--color-brand-50) / 0.05)); padding: 0.75rem; opacity: 0; pointer-events: none; transform: translateY(-4px); transition: opacity 0.2s ease, transform 0.2s ease; z-index: 30; }
-.group:hover .dimension-info-popover, .group:focus-within .dimension-info-popover { opacity: 1; pointer-events: auto; transform: translateY(0); }
-.dimension-info-title { font-size: 0.75rem; font-weight: 700; color: var(--color-text-primary); margin-bottom: 0.375rem; }
-.dimension-info-code { margin-top: 0.45rem; padding: 0.5rem; border-radius: 0.5rem; border: 1px solid rgb(var(--color-brand-200) / 1); background: linear-gradient(135deg, rgb(var(--color-brand-100) / 0.4), rgb(var(--color-brand-50) / 0.25)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; color: rgb(var(--color-brand-700) / 1); white-space: pre-wrap; }
-.dimension-explain-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.25rem; }
-.dimension-explain-item { border: 1px solid var(--color-border-soft); border-radius: 0.75rem; background-color: rgb(var(--color-brand-100) / 0.18); padding: 0.55rem 0.65rem; }
-.dimension-explain-item--active { border-color: rgb(var(--color-brand-400) / 1); border-width: 2px; background-color: rgb(var(--color-brand-100) / 0.6); }
-.dimension-explain-title { font-size: 11px; font-weight: 700; color: var(--color-text-primary); }
-.dimension-explain-item--active .dimension-explain-title { color: rgb(var(--color-brand-700) / 1); }
-.dimension-explain-text { margin-top: 0.2rem; font-size: 10px; line-height: 1.45; color: var(--color-text-secondary); }
-@media (max-width: 767px) {
-  .dimension-explain-grid { grid-template-columns: minmax(0, 1fr); }
-  .dimension-info-popover { right: -0.25rem; }
+.dimension-info-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 999px;
+  background-color: var(--color-surface);
+  color: var(--color-text-muted);
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.dimension-info-trigger:hover,
+.group:focus-within .dimension-info-trigger {
+  border-color: rgb(var(--color-brand-300) / 1);
+  background-color: rgb(var(--color-brand-100) / 0.35);
+  color: rgb(var(--color-brand-700) / 1);
+}
+
+.dimension-info-popover {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 30;
+  width: 22rem;
+  max-width: 85vw;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.85rem;
+  background: linear-gradient(180deg, var(--color-surface), rgb(var(--color-brand-100) / 0.2));
+  padding: 0.75rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.group:hover .dimension-info-popover,
+.group:focus-within .dimension-info-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.dimension-info-title {
+  margin-bottom: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.dimension-info-code {
+  margin-top: 0.45rem;
+  border: 1px solid rgb(var(--color-brand-200) / 1);
+  border-radius: 0.65rem;
+  background-color: rgb(var(--color-brand-100) / 0.4);
+  padding: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgb(var(--color-brand-700) / 1);
+  white-space: pre-wrap;
+}
+
+.dimension-explain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.dimension-explain-item {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.85rem;
+  background-color: rgb(var(--color-brand-100) / 0.18);
+  padding: 0.6rem 0.7rem;
+}
+
+.dimension-explain-item--active {
+  border-color: rgb(var(--color-brand-300) / 1);
+  background-color: rgb(var(--color-brand-100) / 0.55);
+}
+
+.dimension-explain-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.dimension-explain-item--active .dimension-explain-title {
+  color: rgb(var(--color-brand-700) / 1);
+}
+
+.dimension-explain-text {
+  margin-top: 0.2rem;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
 }
 
 /* ── Rule Input Shells ── */
-.rule-input-shell { border: 1px solid var(--color-border-soft); border-radius: 0.75rem; background-color: var(--color-surface); padding: 0.5rem; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
-.rule-input-shell:focus-within { border-color: rgb(var(--color-brand-300) / 1); box-shadow: 0 0 0 2px rgb(var(--color-brand-500) / 0.12); }
+.rule-input-shell {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.85rem;
+  background-color: var(--color-bg-base-soft);
+  padding: 0.55rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.rule-input-shell:focus-within {
+  border-color: rgb(var(--color-brand-300) / 1);
+  box-shadow: 0 0 0 2px rgb(var(--color-brand-500) / 0.1);
+}
 
 /* ── Noise Cards / Switches ── */
-.noise-card { border: 1px solid var(--color-border-soft); border-radius: 0.875rem; background-color: rgb(var(--color-brand-100) / 0.2); overflow: hidden; }
-.global-filter-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.7rem 0.875rem; }
-.global-filter-row+.global-filter-row { border-top: 1px solid var(--color-border-soft); }
-.switch-track { position: relative; display: inline-flex; width: 2.1rem; height: 1.18rem; flex-shrink: 0; cursor: pointer; align-items: center; border-radius: 999px; border: 1px solid var(--color-border-soft); transition: background-color 0.2s ease; }
-.switch-track:focus-visible { outline: 2px solid rgb(var(--color-brand-500) / 0.35); outline-offset: 2px; }
-.switch-track--on { background-color: rgb(var(--color-brand-500) / 1); border-color: rgb(var(--color-brand-500) / 1); }
-.switch-track--off { background-color: var(--color-surface-muted); }
-.switch-thumb { position: absolute; left: 0.14rem; top: 50%; width: 0.9rem; height: 0.9rem; border-radius: 999px; background-color: var(--color-surface); border: 1px solid rgb(var(--color-brand-100) / 1); transition: transform 0.2s ease; }
-.switch-thumb--off { transform: translate3d(0, -50%, 0); }
-.switch-thumb--on { transform: translate3d(1.06rem, -50%, 0); }
+.noise-card {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.95rem;
+  background-color: var(--color-bg-base-soft);
+  overflow: hidden;
+}
+
+.global-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.875rem;
+}
+
+.global-filter-row + .global-filter-row {
+  border-top: 1px solid var(--color-border-soft);
+}
 
 /* ── Chips ── */
-.chip { display: inline-flex; align-items: center; gap: 0.25rem; border-width: 1px; border-style: solid; border-radius: 0.5rem; padding: 0.25rem 0.5rem; font-size: 11px; font-weight: 600; }
-.chip--accent { border-color: rgb(var(--color-accent-200) / 1); background-color: rgb(var(--color-accent-100) / 0.85); color: rgb(var(--color-accent-700) / 1); }
-.chip--success { border-color: rgb(var(--color-success-200) / 1); background-color: rgb(var(--color-success-100) / 0.85); color: rgb(var(--color-success-700) / 1); }
-.chip--success-strong { align-items: flex-start; border-color: rgb(var(--color-success-200) / 1); background-color: rgb(var(--color-success-100) / 0.75); color: rgb(var(--color-success-700) / 1); }
-.chip-dot { width: 0.375rem; height: 0.375rem; border-radius: 999px; margin-top: 0.25rem; flex-shrink: 0; background-color: rgb(var(--color-success-500) / 1); }
-.chip__remove { border-radius: 999px; }
-.chip__remove:hover { color: var(--color-text-primary); }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 0.6rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chip--accent {
+  border-color: rgb(var(--color-accent-200) / 1);
+  background-color: rgb(var(--color-accent-100) / 0.85);
+  color: rgb(var(--color-accent-700) / 1);
+}
+
+.chip--success {
+  border-color: rgb(var(--color-success-200) / 1);
+  background-color: rgb(var(--color-success-100) / 0.85);
+  color: rgb(var(--color-success-700) / 1);
+}
+
+.chip--success-strong {
+  align-items: flex-start;
+  border-color: rgb(var(--color-success-200) / 1);
+  background-color: rgb(var(--color-success-100) / 0.75);
+  color: rgb(var(--color-success-700) / 1);
+}
+
+.chip-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  margin-top: 0.25rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background-color: rgb(var(--color-success-500) / 1);
+}
+
+.chip__remove {
+  border-radius: 999px;
+}
+
+.chip__remove:hover {
+  color: var(--color-text-primary);
+}
 
 /* ── Chip Rows (project filters) ── */
-.chip-row { display: flex; width: 100%; align-items: flex-start; justify-content: space-between; gap: 0.5rem; border: 1px solid var(--color-border-soft); border-radius: 0.5rem; background-color: var(--color-bg-base-soft); color: var(--color-text-secondary); padding: 0.375rem 0.5rem; font-size: 11px; font-weight: 600; }
-.chip-row__content { min-width: 0; display: flex; flex-direction: column; gap: 0.12rem; }
-.chip-row__category { font-size: 12px; font-weight: 700; color: var(--color-text-primary); line-height: 1.3; }
-.chip-row__description { font-size: 10px; color: var(--color-text-muted); line-height: 1.35; word-break: break-word; }
-.project-filter-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) auto; gap: 0.4rem; align-items: center; }
-.project-filter-input { width: 100%; border: 1px solid var(--color-border-soft); border-radius: 0.5rem; background-color: var(--color-bg-base-soft); padding: 0.4rem 0.55rem; font-size: 12px; line-height: 1.3; }
-.project-filter-input:focus { border-color: rgb(var(--color-brand-300) / 1); background-color: var(--color-surface); box-shadow: none; }
-.input-inline-shell { position: relative; display: flex; align-items: center; border: 1px solid var(--color-border-soft); border-radius: 0.5rem; background-color: var(--color-bg-base-soft); padding: 0.25rem 0.5rem; }
-.input-inline-shell:focus-within { border-color: rgb(var(--color-brand-300) / 1); }
-.project-filter-shell { background-color: rgb(var(--color-brand-100) / 0.18); }
-.project-filter-submit { min-width: 3.25rem; padding: 0.42rem 0.75rem; font-size: 12px; line-height: 1.2; }
-.project-filter-hint { margin-top: 0.35rem; padding-left: 0.25rem; font-size: 10px; color: var(--color-text-muted); }
-.project-filter-shell .text-danger { display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem; border-radius: 999px; color: rgb(var(--color-danger-600) / 1); transition: background-color 0.2s ease, color 0.2s ease; }
-.project-filter-shell .text-danger:hover { background-color: rgb(var(--color-danger-100) / 1); color: rgb(var(--color-danger-700) / 1); }
-@media (max-width: 1023px) {
-  .project-filter-form { grid-template-columns: minmax(0, 1fr); }
-  .project-filter-submit { justify-self: end; }
+.chip-row {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.65rem;
+  background-color: var(--color-bg-base-soft);
+  padding: 0.375rem 0.5rem;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.chip-row__content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.chip-row__category {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1.3;
+}
+
+.chip-row__description {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+  word-break: break-word;
+}
+
+.project-filter-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.project-filter-input {
+  width: 100%;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.6rem;
+  background-color: var(--color-bg-base-soft);
+  padding: 0.4rem 0.55rem;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.project-filter-input:focus {
+  border-color: rgb(var(--color-brand-300) / 1);
+  background-color: var(--color-surface);
+  box-shadow: none;
+}
+
+.input-inline-shell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.6rem;
+  background-color: var(--color-bg-base-soft);
+  padding: 0.25rem 0.5rem;
+}
+
+.input-inline-shell:focus-within {
+  border-color: rgb(var(--color-brand-300) / 1);
+}
+
+.project-filter-shell {
+  background-color: rgb(var(--color-brand-100) / 0.18);
+}
+
+.project-filter-submit {
+  min-width: 3.25rem;
+  padding: 0.42rem 0.75rem;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.project-filter-hint {
+  margin-top: 0.35rem;
+  padding-left: 0.25rem;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.project-filter-shell .text-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  color: rgb(var(--color-danger-600) / 1);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.project-filter-shell .text-danger:hover {
+  background-color: rgb(var(--color-danger-100) / 1);
+  color: rgb(var(--color-danger-700) / 1);
 }
 
 /* ── Result Badge ── */
-.result-badge { display: flex; width: 3.5rem; height: 3.5rem; align-items: center; justify-content: center; border-radius: 999px; border: 1px solid rgb(var(--color-success-200) / 1); background-color: rgb(var(--color-success-100) / 0.9); color: rgb(var(--color-success-600) / 1); }
+.result-badge {
+  display: flex;
+  width: 3.5rem;
+  height: 3.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--color-success-200) / 1);
+  background-color: rgb(var(--color-success-100) / 0.9);
+  color: rgb(var(--color-success-600) / 1);
+}
+
+@media (max-width: 1023px) {
+  .workflow-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workflow-summary__actions {
+    justify-content: flex-start;
+  }
+
+  .project-filter-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-filter-submit {
+    justify-self: end;
+  }
+}
+
+@media (max-width: 767px) {
+  .dimension-explain-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dimension-info-popover {
+    right: -0.25rem;
+  }
+
+  .retry-annotation {
+    position: static;
+    transform: none;
+    margin-top: 0.45rem;
+    white-space: normal;
+  }
+}
 </style>

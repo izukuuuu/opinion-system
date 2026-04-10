@@ -192,7 +192,12 @@
       <div class="umap-controls">
         <div class="umap-control-row">
           <label>密度视图：</label>
-          <input v-model="umapControls.density" type="checkbox" @change="updateUMAPChart" aria-label="启用密度视图" />
+          <AppCheckbox
+            v-model="umapControls.density"
+            aria-label="启用密度视图"
+            input-class="shadow-none"
+            @change="updateUMAPChart"
+          />
           <label>降采样上限：</label>
           <input v-model.number="umapControls.maxPoints" type="number" min="1000" step="1000" @change="updateUMAPChart"
             aria-label="降采样上限" placeholder="5000" />
@@ -203,10 +208,18 @@
         <div class="umap-control-row">
           <span>按主题筛选：</span>
           <div class="umap-topics-box">
-            <label v-for="topicId in availableTopics" :key="topicId" class="umap-topic-item">
-              <input type="checkbox" :value="topicId" v-model="umapControls.selectedTopics" @change="updateUMAPChart" />
+            <AppCheckbox
+              v-for="topicId in availableTopics"
+              :key="topicId"
+              v-model="umapControls.selectedTopics"
+              :value="topicId"
+              class="umap-topic-item"
+              label-class="gap-2"
+              input-class="shadow-none"
+              @change="updateUMAPChart"
+            >
               <span>{{ topicId }}</span>
-            </label>
+            </AppCheckbox>
           </div>
         </div>
       </div>
@@ -274,6 +287,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import AnalysisChartPanel from '@/components/AnalysisChartPanel.vue'
 import PlotlyChartPanel from '@/components/PlotlyChartPanel.vue'
+import AppCheckbox from '@/components/AppCheckbox.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import { useTopicBertopicView } from '@/composables/useTopicBertopicView'
 import { useActiveProject } from '@/composables/useActiveProject'
@@ -444,14 +458,14 @@ const filteredTopics = computed(() => {
 const maxTopN = computed(() => Math.max(1, filteredTopics.value.length || 1))
 
 const topicSelectOptions = computed(() =>
-  topicOptions.map(option => ({
+  (Array.isArray(topicOptions.value) ? topicOptions.value : []).map(option => ({
     value: option.bucket,
     label: option.display_name || option.name
   }))
 )
 
 const historySelectOptions = computed(() =>
-  analysisHistory.map(record => ({
+  (Array.isArray(analysisHistory.value) ? analysisHistory.value : []).map(record => ({
     value: record.id,
     label: `${record.start} ~ ${record.end}`
   }))
@@ -1899,9 +1913,9 @@ const updateTopN = (value) => {
   margin-top: 16px;
   padding: 12px 16px;
   border-radius: 12px;
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-  color: #991b1b;
+  border: 1px solid rgb(var(--color-danger-200) / 1);
+  background: rgb(var(--color-danger-50) / 1);
+  color: rgb(var(--color-danger-700) / 1);
   font-size: 0.9rem;
 }
 
@@ -1984,24 +1998,24 @@ const updateTopN = (value) => {
   background: var(--color-surface);
   border-radius: 0.75rem;
   padding: 1.25rem;
-  border-left: 4px solid #4361ee;
+  border-left: 4px solid rgb(var(--color-brand-600) / 1);
   border: 1px solid var(--color-border-soft);
 }
 
 .stat-card--primary {
-  border-left-color: #4361ee;
+  border-left-color: rgb(var(--color-brand-600) / 1);
 }
 
 .stat-card--success {
-  border-left-color: #10b981;
+  border-left-color: rgb(var(--color-success-500) / 1);
 }
 
 .stat-card--info {
-  border-left-color: #3b82f6;
+  border-left-color: rgb(var(--color-accent-600) / 1);
 }
 
 .stat-card--warning {
-  border-left-color: #f59e0b;
+  border-left-color: rgb(var(--color-warning-500) / 1);
 }
 
 .stat-card__icon {
@@ -2018,21 +2032,21 @@ const updateTopN = (value) => {
 .stat-card__value {
   font-size: 1.75rem;
   font-weight: 700;
-  color: #4361ee;
+  color: rgb(var(--color-brand-700) / 1);
   margin: 0 0 0.25rem 0;
   line-height: 1.2;
 }
 
 .stat-card--success .stat-card__value {
-  color: #10b981;
+  color: rgb(var(--color-success-600) / 1);
 }
 
 .stat-card--info .stat-card__value {
-  color: #3b82f6;
+  color: rgb(var(--color-accent-700) / 1);
 }
 
 .stat-card--warning .stat-card__value {
-  color: #f59e0b;
+  color: rgb(var(--color-warning-600) / 1);
 }
 
 .stat-card__label {
@@ -2186,8 +2200,8 @@ const updateTopN = (value) => {
 }
 
 .btn-primary {
-  background: #9ab2cb;
-  color: white;
+  background: rgb(var(--color-brand-600) / 1);
+  color: var(--color-surface);
 }
 
 .btn-primary:disabled {
@@ -2252,12 +2266,6 @@ const updateTopN = (value) => {
   color: var(--color-text-primary);
 }
 
-.umap-control-row input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  accent-color: #4361ee;
-}
-
 .umap-control-row input[type="number"] {
   width: 100px;
   padding: 8px 10px;
@@ -2269,17 +2277,22 @@ const updateTopN = (value) => {
   padding: 8px 16px;
   border-radius: 8px;
   border: none;
-  background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
-  color: white;
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-brand-600) / 1) 0%,
+    rgb(var(--color-brand-700) / 1) 100%
+  );
+  color: var(--color-surface);
   font-weight: 600;
   cursor: pointer;
 }
 
 .umap-selected-info {
   font-weight: 600;
-  color: #4361ee;
+  color: rgb(var(--color-brand-700) / 1);
   padding: 6px 12px;
-  background: rgba(110, 163, 255, 0.1);
+  background: rgb(var(--color-brand-100) / 0.5);
+  border: 1px solid rgb(var(--color-brand-200) / 1);
   border-radius: 8px;
   font-size: 14px;
 }
@@ -2295,7 +2308,7 @@ const updateTopN = (value) => {
   border-radius: 10px;
   background: var(--color-surface-muted);
   scrollbar-width: thin;
-  scrollbar-color: #4361ee transparent;
+  scrollbar-color: rgb(var(--color-brand-600) / 1) transparent;
 }
 
 .umap-topics-box::-webkit-scrollbar {
@@ -2304,7 +2317,7 @@ const updateTopN = (value) => {
 }
 
 .umap-topics-box::-webkit-scrollbar-thumb {
-  background: #4361ee;
+  background: rgb(var(--color-brand-600) / 1);
   border-radius: 4px;
 }
 
@@ -2315,18 +2328,10 @@ const updateTopN = (value) => {
 .umap-topic-item {
   display: flex;
   align-items: center;
-  gap: 8px;
   padding: 6px 10px;
-  background: rgba(67, 97, 238, 0.15);
+  background: rgb(var(--color-brand-100) / 0.45);
   border-radius: 8px;
-  border: 1px solid rgba(67, 97, 238, 0.3);
-}
-
-.umap-topic-item input[type="checkbox"] {
-  margin: 0;
-  width: 16px;
-  height: 16px;
-  accent-color: #4361ee;
+  border: 1px solid rgb(var(--color-brand-200) / 1);
 }
 
 .umap-topic-item span {
@@ -2390,7 +2395,12 @@ const updateTopN = (value) => {
 .llm-cluster-card {
   border-radius: 1rem;
   border: 1px solid var(--color-border-soft);
-  background: linear-gradient(135deg, rgb(var(--color-brand-600) / 0.05) 0%, color-mix(in srgb, var(--color-surface) 90%, transparent) 100%);
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-brand-100) / 0.32) 0%,
+    color-mix(in srgb, var(--color-surface) 94%, transparent) 58%,
+    rgb(var(--color-accent-50) / 0.3) 100%
+  );
   padding: 1.25rem;
 }
 
@@ -2424,8 +2434,13 @@ const updateTopN = (value) => {
 }
 
 .llm-cluster-card__badge {
-  background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
-  color: white;
+  border: 1px solid rgb(var(--color-brand-300) / 1);
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-brand-600) / 1) 0%,
+    rgb(var(--color-brand-700) / 1) 100%
+  );
+  color: var(--color-surface);
   padding: 0.375rem 0.875rem;
   border-radius: 999px;
   font-size: 0.8125rem;
@@ -2440,9 +2455,9 @@ const updateTopN = (value) => {
   line-height: 1.6;
   margin: 0 0 1rem 0;
   padding: 0.75rem;
-  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
   border-radius: 0.5rem;
-  border-left: 3px solid var(--color-brand-600-hex);
+  border-left: 3px solid rgb(var(--color-brand-500) / 1);
 }
 
 .llm-cluster-card__original,
@@ -2463,12 +2478,12 @@ const updateTopN = (value) => {
 }
 
 .llm-cluster-card__original-tag {
-  background: rgba(67, 97, 238, 0.15);
-  color: #4361ee;
+  background: rgb(var(--color-accent-100) / 0.7);
+  color: rgb(var(--color-accent-700) / 1);
   padding: 0.25rem 0.625rem;
   border-radius: 0.375rem;
   font-weight: 500;
-  border: 1px solid rgba(67, 97, 238, 0.3);
+  border: 1px solid rgb(var(--color-accent-200) / 1);
 }
 
 .llm-cluster-card__keyword-tag {
@@ -2493,7 +2508,11 @@ const updateTopN = (value) => {
 }
 
 .stats-table thead {
-  background: linear-gradient(135deg, rgba(67, 97, 238, 0.1) 0%, rgba(67, 97, 238, 0.05) 100%);
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-brand-100) / 0.55) 0%,
+    rgb(var(--color-accent-50) / 0.45) 100%
+  );
 }
 
 .stats-table th {
@@ -2524,7 +2543,7 @@ const updateTopN = (value) => {
 
 .stats-table__topic-name {
   font-weight: 600;
-  color: #4361ee;
+  color: rgb(var(--color-brand-700) / 1);
 }
 
 .stats-table__doc-count {

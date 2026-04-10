@@ -4,7 +4,7 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="space-y-1">
           <h2 class="text-xl font-semibold text-primary">AI 完整报告</h2>
-          <p class="text-sm text-secondary">这里展示基于结构化结果整理出的正式文稿，适合直接阅读、导出和分享。</p>
+          <p class="text-sm text-secondary">完整报告页不再依赖 markdown 排版，直接复用统一的结构化报告文档和图表目录。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="topicsState.loading" @click="loadTopics">
@@ -62,7 +62,7 @@
           建议范围：{{ availableRange.start || '--' }} → {{ availableRange.end || '--' }}
           <span v-if="availableRange.loading" class="ml-2 animate-pulse">检查中…</span>
           <span v-else-if="availableRange.error" class="ml-2 text-danger">{{ availableRange.error }}</span>
-          <span v-else-if="availableRange.notice" class="ml-2 text-amber-600">{{ availableRange.notice }}</span>
+          <span v-else-if="availableRange.notice" class="ml-2 text-warning">{{ availableRange.notice }}</span>
         </p>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="fullReportState.loading || fullReportState.regenerating" @click="handleLoad">
@@ -94,12 +94,14 @@
         <section class="card-surface space-y-4 p-5">
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">报告信息</p>
-            <h3 class="mt-2 text-lg font-semibold text-primary">{{ fullReport.title }}</h3>
-            <p class="mt-2 text-sm text-secondary">{{ fullReport.subtitle || 'AI 完整报告视图' }}</p>
+            <h3 class="mt-2 text-lg font-semibold text-primary">{{ reportTitle }}</h3>
+            <p class="mt-2 text-sm text-secondary">{{ reportSubtitle }}</p>
           </div>
           <div class="space-y-2 text-sm text-secondary">
-            <p>{{ fullReport.rangeText }}</p>
-            <p>知识术语：{{ knowledgeTermsText }}</p>
+            <p>{{ fullReport.rangeText || reportRange }}</p>
+            <p>图表位点：{{ chartCatalog.length }} 个</p>
+            <p>引用索引：{{ citationCount }} 条</p>
+            <p v-if="fullReportState.lastLoaded">读取时间：{{ fullReportState.lastLoaded }}</p>
           </div>
         </section>
 
@@ -113,20 +115,34 @@
               :key="item.id"
               :href="`#${item.id}`"
               class="block rounded-xl px-3 py-2 text-sm transition hover:bg-brand-soft hover:text-brand-700"
-              :class="item.level === 1 ? 'font-semibold text-primary' : (item.level === 2 ? 'pl-3 text-secondary' : 'pl-6 text-muted')"
+              :class="item.kind === 'appendix' ? 'font-semibold text-secondary' : 'font-semibold text-primary'"
             >
-              {{ item.text }}
+              {{ item.label }}
             </a>
           </nav>
         </section>
 
+        <section v-if="hero.highlights?.length" class="card-surface space-y-3 p-5">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">核心发现</p>
+          </div>
+          <article v-for="item in hero.highlights" :key="item" class="rounded-3xl border border-soft bg-surface-muted/40 p-4">
+            <p class="text-sm leading-7 text-primary">{{ item }}</p>
+          </article>
+        </section>
       </aside>
 
-      <article class="card-surface overflow-hidden p-0">
-        <div class="border-b border-soft px-6 py-5">
-          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">文稿预览</p>
+      <article class="card-surface space-y-6 overflow-hidden p-6">
+        <div class="border-b border-soft pb-5">
+          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">结构化文稿预览</p>
+          <p class="mt-2 text-sm text-secondary">当前预览、结构化结果页和导出 HTML 都来自同一份 `report_document`，不再走独立的 markdown 模板。</p>
         </div>
-        <div class="ai-report-body px-6 py-8" v-html="renderedHtml"></div>
+
+        <ReportDocumentRenderer
+          :document="reportDocument"
+          :chart-catalog="chartCatalog"
+          :report-data="reportBundle"
+        />
       </article>
     </section>
 
@@ -148,8 +164,9 @@ import {
   SparklesIcon
 } from '@heroicons/vue/24/outline'
 import AppSelect from '../../components/AppSelect.vue'
+import ReportDocumentRenderer from '../../components/report/ReportDocumentRenderer.vue'
 import { useReportGeneration } from '../../composables/useReportGeneration'
-import { exportableAiMarkdown, extractMarkdownToc, renderAiReportMarkdown } from '../../utils/aiReportMarkdown'
+import { buildStandaloneReportHtml } from '../../utils/reportDocumentHtml'
 
 const router = useRouter()
 
@@ -171,22 +188,37 @@ const {
 } = useReportGeneration()
 
 const fullReport = computed(() => (fullReportData.value && typeof fullReportData.value === 'object' ? fullReportData.value : null))
-const fullMeta = computed(() => ({
-  knowledgeTerms: Array.isArray(fullReport.value?.meta?.knowledge_terms)
-    ? fullReport.value.meta.knowledge_terms.map((item) => String(item || '').trim()).filter(Boolean)
-    : []
-}))
-const tocItems = computed(() => extractMarkdownToc(fullReport.value?.markdown || ''))
-const renderedHtml = computed(() => renderAiReportMarkdown(fullReport.value?.markdown || '', { assets: fullReport.value?.assets || [] }))
+const reportBundle = computed(() => (fullReport.value?.report_data && typeof fullReport.value.report_data === 'object' ? fullReport.value.report_data : fullReport.value || {}))
+const reportDocument = computed(() => (fullReport.value?.report_document && typeof fullReport.value.report_document === 'object' ? fullReport.value.report_document : {}))
+const chartCatalog = computed(() => (Array.isArray(fullReport.value?.chart_catalog) ? fullReport.value.chart_catalog : []))
+const hero = computed(() => (reportDocument.value?.hero && typeof reportDocument.value.hero === 'object' ? reportDocument.value.hero : {}))
+const task = computed(() => (reportBundle.value?.task && typeof reportBundle.value.task === 'object' ? reportBundle.value.task : {}))
 
-const knowledgeTermsText = computed(() => fullMeta.value.knowledgeTerms.length ? fullMeta.value.knowledgeTerms.join('、') : '暂无')
+const reportTitle = computed(() => fullReport.value?.title || hero.value.title || task.value.topic_label || task.value.topic_identifier || 'AI 完整报告')
+const reportSubtitle = computed(() => fullReport.value?.subtitle || hero.value.subtitle || '统一结构化报告阅读视图')
+const reportRange = computed(() => `${task.value.start || '--'} → ${task.value.end || '--'}`)
+const citationCount = computed(() => (Array.isArray(reportBundle.value?.citations) ? reportBundle.value.citations.length : 0))
 
-const topicSelectOptions = computed(() =>
-  topicOptions.value.map(option => ({ value: option, label: option }))
-)
+const tocItems = computed(() => {
+  const sections = Array.isArray(reportDocument.value?.sections) ? reportDocument.value.sections : []
+  const items = sections.map((section) => ({
+    id: section.section_id,
+    label: section.kicker || section.title || section.section_id,
+    kind: 'section'
+  }))
+  if (reportDocument.value?.appendix?.blocks?.length) {
+    items.push({
+      id: 'report-appendix',
+      label: reportDocument.value.appendix.title || '附录',
+      kind: 'appendix'
+    })
+  }
+  return items
+})
 
+const topicSelectOptions = computed(() => topicOptions.value.map((option) => ({ value: option, label: option })))
 const historySelectOptions = computed(() =>
-  reportHistory.value.map(record => ({
+  reportHistory.value.map((record) => ({
     value: record.id,
     label: `${record.start} → ${record.end}`
   }))
@@ -205,8 +237,8 @@ const handleLoad = async () => {
 }
 
 const handleRegenerate = async () => {
-  const task = await createReportTask()
-  if (task?.id) {
+  const taskRecord = await createReportTask()
+  if (taskRecord?.id) {
     router.push({ name: 'report-generation-run' })
   }
 }
@@ -215,50 +247,16 @@ const goToRunPage = () => router.push({ name: 'report-generation-run' })
 
 const exportMarkdown = () => {
   if (!fullReport.value) return
-  const markdown = exportableAiMarkdown(fullReport.value.markdown || '', { assets: fullReport.value.assets || [] })
+  const markdown = String(fullReport.value.markdown || '').trim()
   const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
-  downloadBlob(blob, `${fullReport.value.title || 'ai-report'}.md`)
+  downloadBlob(blob, `${reportTitle.value || 'ai-report'}.md`)
 }
 
 const exportHtml = () => {
   if (!fullReport.value) return
-  const html = `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${escapeHtml(fullReport.value.title || 'AI 完整报告')}</title>
-  <style>
-    body { margin: 0; padding: 40px 24px; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #0f172a; background: #f8fafc; }
-    .shell { max-width: 980px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 24px; overflow: hidden; }
-    .head { padding: 32px 36px; border-bottom: 1px solid #e2e8f0; background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%); }
-    .head h1 { margin: 0; font-size: 32px; }
-    .head p { margin: 10px 0 0; color: #475569; }
-    .body { padding: 32px 36px 44px; }
-    .body h1, .body h2, .body h3 { color: #0f172a; line-height: 1.3; }
-    .body h1 { font-size: 30px; margin: 0 0 18px; }
-    .body h2 { font-size: 24px; margin: 34px 0 14px; }
-    .body h3 { font-size: 18px; margin: 24px 0 10px; }
-    .body p, .body li { font-size: 15px; line-height: 1.9; color: #334155; }
-    .body img { display: block; width: 100%; max-width: 920px; margin: 18px auto; border-radius: 20px; border: 1px solid #dbeafe; background: #f8fafc; }
-    .body ul, .body ol { padding-left: 22px; }
-    .body blockquote { margin: 20px 0; padding: 14px 18px; border-left: 4px solid #93c5fd; background: #eff6ff; color: #1e3a8a; }
-    .body code { padding: 2px 6px; border-radius: 6px; background: #e2e8f0; }
-  </style>
-</head>
-<body>
-  <div class="shell">
-    <header class="head">
-      <h1>${escapeHtml(fullReport.value.title || 'AI 完整报告')}</h1>
-      <p>${escapeHtml(fullReport.value.subtitle || fullReport.value.rangeText || '')}</p>
-      <p>${escapeHtml(fullReport.value.lastUpdated || '')}</p>
-    </header>
-    <main class="body">${renderedHtml.value}</main>
-  </div>
-</body>
-</html>`
+  const html = buildStandaloneReportHtml(fullReport.value, { lastLoaded: fullReportState.lastLoaded })
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-  downloadBlob(blob, `${fullReport.value.title || 'ai-report'}.html`)
+  downloadBlob(blob, `${reportTitle.value || 'ai-report'}.html`)
 }
 
 function downloadBlob(blob, filename) {
@@ -271,83 +269,4 @@ function downloadBlob(blob, filename) {
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
 }
-
-function escapeHtml(text) {
-  return String(text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
 </script>
-
-<style scoped>
-.ai-report-body :deep(.ai-report-heading) {
-  scroll-margin-top: 100px;
-  color: rgb(15 23 42);
-  line-height: 1.3;
-}
-
-.ai-report-body :deep(.ai-report-heading-1) {
-  margin: 0 0 1.25rem;
-  font-size: 2rem;
-  font-weight: 700;
-}
-
-.ai-report-body :deep(.ai-report-heading-2) {
-  margin: 2rem 0 0.875rem;
-  font-size: 1.45rem;
-  font-weight: 700;
-}
-
-.ai-report-body :deep(.ai-report-heading-3) {
-  margin: 1.5rem 0 0.75rem;
-  font-size: 1.1rem;
-  font-weight: 700;
-}
-
-.ai-report-body :deep(p),
-.ai-report-body :deep(li) {
-  color: rgb(51 65 85);
-  font-size: 0.97rem;
-  line-height: 1.9;
-}
-
-.ai-report-body :deep(ul),
-.ai-report-body :deep(ol) {
-  padding-left: 1.35rem;
-}
-
-.ai-report-body :deep(img) {
-  display: block;
-  width: 100%;
-  max-width: 920px;
-  margin: 1.25rem auto;
-  border-radius: 1.25rem;
-  border: 1px solid rgb(219 234 254);
-  background: rgb(248 250 252);
-}
-
-.ai-report-body :deep(blockquote) {
-  margin: 1.25rem 0;
-  padding: 0.95rem 1rem;
-  border-left: 4px solid rgb(147 197 253);
-  background: rgb(239 246 255);
-  color: rgb(30 64 175);
-  border-radius: 0 1rem 1rem 0;
-}
-
-.ai-report-body :deep(code) {
-  padding: 0.1rem 0.35rem;
-  border-radius: 0.45rem;
-  background: var(--color-surface-muted);
-  font-size: 0.92em;
-}
-
-.ai-report-body :deep(hr) {
-  margin: 1.75rem 0;
-  border: 0;
-  border-top: 1px solid var(--color-surface-muted);
-}
-</style>

@@ -1105,6 +1105,7 @@ def system_cancel_background_task(task_id: str):
     - publisher-detection:pd-20250101-120000-abc123
     - fluid-analysis:fa-20250101-120000-abc123
     - basic-analysis:ba-20250101-120000-abc123
+    - bertopic:bt-20250101-120000-abc123
     - deduplicate:<topic>:<database>
     - postclean:<topic>:<database>
     - fetch-refresh:<topic>:<database>
@@ -1143,6 +1144,11 @@ def system_cancel_background_task(task_id: str):
         elif source == "basic-analysis":
             from server_support.basic_analysis import cancel_task as cancel_basic_analysis_task
             task = cancel_basic_analysis_task(actual_id)
+            return success({"data": task})
+
+        elif source == "bertopic":
+            from server_support.bertopic_analysis import cancel_task as cancel_bertopic_task
+            task = cancel_bertopic_task(actual_id)
             return success({"data": task})
 
         elif source == "deduplicate":
@@ -1218,6 +1224,11 @@ def system_delete_background_task(task_id: str):
         elif source == "basic-analysis":
             from server_support.basic_analysis import delete_task as delete_basic_analysis_task
             delete_basic_analysis_task(actual_id)
+            return success({"data": {"deleted": task_id}})
+
+        elif source == "bertopic":
+            from server_support.bertopic_analysis import delete_task as delete_bertopic_task
+            delete_bertopic_task(actual_id)
             return success({"data": {"deleted": task_id}})
 
         elif source == "deduplicate":

@@ -67,15 +67,31 @@
         </label>
       </div>
 
-      <!-- Clear password toggle -->
-      <label class="inline-flex items-center gap-2 cursor-pointer text-sm text-secondary select-none">
-        <input
-          v-model="form.clearPassword"
-          type="checkbox"
-          class="settings-checkbox"
-        />
-        清空已保存的密码
-      </label>
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          class="inline-flex items-center rounded-full border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+          :class="form.clearPassword
+            ? 'border-danger bg-danger-soft text-danger'
+            : 'border-soft bg-surface text-secondary hover:border-danger hover:text-danger'"
+          :disabled="!credentialsSummary.password_configured || loading"
+          @click="handleClearPasswordClick"
+        >
+          {{ form.clearPassword ? '已标记清空密码' : '清空已保存的密码' }}
+        </button>
+        <button
+          v-if="form.clearPassword"
+          type="button"
+          class="inline-flex items-center rounded-full border border-soft bg-surface px-4 py-2 text-sm font-semibold text-secondary transition hover:border-brand hover:text-primary"
+          :disabled="loading"
+          @click="form.clearPassword = false"
+        >
+          撤销
+        </button>
+        <p class="text-xs text-muted">
+          {{ form.clearPassword ? '保存设置后会清空当前已保存密码。' : '这是危险操作，点击后会再次确认。' }}
+        </p>
+      </div>
     </section>
 
     <section class="settings-section settings-section-split">
@@ -146,20 +162,26 @@
 
       <!-- Toggle options -->
       <div class="grid gap-3 sm:grid-cols-2">
-        <label class="flex items-center gap-3 rounded-2xl border border-soft bg-base-soft px-4 py-3 text-sm text-secondary cursor-pointer select-none">
-          <input v-model="form.headless" type="checkbox" class="settings-checkbox" />
+        <AppCheckbox
+          v-model="form.headless"
+          class="w-full"
+          label-class="w-full gap-3 rounded-2xl border border-soft bg-base-soft px-4 py-3 text-sm text-secondary cursor-pointer select-none"
+        >
           <div>
             <span class="font-medium text-primary">隐藏浏览器窗口</span>
-            <p class="text-xs text-muted mt-0.5">关闭后会显示浏览器窗口，便于观察登录过程</p>
+            <p class="mt-0.5 text-xs text-muted">关闭后会显示浏览器窗口，便于观察登录过程</p>
           </div>
-        </label>
-        <label class="flex items-center gap-3 rounded-2xl border border-soft bg-base-soft px-4 py-3 text-sm text-secondary cursor-pointer select-none">
-          <input v-model="form.noProxy" type="checkbox" class="settings-checkbox" />
+        </AppCheckbox>
+        <AppCheckbox
+          v-model="form.noProxy"
+          class="w-full"
+          label-class="w-full gap-3 rounded-2xl border border-soft bg-base-soft px-4 py-3 text-sm text-secondary cursor-pointer select-none"
+        >
           <div>
             <span class="font-medium text-primary">登录阶段禁用系统代理</span>
-            <p class="text-xs text-muted mt-0.5">仅登录步骤绕过代理设置</p>
+            <p class="mt-0.5 text-xs text-muted">仅登录步骤绕过代理设置</p>
           </div>
-        </label>
+        </AppCheckbox>
       </div>
     </section>
 
@@ -308,6 +330,19 @@ async function fetchSettings() {
     feedback.type = 'error'
     feedback.message = err instanceof Error ? err.message : '读取 NetInsight 配置失败'
   }
+}
+
+function handleClearPasswordClick() {
+  if (!credentialsSummary.password_configured || loading.value) return
+  if (form.clearPassword) return
+
+  const confirmed = window.confirm('确认清空当前已保存的 NetInsight 密码吗？该操作会在你点击“保存设置”后生效。')
+  if (!confirmed) return
+
+  form.clearPassword = true
+  form.password = ''
+  feedback.type = ''
+  feedback.message = ''
 }
 
 async function submit() {

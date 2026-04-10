@@ -21,6 +21,7 @@ from server_support.topic_context import TopicContext  # type: ignore
 from src.report.deep_report import (  # type: ignore
     AI_FULL_REPORT_CACHE_FILENAME,
     REPORT_CACHE_FILENAME,
+    ReportRuntimeFailure,
     run_or_resume_deep_report_task,
 )
 from src.report.deep_report.assets import build_artifacts_root  # type: ignore
@@ -40,6 +41,7 @@ from src.report.task_queue import (  # type: ignore
     reserve_next_task,
     set_worker_pid,
     should_cancel,
+    update_task_trust,
     update_todos,
     write_worker_status,
 )
@@ -128,7 +130,8 @@ def main() -> None:
                 mark_task_cancelled(task_id, str(exc))
             except Exception as exc:
                 LOGGER.exception("Report worker failed | task=%s", task_id)
-                mark_task_failed(task_id, str(exc))
+                diagnostic = _build_failure_diagnostic(task_id, exc)
+                mark_task_failed(task_id, _failure_message(exc, diagnostic), payload=diagnostic)
     finally:
         write_worker_status(
             {
@@ -248,9 +251,9 @@ def _run_task(task_id: str) -> None:
                 delta="当前任务使用 research 模式，会保留更完整的调研轨迹。",
             )
         _raise_if_cancelled(task_id)
-        update_todos(
+        _maybe_update_fallback_todos(
             task_id,
-            todos=_deep_todos_snapshot("interpret"),
+            stage="interpret",
             phase="interpret",
             message="总控代理开始协调检索、证据整理和结构分析。",
         )
@@ -274,6 +277,12 @@ def _run_task(task_id: str) -> None:
             resume_payload=resume_payload,
             event_callback=lambda event: _handle_report_event(task_id, event),
         )
+        if str(runtime_result.get("status") or "").strip() == "failed":
+            diagnostic = runtime_result.get("diagnostic") if isinstance(runtime_result.get("diagnostic"), dict) else {}
+            raise ReportRuntimeFailure(
+                str(runtime_result.get("message") or "深度代理执行失败。").strip() or "深度代理执行失败。",
+                diagnostic,
+            )
         report_payload = runtime_result.get("structured_payload") if isinstance(runtime_result.get("structured_payload"), dict) else {}
         full_report_payload = runtime_result.get("full_payload") if isinstance(runtime_result.get("full_payload"), dict) else {}
         if report_payload:
@@ -287,9 +296,15 @@ def _run_task(task_id: str) -> None:
                 digest=_structured_digest_from_payload(report_payload),
                 path=str(cache_path),
             )
-            update_todos(
+            update_task_trust(
                 task_id,
-                todos=_deep_todos_snapshot("review"),
+                trust=_trust_from_payload(report_payload),
+                phase="write",
+                message="已根据结构化结果更新置信信息。",
+            )
+            _maybe_update_fallback_todos(
+                task_id,
+                stage="review",
                 phase="write",
                 message="结构化结果已生成，正在准备正式文稿。",
             )
@@ -298,9 +313,9 @@ def _run_task(task_id: str) -> None:
         if str(runtime_result.get("status") or "").strip() == "interrupted":
             approval_items = runtime_result.get("approvals") if isinstance(runtime_result.get("approvals"), list) else []
             mark_task_progress(task_id, phase="review", percentage=PHASE_PERCENTAGE["review"], message="文稿写入前需要人工确认。")
-            update_todos(
+            _maybe_update_fallback_todos(
                 task_id,
-                todos=_deep_todos_snapshot("persist"),
+                stage="persist",
                 phase="persist",
                 message="正式写入前等待人工确认。",
             )
@@ -318,9 +333,9 @@ def _run_task(task_id: str) -> None:
             raise RuntimeError("深度代理未产出完整文稿缓存。")
 
         mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="正在整理最终报告产物。")
-        update_todos(
+        _maybe_update_fallback_todos(
             task_id,
-            todos=_deep_todos_snapshot("completed"),
+            stage="completed",
             phase="persist",
             message="结构化结果、正式文稿和校验结果均已完成。",
         )
@@ -380,14 +395,6 @@ def _heartbeat_loop(task_id: str, stop_event: threading.Event, started_at: str) 
                     "started_at": started_at,
                 }
             )
-            append_event(
-                task_id,
-                event_type="heartbeat",
-                phase=str(task.get("phase") or ""),
-                title="worker heartbeat",
-                message=str(task.get("message") or "").strip() or "worker 仍在运行。",
-                payload={"worker_pid": os.getpid()},
-            )
         except Exception:
             continue
 
@@ -413,9 +420,29 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
         )
     if event_type == "phase.started":
         mark_task_progress(task_id, phase=phase, percentage=PHASE_PERCENTAGE.get(phase, 60), message=message or title or "阶段已开始。")
+        if payload:
+            append_event(
+                task_id,
+                event_type="phase.context",
+                phase=phase,
+                agent=agent,
+                title=title,
+                message=message,
+                payload=payload,
+            )
         return
     if event_type == "phase.progress":
         mark_task_progress(task_id, phase=phase, percentage=PHASE_PERCENTAGE.get(phase, 60), message=message or title or "阶段执行中。")
+        if payload:
+            append_event(
+                task_id,
+                event_type="phase.context",
+                phase=phase,
+                agent=agent,
+                title=title,
+                message=message,
+                payload=payload,
+            )
         return
     if event_type == "agent.started":
         mark_agent_started(
@@ -507,6 +534,60 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
     )
 
 
+def _failure_message(exc: Exception, diagnostic: Dict[str, Any]) -> str:
+    category = str(diagnostic.get("category") or "").strip()
+    if category == "model_connection":
+        return "模型连接失败：当前环境无法访问上游模型服务。"
+    closure_stage = str(diagnostic.get("closure_stage") or "").strip()
+    if closure_stage == "fallback_synthesis_failed":
+        return "总控未保存结构化结果，服务端补写失败。"
+    if closure_stage == "structured_validation_failed":
+        return "结构化结果已生成，但字段校验未通过。"
+    if closure_stage == "agent_save_missing":
+        return "总控未调用结构化保存，系统已尝试自动补写。"
+    if closure_stage == "tool_round_limit_reached":
+        return "任务达到工具回合上限，建议提高总控或子代理回合数后重试。"
+    text = str(exc or "").strip()
+    return text or "报告任务执行失败。"
+
+
+def _build_failure_diagnostic(task_id: str, exc: Exception) -> Dict[str, Any]:
+    task = get_task(task_id)
+    cause = exc.__cause__ or exc.__context__
+    extra = getattr(exc, "task_diagnostic", None)
+    diagnostic: Dict[str, Any] = {
+        "error_type": type(exc).__name__,
+        "error_message": str(exc or "").strip(),
+        "failed_phase": str(task.get("phase") or "").strip() or "prepare",
+        "failed_actor": str(task.get("current_actor") or "").strip() or "report_coordinator",
+        "current_operation": str(task.get("current_operation") or "").strip(),
+    }
+    if isinstance(extra, dict) and extra:
+        diagnostic.update(extra)
+    if cause is not None:
+        diagnostic["root_cause_type"] = type(cause).__name__
+        diagnostic["root_cause_message"] = str(cause or "").strip()
+
+    combined_text = " ".join(
+        part for part in [
+            diagnostic.get("error_type"),
+            diagnostic.get("error_message"),
+            diagnostic.get("root_cause_type"),
+            diagnostic.get("root_cause_message"),
+        ]
+        if str(part or "").strip()
+    ).lower()
+    if "apiconnectionerror" in combined_text or "connecterror" in combined_text or "winerror 10013" in combined_text:
+        diagnostic.update(
+            {
+                "category": "model_connection",
+                "retryable": True,
+                "hint": "请检查当前机器到模型服务的网络连通性、代理配置、防火墙或安全软件拦截。",
+            }
+        )
+    return diagnostic
+
+
 def _raise_if_cancelled(task_id: str) -> None:
     if should_cancel(task_id):
         raise TaskCancelled("任务已按请求取消。")
@@ -537,6 +618,61 @@ def _structured_digest_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _trust_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
+    evidence_blocks = payload.get("key_evidence") if isinstance(payload.get("key_evidence"), list) else []
+    citations = payload.get("citations") if isinstance(payload.get("citations"), list) else []
+    validation_notes = payload.get("validation_notes") if isinstance(payload.get("validation_notes"), list) else []
+
+    unique_citation_ids = set()
+    corroborated_blocks = 0
+    confidence_values = []
+    for item in evidence_blocks:
+        if not isinstance(item, dict):
+            continue
+        citation_ids = {
+            str(citation_id).strip()
+            for citation_id in (item.get("citation_ids") or [])
+            if str(citation_id or "").strip()
+        }
+        unique_citation_ids.update(citation_ids)
+        if len(citation_ids) >= 2:
+            corroborated_blocks += 1
+        confidence = str(item.get("confidence") or "").strip().lower()
+        confidence_values.append({"high": 1.0, "medium": 0.65, "low": 0.35}.get(confidence, 0.5))
+
+    official_sources = 0
+    for citation in citations:
+        if not isinstance(citation, dict):
+            continue
+        source_type = str(citation.get("source_type") or "").strip().lower()
+        if source_type in {"official", "government", "gov", "media_official", "official_media"}:
+            official_sources += 1
+
+    coverage_penalty = sum(
+        1
+        for note in validation_notes
+        if isinstance(note, dict)
+        and str(note.get("category") or "").strip().lower() == "coverage"
+        and str(note.get("severity") or "").strip().lower() in {"high", "medium"}
+    )
+
+    total_citations = max(len(citations), 1)
+    total_evidence = max(len(evidence_blocks), 1)
+    evidence_coverage = min(len(unique_citation_ids) / total_citations, 1.0)
+    if coverage_penalty:
+        evidence_coverage = max(0.0, evidence_coverage - 0.15 * coverage_penalty)
+
+    return {
+        "status": "ready",
+        "confidence_label": str(conclusion.get("confidence_label") or "").strip() or "待评估",
+        "evidence_coverage": round(evidence_coverage, 4),
+        "corroborated_coverage": round(corroborated_blocks / total_evidence, 4),
+        "official_source_coverage": round(official_sources / total_citations, 4),
+        "avg_signal": round(sum(confidence_values) / max(len(confidence_values), 1), 4),
+    }
+
+
 def _deep_todos_snapshot(stage: str) -> list[Dict[str, Any]]:
     order = ["scope", "retrieval", "evidence", "structure", "writing", "validation", "persist"]
     labels = {
@@ -546,7 +682,7 @@ def _deep_todos_snapshot(stage: str) -> list[Dict[str, Any]]:
         "structure": "结构分析",
         "writing": "文稿生成",
         "validation": "质量校验",
-        "persist": "审批与落盘",
+        "persist": "审批与存储",
     }
     progress_map = {
         "interpret": {"scope": "completed", "retrieval": "running", "evidence": "pending", "structure": "pending", "writing": "pending", "validation": "pending", "persist": "pending"},
@@ -556,6 +692,19 @@ def _deep_todos_snapshot(stage: str) -> list[Dict[str, Any]]:
     }
     selected = progress_map.get(stage, progress_map["interpret"])
     return [{"id": item, "label": labels[item], "status": selected[item]} for item in order]
+
+
+def _maybe_update_fallback_todos(task_id: str, *, stage: str, phase: str, message: str) -> None:
+    task = get_task(task_id)
+    todos = task.get("todos") if isinstance(task.get("todos"), list) else []
+    if todos:
+        return
+    update_todos(
+        task_id,
+        todos=_deep_todos_snapshot(stage),
+        phase=phase,
+        message=message,
+    )
 
 
 def _has_rejected_approval(task: Dict[str, Any]) -> bool:

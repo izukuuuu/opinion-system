@@ -308,7 +308,7 @@ def _run_task(task_id: str) -> None:
         deduped_records, removed_duplicates = list(all_records), 0
 
     if not deduped_records:
-        raise NetInsightError("采集完成，但没有可落盘的数据记录。")
+        raise NetInsightError("采集完成，但没有可存储的数据记录。")
 
     mark_task_progress(
         task_id,

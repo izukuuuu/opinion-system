@@ -1,7 +1,10 @@
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, effectScope, reactive, ref, watch } from 'vue'
+import { useEventSource } from '@vueuse/core'
 import { useApiBase } from './useApiBase'
 import { normaliseRecord, splitFolderRange as sharedSplitFolderRange } from './useArchiveHistory'
 import { buildAnalysisSections } from '../utils/analysisSections'
+import { createReportRunLifecycleActor, buildLifecycleSnapshotInput } from '../machines/reportRunMachine'
+import { useReportRunStore } from '../stores/reportRun'
 
 const MAX_HISTORY = 24
 const TASK_STORAGE_PREFIX = 'opinion-system:report-task'
@@ -35,42 +38,7 @@ const progressState = reactive({
   updatedAt: ''
 })
 const historyState = reactive({ loading: false, error: '', topic: '' })
-const taskState = reactive({
-  loading: false,
-  creating: false,
-  streaming: false,
-  reconnecting: false,
-  usingPollingFallback: false,
-  error: '',
-  id: '',
-  threadId: '',
-  reused: false,
-  topic: '',
-  topicIdentifier: '',
-  start: '',
-  end: '',
-  mode: 'fast',
-  status: 'idle',
-  phase: '',
-  percentage: 0,
-  message: '',
-  updatedAt: '',
-  startedAt: '',
-  finishedAt: '',
-  workerPid: 0,
-  childPid: 0,
-  cancelRequested: false,
-  trust: {},
-  artifacts: {},
-  subagents: [],
-  agents: [],
-  todos: [],
-  approvals: [],
-  runState: {},
-  structuredResultDigest: {},
-  events: [],
-  lastEventId: 0
-})
+let taskState = null
 
 const reportHistory = ref([])
 const selectedHistoryId = ref('')
@@ -81,8 +49,8 @@ const progressLogs = ref([])
 const topicOptions = computed(() => topicsState.options)
 const analysisSections = computed(() => buildAnalysisSections(analysisData.value?.functions))
 const analysisAiSummary = computed(() => analysisData.value?.ai_summary || null)
-const taskEvents = computed(() => taskState.events)
-const activeTask = computed(() => (taskState.id ? {
+const taskEvents = computed(() => taskState?.events || [])
+const activeTask = computed(() => (taskState?.id ? {
   id: taskState.id,
   threadId: taskState.threadId,
   status: taskState.status,
@@ -96,6 +64,9 @@ const activeTask = computed(() => (taskState.id ? {
   todos: taskState.todos,
   approvals: taskState.approvals,
   runState: taskState.runState,
+  orchestratorState: taskState.orchestratorState,
+  currentOperation: taskState.currentOperation,
+  lastDiagnostic: taskState.lastDiagnostic,
   structuredResultDigest: taskState.structuredResultDigest,
   events: taskState.events
 } : null))
@@ -116,10 +87,149 @@ let progressRequestId = 0
 let progressPollTimer = null
 let taskPollTimer = null
 let taskReconnectTimer = null
-let taskStream = null
+let taskLifecycleActor = null
+let taskStreamController = null
+let taskRuntimeScope = null
 let suppressTopicWatcher = false
 
+function ensureTaskRuntime() {
+  if (!taskState) {
+    taskState = useReportRunStore()
+  }
+  if (!taskLifecycleActor) {
+    taskLifecycleActor = createReportRunLifecycleActor()
+    taskLifecycleActor.subscribe((snapshot) => {
+      taskState.setLifecycleState(String(snapshot.value || 'idle'))
+      taskState.setConnectionMode(snapshot.context?.connectionMode || 'idle')
+    })
+  }
+  if (!taskStreamController) {
+    taskRuntimeScope = effectScope(true)
+    taskStreamController = taskRuntimeScope.run(() => createTaskStreamController())
+  }
+  syncRunLifecycle()
+}
+
+function syncRunLifecycle(connectionOverride = taskState?.connectionMode || 'idle') {
+  if (!taskLifecycleActor || !taskState) return
+  taskLifecycleActor.send({
+    type: 'SNAPSHOT',
+    ...buildLifecycleSnapshotInput(taskState, connectionOverride)
+  })
+}
+
+function sendLifecycleEvent(type, connectionMode = taskState?.connectionMode || 'idle') {
+  if (!taskLifecycleActor || !taskState) return
+  taskLifecycleActor.send({ type })
+  syncRunLifecycle(connectionMode)
+}
+
+function createTaskStreamController() {
+  const streamUrl = ref(undefined)
+  const streamEvents = [
+    'task.created',
+    'phase.started',
+    'phase.progress',
+    'agent.started',
+    'agent.memo',
+    'tool.called',
+    'tool.result',
+    'artifact.ready',
+    'task.completed',
+    'task.failed',
+    'task.cancelled',
+    'todo.updated',
+    'subagent.started',
+    'subagent.completed',
+    'approval.required',
+    'approval.resolved',
+    'artifact.updated',
+    'trust.updated',
+    'done',
+    'heartbeat'
+  ]
+  const source = useEventSource(streamUrl, streamEvents, {
+    immediate: false,
+    autoConnect: false,
+    serializer: {
+      read(raw) {
+        try {
+          return JSON.parse(raw)
+        } catch {
+          return raw
+        }
+      }
+    }
+  })
+
+  watch(source.status, (status) => {
+    if (!taskState) return
+    if (status === 'OPEN') {
+      clearTaskReconnectTimer()
+      stopTaskPolling()
+      sendLifecycleEvent('STREAM_OPENED', 'streaming')
+      return
+    }
+    if (status === 'CONNECTING') {
+      taskState.setConnectionMode('idle')
+    }
+  })
+
+  watch([source.event, source.data], async ([eventName, payload]) => {
+    if (!taskState || !eventName) return
+    if (eventName === 'heartbeat') return
+    if (eventName === 'done') {
+      closeTaskStreamOnly()
+      await loadReportTask(taskState.id, { silent: true })
+      return
+    }
+    if (payload && typeof payload === 'object') {
+      taskState.mergeEvents([payload])
+    }
+    if (taskState.id) {
+      await loadReportTask(taskState.id, { silent: true })
+    }
+  })
+
+  watch(source.error, () => {
+    if (!taskState || !taskState.id) return
+    closeTaskStreamOnly()
+    sendLifecycleEvent('STREAM_RECONNECTING', 'reconnecting')
+    if (typeof window !== 'undefined' && !['completed', 'failed', 'cancelled'].includes(taskState.status)) {
+      taskReconnectTimer = window.setTimeout(() => {
+        const endpoint = buildTaskStreamEndpoint(taskState.id)
+        if (!endpoint) {
+          taskState.setConnectionMode('polling_fallback')
+          sendLifecycleEvent('STREAM_POLLING', 'polling_fallback')
+          scheduleTaskPolling()
+          return
+        }
+        streamUrl.value = endpoint
+        source.open()
+      }, 1500)
+    }
+  })
+
+  return {
+    open(url) {
+      clearTaskReconnectTimer()
+      stopTaskPolling()
+      streamUrl.value = url
+      source.open()
+    },
+    close() {
+      closeTaskStreamOnly()
+    }
+  }
+
+  function closeTaskStreamOnly() {
+    source.close()
+    sendLifecycleEvent('STREAM_CLOSED', taskState?.connectionMode || 'idle')
+  }
+}
+
 export const useReportGeneration = () => {
+  ensureTaskRuntime()
   if (!initialized) {
     initialized = true
     initializeStore()
@@ -277,40 +387,8 @@ function resetProgressState() {
 function resetTaskState() {
   closeReportTaskStream()
   stopTaskPolling()
-  taskState.loading = false
-  taskState.creating = false
-  taskState.streaming = false
-  taskState.reconnecting = false
-  taskState.usingPollingFallback = false
-  taskState.error = ''
-  taskState.id = ''
-  taskState.threadId = ''
-  taskState.reused = false
-  taskState.topic = ''
-  taskState.topicIdentifier = ''
-  taskState.start = ''
-  taskState.end = ''
-  taskState.mode = 'fast'
-  taskState.status = 'idle'
-  taskState.phase = ''
-  taskState.percentage = 0
-  taskState.message = ''
-  taskState.updatedAt = ''
-  taskState.startedAt = ''
-  taskState.finishedAt = ''
-  taskState.workerPid = 0
-  taskState.childPid = 0
-  taskState.cancelRequested = false
-  taskState.trust = {}
-  taskState.artifacts = {}
-  taskState.subagents = []
-  taskState.agents = []
-  taskState.todos = []
-  taskState.approvals = []
-  taskState.runState = {}
-  taskState.structuredResultDigest = {}
-  taskState.events = []
-  taskState.lastEventId = 0
+  taskState.reset()
+  syncRunLifecycle('idle')
 }
 
 function applyRangeToForm() {
@@ -667,52 +745,14 @@ function stopTaskPolling() {
 }
 
 function mergeTaskEvents(incoming = []) {
-  const map = new Map((Array.isArray(taskState.events) ? taskState.events : []).map((item) => [Number(item?.event_id || item?.eventId || 0), item]))
-  for (const item of Array.isArray(incoming) ? incoming : []) {
-    const eventId = Number(item?.event_id || item?.eventId || 0)
-    if (!eventId) continue
-    map.set(eventId, {
-      ...item,
-      event_id: eventId
-    })
-  }
-  const merged = [...map.values()].sort((a, b) => Number(a?.event_id || 0) - Number(b?.event_id || 0))
-  taskState.events = merged.slice(-180)
-  taskState.lastEventId = Number(taskState.events[taskState.events.length - 1]?.event_id || taskState.lastEventId || 0)
+  taskState.mergeEvents(incoming)
 }
 
 function applyTaskSnapshot(task, { reused = false } = {}) {
   if (!task || typeof task !== 'object') return
-  taskState.id = String(task.id || '').trim()
-  taskState.threadId = String(task.thread_id || '').trim()
-  taskState.reused = reused
-  taskState.topic = String(task.topic || '').trim()
-  taskState.topicIdentifier = String(task.topic_identifier || '').trim()
-  taskState.start = String(task.start || '').trim()
-  taskState.end = String(task.end || '').trim() || taskState.start
-  taskState.mode = String(task.mode || 'fast').trim() || 'fast'
-  taskState.status = String(task.status || 'idle').trim() || 'idle'
-  taskState.phase = String(task.phase || '').trim()
-  taskState.percentage = Number(task.percentage || 0)
-  taskState.message = String(task.message || '').trim()
-  taskState.updatedAt = String(task.updated_at || '').trim()
-  taskState.startedAt = String(task.started_at || '').trim()
-  taskState.finishedAt = String(task.finished_at || '').trim()
-  taskState.workerPid = Number(task.worker_pid || 0)
-  taskState.childPid = Number(task.child_pid || 0)
-  taskState.cancelRequested = Boolean(task.cancel_requested)
-  taskState.trust = task.trust && typeof task.trust === 'object' ? task.trust : {}
-  taskState.artifacts = task.artifacts && typeof task.artifacts === 'object' ? task.artifacts : {}
-  taskState.subagents = Array.isArray(task.subagents) ? task.subagents : (Array.isArray(task.agents) ? task.agents : [])
-  taskState.agents = taskState.subagents
-  taskState.todos = Array.isArray(task.todos) ? task.todos : []
-  taskState.approvals = Array.isArray(task.approvals) ? task.approvals : []
-  taskState.runState = task.run_state && typeof task.run_state === 'object' ? task.run_state : {}
-  taskState.structuredResultDigest = task.structured_result_digest && typeof task.structured_result_digest === 'object'
-    ? task.structured_result_digest
-    : {}
-  mergeTaskEvents(task.recent_events || [])
+  taskState.applySnapshot(task, { reused })
   persistTaskKey(taskState)
+  syncRunLifecycle(taskState.connectionMode || 'idle')
   applyProgressPayload({
     topic: taskState.topic,
     range: { start: taskState.start, end: taskState.end },
@@ -739,13 +779,20 @@ function buildProgressStepsFromTask() {
   }))
 }
 
+function buildTaskStreamEndpoint(taskId = taskState?.id) {
+  const resolvedTaskId = String(taskId || '').trim()
+  if (!resolvedTaskId) return ''
+  const since = taskState?.lastEventId ? `?since_id=${encodeURIComponent(String(taskState.lastEventId))}` : ''
+  return `/api/report/tasks/${encodeURIComponent(resolvedTaskId)}/stream${since}`
+}
+
 function closeReportTaskStream() {
   clearTaskReconnectTimer()
-  if (taskStream) {
-    taskStream.close()
-    taskStream = null
+  if (taskStreamController) {
+    taskStreamController.close()
   }
-  taskState.streaming = false
+  taskState.setConnectionMode('idle')
+  syncRunLifecycle('idle')
 }
 
 function scheduleTaskPolling() {
@@ -762,77 +809,25 @@ async function openReportTaskStream(taskId = taskState.id, { force = false } = {
   const resolvedTaskId = String(taskId || '').trim()
   if (!resolvedTaskId) return
   if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
-    taskState.usingPollingFallback = true
+    taskState.setConnectionMode('polling_fallback')
+    sendLifecycleEvent('STREAM_POLLING', 'polling_fallback')
     scheduleTaskPolling()
     return
   }
-  if (taskStream && !force) return
+  if (taskState.connectionMode === 'streaming' && !force) return
   closeReportTaskStream()
   stopTaskPolling()
-  taskState.usingPollingFallback = false
   const apiBase = await ensureApiBase()
-  const since = taskState.lastEventId ? `?since_id=${encodeURIComponent(String(taskState.lastEventId))}` : ''
-  const endpoint = `${apiBase}/report/tasks/${encodeURIComponent(resolvedTaskId)}/stream${since}`
-  const es = new EventSource(endpoint)
-  taskStream = es
-  taskState.streaming = true
-  es.addEventListener('heartbeat', () => {
-    taskState.reconnecting = false
-  })
-  es.addEventListener('done', async () => {
-    closeReportTaskStream()
-    await loadReportTask(resolvedTaskId, { silent: true })
-  })
-  es.onmessage = () => {
-    // ignore unnamed messages
-  }
-  const handleEvent = async (event) => {
-    try {
-      const payload = JSON.parse(event.data)
-      mergeTaskEvents([payload])
-      await loadReportTask(resolvedTaskId, { silent: true })
-    } catch {
-      // ignore parse errors
-    }
-  }
-  ;[
-    'task.created',
-    'phase.started',
-    'phase.progress',
-    'agent.started',
-    'agent.memo',
-    'tool.called',
-    'tool.result',
-    'artifact.ready',
-    'task.completed',
-    'task.failed',
-    'task.cancelled',
-    'todo.updated',
-    'subagent.started',
-    'subagent.completed',
-    'approval.required',
-    'approval.resolved',
-    'artifact.updated'
-  ].forEach((eventName) => {
-    es.addEventListener(eventName, handleEvent)
-  })
-  es.onerror = () => {
-    closeReportTaskStream()
-    taskState.reconnecting = true
-    taskState.usingPollingFallback = false
-    if (typeof window !== 'undefined' && !['completed', 'failed', 'cancelled'].includes(taskState.status)) {
-      taskReconnectTimer = window.setTimeout(() => {
-        void openReportTaskStream(resolvedTaskId, { force: true })
-      }, 1500)
-    }
-  }
+  const endpoint = `${apiBase}${buildTaskStreamEndpoint(resolvedTaskId)}`
+  taskState.setConnectionMode('idle')
+  taskStreamController.open(endpoint)
 }
 
 async function loadReportTask(taskId = taskState.id, { silent = false, reused = false } = {}) {
   const resolvedTaskId = String(taskId || '').trim()
   if (!resolvedTaskId) return null
-  if (!silent) taskState.loading = true
-  taskState.error = ''
+  if (!silent) taskState.setLoading(true)
+  taskState.setError('')
   try {
     const response = await callApi(`/api/report/tasks/${encodeURIComponent(resolvedTaskId)}`, { method: 'GET' })
     const task = response?.task || null
@@ -844,10 +839,10 @@ async function loadReportTask(taskId = taskState.id, { silent = false, reused = 
     }
     return task
   } catch (error) {
-    taskState.error = error instanceof Error ? error.message : String(error)
+    taskState.setError(error instanceof Error ? error.message : String(error))
     return null
   } finally {
-    if (!silent) taskState.loading = false
+    if (!silent) taskState.setLoading(false)
   }
 }
 
@@ -859,8 +854,8 @@ async function createReportTask(rangeOverride = null) {
     reportState.error = availableRange.notice || 'Topic / Start / End 为必填'
     return null
   }
-  taskState.creating = true
-  taskState.error = ''
+  taskState.setCreating(true)
+  taskState.setError('')
   reportState.error = ''
   try {
     const response = await callApi('/api/report/tasks', {
@@ -875,14 +870,13 @@ async function createReportTask(rangeOverride = null) {
     reportForm.end = resolvedRange.end
     reportForm.mode = resolvedRange.mode
     await openReportTaskStream(task.id, { force: true })
-    if (taskState.usingPollingFallback) scheduleTaskPolling()
     return task
   } catch (error) {
-    taskState.error = error instanceof Error ? error.message : String(error)
+    taskState.setError(error instanceof Error ? error.message : String(error))
     reportState.error = taskState.error
     return null
   } finally {
-    taskState.creating = false
+    taskState.setCreating(false)
   }
 }
 
@@ -895,7 +889,7 @@ async function cancelReportTask(taskId = taskState.id) {
     if (task) applyTaskSnapshot(task)
     return task
   } catch (error) {
-    taskState.error = error instanceof Error ? error.message : String(error)
+    taskState.setError(error instanceof Error ? error.message : String(error))
     return null
   }
 }
@@ -912,7 +906,7 @@ async function retryReportTask(taskId = taskState.id) {
     }
     return task
   } catch (error) {
-    taskState.error = error instanceof Error ? error.message : String(error)
+    taskState.setError(error instanceof Error ? error.message : String(error))
     return null
   }
 }
@@ -933,7 +927,7 @@ async function resolveReportApproval(taskId = taskState.id, approvalId, payload 
     if (task) applyTaskSnapshot(task)
     return task
   } catch (error) {
-    taskState.error = error instanceof Error ? error.message : String(error)
+    taskState.setError(error instanceof Error ? error.message : String(error))
     return null
   }
 }
@@ -945,7 +939,6 @@ async function resumeLastReportTask(rangeOverride = null) {
   const task = await loadReportTask(taskId, { silent: true })
   if (!task || ['completed', 'failed', 'cancelled'].includes(String(task.status || ''))) return task
   await openReportTaskStream(taskId, { force: true })
-  if (taskState.usingPollingFallback) scheduleTaskPolling()
   return task
 }
 

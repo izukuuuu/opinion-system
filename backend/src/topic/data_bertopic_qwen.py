@@ -618,13 +618,24 @@ def _load_prompt(file_path: str, prompt_key: str, logger) -> Optional[Dict[str, 
 def run_topic_bertopic(topic: str, start_date: str, end_date: str = None,
                        fetch_dir: Optional[str] = None,
                        userdict: Optional[str] = None, stopwords: Optional[str] = None,
-                       bucket_topic: Optional[str] = None, display_topic: Optional[str] = None) -> bool:
+                       bucket_topic: Optional[str] = None, display_topic: Optional[str] = None,
+                       progress_callback=None) -> bool:
     # 使用日期范围格式作为日志标识
     date_range = f"{start_date}_{end_date}" if end_date else start_date
     topic_label = display_topic or topic
     storage_topic = bucket_topic or topic
     logger = setup_logger(topic_label, date_range)
     log_module_start(logger, "TopicBertopic")
+
+    def _emit_progress(phase: str, percentage: int, message: str) -> None:
+        if not callable(progress_callback):
+            return
+        progress_callback({
+            "phase": phase,
+            "percentage": percentage,
+            "message": message,
+            "current_step": phase,
+        })
 
     paths = _default_paths(storage_topic, start_date, end_date, bucket_topic=storage_topic)
     fetch_path = Path(fetch_dir) if fetch_dir else paths["fetch_dir"]
@@ -633,6 +644,7 @@ def run_topic_bertopic(topic: str, start_date: str, end_date: str = None,
     out_analyze = paths["out_analyze"]
 
     try:
+        _emit_progress("prepare", 20, "正在读取 BERTopic 输入数据。")
         # 从fetch目录读取并合并所有CSV文件（与analyze模块一致）
         df = _load_and_merge_fetch_data(fetch_path, logger)
         if df.empty:
@@ -658,6 +670,7 @@ def run_topic_bertopic(topic: str, start_date: str, end_date: str = None,
         seg = _segment(cleaned, sw, userdict_path)
 
         # 向量化
+        _emit_progress("embed", 45, "正在生成文本向量。")
         load_env_file()  # 确保.env文件被加载
         api_key = get_api_key()
         if not api_key:
@@ -669,6 +682,7 @@ def run_topic_bertopic(topic: str, start_date: str, end_date: str = None,
             return False
 
         # 主题建模
+        _emit_progress("cluster", 70, "正在训练 BERTopic 模型。")
         model = _build_bertopic()
         model.fit_transform(seg, embeddings=vecs)
 
@@ -676,12 +690,13 @@ def run_topic_bertopic(topic: str, start_date: str, end_date: str = None,
         stats_json = _generate_jsons(model, seg, vecs, out_analyze, logger)
 
         # 大模型再聚类，生成第4、5个JSON
+        _emit_progress("recluster", 88, "正在执行 LLM 再聚类。")
         import asyncio
         asyncio.run(_generate_reclustered_json(stats_json, topic_label, out_analyze, logger))
 
+        _emit_progress("persist", 98, "正在写入 BERTopic 结果。")
         log_success(logger, "主题分析完成", "TopicBertopic")
         return True
     except Exception as e:
         log_error(logger, f"异常: {e}", "TopicBertopic")
         return False
-

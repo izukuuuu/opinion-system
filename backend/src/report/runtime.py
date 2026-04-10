@@ -190,7 +190,7 @@ def ensure_explain_results(
     ready = bool(refreshed["ready"])
     source = _resolve_explain_source(refreshed)
     if ready and smart_fill["generated_count"] > 0:
-        message = "已智能补齐缺失的总体文字解读，并落盘到 explain 产物。"
+        message = "已智能补齐缺失的总体文字解读，并存储到 explain 产物。"
     elif runner_ok and ready:
         message = "已自动补齐总体文字解读。"
     elif runner_ok and refreshed["available_count"] > 0:
@@ -402,7 +402,7 @@ def _generate_explain_text(facts: Dict[str, Any]) -> str:
 
 def _generate_explain_with_llm(facts: Dict[str, Any]) -> str:
     prompt = (
-        "你是一名舆情分析师，需要为缺失的“总体解读”产物补写一段可直接落盘的 explain 文本。\n"
+        "你是一名舆情分析师，需要为缺失的“总体解读”产物补写一段可直接存储的 explain 文本。\n"
         "要求：\n"
         "1) 仅基于输入事实，不得编造数字或事件；\n"
         "2) 输出 120-220 字中文自然段；\n"

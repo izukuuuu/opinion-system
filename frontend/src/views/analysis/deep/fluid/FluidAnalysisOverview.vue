@@ -1,15 +1,13 @@
 <template>
     <div class="space-y-12 pb-12">
         <!-- Hero Section -->
-        <section class="relative overflow-hidden rounded-3xl bg-surface border border-soft p-1">
+        <section class="relative overflow-hidden rounded-3xl border border-soft bg-surface p-1">
             <div
-                class="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-brand-600 via-brand-700 to-indigo-900 px-6 py-10 text-white sm:px-10 sm:py-12">
-                <!-- Abstract background elements -->
-                <div class="absolute inset-0 overflow-hidden opacity-20 pointer-events-none">
-                    <div class="absolute -top-1/4 -left-1/4 h-[400px] w-[400px] rounded-full bg-white/30 blur-[100px]">
-                    </div>
+                class="relative isolate overflow-hidden rounded-[22px] bg-gradient-to-br from-brand-600 via-brand-500 to-accent-500 px-6 py-10 text-white sm:px-10 sm:py-12">
+                <div class="absolute inset-0 opacity-30 mix-blend-overlay">
+                    <div class="absolute -top-32 -left-32 h-96 w-96 rounded-full bg-white/20 blur-[100px]"></div>
                     <div
-                        class="absolute -bottom-1/4 -right-1/4 h-[300px] w-[300px] rounded-full bg-brand-400 blur-[80px]">
+                        class="absolute bottom-0 right-0 h-[30rem] w-[30rem] translate-x-1/3 translate-y-1/3 rounded-full bg-accent-300/30 blur-[120px]">
                     </div>
                 </div>
 
@@ -17,27 +15,27 @@
                     <div class="space-y-6">
                         <div class="space-y-2">
                             <div
-                                class="inline-flex items-center rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-brand-100 backdrop-blur-md border border-white/10">
+                                class="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-brand-100 backdrop-blur-md">
                                 Computational Linguistics
                             </div>
                             <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
                                 舆论流体力学分析
                             </h1>
-                            <p class="max-w-xl text-base text-brand-50/80 leading-relaxed font-medium">
+                            <p class="max-w-xl text-base font-medium leading-relaxed text-brand-50/80">
                                 基于物理学流体动力学模型，分析舆论的传播流速、粘度与压力梯度。量化揭示信息的传播动力与演化路径。
                             </p>
                         </div>
 
                         <div class="flex flex-wrap gap-2 text-[10px]">
                             <span v-for="tag in activeDimensions" :key="tag"
-                                class="rounded-full bg-white/10 px-3 py-1 font-semibold text-white backdrop-blur-sm border border-white/5">
+                                class="rounded-full border border-white/5 bg-white/10 px-3 py-1 font-semibold text-white backdrop-blur-sm">
                                 {{ tag }}
                             </span>
                         </div>
 
                         <div class="flex flex-wrap items-center gap-3 pt-2">
                             <button type="button"
-                                class="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-brand-800 transition-all active:scale-95 group"
+                                class="group inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-brand-800 transition-all active:scale-95"
                                 @click="goToRun">
                                 <PlayIcon class="h-4 w-4 fill-current" />
                                 <span class="text-sm font-bold">启动流体动力计算</span>
@@ -52,24 +50,25 @@
                         </div>
                     </div>
 
-                    <!-- Feature highlight -->
                     <div class="hidden lg:block">
-                        <div class="relative rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
-                            <h3 class="mb-3 text-xs font-bold text-brand-200">物理特性指标 (Physical Metrics)</h3>
-                            <ul class="space-y-2.5 text-[13px] text-white/70">
-                                <li class="flex items-start gap-3">
-                                    <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
-                                    <span>信息流速 (Velocity)：单位时间内信息穿透的主体密度</span>
-                                </li>
-                                <li class="flex items-start gap-3">
-                                    <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
-                                    <span>介质粘度 (Viscosity)：平台环境对传播阻尼的影响系数</span>
-                                </li>
-                                <li class="flex items-start gap-3">
-                                    <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
-                                    <span>雷诺数 (Reynolds Num)：判断传播状态属于层流或湍流</span>
-                                </li>
-                            </ul>
+                        <div class="glass-inner-glow-card rounded-2xl p-5">
+                            <div class="relative z-10">
+                                <h3 class="mb-3 text-xs font-bold text-brand-200">物理特性指标 (Physical Metrics)</h3>
+                                <ul class="space-y-2.5 text-[13px] text-white/70">
+                                    <li class="flex items-start gap-3">
+                                        <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
+                                        <span>信息流速 (Velocity)：单位时间内信息穿透的主体密度</span>
+                                    </li>
+                                    <li class="flex items-start gap-3">
+                                        <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
+                                        <span>介质粘度 (Viscosity)：平台环境对传播阻尼的影响系数</span>
+                                    </li>
+                                    <li class="flex items-start gap-3">
+                                        <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
+                                        <span>雷诺数 (Reynolds Num)：判断传播状态属于层流或湍流</span>
+                                    </li>
+                                </ul>
+                            </div>
                         </div>
                     </div>
                 </div>

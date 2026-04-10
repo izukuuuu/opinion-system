@@ -31,7 +31,6 @@
               :options="projectSelectOptions"
               :value="selectedProjectName"
               :disabled="projectsLoading"
-              searchable
               @change="selectedProjectName = $event"
             />
             <button type="button"
@@ -51,14 +50,13 @@
               <AppSelect
                 :options="availableDateSelectOptions"
                 :value="processingDate"
-                searchable
                 @change="processingDate = $event"
               />
             </template>
             <template v-else>
               <div class="flex items-center gap-2">
                 <input v-model="processingDate" type="date"
-                  class="flex-1 rounded-2xl border-0 bg-base-soft px-4 py-4 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20" />
+                  class="input flex-1 py-4" />
                 <button type="button"
                   class="shrink-0 rounded-2xl bg-brand-50 px-4 py-4 text-xs font-bold text-brand-600 border border-brand-100/50 hover:bg-brand-100 transition-colors"
                   @click="resetToToday">
@@ -76,7 +74,7 @@
         <label class="space-y-2 block">
           <span class="text-xs font-bold text-primary ml-1">正式数据集名称</span>
           <input v-model.trim="datasetNameInput" type="text"
-            class="w-full rounded-2xl border-0 bg-base-soft px-4 py-4 text-sm text-primary transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+            class="input py-4"
             placeholder="例如：控烟政策-12月第1周" />
         </label>
 
@@ -152,7 +150,6 @@
                     <AppSelect
                       :options="fetchDateSelectOptions"
                       :value="selectedFetchDate"
-                      searchable
                       @change="selectedFetchDate = $event"
                     />
                     <button type="button"

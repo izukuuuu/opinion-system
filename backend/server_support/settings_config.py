@@ -410,12 +410,15 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
             except (TypeError, ValueError):
                 return error("Field 'temperature' must be a number")
 
-        for field in ["max_tokens", "max_retries"]:
+        for field in ["max_tokens", "max_retries", "max_tool_rounds", "report_max_tool_rounds", "report_subagent_max_tool_rounds"]:
             if field in payload:
                 try:
-                    langchain[field] = int(payload[field])
+                    value = int(payload[field])
                 except (TypeError, ValueError):
                     return error(f"Field '{field}' must be an integer")
+                if value < 0:
+                    return error(f"Field '{field}' must be greater than or equal to 0")
+                langchain[field] = value
 
         if "timeout" in payload:
             try:

@@ -92,7 +92,7 @@
                 class="flex items-center justify-between gap-3 rounded-2xl border border-soft px-3 py-2 text-sm text-secondary"
               >
                 <span class="flex items-center gap-2">
-                  <input v-model="selectedTables" type="checkbox" :value="table.name" class="h-4 w-4 rounded border-soft text-brand-600 focus:ring-brand-400" />
+                  <AppCheckbox v-model="selectedTables" :value="table.name" />
                   <span class="font-medium text-primary">{{ table.name }}</span>
                 </span>
                 <span class="text-xs text-muted">{{ formatInteger(table.rowCount) }} 行</span>
@@ -235,6 +235,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline'
+import AppCheckbox from '../../components/AppCheckbox.vue'
 import AppSelect from '../../components/AppSelect.vue'
 import { useProcessingScope } from '../../composables/useProcessingScope'
 

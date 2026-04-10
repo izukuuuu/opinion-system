@@ -56,16 +56,14 @@ const triggerRef = ref(null)
 const dropdownRef = ref(null)
 const optionsRef = ref(null)
 const dropdownStyle = ref({})
-const dropdownPlacement = ref('bottom')
-let scrollContainers = []
+let boundaryElement = null
 
 const DROPDOWN_OFFSET = 6
 const DROPDOWN_VIEWPORT_MARGIN = 12
+const DROPDOWN_FLIP_TOLERANCE = 4
 const DEFAULT_DROPDOWN_MAX_HEIGHT = 280
 const MIN_OPTIONS_HEIGHT = 96
 const SEARCH_BAR_HEIGHT = 56
-const CLIPPING_OVERFLOW_RE = /(auto|scroll|overlay|hidden|clip)/
-const SCROLLABLE_OVERFLOW_RE = /(auto|scroll|overlay)/
 
 const selectedOption = computed(() =>
   props.options.find(opt => opt.value === props.value)
@@ -102,8 +100,7 @@ function closeDropdown() {
   selectedIndex.value = -1
   isSearchFocused.value = false
   dropdownStyle.value = {}
-  dropdownPlacement.value = 'bottom'
-  cleanupScrollListeners()
+  detachBoundaryListener()
 }
 
 function selectOption(option) {
@@ -163,35 +160,8 @@ function handleClickOutside(e) {
   }
 }
 
-function getOverflowAncestors(element) {
-  const clippingAncestors = []
-  const nextScrollContainers = []
-  let current = element?.parentElement
-
-  while (current && current !== document.body && current !== document.documentElement) {
-    const style = window.getComputedStyle(current)
-    const overflowValue = `${style.overflow} ${style.overflowX} ${style.overflowY}`
-
-    if (CLIPPING_OVERFLOW_RE.test(overflowValue)) {
-      clippingAncestors.push(current)
-    }
-    if (SCROLLABLE_OVERFLOW_RE.test(overflowValue)) {
-      nextScrollContainers.push(current)
-    }
-
-    current = current.parentElement
-  }
-
-  return { clippingAncestors, scrollContainers: nextScrollContainers }
-}
-
-function intersectRects(baseRect, nextRect) {
-  return {
-    top: Math.max(baseRect.top, nextRect.top),
-    right: Math.min(baseRect.right, nextRect.right),
-    bottom: Math.min(baseRect.bottom, nextRect.bottom),
-    left: Math.max(baseRect.left, nextRect.left)
-  }
+function getBoundaryElement() {
+  return triggerRef.value?.closest?.('[data-app-select-boundary]') ?? null
 }
 
 function getBoundaryRect() {
@@ -202,35 +172,19 @@ function getBoundaryRect() {
     left: 0
   }
 
-  if (!triggerRef.value) {
-    return viewportRect
-  }
-
-  const { clippingAncestors } = getOverflowAncestors(triggerRef.value)
-
-  return clippingAncestors.reduce((rect, ancestor) => {
-    const ancestorRect = ancestor.getBoundingClientRect()
-    return intersectRects(rect, ancestorRect)
-  }, viewportRect)
+  return boundaryElement?.getBoundingClientRect?.() ?? viewportRect
 }
 
-function cleanupScrollListeners() {
-  scrollContainers.forEach(container => {
-    container.removeEventListener('scroll', handleViewportChange)
-  })
-  scrollContainers = []
+function detachBoundaryListener() {
+  if (!boundaryElement) return
+  boundaryElement.removeEventListener('scroll', handleViewportChange)
+  boundaryElement = null
 }
 
-function syncScrollListeners() {
-  cleanupScrollListeners()
-
-  if (!triggerRef.value) return
-
-  const { scrollContainers: nextContainers } = getOverflowAncestors(triggerRef.value)
-  scrollContainers = nextContainers
-  scrollContainers.forEach(container => {
-    container.addEventListener('scroll', handleViewportChange, { passive: true })
-  })
+function syncBoundaryListener() {
+  detachBoundaryListener()
+  boundaryElement = getBoundaryElement()
+  boundaryElement?.addEventListener('scroll', handleViewportChange, { passive: true })
 }
 
 function updateDropdownPosition() {
@@ -248,6 +202,8 @@ function updateDropdownPosition() {
 
   const availableBelow = Math.max(boundaryBottom - rect.bottom - DROPDOWN_OFFSET, 0)
   const availableAbove = Math.max(rect.top - boundaryTop - DROPDOWN_OFFSET, 0)
+  const availableBelowForFlip = Math.max(boundaryRect.bottom - rect.bottom - DROPDOWN_OFFSET, 0)
+  const availableAboveForFlip = Math.max(rect.top - boundaryRect.top - DROPDOWN_OFFSET, 0)
   const optionsNaturalHeight = optionsRef.value?.scrollHeight ?? MIN_OPTIONS_HEIGHT
   const desiredOptionsHeight = Math.min(
     optionsNaturalHeight,
@@ -260,14 +216,13 @@ function updateDropdownPosition() {
   )
 
   const shouldOpenAbove =
-    availableBelow < desiredDropdownHeight && availableAbove >= MIN_OPTIONS_HEIGHT
+    availableBelowForFlip + DROPDOWN_FLIP_TOLERANCE < desiredDropdownHeight &&
+    availableAboveForFlip >= MIN_OPTIONS_HEIGHT
 
   const placementSpace = shouldOpenAbove ? availableAbove : availableBelow
   const dropdownMaxHeight = Math.min(DEFAULT_DROPDOWN_MAX_HEIGHT, placementSpace)
   const renderedDropdownHeight = Math.min(desiredDropdownHeight, dropdownMaxHeight)
   const optionsMaxHeight = Math.max(0, dropdownMaxHeight - reservedHeight)
-  dropdownPlacement.value = shouldOpenAbove ? 'top' : 'bottom'
-
   const width = Math.min(
     rect.width,
     Math.max(0, boundaryRight - boundaryLeft)
@@ -309,7 +264,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('resize', handleViewportChange)
   window.removeEventListener('scroll', handleViewportChange)
-  cleanupScrollListeners()
+  detachBoundaryListener()
 })
 
 // Reset search when options change
@@ -324,7 +279,7 @@ watch(() => props.options, () => {
 watch(() => isOpen.value, async (open) => {
   if (!open) return
   await nextTick()
-  syncScrollListeners()
+  syncBoundaryListener()
   updateDropdownPosition()
 })
 </script>

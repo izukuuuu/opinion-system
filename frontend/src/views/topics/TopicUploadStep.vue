@@ -27,14 +27,14 @@
             <div class="space-y-2">
               <label class="text-sm font-bold text-primary ml-1">专题名称</label>
               <input v-model.trim="topicName" type="text" required
-                class="w-full rounded-2xl border-0 bg-base-soft px-5 py-4 text-sm ring-1 ring-inset ring-black/5 transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+                class="input"
                 placeholder="例如：2024-两会舆情专项" />
             </div>
 
             <div class="space-y-2">
               <label class="text-sm font-bold text-primary ml-1">专题说明</label>
               <textarea v-model.trim="topicDescription" rows="4"
-                class="w-full resize-none rounded-2xl border-0 bg-base-soft px-5 py-4 text-sm ring-1 ring-inset ring-black/5 transition focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted"
+                class="form-textarea resize-none"
                 :placeholder="selectedTags.length ? '补充更多背景信息...' : '简要描述专题背景、抓取渠道等信息...'"></textarea>
             </div>
 

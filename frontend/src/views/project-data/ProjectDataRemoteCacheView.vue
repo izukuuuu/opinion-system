@@ -168,14 +168,14 @@ const availability = reactive({
   start: '',
   end: '',
   loading: false,
+  error: '',
+})
+let availabilityRequestId = 0
 
 const topicSelectOptions = computed(() => [
   { value: '', label: '请选择远程专题' },
   ...topics.value.map(t => ({ value: t, label: t }))
 ])
-  error: '',
-})
-let availabilityRequestId = 0
 
 const fetchForm = reactive({
   start: '',

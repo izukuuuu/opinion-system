@@ -165,7 +165,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import {
   ArrowPathIcon,
   CheckIcon,

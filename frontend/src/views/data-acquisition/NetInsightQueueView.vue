@@ -33,10 +33,13 @@
 
       <!-- Right side -->
       <div class="ml-auto flex items-center gap-3">
-        <label class="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-500">
-          <input v-model="onlyCurrentProject" type="checkbox" class="rounded border-slate-300 text-slate-700" />
+        <AppCheckbox
+          v-model="onlyCurrentProject"
+          label-class="gap-1.5 text-xs text-slate-500"
+          input-class="shadow-none"
+        >
           仅当前项目
-        </label>
+        </AppCheckbox>
         <button
           type="button"
           class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100"
@@ -436,14 +439,17 @@
             <div>
               <p class="text-sm font-medium text-slate-700">平台</p>
               <div class="mt-3 grid gap-2 sm:grid-cols-2">
-                <label
+                <AppCheckbox
                   v-for="option in platformOptions"
                   :key="option"
-                  class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600"
+                  v-model="taskForm.platforms"
+                  :value="option"
+                  class="rounded-2xl border border-slate-200 bg-white px-3 py-2"
+                  label-class="gap-2 text-sm text-slate-600"
+                  input-class="shadow-none"
                 >
-                  <input v-model="taskForm.platforms" type="checkbox" :value="option" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
                   <span>{{ option }}</span>
-                </label>
+                </AppCheckbox>
               </div>
             </div>
             <div class="grid gap-4 sm:grid-cols-2">
@@ -534,10 +540,13 @@
                 />
               </label>
             </div>
-            <label class="inline-flex items-center gap-2 text-sm text-slate-600">
-              <input v-model="taskForm.dedupeByContent" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+            <AppCheckbox
+              v-model="taskForm.dedupeByContent"
+              label-class="gap-2 text-sm text-slate-600"
+              input-class="shadow-none"
+            >
               自动过滤重复内容
-            </label>
+            </AppCheckbox>
           </div>
         </div>
       </div>
@@ -558,6 +567,7 @@ import {
 } from '@heroicons/vue/24/outline'
 
 import AppModal from '../../components/AppModal.vue'
+import AppCheckbox from '../../components/AppCheckbox.vue'
 import AppSelect from '../../components/AppSelect.vue'
 import { useActiveProject } from '../../composables/useActiveProject'
 import { useApiBase } from '../../composables/useApiBase'

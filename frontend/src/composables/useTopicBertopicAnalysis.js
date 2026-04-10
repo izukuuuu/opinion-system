@@ -156,6 +156,16 @@ const lastResult = ref(null)
 const lastPayload = ref(null)
 
 const logs = ref([])
+const bertopicTaskState = reactive({
+  loading: false,
+  error: '',
+  taskId: '',
+  worker: null
+})
+
+const BERTOPIC_ACTIVE_STATUSES = new Set(['queued', 'running'])
+const BERTOPIC_TASK_POLL_INTERVAL = 3000
+let bertopicTaskPollTimer = null
 
 // 分析历史（可选功能）
 const historyState = reactive({
@@ -377,6 +387,7 @@ export const useTopicBertopicAnalysis = () => {
     hasPromptDraftChanges,
     availableRange,
     runState,
+    bertopicTaskState,
     lastResult,
     lastPayload,
     logs,
@@ -386,6 +397,7 @@ export const useTopicBertopicAnalysis = () => {
     loadBertopicPrompt,
     saveBertopicPrompt,
     loadAvailableRange,
+    loadBertopicTasks,
     resetState,
     runBertopicAnalysis,
     resetForm,
@@ -398,16 +410,20 @@ export const useTopicBertopicAnalysis = () => {
 function initializeStore() {
   loadTopics()
 
-  // 监听专题变化，自动加载可用日期范围
   watch(
     () => form.topic,
     (newTopic) => {
       if (newTopic) {
         loadAvailableRange()
         loadBertopicPrompt(newTopic)
+        if (form.startDate) {
+          loadBertopicTasks()
+        }
       } else {
         clearAvailableRange()
         clearPromptState()
+        stopBertopicTaskPolling()
+        clearLogs()
       }
     },
     { immediate: true }
@@ -419,6 +435,17 @@ function initializeStore() {
       if (!form.topic) return
       loadAvailableRange()
       loadBertopicPrompt(form.topic)
+    }
+  )
+
+  watch(
+    () => [form.topic, form.startDate, form.endDate],
+    ([topic, start]) => {
+      if (!topic || !start) {
+        stopBertopicTaskPolling()
+        return
+      }
+      loadBertopicTasks()
     }
   )
 }
@@ -644,6 +671,10 @@ const resetState = () => {
   lastResult.value = null
   lastPayload.value = null
   runState.running = false
+  bertopicTaskState.taskId = ''
+  bertopicTaskState.error = ''
+  bertopicTaskState.worker = null
+  stopBertopicTaskPolling()
   clearLogs()
 }
 
@@ -672,11 +703,129 @@ const clearLogs = () => {
   logs.value = []
 }
 
-const runBertopicAnalysis = async (params) => {
-  // 更新表单
-  Object.assign(form, params)
+const stopBertopicTaskPolling = () => {
+  if (typeof window !== 'undefined' && bertopicTaskPollTimer) {
+    window.clearTimeout(bertopicTaskPollTimer)
+  }
+  bertopicTaskPollTimer = null
+}
 
-  // 验证参数
+const normalizeBertopicLogStatus = (status) => {
+  const value = String(status || '').trim().toLowerCase()
+  if (value === 'completed') return 'ok'
+  if (value === 'failed' || value === 'cancelled' || value === 'error') return 'error'
+  if (value === 'running') return 'running'
+  if (value === 'queued') return 'queued'
+  return 'pending'
+}
+
+const normalizeBertopicTaskLog = (task) => {
+  const payload = task && typeof task === 'object' ? task : {}
+  const percentage = Number(payload.percentage || 0)
+  const progress = payload.progress && typeof payload.progress === 'object' ? payload.progress : {}
+  const phase = String(payload.phase || '').trim()
+  const currentStep = String(progress.current_step || '').trim()
+  const label = phase === 'running'
+    ? 'BERTopic分析'
+    : ({
+        prepare: '准备数据',
+        collect: '数据准备',
+        embed: '向量生成',
+        cluster: 'BERTopic建模',
+        recluster: '主题重整',
+        keywords: '关键词生成',
+        persist: '写入结果',
+        completed: 'BERTopic分析',
+        failed: 'BERTopic分析',
+        cancelled: 'BERTopic分析',
+        queued: '等待调度'
+      }[phase] || 'BERTopic分析')
+  return {
+    id: payload.id || `bertopic-${Date.now()}`,
+    label,
+    message: String(payload.message || '').trim() || '等待执行。',
+    status: normalizeBertopicLogStatus(payload.status),
+    progress: Number.isFinite(percentage) ? Math.max(0, Math.min(100, Math.round(percentage))) : 0,
+    phase,
+    currentStep,
+    time: currentTimeString(),
+    raw: payload
+  }
+}
+
+const syncBertopicRunningState = () => {
+  runState.running = logs.value.some((log) => BERTOPIC_ACTIVE_STATUSES.has(String(log.raw?.status || '').trim().toLowerCase()))
+}
+
+const applyBertopicTaskSnapshot = (payload) => {
+  const data = payload && typeof payload === 'object' ? payload : {}
+  const tasks = Array.isArray(data.tasks) ? data.tasks : []
+  bertopicTaskState.worker = data.worker && typeof data.worker === 'object' ? data.worker : null
+  logs.value = tasks.map(normalizeBertopicTaskLog)
+  if (tasks.length) {
+    bertopicTaskState.taskId = String(tasks[0]?.id || '')
+    lastResult.value = String(tasks[0]?.status || '').trim().toLowerCase() === 'completed' ? tasks[0] : null
+  } else {
+    bertopicTaskState.taskId = ''
+    lastResult.value = null
+  }
+  syncBertopicRunningState()
+}
+
+const scheduleBertopicTaskPolling = () => {
+  if (typeof window === 'undefined' || bertopicTaskPollTimer) return
+  if (!runState.running) return
+  bertopicTaskPollTimer = window.setTimeout(async () => {
+    bertopicTaskPollTimer = null
+    await loadBertopicTasks(null, { silent: true })
+  }, BERTOPIC_TASK_POLL_INTERVAL)
+}
+
+const loadBertopicTasks = async (rangeOverride = null, { silent = false } = {}) => {
+  const topic = String((rangeOverride?.topic ?? form.topic) || '').trim()
+  const start = String((rangeOverride?.startDate ?? rangeOverride?.start ?? form.startDate) || '').trim()
+  const end = String((rangeOverride?.endDate ?? rangeOverride?.end ?? form.endDate) || '').trim() || start
+
+  if (!topic || !start) {
+    stopBertopicTaskPolling()
+    logs.value = []
+    bertopicTaskState.taskId = ''
+    bertopicTaskState.worker = null
+    lastResult.value = null
+    syncBertopicRunningState()
+    return
+  }
+
+  if (!silent) {
+    bertopicTaskState.loading = true
+    bertopicTaskState.error = ''
+  }
+
+  try {
+    const params = new URLSearchParams({
+      topic,
+      start,
+      end,
+      latest: 'true',
+      limit: '20'
+    })
+    const response = await callApi(`/api/topic/bertopic/tasks?${params.toString()}`, { method: 'GET' })
+    applyBertopicTaskSnapshot(response?.data || {})
+    stopBertopicTaskPolling()
+    scheduleBertopicTaskPolling()
+  } catch (error) {
+    bertopicTaskState.error = error instanceof Error ? error.message : String(error)
+    stopBertopicTaskPolling()
+    syncBertopicRunningState()
+  } finally {
+    if (!silent) {
+      bertopicTaskState.loading = false
+    }
+  }
+}
+
+const runBertopicAnalysis = async (params) => {
+  Object.assign(form, params)
   if (!form.topic || !form.startDate) {
     appendLog({
       label: '参数验证',
@@ -703,138 +852,48 @@ const runBertopicAnalysis = async (params) => {
     }
   }
 
+  bertopicTaskState.error = ''
+  bertopicTaskState.loading = true
   runState.running = true
-
-  const logId = appendLog({
-    label: 'BERTopic分析',
-    message: '准备执行主题分析...',
-    status: 'running'
-  })
-
   try {
-    // 先拉取远程数据到本地缓存（与基础分析一致）
-    const fetchLogId = appendLog({
-      label: '数据准备',
-      message: `拉取远程数据 ${form.topic} ${form.startDate} → ${form.endDate || form.startDate}`,
-      status: 'running'
-    })
-    try {
-      const fetchResponse = await callApi('/api/fetch', {
-        method: 'POST',
-        body: JSON.stringify({
-          topic: form.topic,
-          project: form.project || undefined,
-          start: form.startDate,
-          end: form.endDate || form.startDate
-        })
-      })
-      updateLog(fetchLogId, {
-        status: 'ok',
-        message: '数据拉取完成，可开始主题分析'
-      })
-
-      // 自动优化参数逻辑
-      try {
-        const fetchedCount = fetchResponse.data?.count || 0
-        if (fetchedCount >= 2000) {
-          const currentMinCluster = parseInt(form.runParams.hdbscan.min_cluster_size)
-          // 仅在当前设置较小（默认值附近）时触发自动调整
-          if (currentMinCluster <= 20) {
-            let suggested = 0
-            if (fetchedCount < 20000) {
-              suggested = Math.floor(fetchedCount / 250)
-            } else if (fetchedCount < 100000) {
-              suggested = Math.max(24, Math.floor(fetchedCount / 3000) + 16)
-            } else {
-              suggested = Math.max(36, Math.floor(fetchedCount / 10000) + 28)
-            }
-            suggested = Math.max(suggested, currentMinCluster, 10)
-            suggested = Math.min(suggested, 60)
-
-            if (suggested > currentMinCluster) {
-              form.runParams.hdbscan.min_cluster_size = suggested
-              appendLog({
-                label: '参数优化',
-                message: `检测到数据量(${fetchedCount}条)较大，已自动调整最小聚类规模: ${currentMinCluster} -> ${suggested}`,
-                status: 'info'
-              })
-            }
-          }
-        }
-      } catch (optError) {
-        console.warn('Parameter optimization failed:', optError)
-      }
-
-    } catch (fetchError) {
-      updateLog(fetchLogId, {
-        status: 'error',
-        message: fetchError instanceof Error ? fetchError.message : String(fetchError)
-      })
-      updateLog(logId, {
-        status: 'error',
-        message: '数据拉取失败，已终止分析'
-      })
-      return
-    }
-
-    // 构建请求参数
     const payload = {
       topic: form.topic,
       project: form.project || undefined,
       start_date: form.startDate,
       end_date: form.endDate || undefined,
-      run_params: sanitizeRunParamsForPayload(form.runParams)
+      run_params: sanitizeRunParamsForPayload(form.runParams),
+      force: true
     }
 
     lastPayload.value = payload
-
-    updateLog(logId, {
-      status: 'running',
-      message: `正在分析 ${form.topic} (${form.startDate} ~ ${form.endDate || form.startDate})...`
-    })
-
-    // 调用API
     const response = await callApi('/api/topic/bertopic/run', {
       method: 'POST',
       body: JSON.stringify(payload)
     })
 
-    if (response.status === 'ok') {
-      updateLog(logId, {
-        status: 'ok',
-        message: 'BERTopic分析完成'
-      })
-
-      lastResult.value = response
-
-      // 加载分析历史
-      if (form.topic) {
-        loadHistory()
-      }
-
-      return response
-    } else {
-      throw new Error(response.message || '分析失败')
+    const task = response?.task || response?.data?.task || null
+    if (!task || typeof task !== 'object') {
+      throw new Error(response?.message || 'BERTopic 任务创建失败')
     }
+    logs.value = [normalizeBertopicTaskLog(task)]
+    bertopicTaskState.taskId = String(task.id || '')
+    lastResult.value = String(task.status || '').trim().toLowerCase() === 'completed' ? task : null
+    syncBertopicRunningState()
+    stopBertopicTaskPolling()
+    scheduleBertopicTaskPolling()
+    return response
   } catch (error) {
-    updateLog(logId, {
-      status: 'error',
-      message: error instanceof Error ? error.message : String(error)
+    const message = error instanceof Error ? error.message : String(error)
+    bertopicTaskState.error = message
+    appendLog({
+      label: 'BERTopic分析',
+      message,
+      status: 'error'
     })
     throw error
   } finally {
-    runState.running = false
-  }
-}
-
-const updateLog = (logId, updates) => {
-  const index = logs.value.findIndex(log => log.id === logId)
-  if (index !== -1) {
-    logs.value[index] = {
-      ...logs.value[index],
-      ...updates,
-      time: updates.time || currentTimeString()
-    }
+    bertopicTaskState.loading = false
+    syncBertopicRunningState()
   }
 }
 

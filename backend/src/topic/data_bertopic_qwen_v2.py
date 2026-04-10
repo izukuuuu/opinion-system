@@ -2110,9 +2110,22 @@ def _run_bertopic(
     prompt_config: Optional[Dict[str, Any]] = None,
     run_params: Optional[Dict[str, Any]] = None,
     embedding_model: Optional[SentenceTransformer] = None,
+    progress_callback=None,
 ) -> bool:
     """运行BERTopic主题分析"""
     try:
+        def _emit_progress(phase: str, percentage: int, message: str, **extra: Any) -> None:
+            if not callable(progress_callback):
+                return
+            payload = {
+                "phase": phase,
+                "percentage": percentage,
+                "message": message,
+                "current_step": str(extra.get("current_step") or phase).strip() or phase,
+            }
+            payload.update(extra)
+            progress_callback(payload)
+
         resolved_params = _resolve_run_params(run_params)
         vectorizer_params = resolved_params["vectorizer"]
         umap_params = resolved_params["umap"]
@@ -2225,6 +2238,7 @@ def _run_bertopic(
             log_skip(logger, f"无法设置 pandas 字符串后端: {exc}", "TopicBertopic")
 
         # 训练模型
+        _emit_progress("cluster", 60, "正在训练 BERTopic 模型。", current_step="cluster")
         log_success(logger, "开始训练BERTopic模型...", "TopicBertopic")
         try:
             try:
@@ -2252,6 +2266,8 @@ def _run_bertopic(
                     pd.set_option("mode.string_storage", previous_string_storage)
                 except Exception:
                     pass
+
+        _emit_progress("persist", 74, "正在整理 BERTopic 原始主题结果。", current_step="persist")
 
         # 获取主题信息
         topic_info = topic_model.get_topic_info()
@@ -2374,6 +2390,7 @@ def _run_bertopic(
                 )
 
         # 4-5. 使用大模型进行主题聚类和生成新关键词
+        _emit_progress("recluster", 84, "正在执行 LLM 再聚类。", current_step="recluster")
         if topic_stats and len(topic_stats) > 0:
             try:
                 recluster_topic_stats, _ = _filter_recluster_topic_stats(
@@ -2467,6 +2484,7 @@ def _run_bertopic(
             except Exception as e:
                 log_error(logger, f"大模型聚类失败: {e}", "TopicBertopic")
 
+        _emit_progress("persist", 92, "正在生成时间趋势与最终结果。", current_step="temporal")
         temporal_payload = _build_temporal_payload(
             topic_model,
             vectorizer_texts,
@@ -2484,6 +2502,7 @@ def _run_bertopic(
                 json.dump(temporal_payload, f, ensure_ascii=False, indent=2)
             log_success(logger, "已保存 BERTopic temporal 结果: 6主题时间趋势.json", "TopicBertopic")
 
+        _emit_progress("persist", 98, "分析结果写入完成，正在收尾。", current_step="finalize")
         log_success(logger, "BERTopic分析完成", "TopicBertopic")
         return True
 
@@ -2795,6 +2814,7 @@ def run_topic_bertopic(
     bucket_topic: str = None,
     db_topic: str = None,
     display_topic: str = None,
+    progress_callback=None,
 ) -> bool:
     """
     运行BERTopic主题分析主函数
@@ -2819,7 +2839,20 @@ def run_topic_bertopic(
     logger = setup_logger("topic_bertopic", log_date_str)
     log_module_start(logger, f"BERTopic主题分析: {topic_label} {start_date}~{end_date or start_date}")
 
+    def _emit_progress(phase: str, percentage: int, message: str, **extra: Any) -> None:
+        if not callable(progress_callback):
+            return
+        payload = {
+            "phase": phase,
+            "percentage": percentage,
+            "message": message,
+            "current_step": str(extra.get("current_step") or phase).strip() or phase,
+        }
+        payload.update(extra)
+        progress_callback(payload)
+
     try:
+        _emit_progress("prepare", 4, "正在加载 BERTopic 提示词配置。", current_step="prompt")
         prompt_config = load_topic_bertopic_prompt_config(storage_topic)
         if prompt_config.get("exists"):
             log_success(
@@ -2852,6 +2885,7 @@ def run_topic_bertopic(
         # 确保数据已拉取
         if not fetch_dir:
             # 自动fetch数据
+            _emit_progress("collect", 10, "正在确认本地缓存与采集数据。", current_step="fetch")
             if not _ensure_fetch_data(db_name, start_date, end_date, logger, bucket_topic=storage_topic, db_topic=db_name):
                 return False
             paths = _default_paths(storage_topic, start_date, end_date, bucket_topic=storage_topic)
@@ -2903,6 +2937,7 @@ def run_topic_bertopic(
             )
 
         # 加载和预处理数据
+        _emit_progress("prepare", 24, "正在读取待分析文本。", current_step="load_texts")
         texts = _load_and_merge_data(paths["fetch_dir"], logger)
         if not texts:
             log_error(logger, "没有可用的数据", "TopicBertopic")
@@ -2914,6 +2949,7 @@ def run_topic_bertopic(
             return False
 
         log_success(logger, f"加载文本数据: {text_count}条", "TopicBertopic")
+        _emit_progress("prepare", 34, f"已读取 {text_count} 条文本，正在标准化内容。", current_step="normalize", text_count=text_count)
 
         raw_texts, raw_dates = _normalise_raw_texts(
             texts,
@@ -2926,6 +2962,7 @@ def run_topic_bertopic(
             log_error(logger, "原文清洗后没有有效内容", "TopicBertopic")
             return False
 
+        _emit_progress("embed", 44, "正在生成文本向量。", current_step="embed", text_count=len(raw_texts))
         try:
             embedding_model, _, _, embedding_batch_size = _load_embedding_model(logger)
         except Exception as exc:
@@ -2943,6 +2980,7 @@ def run_topic_bertopic(
             log_error(logger, "原文嵌入生成失败", "TopicBertopic")
             return False
 
+        _emit_progress("prepare", 54, "向量生成完成，正在执行预过滤与文本预处理。", current_step="prefilter", text_count=len(raw_texts))
         raw_texts, raw_embeddings, raw_dates = _apply_topic_relevance_prefilter(
             raw_texts,
             raw_embeddings,
@@ -2991,9 +3029,11 @@ def run_topic_bertopic(
             prompt_config=prompt_config,
             run_params=run_params,
             embedding_model=embedding_model,
+            progress_callback=progress_callback,
         )
 
         if success:
+            _emit_progress("persist", 99, "BERTopic 结果已生成。", current_step="done")
             log_save_success(logger, f"主题分析结果已保存到: {output_dir}", "TopicBertopic")
 
         return success

@@ -109,6 +109,16 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
             "phase": "prepare",
             "message": "等待报告 worker 接单。",
         },
+        "orchestrator_state": {
+            "agent": "report_coordinator",
+            "status": "queued",
+            "phase": "prepare",
+            "message": "等待报告 worker 接单。",
+            "updated_at": now,
+        },
+        "current_actor": "",
+        "current_operation": "等待报告 worker 接单。",
+        "last_diagnostic": {},
         "trust": _initial_trust(),
         "artifacts": {
             "report_ready": False,
@@ -592,20 +602,26 @@ def mark_task_completed(task_id: str, *, message: str, payload: Optional[Dict[st
     )
 
 
-def mark_task_failed(task_id: str, message: str) -> Dict[str, Any]:
-    return _mutate_task_with_event(
-        task_id,
-        mutate=lambda task: _apply_terminal_state(
+def mark_task_failed(task_id: str, message: str, *, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _mutate(task: Dict[str, Any]) -> None:
+        failed_phase = str(((payload or {}).get("failed_phase")) or task.get("phase") or "").strip()
+        _apply_terminal_state(
             task,
             status="failed",
             phase="failed",
             message=message,
             error=message,
-        ),
+        )
+        _sync_failed_todos(task, failed_phase=failed_phase)
+
+    return _mutate_task_with_event(
+        task_id,
+        mutate=_mutate,
         event_type="task.failed",
         phase="failed",
         title="任务失败",
         message=message,
+        payload=payload or {},
     )
 
 
@@ -679,6 +695,19 @@ def set_structured_result_digest(task_id: str, *, digest: Dict[str, Any], path: 
             "structured_result_digest": digest if isinstance(digest, dict) else {},
             "structured_result_path": str(path or "").strip(),
         },
+    )
+
+
+def update_task_trust(task_id: str, *, trust: Dict[str, Any], phase: str = "write", message: str = "") -> Dict[str, Any]:
+    payload = trust if isinstance(trust, dict) else {}
+    return _mutate_task_with_event(
+        task_id,
+        mutate=lambda task: task.update({"trust": payload}),
+        event_type="trust.updated",
+        phase=phase,
+        title="置信信息已更新",
+        message=message or "已同步本次结构化结果的置信信息。",
+        payload=payload,
     )
 
 
@@ -840,6 +869,16 @@ def _mutate_task_with_event(
             raise LookupError("未找到指定的报告任务")
         mutate(task)
         now = _utc_now()
+        _apply_runtime_observability(
+            task,
+            event_type=event_type,
+            phase=phase or str(task.get("phase") or ""),
+            agent=agent,
+            title=title,
+            message=message,
+            payload=payload or {},
+            now=now,
+        )
         event_id = _safe_int(task.get("event_seq"), 0) + 1
         task["event_seq"] = event_id
         task["event_count"] = _safe_int(task.get("event_count"), 0) + 1
@@ -859,6 +898,46 @@ def _mutate_task_with_event(
         _atomic_write_json(state_path, task)
         _append_jsonl_line(event_path, event)
         return attach_recent_events(task, limit=80)
+
+
+def _apply_runtime_observability(
+    task: Dict[str, Any],
+    *,
+    event_type: str,
+    phase: str,
+    agent: str,
+    title: str,
+    message: str,
+    payload: Dict[str, Any],
+    now: str,
+) -> None:
+    text = str(message or title or "").strip()
+    diagnostic_phase = str(payload.get("failed_phase") or "").strip() if isinstance(payload, dict) else ""
+    diagnostic_actor = str(payload.get("failed_actor") or "").strip() if isinstance(payload, dict) else ""
+    current_actor = str(task.get("current_actor") or "").strip()
+    if event_type == "task.failed":
+        current_actor = diagnostic_actor or current_actor or "report_coordinator"
+    elif event_type in {"agent.started", "subagent.started", "agent.memo", "tool.called", "tool.result", "subagent.completed"} and agent:
+        current_actor = agent
+    elif event_type.startswith("approval."):
+        current_actor = "approval"
+    elif event_type.startswith("phase.") and not current_actor:
+        current_actor = "report_coordinator"
+    if current_actor:
+        task["current_actor"] = current_actor
+    if text:
+        task["current_operation"] = text
+    orchestrator_phase = diagnostic_phase or phase or str(task.get("phase") or "").strip()
+    if event_type == "task.failed" or agent == "report_coordinator" or event_type.startswith("phase.") or event_type.startswith("approval."):
+        task["orchestrator_state"] = {
+            "agent": "report_coordinator",
+            "status": str(task.get("status") or "").strip() or "running",
+            "phase": orchestrator_phase,
+            "message": text or str(task.get("message") or "").strip(),
+            "updated_at": now,
+        }
+    if event_type in {"agent.memo", "task.failed"} and isinstance(payload, dict) and payload:
+        task["last_diagnostic"] = payload
 
 
 def _apply_terminal_state(
@@ -895,6 +974,39 @@ def _apply_terminal_state(
             item["updated_at"] = _utc_now()
     if payload:
         task.setdefault("artifacts", {}).update(payload)
+
+
+def _sync_failed_todos(task: Dict[str, Any], *, failed_phase: str) -> None:
+    todos = task.get("todos")
+    if not isinstance(todos, list) or not todos:
+        return
+    phase_to_todo = {
+        "prepare": "scope",
+        "analyze": "scope",
+        "explain": "scope",
+        "interpret": "retrieval",
+        "write": "writing",
+        "review": "validation",
+        "persist": "persist",
+    }
+    target_id = phase_to_todo.get(str(failed_phase or "").strip())
+    updated: List[Dict[str, Any]] = []
+    running_found = False
+    target_marked = False
+    for item in todos:
+        if not isinstance(item, dict):
+            updated.append(item)
+            continue
+        row = dict(item)
+        status = str(row.get("status") or "").strip()
+        if status == "running":
+            row["status"] = "failed"
+            running_found = True
+        elif not running_found and not target_marked and target_id and str(row.get("id") or "").strip() == target_id and status != "completed":
+            row["status"] = "failed"
+            target_marked = True
+        updated.append(row)
+    task["todos"] = updated
 
 
 def _update_agent(
@@ -1181,6 +1293,7 @@ __all__ = [
     "tail_events",
     "task_events_path",
     "task_state_path",
+    "update_task_trust",
     "update_todos",
     "write_worker_status",
 ]

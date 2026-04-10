@@ -243,6 +243,42 @@ def build_base_context(
     }
 
 
+def build_analyze_results_payload(
+    topic_identifier: str,
+    start: str,
+    end: str,
+    *,
+    topic_label: str,
+) -> Dict[str, Any]:
+    ctx = TopicContext(identifier=topic_identifier, display_name=topic_label, aliases=[])
+    ensure_analyze_results(topic_identifier, start=start, end=end, ctx=ctx)
+    analyze_root = ArchiveLocator(ctx).resolve_result_dir("analyze", start, end)
+    if not analyze_root:
+        folder = compose_folder_name(start, end)
+        analyze_root = bucket("analyze", topic_identifier, folder)
+    results: List[Dict[str, Any]] = []
+    for func_name in sorted(path.name for path in analyze_root.iterdir() if path.is_dir()):
+        func_dir = analyze_root / func_name
+        targets: List[Dict[str, Any]] = []
+        for target_dir in sorted(path for path in func_dir.iterdir() if path.is_dir()):
+            filename = ANALYZE_FILE_MAP.get(func_name, "result.json")
+            file_path = target_dir / filename
+            if not file_path.exists():
+                candidates = sorted(target_dir.glob("*.json"))
+                if not candidates:
+                    continue
+                file_path = candidates[0]
+            data = _safe_json(file_path)
+            targets.append({"target": target_dir.name, "file": file_path.name, "data": data})
+        if targets:
+            results.append({"name": func_name, "targets": targets})
+    return {
+        "topic": topic_label,
+        "range": {"start": start, "end": end or start},
+        "functions": results,
+    }
+
+
 def build_workspace_files(base_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     from deepagents.backends.utils import create_file_data
 
@@ -270,16 +306,9 @@ def build_workspace_files(base_context: Dict[str, Any]) -> Dict[str, Dict[str, A
         *sample_lines[:12],
     ]
     files["/workspace/summary.md"] = create_file_data("\n".join(summary_md).strip())
-    for name in [
-        "retrieval_plan",
-        "evidence_bundle",
-        "timeline_bundle",
-        "stance_bundle",
-        "propagation_bundle",
-        "structured_report",
-        "validation_bundle",
-    ]:
-        files[f"/workspace/state/{name}.json"] = create_file_data("{}")
+    # Keep the state directory available for agent writes without pre-creating
+    # individual payload files that can trigger "already exists" write errors.
+    files["/workspace/state/.keep"] = create_file_data("")
     return files
 
 

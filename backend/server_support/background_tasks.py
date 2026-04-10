@@ -18,6 +18,7 @@ from .rebuild_fetch_jobs import list_rebuild_fetch_jobs
 from .stopword_suggestions import load_worker_status as load_stopword_worker_status
 from .fluid_analysis import load_worker_status as load_fluid_analysis_worker_status
 from .basic_analysis import load_worker_status as load_basic_analysis_worker_status
+from .bertopic_analysis import load_worker_status as load_bertopic_worker_status
 
 ACTIVE_STATUSES = {"queued", "running"}
 TERMINAL_STATUSES = {"completed", "failed", "cancelled", "error"}
@@ -47,6 +48,25 @@ GENERIC_PHASE_LABELS = {
     "dedupe": "去重整理",
     "persist": "写入结果",
     "analyze": "处理中",
+    "embed": "向量生成",
+    "cluster": "主题建模",
+    "recluster": "主题重整",
+    "keywords": "关键词生成",
+    "completed": "已完成",
+    "failed": "已失败",
+    "cancelled": "已取消",
+    "error": "异常",
+}
+
+BERTOPIC_PHASE_LABELS = {
+    "queued": "等待中",
+    "prepare": "准备中",
+    "collect": "数据准备",
+    "embed": "向量生成",
+    "cluster": "BERTopic建模",
+    "recluster": "主题重整",
+    "keywords": "关键词生成",
+    "persist": "写入结果",
     "completed": "已完成",
     "failed": "已失败",
     "cancelled": "已取消",
@@ -65,6 +85,7 @@ def collect_background_task_payload(*, active_only: bool = True, limit: int = _D
         _collect_stopword_tasks,
         _collect_publisher_detection_tasks,
         _collect_fluid_analysis_tasks,
+        _collect_bertopic_tasks,
         _collect_basic_analysis_tasks,
         _collect_postclean_tasks,
         _collect_deduplicate_tasks,
@@ -213,6 +234,25 @@ def _collect_basic_analysis_tasks(*, active_only: bool) -> Tuple[List[Dict[str, 
         if not _include_task(payload, active_only=active_only):
             continue
         tasks.append(_normalise_basic_analysis_task(payload, worker_payload))
+    return tasks, [worker_payload]
+
+
+def _collect_bertopic_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    from .bertopic_analysis import list_tasks as list_bertopic_tasks
+
+    payload = list_bertopic_tasks(limit=80)
+    raw_tasks = payload.get("tasks") if isinstance(payload, dict) else []
+    raw_worker = payload.get("worker") if isinstance(payload, dict) else {}
+    worker_payload = _normalise_worker(
+        source="bertopic",
+        source_label="BERTopic Worker",
+        payload=raw_worker if isinstance(raw_worker, dict) else load_bertopic_worker_status(),
+    )
+    tasks = [
+        _normalise_bertopic_task(task, worker_payload)
+        for task in (raw_tasks or [])
+        if isinstance(task, dict) and _include_task(task, active_only=active_only)
+    ]
     return tasks, [worker_payload]
 
 
@@ -596,6 +636,52 @@ def _normalise_basic_analysis_task(task: Dict[str, Any], worker: Dict[str, Any])
         "sentiment_processed": sentiment_processed,
         "sentiment_classified": sentiment_classified,
         "sentiment_remaining": sentiment_remaining,
+    }
+
+
+def _normalise_bertopic_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict[str, Any]:
+    task_id = str(task.get("id") or "").strip()
+    progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
+    phase = str(task.get("phase") or task.get("status") or "").strip() or "queued"
+    percentage = _safe_int(task.get("percentage"), 0)
+    current_step = str(progress.get("current_step") or "").strip()
+    text_count = _safe_int(progress.get("text_count"), 0)
+    topic_count = _safe_int(progress.get("topic_count"), 0)
+    progress_text = f"{percentage}%"
+    if topic_count > 0:
+        progress_text = f"{progress_text} · {topic_count} 个主题"
+    elif text_count > 0:
+        progress_text = f"{progress_text} · {text_count} 条文本"
+
+    current_worker_task = str(worker.get("current_task_id") or "").strip()
+    heartbeat_at = (
+        str(worker.get("last_heartbeat") or "").strip()
+        if current_worker_task == task_id
+        else str(task.get("last_heartbeat") or task.get("updated_at") or "").strip()
+    )
+    display_topic = str(task.get("display_topic") or task.get("topic_identifier") or "").strip()
+    start_date = str(task.get("start_date") or "").strip()
+    end_date = str(task.get("end_date") or "").strip()
+    return {
+        "id": f"bertopic:{task_id}",
+        "task_id": task_id,
+        "source": "bertopic",
+        "source_label": "BERTopic",
+        "title": f"{display_topic or '专题'} BERTopic分析",
+        "scope": f"{start_date}" + (f" 至 {end_date}" if end_date else ""),
+        "status": _normalise_status(task.get("status")),
+        "phase": phase,
+        "phase_label": BERTOPIC_PHASE_LABELS.get(phase, phase or "处理中"),
+        "message": str(task.get("message") or "").strip() or "等待处理。",
+        "percentage": percentage,
+        "progress_text": progress_text,
+        "detail_text": current_step,
+        "updated_at": str(task.get("updated_at") or "").strip(),
+        "started_at": str(task.get("started_at") or "").strip(),
+        "finished_at": str(task.get("finished_at") or "").strip(),
+        "heartbeat_at": heartbeat_at,
+        "heartbeat_stale": _is_stale_timestamp(heartbeat_at),
+        "worker_pid": _safe_int(task.get("worker_pid"), 0) or _safe_int(worker.get("pid"), 0),
     }
 
 

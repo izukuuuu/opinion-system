@@ -6,24 +6,31 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
     "@tanstack/vue-table": "^8.21.3",
+    "@vueuse/core": "^14.2.1",
     "deep-chat": "^2.4.2",
     "dompurify": "^3.3.3",
     "echarts": "^5.6.0",
     "echarts-wordcloud": "^2.1.0",
     "marked": "^17.0.5",
+    "pinia": "^3.0.4",
     "vue": "^3.5.31",
-    "vue-router": "^4.6.4"
+    "vue-router": "^4.6.4",
+    "xstate": "^5.30.0"
   },
   "devDependencies": {
+    "@vue/test-utils": "^2.4.6",
     "@vitejs/plugin-vue": "^5.2.4",
     "autoprefixer": "^10.4.27",
+    "jsdom": "^29.0.2",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "vitest": "^4.1.4"
   }
 }

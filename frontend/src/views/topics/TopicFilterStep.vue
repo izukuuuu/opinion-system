@@ -91,7 +91,7 @@
             <p v-if="projectsError" class="text-xs text-danger">{{ projectsError }}</p>
           </label>
 
-          <label class="space-y-2">
+          <label class="mt-8 space-y-2">
             <span class="flex items-center justify-between gap-3">
               <span class="text-xs font-semibold text-muted">用于处理的存档</span>
               <button type="button" class="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
@@ -1532,4 +1532,3 @@ function formatInteger(value) {
   return new Intl.NumberFormat('zh-CN').format(num)
 }
 </script>
-

@@ -176,21 +176,28 @@ def _resolve_max_tool_rounds(
     task: str = "default",
     model_role: Optional[str] = None,
     explicit_value: Optional[int] = None,
-) -> int:
+) -> Optional[int]:
     if explicit_value is not None:
-        return max(1, _as_int(explicit_value, 5))
+        explicit_rounds = _as_int(explicit_value, 0)
+        return explicit_rounds if explicit_rounds > 0 else None
     cfg = _read_langchain_config()
     role_prefix = str(model_role or "").strip()
     role_value = cfg.get(f"{role_prefix}_max_tool_rounds") if role_prefix else None
     task_value = cfg.get(f"{task}_max_tool_rounds")
+    runtime_override = cfg.get(f"{task}_runtime")
+    runtime_value = runtime_override.get("max_tool_rounds") if isinstance(runtime_override, dict) else None
     global_value = cfg.get("max_tool_rounds")
-    return max(
-        1,
-        _as_int(
-            role_value if role_value is not None else task_value if task_value is not None else global_value,
-            5,
-        ),
+    resolved = _as_int(
+        runtime_value
+        if runtime_value is not None
+        else role_value
+        if role_value is not None
+        else task_value
+        if task_value is not None
+        else global_value,
+        0,
     )
+    return resolved if resolved > 0 else None
 
 
 def _coerce_response_content(content: Any) -> str:
@@ -430,7 +437,9 @@ async def call_langchain_with_tools(
     tool_calls_trace: List[Dict[str, Any]] = []
     tool_results_trace: List[Dict[str, Any]] = []
 
-    for _ in range(resolved_max_tool_rounds):
+    round_index = 0
+    while resolved_max_tool_rounds is None or round_index < resolved_max_tool_rounds:
+        round_index += 1
         try:
             response = await bound_llm.ainvoke(history)
         except Exception:

@@ -276,6 +276,10 @@ def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
             "todos": todos,
             "approvals": approvals,
             "run_state": run_state,
+            "orchestrator_state": task.get("orchestrator_state") if isinstance(task.get("orchestrator_state"), dict) else {},
+            "current_actor": str(task.get("current_actor") or "").strip(),
+            "current_operation": str(task.get("current_operation") or "").strip(),
+            "last_diagnostic": task.get("last_diagnostic") if isinstance(task.get("last_diagnostic"), dict) else {},
             "structured_result_digest": structured_digest,
             "trust": trust,
             "recent_events": recent_events,
@@ -449,11 +453,13 @@ def get_report_payload():
         return error("Missing required field(s): start")
     try:
         topic_identifier, display_name = _resolve_topic(topic_param, project_param, dataset_id)
-        folder = compose_folder_name(start, end)
-        cache_path = bucket("reports", topic_identifier, folder) / REPORT_CACHE_FILENAME
-        payload = _load_report_cache_payload(cache_path)
-        if not payload:
-            return error("当前区间暂无已生成报告，请前往“运行报告”创建后台任务。", status_code=409)
+        payload = generate_report_payload(
+            topic_identifier,
+            start,
+            end,
+            topic_label=display_name,
+            regenerate=False,
+        )
     except ValueError as exc:
         return error(str(exc), status_code=404)
     except Exception as exc:
@@ -474,20 +480,13 @@ def get_full_report_payload():
         return error("Missing required field(s): start")
     try:
         topic_identifier, display_name = _resolve_topic(topic_param, project_param, dataset_id)
-        folder = compose_folder_name(start, end)
-        cache_path = bucket("reports", topic_identifier, folder) / AI_FULL_REPORT_CACHE_FILENAME
-        if regenerate:
-            payload = generate_full_report_payload(
-                topic_identifier,
-                start,
-                end,
-                topic_label=display_name,
-                regenerate=True,
-            )
-        else:
-            payload = _load_json_payload(cache_path)
-            if not payload:
-                return error("当前区间暂无 AI 完整报告，请前往“运行报告”创建后台任务。", status_code=409)
+        payload = generate_full_report_payload(
+            topic_identifier,
+            start,
+            end,
+            topic_label=display_name,
+            regenerate=regenerate,
+        )
     except ValueError as exc:
         return error(str(exc), status_code=404)
     except Exception as exc:

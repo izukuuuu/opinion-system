@@ -36,7 +36,7 @@
                   type="password"
                   autocomplete="new-password"
                   placeholder="sk-..."
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
                 <div class="absolute inset-y-0 right-3 flex items-center">
                   <span
@@ -73,7 +73,7 @@
                   type="password"
                   autocomplete="new-password"
                   placeholder="sk-..."
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
                 <div class="absolute inset-y-0 right-3 flex items-center">
                   <span
@@ -110,7 +110,7 @@
                 v-model.trim="credentialState.form.openai_base_url"
                 type="text"
                 placeholder="https://api.openai.com/v1"
-                class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                class="form-input"
               />
               <p class="text-xs text-muted ml-1">只在使用第三方代理或自建兼容服务时需要修改，留空会使用默认地址。</p>
             </div>
@@ -164,7 +164,7 @@
                   v-model.trim="llmState.assistant.model"
                   type="text"
                   :placeholder="assistantModelPlaceholder"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
 
@@ -174,7 +174,7 @@
                   v-model.trim="llmState.assistant.base_url"
                   type="text"
                   placeholder="继承全局设置"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
 
@@ -184,7 +184,7 @@
                   v-model.trim="llmState.assistant.system_prompt"
                   rows="3"
                   placeholder="如：你是一个专业的舆情分析助手，请结合提供的知识库内容回答问题。"
-                  class="form-textarea w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50 resize-none"
+                  class="form-textarea resize-none"
                 ></textarea>
                 <p class="mt-2 text-xs text-muted ml-1">用来定义助手的角色、语气和回答边界。</p>
               </div>
@@ -194,7 +194,7 @@
                 <input
                   v-model.number="llmState.assistant.max_tokens"
                   type="number"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -203,7 +203,7 @@
                   v-model.number="llmState.assistant.temperature"
                   type="number"
                   step="0.1"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
             </div>
@@ -247,7 +247,7 @@
                   v-model.trim="llmState.filter.model"
                   type="text"
                   :placeholder="filterModelPlaceholder"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div v-if="llmState.filter.provider === 'openai'" class="md:col-span-2">
@@ -256,7 +256,7 @@
                   v-model.trim="llmState.filter.base_url"
                   type="text"
                   placeholder="继承全局设置"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -264,7 +264,7 @@
                 <input
                   v-model.number="llmState.filter.qps"
                   type="number"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -272,7 +272,7 @@
                 <input
                   v-model.number="llmState.filter.batch_size"
                   type="number"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
             </div>
@@ -304,7 +304,7 @@
                   v-model.trim="llmState.embedding.model"
                   type="text"
                   :placeholder="embeddingModelPlaceholder"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div v-if="llmState.embedding.provider === 'openai'" class="md:col-span-2">
@@ -313,7 +313,7 @@
                   v-model.trim="llmState.embedding.base_url"
                   type="text"
                   placeholder="继承全局设置"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -321,7 +321,7 @@
                 <input
                   v-model.number="llmState.embedding.dimension"
                   type="number"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
             </div>
@@ -364,7 +364,7 @@
                 v-model.trim="llmState.langchain.model"
                 type="text"
                 :placeholder="featureModelPlaceholder"
-                class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                class="form-input"
               />
             </div>
 
@@ -375,7 +375,7 @@
                   v-model.trim="llmState.langchain.report_model"
                   type="text"
                   placeholder="留空时跟随默认模型"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -384,7 +384,7 @@
                   v-model.trim="llmState.langchain.analyze_summary_model"
                   type="text"
                   placeholder="留空时跟随默认模型"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
             </div>
@@ -398,14 +398,14 @@
                 v-model.trim="llmState.langchain.base_url"
                 type="text"
                 placeholder="请输入 OpenAI 兼容接口地址"
-                class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                class="form-input"
               />
               <input
                 v-else
                 :value="effectiveLangchainBaseUrl"
                 type="text"
                 disabled
-                class="form-input w-full rounded-2xl border-0 bg-base-soft/70 px-4 py-3 text-sm text-muted cursor-not-allowed"
+                class="form-input"
               />
             </div>
 
@@ -420,7 +420,7 @@
                   v-model.number="llmState.langchain.temperature"
                   type="number"
                   step="0.1"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -428,7 +428,7 @@
                 <input
                   v-model.number="llmState.langchain.max_tokens"
                   type="number"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -437,7 +437,7 @@
                   v-model.number="llmState.langchain.timeout"
                   type="number"
                   step="1"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -445,10 +445,40 @@
                 <input
                   v-model.number="llmState.langchain.max_retries"
                   type="number"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">默认最大工具回合</label>
+                <input
+                  v-model.number="llmState.langchain.max_tool_rounds"
+                  type="number"
+                  min="0"
+                  class="form-input"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">报告总控最大工具回合</label>
+                <input
+                  v-model.number="llmState.langchain.report_max_tool_rounds"
+                  type="number"
+                  min="0"
+                  class="form-input"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">报告子代理最大工具回合</label>
+                <input
+                  v-model.number="llmState.langchain.report_subagent_max_tool_rounds"
+                  type="number"
+                  min="0"
+                  class="form-input"
                 />
               </div>
             </div>
+            <p class="text-xs text-muted ml-1">
+              工具回合表示单个代理在一次运行里最多允许发起的工具调用次数。填写 `0` 表示不限制；如果要设上限，报告总控通常要高于子代理。
+            </p>
           </div>
 
           <div class="flex justify-end">
@@ -490,7 +520,7 @@
                   v-model.trim="reportRuntime.model"
                   type="text"
                   :placeholder="reportRuntimeModelPlaceholder"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
             </div>
@@ -501,7 +531,7 @@
                 v-model.trim="reportRuntime.base_url"
                 type="text"
                 placeholder="如：https://dashscope.aliyuncs.com/compatible-mode/v1"
-                class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                class="form-input"
               />
               <p class="mt-2 text-xs text-muted ml-1">如果报告要走单独入口，在这里填写地址。</p>
             </div>
@@ -514,7 +544,7 @@
                   type="password"
                   autocomplete="new-password"
                   placeholder="留空表示保留当前已保存的密钥"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 pr-28 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input pr-28"
                 />
                 <div class="absolute inset-y-0 right-3 flex items-center">
                   <span
@@ -552,7 +582,7 @@
                   v-model.number="reportRuntime.temperature"
                   type="number"
                   step="0.1"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -560,7 +590,7 @@
                 <input
                   v-model.number="reportRuntime.max_tokens"
                   type="number"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -569,7 +599,7 @@
                   v-model.number="reportRuntime.timeout"
                   type="number"
                   step="1"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
               <div>
@@ -577,7 +607,7 @@
                 <input
                   v-model.number="reportRuntime.max_retries"
                   type="number"
-                  class="form-input w-full rounded-2xl border-0 bg-base-soft px-4 py-3 text-sm transition-all focus:bg-surface focus:ring-2 focus:ring-brand-500/20 placeholder:text-muted/50"
+                  class="form-input"
                 />
               </div>
             </div>
@@ -656,7 +686,10 @@ const llmState = reactive({
     temperature: 0.3,
     max_tokens: 3000,
     timeout: 120,
-    max_retries: 2
+    max_retries: 2,
+    max_tool_rounds: 0,
+    report_max_tool_rounds: 0,
+    report_subagent_max_tool_rounds: 0
   },
   loading: false,
   error: '',
@@ -963,7 +996,10 @@ const submitLlmLangchain = async () => {
       temperature: llmState.langchain.temperature,
       max_tokens: llmState.langchain.max_tokens,
       timeout: llmState.langchain.timeout,
-      max_retries: llmState.langchain.max_retries
+      max_retries: llmState.langchain.max_retries,
+      max_tool_rounds: llmState.langchain.max_tool_rounds,
+      report_max_tool_rounds: llmState.langchain.report_max_tool_rounds,
+      report_subagent_max_tool_rounds: llmState.langchain.report_subagent_max_tool_rounds
     }
     const endpoint = await buildApiUrl('/settings/llm/langchain')
     const response = await fetch(endpoint, {
@@ -1121,6 +1157,9 @@ const fetchLlmSettings = async () => {
     llmState.langchain.max_tokens = asNumber(langchainConfig.max_tokens, 3000)
     llmState.langchain.timeout = asNumber(langchainConfig.timeout, 120)
     llmState.langchain.max_retries = asNumber(langchainConfig.max_retries, 2)
+    llmState.langchain.max_tool_rounds = asNumber(langchainConfig.max_tool_rounds, 0)
+    llmState.langchain.report_max_tool_rounds = asNumber(langchainConfig.report_max_tool_rounds, 0)
+    llmState.langchain.report_subagent_max_tool_rounds = asNumber(langchainConfig.report_subagent_max_tool_rounds, 0)
     syncLangchainBaseUrlModeFromState()
   } catch (err) {
     llmState.error = err instanceof Error ? err.message : '读取模型配置失败'

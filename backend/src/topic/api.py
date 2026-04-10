@@ -21,7 +21,7 @@ from src.utils.setting.paths import bucket, get_data_root
 from pathlib import Path
 import logging
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,7 +47,34 @@ def _load_json_file(path: Path) -> Any:
             return fh.read()
 
 
-def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _report_bertopic_progress(
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]],
+    *,
+    phase: str,
+    percentage: int,
+    message: str,
+    **extra: Any,
+) -> None:
+    if not callable(progress_callback):
+        return
+    payload = {
+        "status": "running",
+        "phase": str(phase or "").strip() or "analyze",
+        "percentage": max(0, min(100, int(percentage))),
+        "message": str(message or "").strip(),
+    }
+    payload.update(extra)
+    try:
+        progress_callback(payload)
+    except Exception:
+        LOGGER.debug("Failed to report BERTopic task progress", exc_info=True)
+
+
+def run_topic_bertopic_job(
+    payload: Dict[str, Any],
+    *,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
     valid, error_response = require_fields(payload, "topic", "start_date")
     if not valid:
         return error_response
@@ -72,7 +99,14 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
             "message": "Missing required field(s): start_date",
         }
 
-    # 将云端/项目标识解析为本地 bucket 名称（与基础分析一致）
+    _report_bertopic_progress(
+        progress_callback,
+        phase="prepare",
+        percentage=2,
+        message="正在解析专题与任务参数。",
+        current_step="resolve",
+    )
+
     try:
         topic_identifier, display_name, log_project, _ = resolve_topic_identifier(
             {
@@ -106,6 +140,14 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # 确保fetch数据可用性检查
         from src.fetch.data_fetch import get_topic_available_date_range
+
+        _report_bertopic_progress(
+            progress_callback,
+            phase="prepare",
+            percentage=6,
+            message="正在检查数据可用区间。",
+            current_step="availability",
+        )
 
         # 检查数据可用范围（使用数据库实际专题名）
         availability = get_topic_available_date_range(db_topic)
@@ -143,6 +185,14 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(run_params, dict):
         run_params = {}
 
+    _report_bertopic_progress(
+        progress_callback,
+        phase="collect",
+        percentage=10,
+        message="任务已进入 BERTopic worker，开始准备数据。",
+        current_step="collect",
+    )
+
     # 运行BERTopic分析
     run_kwargs = {
         "fetch_dir": fetch_dir,
@@ -154,6 +204,9 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     if supports_run_params:
         run_kwargs["db_topic"] = db_topic
         run_kwargs["run_params"] = run_params
+        run_kwargs["progress_callback"] = progress_callback
+    elif progress_callback is not None:
+        run_kwargs["progress_callback"] = progress_callback
 
     result = run_topic_bertopic(
         bucket_topic,
@@ -174,6 +227,7 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "start_date": start_date,
                 "end_date": end_date,
                 "folder": folder_name,
+                "output_dir": str(bucket("topic", bucket_topic, folder_name)),
                 "message": "BERTopic分析完成，结果已保存"
             }
         }
@@ -186,11 +240,14 @@ def _run_topic_bertopic_api(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @topic_bp.route('/bertopic/run', methods=['POST'])
 def run_topic_bertopic_endpoint():
+    from server_support.bertopic_analysis import create_or_reuse_task, ensure_worker_running  # type: ignore
+
     payload = request.get_json(silent=True) or {}
     valid, error_response = require_fields(payload, "topic", "start_date")
     if not valid:
         return jsonify(error_response), 400
 
+    run_sync = str(payload.get("sync") or "").strip().lower() in {"1", "true", "yes", "on"}
     raw_topic = str(payload.get("topic") or "").strip()
     raw_project = str(payload.get("project") or "").strip()
     raw_dataset_id = str(payload.get("dataset_id") or "").strip()
@@ -208,22 +265,209 @@ def run_topic_bertopic_endpoint():
         display_name = raw_topic or raw_project or topic_identifier
         log_project = topic_identifier
 
-    response, code = _execute_operation(
-        "topic-bertopic",
-        _run_topic_bertopic_api,
-        payload,
-        log_context={
-            "project": log_project or topic_identifier,
-            "params": {
-                "start_date": str(payload.get("start_date") or "").strip(),
-                "end_date": str(payload.get("end_date") or "").strip(),
-                "topic": display_name or raw_topic or raw_project,
-                "bucket": topic_identifier,
-                "source": "api",
+    if run_sync:
+        response, code = _execute_operation(
+            "topic-bertopic",
+            run_topic_bertopic_job,
+            payload,
+            log_context={
+                "project": log_project or topic_identifier,
+                "params": {
+                    "start_date": str(payload.get("start_date") or "").strip(),
+                    "end_date": str(payload.get("end_date") or "").strip(),
+                    "topic": display_name or raw_topic or raw_project,
+                    "bucket": topic_identifier,
+                    "source": "api-sync",
+                },
             },
-        },
-    )
-    return jsonify(response), code
+        )
+        return jsonify(response), code
+
+    start_date = str(payload.get("start_date") or "").strip()
+    end_date = str(payload.get("end_date") or "").strip() or None
+    force = bool(payload.get("force", False))
+
+    try:
+        task = create_or_reuse_task(
+            topic_identifier=topic_identifier,
+            display_topic=display_name or raw_topic or raw_project or topic_identifier,
+            start_date=start_date,
+            end_date=end_date,
+            request_payload=payload,
+            force=force,
+        )
+        ensure_worker_running()
+        return success(
+            {
+                "message": "BERTopic 任务已创建",
+                "task_id": task.get("id"),
+                "task_status": task.get("status"),
+                "task": task,
+            }
+        )
+    except Exception as exc:
+        LOGGER.exception("Error creating BERTopic task")
+        return error(str(exc), status_code=500)
+
+
+@topic_bp.route('/bertopic/task/<task_id>', methods=['GET'])
+def get_topic_bertopic_task_status(task_id):
+    from server_support.bertopic_analysis import get_task  # type: ignore
+
+    try:
+        task = get_task(task_id)
+        return success({"task": task})
+    except LookupError:
+        return error("Task not found", status_code=404)
+    except Exception as exc:
+        LOGGER.exception("Error getting BERTopic task")
+        return error(str(exc), status_code=500)
+
+
+@topic_bp.route('/bertopic/task/<task_id>/cancel', methods=['POST'])
+def cancel_topic_bertopic_task(task_id):
+    from server_support.bertopic_analysis import cancel_task as do_cancel_task  # type: ignore
+
+    try:
+        task = do_cancel_task(task_id)
+        return success({"task": task})
+    except LookupError:
+        return error("Task not found", status_code=404)
+    except ValueError as exc:
+        return error(str(exc), status_code=400)
+    except Exception as exc:
+        LOGGER.exception("Error cancelling BERTopic task")
+        return error(str(exc), status_code=500)
+
+
+@topic_bp.route('/bertopic/task/<task_id>', methods=['DELETE'])
+def delete_topic_bertopic_task(task_id):
+    from server_support.bertopic_analysis import delete_task as do_delete_task  # type: ignore
+
+    try:
+        do_delete_task(task_id)
+        return success({"message": "Task deleted"})
+    except LookupError:
+        return error("Task not found", status_code=404)
+    except ValueError as exc:
+        return error(str(exc), status_code=400)
+    except Exception as exc:
+        LOGGER.exception("Error deleting BERTopic task")
+        return error(str(exc), status_code=500)
+
+
+@topic_bp.route('/bertopic/status', methods=['GET'])
+def get_topic_bertopic_status():
+    from server_support.bertopic_analysis import build_status_payload  # type: ignore
+
+    raw_topic = request.args.get("topic")
+    raw_project = request.args.get("project")
+    raw_dataset_id = request.args.get("dataset_id")
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip() or None
+
+    payload = {
+        "topic": raw_topic,
+        "project": raw_project,
+        "dataset_id": raw_dataset_id,
+    }
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError:
+        topic_identifier = (raw_topic or raw_project or raw_dataset_id or "").strip()
+        if not topic_identifier:
+            return error("Missing required query parameters: topic/project/dataset_id")
+
+    if not start:
+        return error("Missing required query parameter: start", status_code=400)
+
+    try:
+        data = build_status_payload(topic_identifier, start, end_date=end)
+        return success({"data": data})
+    except Exception as exc:
+        LOGGER.exception("Error getting BERTopic status")
+        return error(str(exc), status_code=500)
+
+
+@topic_bp.route('/bertopic/tasks', methods=['GET'])
+def list_topic_bertopic_tasks():
+    from server_support.bertopic_analysis import list_tasks as do_list_tasks  # type: ignore
+
+    raw_topic = request.args.get("topic")
+    raw_project = request.args.get("project")
+    raw_dataset_id = request.args.get("dataset_id")
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip() or None
+    latest_only = str(request.args.get("latest") or "true").strip().lower() != "false"
+    limit = max(1, min(200, int(request.args.get("limit") or 50)))
+
+    payload = {
+        "topic": raw_topic,
+        "project": raw_project,
+        "dataset_id": raw_dataset_id,
+    }
+
+    try:
+        topic_identifier, _, _, _ = resolve_topic_identifier(payload, PROJECT_MANAGER)
+    except ValueError:
+        topic_identifier = (raw_topic or raw_project or raw_dataset_id or "").strip()
+        if not topic_identifier:
+            return error("Missing required query parameters: topic/project/dataset_id")
+
+    if not start:
+        return error("Missing required query parameter: start", status_code=400)
+
+    try:
+        listing = do_list_tasks(limit=limit)
+        tasks = listing.get("tasks") if isinstance(listing, dict) else []
+        worker = listing.get("worker") if isinstance(listing, dict) else {}
+        if not isinstance(tasks, list):
+            tasks = []
+
+        filtered: List[Dict[str, Any]] = []
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            if str(task.get("topic_identifier") or "").strip() != topic_identifier:
+                continue
+            if str(task.get("start_date") or "").strip() != start:
+                continue
+            task_end = str(task.get("end_date") or "").strip() or None
+            if (task_end or None) != end:
+                continue
+            filtered.append(task)
+
+        if latest_only and filtered:
+            filtered = [max(filtered, key=lambda item: str(item.get("created_at") or ""))]
+
+        filtered.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        return success(
+            {
+                "data": {
+                    "topic_identifier": topic_identifier,
+                    "start": start,
+                    "end": end or start,
+                    "tasks": filtered,
+                    "worker": worker,
+                }
+            }
+        )
+    except Exception as exc:
+        LOGGER.exception("Error listing BERTopic tasks")
+        return error(str(exc), status_code=500)
+
+
+@topic_bp.route('/bertopic/worker', methods=['GET'])
+def get_topic_bertopic_worker_status():
+    from server_support.bertopic_analysis import load_worker_status  # type: ignore
+
+    try:
+        status = load_worker_status()
+        return success({"worker": status})
+    except Exception as exc:
+        LOGGER.exception("Error getting BERTopic worker status")
+        return error(str(exc), status_code=500)
 
 
 @topic_bp.route('/bertopic/availability', methods=['GET'])

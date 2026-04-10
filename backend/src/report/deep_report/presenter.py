@@ -3,16 +3,24 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 
+def _report_source(payload: Dict[str, Any]) -> Dict[str, Any]:
+    report_data = payload.get("report_data")
+    if isinstance(report_data, dict):
+        return report_data
+    return payload
+
+
 def render_markdown(payload: Dict[str, Any]) -> str:
-    conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
-    timeline = payload.get("timeline") if isinstance(payload.get("timeline"), list) else []
-    stance = payload.get("stance_matrix") if isinstance(payload.get("stance_matrix"), list) else []
-    risks = payload.get("risk_judgement") if isinstance(payload.get("risk_judgement"), list) else []
-    actions = payload.get("suggested_actions") if isinstance(payload.get("suggested_actions"), list) else []
-    propagation = payload.get("propagation_features") if isinstance(payload.get("propagation_features"), list) else []
-    unverified = payload.get("unverified_points") if isinstance(payload.get("unverified_points"), list) else []
-    citations = payload.get("citations") if isinstance(payload.get("citations"), list) else []
-    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    source = _report_source(payload)
+    conclusion = source.get("conclusion") if isinstance(source.get("conclusion"), dict) else {}
+    timeline = source.get("timeline") if isinstance(source.get("timeline"), list) else []
+    stance = source.get("stance_matrix") if isinstance(source.get("stance_matrix"), list) else []
+    risks = source.get("risk_judgement") if isinstance(source.get("risk_judgement"), list) else []
+    actions = source.get("suggested_actions") if isinstance(source.get("suggested_actions"), list) else []
+    propagation = source.get("propagation_features") if isinstance(source.get("propagation_features"), list) else []
+    unverified = source.get("unverified_points") if isinstance(source.get("unverified_points"), list) else []
+    citations = source.get("citations") if isinstance(source.get("citations"), list) else []
+    task = source.get("task") if isinstance(source.get("task"), dict) else {}
     lines: List[str] = [
         f"# {str(task.get('topic_label') or task.get('topic_identifier') or '专题报告').strip()}",
         "",
@@ -98,8 +106,10 @@ def render_markdown(payload: Dict[str, Any]) -> str:
 
 
 def build_structured_digest(payload: Dict[str, Any]) -> Dict[str, Any]:
-    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
-    conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
+    source = _report_source(payload)
+    task = source.get("task") if isinstance(source.get("task"), dict) else {}
+    conclusion = source.get("conclusion") if isinstance(source.get("conclusion"), dict) else {}
+    report_document = payload.get("report_document") if isinstance(payload.get("report_document"), dict) else {}
     return {
         "topic": str(task.get("topic_label") or task.get("topic_identifier") or "").strip(),
         "range": {
@@ -110,30 +120,36 @@ def build_structured_digest(payload: Dict[str, Any]) -> Dict[str, Any]:
         "key_findings": [str(item).strip() for item in (conclusion.get("key_findings") or []) if str(item or "").strip()][:6],
         "key_risks": [str(item).strip() for item in (conclusion.get("key_risks") or []) if str(item or "").strip()][:6],
         "counts": {
-            "timeline": len(payload.get("timeline") or []),
-            "subjects": len(payload.get("subjects") or []),
-            "evidence": len(payload.get("key_evidence") or []),
-            "conflicts": len(payload.get("conflict_points") or []),
-            "propagation": len(payload.get("propagation_features") or []),
-            "risks": len(payload.get("risk_judgement") or []),
-            "actions": len(payload.get("suggested_actions") or []),
-            "citations": len(payload.get("citations") or []),
+            "timeline": len(source.get("timeline") or []),
+            "subjects": len(source.get("subjects") or []),
+            "evidence": len(source.get("key_evidence") or []),
+            "conflicts": len(source.get("conflict_points") or []),
+            "propagation": len(source.get("propagation_features") or []),
+            "risks": len(source.get("risk_judgement") or []),
+            "actions": len(source.get("suggested_actions") or []),
+            "citations": len(source.get("citations") or []),
+            "sections": len(report_document.get("sections") or []),
+            "charts": len(payload.get("chart_catalog") or []),
         },
     }
 
 
 def build_full_payload(structured_payload: Dict[str, Any], markdown: str, *, cache_version: int) -> Dict[str, Any]:
-    task = structured_payload.get("task") if isinstance(structured_payload.get("task"), dict) else {}
+    source = _report_source(structured_payload)
+    task = source.get("task") if isinstance(source.get("task"), dict) else {}
     title = str(task.get("topic_label") or task.get("topic_identifier") or "AI 完整报告").strip() or "AI 完整报告"
-    return {
+    full_payload = {
+        **structured_payload,
         "title": title,
-        "subtitle": "结构化研判生成的正式文稿",
+        "subtitle": "统一结构化报告阅读视图",
         "rangeText": f"{str(task.get('start') or '').strip()} -> {str(task.get('end') or '').strip()}",
         "markdown": str(markdown or "").strip(),
-        "assets": [],
         "meta": {
             "cache_version": int(cache_version),
             "thread_id": str(task.get("thread_id") or "").strip(),
             "structured_digest": build_structured_digest(structured_payload),
         },
     }
+    if isinstance(structured_payload.get("meta"), dict):
+        full_payload["meta"] = {**structured_payload.get("meta"), **full_payload["meta"]}
+    return full_payload

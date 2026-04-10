@@ -652,7 +652,7 @@ def run_Analyze(topic: str, date: str, logger=None, only_function: str = None, e
         target = func_config.get('target')
         # 这里不再逐项跳过，已在上方统一过滤
         try:
-            # 根据函数名和目标调用对应的分析函数，并按功能/渠道落盘
+            # 根据函数名和目标调用对应的分析函数，并按功能/渠道存储
             if target == '总体':
                 # 运行总体
                 result = None

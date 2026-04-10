@@ -42,6 +42,7 @@
           </header>
 
           <section
+            :data-app-select-boundary="scrollable ? '' : null"
             class="text-sm text-secondary"
             :class="scrollable ? 'min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4' : 'mt-4 space-y-4'"
           >

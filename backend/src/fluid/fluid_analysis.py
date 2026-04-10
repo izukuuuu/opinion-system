@@ -1131,7 +1131,7 @@ def calculate_predicted_heat(predicted_metrics: Dict, dI_dt: float, E: float = 0
     return H_pred
 
 
-# ——————————— 结果落盘 ———————————
+# ——————————— 结果存储 ———————————
 
 def _save_outputs(metrics: Dict, all_results: List[Dict], output_file: Path, output_json: Path) -> None:
     """

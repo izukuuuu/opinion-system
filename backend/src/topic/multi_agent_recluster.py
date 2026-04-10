@@ -30,7 +30,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, TypedDict
 
-from ..utils.ai import call_langchain_chat
+from ..utils.ai import call_langchain_chat, ensure_langchain_uuid_compat
 
 # ---------------------------------------------------------------------------
 # Shared state schema
@@ -1478,6 +1478,7 @@ def build_recluster_graph():
         Phase 3 – Filtering:    custom_filter_judge (conditional, skipped if no rules)
         Phase 4 – Finalisation: naming_keywords → END
     """
+    ensure_langchain_uuid_compat()
     try:
         from langgraph.graph import StateGraph, END
     except ImportError as exc:

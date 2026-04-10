@@ -171,11 +171,13 @@
               <textarea v-model.trim="databaseForm.description" rows="3" placeholder="用途说明（可选）"
                 class="input"></textarea>
             </label>
-            <label class="flex items-center gap-2 text-sm font-medium text-secondary md:col-span-2">
-              <input v-model="databaseForm.set_active" type="checkbox"
-                class="settings-checkbox" />
-              <span>保存后设为默认连接</span>
-            </label>
+            <AppCheckbox
+              v-model="databaseForm.set_active"
+              class="md:col-span-2"
+              label-class="text-sm font-medium text-secondary"
+            >
+              保存后设为默认连接
+            </AppCheckbox>
           </div>
         </div>
         <button type="submit" class="hidden" aria-hidden="true">
@@ -188,6 +190,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import AppCheckbox from "../../components/AppCheckbox.vue";
 import AppModal from "../../components/AppModal.vue";
 import AppSelect from "../../components/AppSelect.vue";
 import TabSwitch from "../../components/TabSwitch.vue";

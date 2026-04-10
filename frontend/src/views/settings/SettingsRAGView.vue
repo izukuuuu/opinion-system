@@ -90,29 +90,21 @@
           </div>
 
           <div class="space-y-3">
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.chunking.respect_sentence_boundary"
-                type="checkbox"
-                id="respect-sentence"
-                class="checkbox-custom"
-              />
-              <label for="respect-sentence" class="ml-2 text-sm text-secondary">
-                尊重句子边界
-              </label>
-            </div>
+            <AppCheckbox
+              v-model="ragState.configForm.chunking.respect_sentence_boundary"
+              id="respect-sentence"
+              label-class="text-sm text-secondary"
+            >
+              尊重句子边界
+            </AppCheckbox>
 
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.chunking.strip_whitespace"
-                type="checkbox"
-                id="strip-whitespace"
-                class="checkbox-custom"
-              />
-              <label for="strip-whitespace" class="ml-2 text-sm text-secondary">
-                去除多余空白
-              </label>
-            </div>
+            <AppCheckbox
+              v-model="ragState.configForm.chunking.strip_whitespace"
+              id="strip-whitespace"
+              label-class="text-sm text-secondary"
+            >
+              去除多余空白
+            </AppCheckbox>
           </div>
         </div>
 
@@ -180,57 +172,41 @@
           </div>
 
           <div class="space-y-3">
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.retrieval.include_metadata"
-                type="checkbox"
-                id="include-metadata"
-                class="checkbox-custom"
-              />
-              <label for="include-metadata" class="ml-2 text-sm text-secondary">
-                包含元数据
-              </label>
-            </div>
+            <AppCheckbox
+              v-model="ragState.configForm.retrieval.include_metadata"
+              id="include-metadata"
+              label-class="text-sm text-secondary"
+            >
+              包含元数据
+            </AppCheckbox>
 
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.retrieval.rerank"
-                type="checkbox"
-                id="enable-rerank"
-                class="checkbox-custom"
-                disabled
-              />
-              <label for="enable-rerank" class="ml-2 text-sm text-muted">
-                启用重排序 (暂不支持)
-              </label>
-            </div>
+            <AppCheckbox
+              v-model="ragState.configForm.retrieval.rerank"
+              id="enable-rerank"
+              disabled
+              label-class="text-sm text-muted"
+            >
+              启用重排序 (暂不支持)
+            </AppCheckbox>
 
             <div class="border-t pt-4 mt-4 space-y-4">
               <h3 class="text-sm font-bold text-primary">RouterRAG 特有配置</h3>
               
-              <div class="flex items-center">
-                <input
-                  v-model="ragState.configForm.retrieval.enable_query_expansion"
-                  type="checkbox"
-                  id="enable-query-expansion"
-                  class="checkbox-custom"
-                />
-                <label for="enable-query-expansion" class="ml-2 text-sm text-secondary">
-                  启用查询扩展 (Query Expansion)
-                </label>
-              </div>
+              <AppCheckbox
+                v-model="ragState.configForm.retrieval.enable_query_expansion"
+                id="enable-query-expansion"
+                label-class="text-sm text-secondary"
+              >
+                启用查询扩展 (Query Expansion)
+              </AppCheckbox>
 
-              <div class="flex items-center">
-                <input
-                  v-model="ragState.configForm.retrieval.enable_llm_summary"
-                  type="checkbox"
-                  id="enable-llm-summary"
-                  class="checkbox-custom"
-                />
-                <label for="enable-llm-summary" class="ml-2 text-sm text-secondary">
-                  启用 LLM 结果总结 (Result Summary)
-                </label>
-              </div>
+              <AppCheckbox
+                v-model="ragState.configForm.retrieval.enable_llm_summary"
+                id="enable-llm-summary"
+                label-class="text-sm text-secondary"
+              >
+                启用 LLM 结果总结 (Result Summary)
+              </AppCheckbox>
 
               <div v-if="ragState.configForm.retrieval.enable_llm_summary" class="ml-6 space-y-2">
                 <label class="text-xs font-semibold text-muted">总结模式</label>
@@ -309,17 +285,13 @@
           </div>
 
           <div class="space-y-3">
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.storage.persist_index"
-                type="checkbox"
-                id="persist-index"
-                class="checkbox-custom"
-              />
-              <label for="persist-index" class="ml-2 text-sm text-secondary">
-                持久化索引
-              </label>
-            </div>
+            <AppCheckbox
+              v-model="ragState.configForm.storage.persist_index"
+              id="persist-index"
+              label-class="text-sm text-secondary"
+            >
+              持久化索引
+            </AppCheckbox>
           </div>
         </div>
 
@@ -328,77 +300,37 @@
           <h2 class="text-lg font-semibold text-primary">文本预处理配置</h2>
 
           <div class="space-y-3">
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.processing.lowercase"
-                type="checkbox"
-                id="lowercase"
-                class="checkbox-custom"
-              />
-              <label for="lowercase" class="ml-2 text-sm text-secondary">
-                转换为小写
-              </label>
-            </div>
+            <AppCheckbox v-model="ragState.configForm.processing.lowercase" id="lowercase" label-class="text-sm text-secondary">
+              转换为小写
+            </AppCheckbox>
 
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.processing.remove_urls"
-                type="checkbox"
-                id="remove-urls"
-                class="checkbox-custom"
-              />
-              <label for="remove-urls" class="ml-2 text-sm text-secondary">
-                移除URL
-              </label>
-            </div>
+            <AppCheckbox v-model="ragState.configForm.processing.remove_urls" id="remove-urls" label-class="text-sm text-secondary">
+              移除URL
+            </AppCheckbox>
 
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.processing.remove_emails"
-                type="checkbox"
-                id="remove-emails"
-                class="checkbox-custom"
-              />
-              <label for="remove-emails" class="ml-2 text-sm text-secondary">
-                移除邮箱
-              </label>
-            </div>
+            <AppCheckbox v-model="ragState.configForm.processing.remove_emails" id="remove-emails" label-class="text-sm text-secondary">
+              移除邮箱
+            </AppCheckbox>
 
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.processing.remove_extra_whitespace"
-                type="checkbox"
-                id="remove-whitespace"
-                class="checkbox-custom"
-              />
-              <label for="remove-whitespace" class="ml-2 text-sm text-secondary">
-                移除多余空白
-              </label>
-            </div>
+            <AppCheckbox
+              v-model="ragState.configForm.processing.remove_extra_whitespace"
+              id="remove-whitespace"
+              label-class="text-sm text-secondary"
+            >
+              移除多余空白
+            </AppCheckbox>
 
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.processing.remove_special_chars"
-                type="checkbox"
-                id="remove-special"
-                class="checkbox-custom"
-              />
-              <label for="remove-special" class="ml-2 text-sm text-secondary">
-                移除特殊字符
-              </label>
-            </div>
+            <AppCheckbox v-model="ragState.configForm.processing.remove_special_chars" id="remove-special" label-class="text-sm text-secondary">
+              移除特殊字符
+            </AppCheckbox>
 
-            <div class="flex items-center">
-              <input
-                v-model="ragState.configForm.processing.normalize_unicode"
-                type="checkbox"
-                id="normalize-unicode"
-                class="checkbox-custom"
-              />
-              <label for="normalize-unicode" class="ml-2 text-sm text-secondary">
-                标准化Unicode
-              </label>
-            </div>
+            <AppCheckbox
+              v-model="ragState.configForm.processing.normalize_unicode"
+              id="normalize-unicode"
+              label-class="text-sm text-secondary"
+            >
+              标准化Unicode
+            </AppCheckbox>
           </div>
         </div>
 
@@ -649,6 +581,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useRAGSimple } from '../../composables/useRAGSimple'
 import { useRAGTopics } from '../../composables/useRAGTopics'
 import { useApiBase } from '../../composables/useApiBase'
+import AppCheckbox from '../../components/AppCheckbox.vue'
 import TabSwitch from '../../components/TabSwitch.vue'
 import AppSelect from '../../components/AppSelect.vue'
 
