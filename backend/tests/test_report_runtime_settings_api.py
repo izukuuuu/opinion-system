@@ -25,11 +25,11 @@ class ReportRuntimeSettingsApiTests(unittest.TestCase):
                     "runtime": {
                         "model": {"provider": "openai", "model": "glm-5", "base_url": "https://example.com", "temperature": 0.2, "max_tokens": 18000, "timeout": 420.0, "max_retries": 2},
                         "persistence": {"enabled": True, "source_mode": "reuse_active", "schema_name": "report_runtime"},
-                        "observability": {"langsmith": {"enabled": True, "project": "opinion-system-report", "endpoint": "https://api.smith.langchain.com", "api_key": "lsv2_pt_test"}},
+                        "observability": {"langsmith": {"enabled": True, "project": "opinion-system-report", "endpoint": "https://api.smith.langchain.com"}},
                     }
                 }
             },
-            "credentials": {"report_api_key": "sk-test-1234"},
+            "credentials": {"report_api_key": "sk-test-1234", "langsmith_api_key": "lsv2_pt_test"},
         }
         databases = {
             "active": "primary",
@@ -97,6 +97,7 @@ class ReportRuntimeSettingsApiTests(unittest.TestCase):
     def test_put_report_runtime_observability_writes_langsmith_config(self) -> None:
         stored = {"langchain": {"report": {"runtime": {"observability": {"langsmith": {"enabled": False, "project": "default"}}}}}}
         persisted = {}
+        local_updates = []
 
         def _persist(config):
             persisted.update(config)
@@ -104,6 +105,9 @@ class ReportRuntimeSettingsApiTests(unittest.TestCase):
         client = self._client()
         with patch("server_support.settings_config.load_llm_config", return_value=stored), patch(
             "server_support.settings_config.persist_llm_config", side_effect=_persist
+        ), patch(
+            "server_support.settings_config.update_llm_local_secrets",
+            side_effect=lambda **kwargs: local_updates.append(kwargs),
         ):
             response = client.put(
                 "/api/settings/report-runtime/observability",
@@ -120,7 +124,38 @@ class ReportRuntimeSettingsApiTests(unittest.TestCase):
         self.assertEqual(langsmith["enabled"], True)
         self.assertEqual(langsmith["project"], "report-prod")
         self.assertEqual(langsmith["endpoint"], "https://api.smith.langchain.com")
-        self.assertEqual(langsmith["api_key"], "lsv2_pt_test")
+        self.assertNotIn("api_key", langsmith)
+        self.assertEqual(local_updates, [{"credential_updates": {"langsmith_api_key": "lsv2_pt_test"}}])
+
+    def test_put_report_runtime_settings_stores_report_api_key_in_local_overrides(self) -> None:
+        stored = {"langchain": {"report": {"runtime": {"model": {"provider": "openai", "model": "glm-5"}}}}, "credentials": {}}
+        persisted = {}
+        local_updates = []
+
+        def _persist(config):
+            persisted.update(config)
+
+        client = self._client()
+        with patch("server_support.settings_config.load_llm_config", side_effect=[stored, stored]), patch(
+            "server_support.settings_config.persist_llm_config", side_effect=_persist
+        ), patch(
+            "server_support.settings_config.update_llm_local_secrets",
+            side_effect=lambda **kwargs: local_updates.append(kwargs),
+        ), patch(
+            "server_support.settings_config._report_runtime_persistence_payload",
+            return_value={"enabled": True, "status": "ready"},
+        ), patch(
+            "server_support.settings_config._report_runtime_observability_payload",
+            return_value={"enabled": False, "project": "opinion-system-report", "endpoint": "", "api_key": {"configured": False, "last_four": ""}},
+        ):
+            response = client.put(
+                "/api/settings/llm/report-runtime",
+                json={"provider": "openai", "model": "glm-5", "api_key": "sk-report-local"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(local_updates, [{"credential_updates": {"report_api_key": "sk-report-local"}}])
+        self.assertEqual(persisted["credentials"]["report_api_key"], "sk-report-local")
 
 
 if __name__ == "__main__":

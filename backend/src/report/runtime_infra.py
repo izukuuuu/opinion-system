@@ -216,11 +216,16 @@ def _langsmith_endpoint() -> str:
 
 
 def _langsmith_api_key() -> str:
-    observability = _read_llm_runtime_config().get("observability") if isinstance(_read_llm_runtime_config().get("observability"), dict) else {}
+    runtime = _read_llm_runtime_config()
+    observability = runtime.get("observability") if isinstance(runtime.get("observability"), dict) else {}
     langsmith = observability.get("langsmith") if isinstance(observability.get("langsmith"), dict) else {}
+    llm_config = load_llm_config()
+    credentials = llm_config.get("credentials") if isinstance(llm_config.get("credentials"), dict) else {}
+    credential_api_key = str(credentials.get("langsmith_api_key") or "").strip()
     return (
         _env_text("LANGSMITH_API_KEY")
         or _env_text("OPINION_REPORT_LANGSMITH_API_KEY")
+        or credential_api_key
         or str(langsmith.get("api_key") or "").strip()
     )
 

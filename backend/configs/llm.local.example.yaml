@@ -3,3 +3,4 @@ credentials:
   openai_base_url: https://api.example.com/v1
   qwen_api_key: your_qwen_api_key_here
   report_api_key: your_report_api_key_here
+  langsmith_api_key: your_langsmith_api_key_here

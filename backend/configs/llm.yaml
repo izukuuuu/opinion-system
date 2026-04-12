@@ -51,7 +51,9 @@ langchain:
       observability:
         langsmith:
           enabled: true
-          project: opinion-system-report
+          project: Opinion System
+          endpoint: ''
+          api_key: ''
     skills:
       runtime: deepagents
       default: sona_feature_analysis

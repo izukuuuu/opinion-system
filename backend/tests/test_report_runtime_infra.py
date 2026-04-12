@@ -78,10 +78,11 @@ class ReportRuntimeInfraTests(unittest.TestCase):
                         "runtime": {
                             "environment": "production",
                             "persistence": {"enabled": True, "backend": "postgres", "source_mode": "reuse_active", "schema_name": "report_runtime"},
-                            "observability": {"langsmith": {"enabled": True, "project": "opinion-system-report", "endpoint": "https://api.smith.langchain.com", "api_key": "lsv2_pt_test"}},
+                            "observability": {"langsmith": {"enabled": True, "project": "opinion-system-report", "endpoint": "https://api.smith.langchain.com"}},
                         }
                     }
-                }
+                },
+                "credentials": {"langsmith_api_key": "lsv2_pt_test"},
             },
         ), patch.dict(os.environ, {}, clear=False):
             profile = resolve_runtime_profile(purpose="deep-report-coordinator")

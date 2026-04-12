@@ -12,6 +12,7 @@ from server_support import (
     persist_databases_config,
     load_llm_config,
     persist_llm_config,
+    update_llm_local_secrets,
     error,
     success,
     resolve_topic_identifier,
@@ -81,11 +82,15 @@ def _report_runtime_observability_payload(config: Dict[str, Any]) -> Dict[str, A
     runtime = report.get("runtime") if isinstance(report.get("runtime"), dict) else {}
     observability = runtime.get("observability") if isinstance(runtime.get("observability"), dict) else {}
     langsmith = observability.get("langsmith") if isinstance(observability.get("langsmith"), dict) else {}
+    credentials = config.get("credentials") if isinstance(config.get("credentials"), dict) else {}
+    langsmith_api_key = credentials.get("langsmith_api_key")
+    if not isinstance(langsmith_api_key, str) or not langsmith_api_key.strip():
+        langsmith_api_key = langsmith.get("api_key") if isinstance(langsmith.get("api_key"), str) else ""
     return {
         "enabled": bool(langsmith.get("enabled", False)),
         "project": str(langsmith.get("project") or "opinion-system-report").strip() or "opinion-system-report",
         "endpoint": str(langsmith.get("endpoint") or "").strip(),
-        "api_key": _summarise_api_key(langsmith.get("api_key") if isinstance(langsmith.get("api_key"), str) else None),
+        "api_key": _summarise_api_key(langsmith_api_key),
     }
 
 
@@ -326,6 +331,7 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
         payload = request.get_json(silent=True) or {}
         config = load_llm_config()
         credentials = dict(config.get("credentials", {}))
+        secret_updates: Dict[str, Any] = {}
 
         def _update_text_field(field: str) -> None:
             if field not in payload:
@@ -339,10 +345,19 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
             else:
                 text = str(value).strip()
 
+            if field == "openai_base_url":
+                if text:
+                    credentials[field] = text
+                else:
+                    credentials.pop(field, None)
+                return
+
             if text:
                 credentials[field] = text
+                secret_updates[field] = text
             else:
                 credentials.pop(field, None)
+                secret_updates[field] = None
 
         _update_text_field("qwen_api_key")
         _update_text_field("dashscope_api_key")
@@ -352,6 +367,8 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
         _update_text_field("report_api_key")
 
         config["credentials"] = credentials
+        if secret_updates:
+            update_llm_local_secrets(credential_updates=secret_updates)
         persist_llm_config(config)
 
         return success({
@@ -399,16 +416,25 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
         credentials = config.get("credentials", {})
         if not isinstance(credentials, dict):
             credentials = {}
+        report_secret: str | None = None
+        clear_report_secret = False
         if payload.get("clear_api_key"):
             credentials.pop("report_api_key", None)
+            clear_report_secret = True
         elif "api_key" in payload:
             api_key = str(payload.get("api_key") or "").strip()
             if api_key:
                 credentials["report_api_key"] = api_key
+                report_secret = api_key
             else:
                 credentials.pop("report_api_key", None)
+                clear_report_secret = True
         config["credentials"] = credentials
 
+        if report_secret is not None or clear_report_secret:
+            update_llm_local_secrets(
+                credential_updates={"report_api_key": report_secret},
+            )
         persist_llm_config(config)
         saved = load_llm_config()
         data = _report_runtime_model_payload(saved)
@@ -441,17 +467,23 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
         if "endpoint" in payload:
             langsmith["endpoint"] = str(payload.get("endpoint") or "").strip()
 
+        langsmith_secret: str | None = None
+        clear_langsmith_secret = False
         if payload.get("clear_api_key"):
-            langsmith.pop("api_key", None)
+            clear_langsmith_secret = True
         elif "api_key" in payload:
             api_key = str(payload.get("api_key") or "").strip()
             if api_key:
-                langsmith["api_key"] = api_key
+                langsmith_secret = api_key
             else:
-                langsmith.pop("api_key", None)
+                clear_langsmith_secret = True
 
         observability["langsmith"] = langsmith
         runtime["observability"] = observability
+        if langsmith_secret is not None or clear_langsmith_secret:
+            update_llm_local_secrets(
+                credential_updates={"langsmith_api_key": None if clear_langsmith_secret else langsmith_secret},
+            )
         persist_llm_config(config)
         saved = load_llm_config()
         return success({"data": _report_runtime_observability_payload(saved)})

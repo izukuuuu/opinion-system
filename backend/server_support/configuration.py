@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict
 
 import yaml
@@ -42,6 +43,15 @@ LOGGER = logging.getLogger(__name__)
 
 DATABASES_CONFIG_NAME = "databases"
 LLM_CONFIG_NAME = "llm"
+LLM_LOCAL_CONFIG_FILENAME = f"{LLM_CONFIG_NAME}.local.yaml"
+_SECRET_CREDENTIAL_FIELDS = {
+    "openai_api_key",
+    "opinion_openai_api_key",
+    "qwen_api_key",
+    "dashscope_api_key",
+    "report_api_key",
+    "langsmith_api_key",
+}
 
 
 def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -80,6 +90,94 @@ def _load_local_llm_config() -> Dict[str, Any]:
     if not isinstance(data, dict):
         return {}
     return data
+
+
+def _persist_yaml_file(path: Path, data: Dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(data, fh, allow_unicode=True, sort_keys=False)
+
+
+def _prune_empty_dicts(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned: Dict[str, Any] = {}
+        for key, item in value.items():
+            pruned = _prune_empty_dicts(item)
+            if isinstance(pruned, dict) and not pruned:
+                continue
+            cleaned[key] = pruned
+        return cleaned
+    if isinstance(value, list):
+        return [_prune_empty_dicts(item) for item in value]
+    return value
+
+
+def _remove_nested_value(target: Dict[str, Any], path: tuple[str, ...]) -> None:
+    current: Any = target
+    parents: list[tuple[Dict[str, Any], str]] = []
+    for key in path[:-1]:
+        if not isinstance(current, dict):
+            return
+        child = current.get(key)
+        if not isinstance(child, dict):
+            return
+        parents.append((current, key))
+        current = child
+    if not isinstance(current, dict):
+        return
+    current.pop(path[-1], None)
+    while parents:
+        parent, key = parents.pop()
+        child = parent.get(key)
+        if isinstance(child, dict) and not child:
+            parent.pop(key, None)
+        else:
+            break
+
+
+def _get_nested_mapping(source: Dict[str, Any], path: tuple[str, ...]) -> Dict[str, Any]:
+    current: Any = source
+    for key in path:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
+
+
+def _merge_credentials_with_local_priority(
+    base_credentials: Dict[str, Any],
+    override_credentials: Dict[str, Any],
+) -> Dict[str, Any]:
+    merged: Dict[str, Any] = deepcopy(base_credentials)
+    for key, value in override_credentials.items():
+        if key in _SECRET_CREDENTIAL_FIELDS:
+            text = str(value).strip() if value is not None else ""
+            if text:
+                merged[key] = text
+            elif key not in merged:
+                merged[key] = ""
+            continue
+        if key == "openai_base_url":
+            text = str(value).strip() if value is not None else ""
+            if text:
+                merged[key] = text
+            elif key not in merged:
+                merged[key] = ""
+            continue
+        merged[key] = deepcopy(value)
+    return merged
+
+
+def _sanitize_llm_config_for_persistence(config: Dict[str, Any]) -> Dict[str, Any]:
+    sanitized = deepcopy(config)
+    credentials = sanitized.get("credentials")
+    if isinstance(credentials, dict):
+        for field in _SECRET_CREDENTIAL_FIELDS:
+            credentials.pop(field, None)
+    _remove_nested_value(
+        sanitized,
+        ("langchain", "report", "runtime", "observability", "langsmith", "api_key"),
+    )
+    return _prune_empty_dicts(sanitized)
 
 
 def load_config() -> Dict[str, Any]:
@@ -199,7 +297,14 @@ def load_llm_config() -> Dict[str, Any]:
         credentials.update(static_credentials)
     dynamic_credentials = config.get("credentials")
     if isinstance(dynamic_credentials, dict):
-        credentials.update(dynamic_credentials)
+        credentials = _merge_credentials_with_local_priority(credentials, dynamic_credentials)
+    legacy_langsmith = _get_nested_mapping(
+        langchain,
+        ("report", "runtime", "observability", "langsmith"),
+    )
+    legacy_langsmith_api_key = legacy_langsmith.get("api_key") or ""
+    if isinstance(legacy_langsmith_api_key, str) and legacy_langsmith_api_key.strip():
+        credentials.setdefault("langsmith_api_key", legacy_langsmith_api_key.strip())
     config["credentials"] = credentials
 
     return config
@@ -208,8 +313,58 @@ def load_llm_config() -> Dict[str, Any]:
 def persist_llm_config(config: Dict[str, Any]) -> None:
     """Persist and reload LLM configuration settings."""
 
-    save_settings_config(LLM_CONFIG_NAME, config)
+    save_settings_config(LLM_CONFIG_NAME, _sanitize_llm_config_for_persistence(config))
     reload_settings()
+
+
+def load_llm_local_config() -> Dict[str, Any]:
+    """Return the local ignored LLM override payload."""
+
+    return _load_local_llm_config()
+
+
+def persist_llm_local_config(config: Dict[str, Any]) -> None:
+    """Persist local ignored LLM overrides and refresh settings."""
+
+    local_path = CONFIGS_DIR / LLM_LOCAL_CONFIG_FILENAME
+    cleaned = _prune_empty_dicts(deepcopy(config))
+    if cleaned:
+        _persist_yaml_file(local_path, cleaned)
+    elif local_path.exists():
+        local_path.unlink()
+    reload_settings()
+
+
+def update_llm_local_secrets(
+    *,
+    credential_updates: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Update secret-only local overrides without touching tracked config."""
+
+    local_config = load_llm_local_config()
+    credentials = local_config.get("credentials")
+    if not isinstance(credentials, dict):
+        credentials = {}
+    if isinstance(credential_updates, dict):
+        for key, value in credential_updates.items():
+            if key not in _SECRET_CREDENTIAL_FIELDS:
+                continue
+            text = str(value).strip() if value is not None else ""
+            if text:
+                credentials[key] = text
+            else:
+                credentials.pop(key, None)
+    if credentials:
+        local_config["credentials"] = credentials
+    else:
+        local_config.pop("credentials", None)
+    _remove_nested_value(
+        local_config,
+        ("langchain", "report", "runtime", "observability", "langsmith", "api_key"),
+    )
+
+    persist_llm_local_config(local_config)
+    return local_config
 
 
 def filter_ai_overview() -> Dict[str, Any]:
@@ -235,7 +390,10 @@ __all__ = [
     "load_config",
     "load_databases_config",
     "load_llm_config",
+    "load_llm_local_config",
     "persist_databases_config",
     "persist_llm_config",
+    "persist_llm_local_config",
     "reload_settings",
+    "update_llm_local_secrets",
 ]

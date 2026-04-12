@@ -15,9 +15,12 @@ from .configuration import (
     load_config,
     load_databases_config,
     load_llm_config,
+    load_llm_local_config,
     persist_databases_config,
     persist_llm_config,
+    persist_llm_local_config,
     reload_settings,
+    update_llm_local_secrets,
 )
 from .rag_config import (
     load_rag_config,
@@ -142,9 +145,12 @@ __all__ = [
     "load_config",
     "load_databases_config",
     "load_llm_config",
+    "load_llm_local_config",
     "persist_databases_config",
     "persist_llm_config",
+    "persist_llm_local_config",
     "reload_settings",
+    "update_llm_local_secrets",
     # RAG configuration helpers
     "load_rag_config",
     "persist_rag_config",
