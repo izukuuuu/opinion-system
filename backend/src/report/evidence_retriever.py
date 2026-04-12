@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timedelta
+import hashlib
 import json
+import pickle
 import re
+from threading import RLock
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -18,6 +21,12 @@ _NEGATION_HINTS = ("辟谣", "不实", "并非", "未发布", "网传", "谣言"
 _POLICY_HINTS = ("控烟", "禁烟", "无烟", "二手烟", "吸烟", "戒烟", "烟草", "公共场所", "卫健委", "条例", "执法")
 _POLICY_CONTEXT_HINTS = ("政策", "通知", "条例", "卫健委", "公共场所", "控烟", "禁烟", "执法", "宣传", "健康", "二手烟")
 _KITCHEN_NOISE_HINTS = ("厨房", "油烟", "油烟机", "抽油烟", "灶台", "做饭", "烟灶", "神器")
+_RETRIEVAL_CACHE_VERSION = 1
+_CORPUS_CACHE_FILENAME = "retrieval_corpus.pkl"
+_EMBEDDING_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+_CORPUS_CACHE_LOCK = RLock()
+_CORPUS_CACHE_MEMO: Dict[str, Dict[str, Any]] = {}
+_EMBEDDING_MODEL: Any = None
 
 
 def _extract_date_text(value: Any) -> str:
@@ -113,6 +122,12 @@ def _parse_fetch_range(folder_name: str) -> Tuple[str, str]:
         return _extract_date_text(start), _extract_date_text(end)
     single = _extract_date_text(text)
     return single, single
+
+
+def _compose_range_folder(start: str, end: str) -> str:
+    start_text = str(start or "").strip()
+    end_text = str(end or "").strip()
+    return f"{start_text}_{end_text}" if end_text and end_text != start_text else start_text
 
 
 def _fetch_root(topic_identifier: str) -> Path:
@@ -212,6 +227,247 @@ def resolve_source_scope(topic_identifier: str, start: str, end: str) -> Dict[st
 def _resolve_source_files(topic_identifier: str, start: str, end: str) -> Tuple[List[Path], str]:
     bundle = _resolve_source_bundle(topic_identifier, start, end)
     return list(bundle.get("files") or []), str(bundle.get("source_resolution") or "").strip()
+
+
+def _build_source_fingerprint(source_files: Sequence[Path], source_resolution: str) -> str:
+    payload: List[Dict[str, Any]] = []
+    for file_path in source_files:
+        try:
+            stat = file_path.stat()
+            payload.append(
+                {
+                    "path": str(file_path.resolve()),
+                    "mtime_ns": int(stat.st_mtime_ns),
+                    "size": int(stat.st_size),
+                }
+            )
+        except Exception:
+            payload.append({"path": str(file_path), "mtime_ns": 0, "size": 0})
+    raw = json.dumps(
+        {
+            "version": _RETRIEVAL_CACHE_VERSION,
+            "source_resolution": str(source_resolution or "").strip(),
+            "files": payload,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _retrieval_cache_root(topic_identifier: str, start: str, end: str) -> Path:
+    cache_root = bucket("reports", topic_identifier, _compose_range_folder(start, end)) / "retrieval_cache"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    return cache_root
+
+
+def _corpus_cache_key(
+    *,
+    topic_identifier: str,
+    start: str,
+    end: str,
+    platforms: Sequence[str],
+    time_start: str,
+    time_end: str,
+    source_files: Sequence[Path],
+    source_resolution: str,
+) -> str:
+    payload = {
+        "version": _RETRIEVAL_CACHE_VERSION,
+        "topic_identifier": str(topic_identifier or "").strip(),
+        "start": str(start or "").strip(),
+        "end": str(end or "").strip(),
+        "platforms": sorted(str(item or "").strip() for item in platforms if str(item or "").strip()),
+        "time_start": str(time_start or "").strip(),
+        "time_end": str(time_end or "").strip(),
+        "source_fingerprint": _build_source_fingerprint(source_files, source_resolution),
+    }
+    return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _corpus_cache_path(topic_identifier: str, start: str, end: str, cache_key: str) -> Path:
+    return _retrieval_cache_root(topic_identifier, start, end) / cache_key / _CORPUS_CACHE_FILENAME
+
+
+def _build_tfidf_index(docs: Sequence[str]) -> Tuple[Optional[TfidfVectorizer], Any]:
+    if not docs:
+        return None, None
+    vectorizer = TfidfVectorizer(analyzer="char", ngram_range=(2, 4), lowercase=True, min_df=1, max_features=30000)
+    matrix = vectorizer.fit_transform(docs)
+    return vectorizer, matrix
+
+
+def _score_tfidf_query(vectorizer: Optional[TfidfVectorizer], matrix: Any, query_text: str, docs_count: int) -> List[float]:
+    if vectorizer is None or matrix is None or not str(query_text or "").strip():
+        return [0.0 for _ in range(docs_count)]
+    try:
+        query_vec = vectorizer.transform([str(query_text or "").strip()])
+        scores = (matrix @ query_vec.T).toarray().reshape(-1)
+        return [float(value) for value in scores.tolist()]
+    except Exception:
+        return [0.0 for _ in range(docs_count)]
+
+
+def _get_embedding_model() -> Any:
+    global _EMBEDDING_MODEL
+    if _EMBEDDING_MODEL is not None:
+        return _EMBEDDING_MODEL
+    from sentence_transformers import SentenceTransformer
+
+    _EMBEDDING_MODEL = SentenceTransformer(_EMBEDDING_MODEL_NAME)
+    return _EMBEDDING_MODEL
+
+
+def _build_embedding_doc_vectors(docs: Sequence[str], mode: str) -> Optional[np.ndarray]:
+    safe_mode = str(mode or "fast").strip().lower()
+    if safe_mode != "research" or not docs:
+        return None
+    try:
+        model = _get_embedding_model()
+        vectors = model.encode(list(docs), normalize_embeddings=True)
+        return np.asarray(vectors, dtype=np.float32)
+    except Exception:
+        return None
+
+
+def _score_embedding_query(doc_vectors: Optional[np.ndarray], query_text: str, mode: str) -> List[float]:
+    docs_count = int(doc_vectors.shape[0]) if isinstance(doc_vectors, np.ndarray) and doc_vectors.ndim >= 1 else 0
+    safe_mode = str(mode or "fast").strip().lower()
+    if safe_mode != "research" or docs_count <= 0 or not str(query_text or "").strip():
+        return [0.0 for _ in range(docs_count)]
+    try:
+        model = _get_embedding_model()
+        query_vec = np.asarray(model.encode([str(query_text or "").strip()], normalize_embeddings=True)[0], dtype=np.float32)
+        scores = np.matmul(doc_vectors, query_vec)
+        return [float(value) for value in scores.tolist()]
+    except Exception:
+        return [0.0 for _ in range(docs_count)]
+
+
+def _build_corpus_entries(
+    *,
+    topic_identifier: str,
+    start: str,
+    end: str,
+    platforms: Optional[List[str]] = None,
+    time_start: str = "",
+    time_end: str = "",
+) -> Dict[str, Any]:
+    rows = list(
+        _iter_filtered_entries(
+            topic_identifier=topic_identifier,
+            start=start,
+            end=end,
+            platforms=platforms,
+            time_start=time_start,
+            time_end=time_end,
+        )
+    )
+    entries: List[Dict[str, Any]] = []
+    docs: List[str] = []
+    for row, source_file, row_index in rows:
+        doc = "\n".join(
+            [
+                str(row.get("title") or "").strip(),
+                str(row.get("title") or "").strip(),
+                _record_text(row),
+                str(row.get("platform") or "").strip(),
+                str(row.get("author") or "").strip(),
+            ]
+        )
+        entries.append({"row": row, "source_file": source_file, "row_index": row_index, "doc": doc})
+        docs.append(doc)
+    vectorizer, matrix = _build_tfidf_index(docs)
+    return {
+        "entries": entries,
+        "vectorizer": vectorizer,
+        "matrix": matrix,
+        "embedding_doc_vectors": None,
+        "doc_count": len(docs),
+    }
+
+
+def _load_cached_corpus(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        with path.open("rb") as handle:
+            payload = pickle.load(handle)
+        if not isinstance(payload, dict):
+            return None
+        if int(payload.get("version") or 0) != _RETRIEVAL_CACHE_VERSION:
+            return None
+        corpus = payload.get("corpus")
+        return corpus if isinstance(corpus, dict) else None
+    except Exception:
+        return None
+
+
+def _store_cached_corpus(path: Path, corpus: Dict[str, Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as handle:
+            pickle.dump({"version": _RETRIEVAL_CACHE_VERSION, "corpus": corpus}, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception:
+        return
+
+
+def _get_retrieval_corpus(
+    *,
+    topic_identifier: str,
+    start: str,
+    end: str,
+    platforms: Optional[List[str]] = None,
+    time_start: str = "",
+    time_end: str = "",
+    mode: str = "fast",
+) -> Dict[str, Any]:
+    normalized_platforms = _normalise_platforms(platforms)
+    lower_bound = str(time_start or "").strip() or str(start or "").strip()
+    upper_bound = str(time_end or "").strip() or str(end or "").strip()
+    source_files, source_resolution = _resolve_source_files(topic_identifier, start, end)
+    cache_key = _corpus_cache_key(
+        topic_identifier=topic_identifier,
+        start=start,
+        end=end,
+        platforms=normalized_platforms,
+        time_start=lower_bound,
+        time_end=upper_bound,
+        source_files=source_files,
+        source_resolution=source_resolution,
+    )
+    cache_path = _corpus_cache_path(topic_identifier, start, end, cache_key)
+    with _CORPUS_CACHE_LOCK:
+        corpus = _CORPUS_CACHE_MEMO.get(cache_key)
+        if corpus is None:
+            corpus = _load_cached_corpus(cache_path)
+        if corpus is None:
+            corpus = _build_corpus_entries(
+                topic_identifier=topic_identifier,
+                start=start,
+                end=end,
+                platforms=normalized_platforms,
+                time_start=lower_bound,
+                time_end=upper_bound,
+            )
+            _store_cached_corpus(cache_path, corpus)
+        if str(mode or "fast").strip().lower() == "research" and corpus.get("embedding_doc_vectors") is None:
+            docs = [str(entry.get("doc") or "") for entry in corpus.get("entries") or [] if isinstance(entry, dict)]
+            corpus["embedding_doc_vectors"] = _build_embedding_doc_vectors(docs[: max(12, len(docs))], mode)
+            _store_cached_corpus(cache_path, corpus)
+        _CORPUS_CACHE_MEMO[cache_key] = corpus
+    return {
+        "cache_key": cache_key,
+        "cache_path": cache_path,
+        "source_files": source_files,
+        "source_resolution": source_resolution,
+        "time_start": lower_bound,
+        "time_end": upper_bound,
+        "entries": list(corpus.get("entries") or []),
+        "vectorizer": corpus.get("vectorizer"),
+        "matrix": corpus.get("matrix"),
+        "embedding_doc_vectors": corpus.get("embedding_doc_vectors"),
+    }
 
 
 def _record_text(row: Dict[str, Any]) -> str:
@@ -389,11 +645,8 @@ def _compute_tfidf_scores(docs: Sequence[str], query_text: str) -> List[float]:
     if not docs or not str(query_text or "").strip():
         return [0.0 for _ in docs]
     try:
-        vectorizer = TfidfVectorizer(analyzer="char", ngram_range=(2, 4), lowercase=True, min_df=1, max_features=30000)
-        matrix = vectorizer.fit_transform(docs)
-        query_vec = vectorizer.transform([str(query_text or "").strip()])
-        scores = (matrix @ query_vec.T).toarray().reshape(-1)
-        return [float(value) for value in scores.tolist()]
+        vectorizer, matrix = _build_tfidf_index(docs)
+        return _score_tfidf_query(vectorizer, matrix, query_text, len(docs))
     except Exception:
         return [0.0 for _ in docs]
 
@@ -403,14 +656,8 @@ def _maybe_embedding_scores(docs: Sequence[str], query_text: str, mode: str) -> 
     if safe_mode != "research" or not docs or not str(query_text or "").strip():
         return [0.0 for _ in docs]
     try:
-        from sentence_transformers import SentenceTransformer
-
-        model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-        vectors = model.encode([str(query_text or "").strip(), *docs], normalize_embeddings=True)
-        query_vec = np.asarray(vectors[0], dtype=np.float32)
-        doc_vecs = np.asarray(vectors[1:], dtype=np.float32)
-        scores = np.matmul(doc_vecs, query_vec)
-        return [float(value) for value in scores.tolist()]
+        doc_vecs = _build_embedding_doc_vectors(docs[: max(12, len(docs))], mode)
+        return _score_embedding_query(doc_vecs, query_text, mode)
     except Exception:
         return [0.0 for _ in docs]
 
@@ -450,33 +697,29 @@ def _retrieve_candidates(
     top_k: int = 20,
     mode: str = "fast",
 ) -> Dict[str, Any]:
-    rows = list(
-        _iter_filtered_entries(
-            topic_identifier=topic_identifier,
-            start=start,
-            end=end,
-            platforms=platforms,
-            time_start=time_start,
-            time_end=time_end,
-        )
+    corpus = _get_retrieval_corpus(
+        topic_identifier=topic_identifier,
+        start=start,
+        end=end,
+        platforms=platforms,
+        time_start=time_start,
+        time_end=time_end,
+        mode=mode,
     )
+    entries = [entry for entry in corpus.get("entries") or [] if isinstance(entry, dict)]
     query_terms = _build_query_terms(query_text, entities)
-    docs = [
-        "\n".join(
-            [
-                str(row.get("title") or "").strip(),
-                str(row.get("title") or "").strip(),
-                _record_text(row),
-                str(row.get("platform") or "").strip(),
-                str(row.get("author") or "").strip(),
-            ]
-        )
-        for row, _, _ in rows
-    ]
-    lexical_scores = _compute_tfidf_scores(docs, query_text)
-    embedding_scores = _maybe_embedding_scores(docs[: min(len(docs), max(12, top_k * 3))], query_text, mode)
+    lexical_scores = _score_tfidf_query(
+        corpus.get("vectorizer"),
+        corpus.get("matrix"),
+        query_text,
+        len(entries),
+    )
+    embedding_scores = _score_embedding_query(corpus.get("embedding_doc_vectors"), query_text, mode)
     candidates: List[Dict[str, Any]] = []
-    for index, (row, source_file, row_index) in enumerate(rows):
+    for index, entry in enumerate(entries):
+        row = entry.get("row") if isinstance(entry.get("row"), dict) else {}
+        source_file = str(entry.get("source_file") or "").strip()
+        row_index = int(entry.get("row_index") or 0)
         title = str(row.get("title") or "").strip()
         text = _record_text(row)
         token_score, matched_terms, token_breakdown = _score_row(text, title, query_terms)
@@ -532,20 +775,21 @@ def _retrieve_candidates(
         source_distribution[candidate["platform"] or "未知"] = source_distribution.get(candidate["platform"] or "未知", 0) + 1
         time_distribution[candidate["date_text"]] = time_distribution.get(candidate["date_text"], 0) + 1
         matched_terms_counter.update(candidate["matched_terms"])
-    source_files, source_resolution = _resolve_source_files(topic_identifier, start, end)
+    source_files = list(corpus.get("source_files") or [])
+    source_resolution = str(corpus.get("source_resolution") or "").strip()
     retrieval_strategy = "tfidf_lexical"
     if str(mode or "fast").strip().lower() == "research":
         retrieval_strategy = "tfidf_lexical+embedding" if any(score > 0 for score in embedding_scores) else "tfidf_lexical"
     return {
         "query": str(query_text or "").strip(),
         "query_terms": query_terms[:10],
-        "time_start": str(time_start or start or "").strip(),
-        "time_end": str(time_end or end or "").strip(),
+        "time_start": str(corpus.get("time_start") or "").strip(),
+        "time_end": str(corpus.get("time_end") or "").strip(),
         "items": [{key: value for key, value in item.items() if key not in {"dedupe_key", "date_text", "row_text"}} for item in selected],
         "source_distribution": source_distribution,
         "time_distribution": dict(sorted(time_distribution.items(), key=lambda item: item[0])),
         "high_signal_terms": [term for term, _ in matched_terms_counter.most_common(8)],
-        "scanned_records": len(rows),
+        "scanned_records": len(entries),
         "matched_records": len(candidates),
         "candidate_count": len(candidates),
         "deduped_count": len(deduped),
@@ -553,6 +797,7 @@ def _retrieve_candidates(
         "source_resolution": source_resolution,
         "retrieval_strategy": retrieval_strategy,
         "mode": "research" if str(mode or "").strip().lower() == "research" else "fast",
+        "cache_scope": "window_corpus",
     }
 
 

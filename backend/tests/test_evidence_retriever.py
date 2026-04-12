@@ -6,9 +6,11 @@ import sys
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.report import evidence_retriever
 from src.report.evidence_retriever import (
     analyze_temporal_event_window,
     iter_filtered_records,
@@ -145,6 +147,36 @@ class EvidenceRetrieverTests(unittest.TestCase):
         self.assertEqual(resolution["resolved_fetch_range"]["end"], "2025-12-31")
         self.assertTrue(rows)
         self.assertTrue(all(str(row.get("published_at") or "")[:10] <= "2025-06-30" for row in rows))
+
+    def test_same_window_reuses_cached_tfidf_corpus(self) -> None:
+        original_build_index = evidence_retriever._build_tfidf_index
+        build_calls = {"count": 0}
+
+        def _counting_build_index(docs):
+            build_calls["count"] += 1
+            return original_build_index(docs)
+
+        with patch.object(evidence_retriever, "_build_tfidf_index", side_effect=_counting_build_index):
+            first = search_raw_records(
+                topic_identifier=self.topic_identifier,
+                start="2025-08-01",
+                end="2025-08-31",
+                query="控烟 政策",
+                top_k=3,
+            )
+            second = search_raw_records(
+                topic_identifier=self.topic_identifier,
+                start="2025-08-01",
+                end="2025-08-31",
+                query="公共场所 执法",
+                top_k=3,
+            )
+
+        self.assertEqual(build_calls["count"], 1)
+        self.assertEqual(first["cache_scope"], "window_corpus")
+        self.assertEqual(second["cache_scope"], "window_corpus")
+        self.assertGreater(first["scanned_records"], 0)
+        self.assertGreater(second["scanned_records"], 0)
 
 
 if __name__ == "__main__":
