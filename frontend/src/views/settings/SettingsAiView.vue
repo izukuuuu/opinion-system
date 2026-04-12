@@ -514,6 +514,98 @@
             </div>
           </div>
 
+          <div class="rounded-2xl border border-soft/70 bg-surface-muted/35 px-4 py-4 space-y-4">
+            <div class="space-y-1">
+              <p class="font-medium text-primary">LangSmith 追踪</p>
+              <p class="text-xs text-muted">用于查看报告运行链路、工具调用和中断恢复轨迹。关闭后不会再向 LangSmith 发送追踪数据。</p>
+            </div>
+            <div class="grid gap-6 md:grid-cols-2">
+              <label class="flex items-start gap-3 rounded-2xl bg-base-soft px-4 py-3">
+                <input
+                  v-model="reportRuntime.observability.enabled"
+                  type="checkbox"
+                  class="mt-1 h-4 w-4 rounded border-soft text-brand focus:ring-brand"
+                />
+                <span class="space-y-1">
+                  <span class="block text-sm font-medium text-primary">启用 LangSmith 追踪</span>
+                  <span class="block text-xs text-muted">启用后，报告运行时会把 trace 发送到配置的 LangSmith 项目。</span>
+                </span>
+              </label>
+
+              <div class="rounded-2xl bg-base-soft px-4 py-3 text-xs text-muted space-y-1">
+                <p>当前状态：{{ reportRuntime.observability.enabled ? '已启用' : '未启用' }}</p>
+                <p>项目：{{ reportRuntime.observability.project || 'opinion-system-report' }}</p>
+                <p>接入地址：{{ reportRuntime.observability.endpoint || '默认 LangSmith 云端地址' }}</p>
+              </div>
+            </div>
+
+            <div class="grid gap-6 md:grid-cols-2">
+              <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">项目名</label>
+                <input
+                  v-model.trim="reportRuntime.observability.project"
+                  type="text"
+                  placeholder="opinion-system-report"
+                  class="form-input"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">LangSmith Endpoint</label>
+                <input
+                  v-model.trim="reportRuntime.observability.endpoint"
+                  type="text"
+                  placeholder="https://api.smith.langchain.com"
+                  class="form-input"
+                />
+              </div>
+            </div>
+
+            <div class="space-y-3">
+              <label class="block text-xs font-bold uppercase tracking-wider text-muted mb-2 ml-1">LangSmith API Key</label>
+              <div class="relative">
+                <input
+                  v-model.trim="reportRuntime.observability.api_key"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="留空表示保留当前已保存的 LangSmith API Key"
+                  class="form-input pr-28"
+                />
+                <div class="absolute inset-y-0 right-3 flex items-center">
+                  <span
+                    v-if="reportRuntime.observability.api_key_summary.configured"
+                    class="inline-flex items-center gap-1.5 rounded-full bg-success-soft px-2.5 py-1 text-xs font-medium text-success ring-1 ring-success-500/10"
+                  >
+                    <CheckIcon class="w-3.5 h-3.5" />
+                    已配置
+                  </span>
+                  <span
+                    v-else
+                    class="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2.5 py-1 text-xs font-medium text-muted"
+                  >
+                    未配置
+                  </span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-xs text-muted ml-1">如果你使用自建 LangSmith 或新的项目密钥，可以在这里单独更新。</p>
+                <button
+                  v-if="reportRuntime.observability.api_key_summary.configured"
+                  type="button"
+                  class="text-xs font-medium text-muted transition-colors hover:text-danger"
+                  @click="clearLangsmithApiKey"
+                >
+                  清除 LangSmith Key
+                </button>
+              </div>
+            </div>
+
+            <div class="flex justify-end">
+              <button type="button" class="btn-primary rounded-full px-6 py-3" @click="submitReportRuntimeObservability">
+                保存 LangSmith 设置
+              </button>
+            </div>
+          </div>
+
           <div class="space-y-5">
             <div class="grid gap-6 md:grid-cols-2">
               <div>
@@ -728,6 +820,16 @@ const reportRuntime = reactive({
     schema_name: 'report_runtime',
     status: '',
     status_message: ''
+  },
+  observability: {
+    enabled: false,
+    project: 'opinion-system-report',
+    endpoint: '',
+    api_key: '',
+    api_key_summary: {
+      configured: false,
+      last_four: ''
+    }
   }
 })
 
@@ -1059,6 +1161,14 @@ const applyReportRuntimeResult = (result) => {
   reportRuntime.persistence.schema_name = String(persistence.schema_name || 'report_runtime').trim() || 'report_runtime'
   reportRuntime.persistence.status = String(persistence.status || '').trim()
   reportRuntime.persistence.status_message = String(persistence.status_message || '').trim()
+  const observability = result.observability && typeof result.observability === 'object' ? result.observability : {}
+  reportRuntime.observability.enabled = Boolean(observability.enabled)
+  reportRuntime.observability.project = String(observability.project || 'opinion-system-report').trim() || 'opinion-system-report'
+  reportRuntime.observability.endpoint = String(observability.endpoint || '').trim()
+  const langsmithApiKey = observability.api_key && typeof observability.api_key === 'object' ? observability.api_key : {}
+  reportRuntime.observability.api_key_summary.configured = Boolean(langsmithApiKey.configured)
+  reportRuntime.observability.api_key_summary.last_four = String(langsmithApiKey.last_four || '')
+  reportRuntime.observability.api_key = ''
 }
 
 const fetchReportRuntimeSettings = async () => {
@@ -1129,6 +1239,58 @@ const clearReportRuntimeApiKey = async () => {
     llmState.message = '报告专用密钥已清除'
   } catch (err) {
     llmState.error = err instanceof Error ? err.message : '清除报告专用密钥失败'
+  }
+}
+
+const submitReportRuntimeObservability = async () => {
+  llmState.message = ''
+  llmState.error = ''
+  try {
+    const payload = {
+      enabled: reportRuntime.observability.enabled,
+      project: reportRuntime.observability.project,
+      endpoint: reportRuntime.observability.endpoint
+    }
+    if ((reportRuntime.observability.api_key || '').trim()) {
+      payload.api_key = reportRuntime.observability.api_key.trim()
+    }
+    const endpoint = await buildApiUrl('/settings/report-runtime/observability')
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!response.ok) {
+      throw new Error('保存 LangSmith 设置失败')
+    }
+    const resultPayload = await response.json()
+    const result = resultPayload && typeof resultPayload === 'object' ? resultPayload.data ?? {} : {}
+    applyReportRuntimeResult({ ...reportRuntime, observability: result })
+    llmState.message = 'LangSmith 设置已保存'
+  } catch (err) {
+    llmState.error = err instanceof Error ? err.message : '保存 LangSmith 设置失败'
+  }
+}
+
+const clearLangsmithApiKey = async () => {
+  llmState.message = ''
+  llmState.error = ''
+  try {
+    const endpoint = await buildApiUrl('/settings/report-runtime/observability')
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clear_api_key: true })
+    })
+    if (!response.ok) {
+      throw new Error('清除 LangSmith API Key 失败')
+    }
+    const resultPayload = await response.json()
+    const result = resultPayload && typeof resultPayload === 'object' ? resultPayload.data ?? {} : {}
+    applyReportRuntimeResult({ ...reportRuntime, observability: result })
+    llmState.message = 'LangSmith API Key 已清除'
+  } catch (err) {
+    llmState.error = err instanceof Error ? err.message : '清除 LangSmith API Key 失败'
   }
 }
 

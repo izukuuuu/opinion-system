@@ -7,6 +7,16 @@ from typing import Any, Dict
 from .paths import get_configs_root, get_data_root, get_project_root
 
 
+def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 class Settings:
     """项目配置管理类"""
     
@@ -119,7 +129,15 @@ class Settings:
         Returns:
             Dict[str, Any]: LLM配置
         """
-        return self.configs.get('llm', {})
+        base = self.configs.get('llm', {})
+        local = self.configs.get('llm.local', {})
+        if not isinstance(base, dict):
+            base = {}
+        if not isinstance(local, dict):
+            local = {}
+        if not local:
+            return base
+        return _deep_merge_dict(base, local)
     
     def get_project_paths(self) -> Dict[str, str]:
         """

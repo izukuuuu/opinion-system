@@ -78,7 +78,7 @@ class ReportRuntimeInfraTests(unittest.TestCase):
                         "runtime": {
                             "environment": "production",
                             "persistence": {"enabled": True, "backend": "postgres", "source_mode": "reuse_active", "schema_name": "report_runtime"},
-                            "observability": {"langsmith": {"enabled": True, "project": "opinion-system-report"}},
+                            "observability": {"langsmith": {"enabled": True, "project": "opinion-system-report", "endpoint": "https://api.smith.langchain.com", "api_key": "lsv2_pt_test"}},
                         }
                     }
                 }
@@ -87,6 +87,9 @@ class ReportRuntimeInfraTests(unittest.TestCase):
             profile = resolve_runtime_profile(purpose="deep-report-coordinator")
             config = build_report_runnable_config(thread_id="thread-1", purpose="deep-report-coordinator", task_id="task-1")
             diagnostics = build_runtime_diagnostics(thread_id="thread-1", purpose="deep-report-coordinator", task_id="task-1")
+
+            self.assertEqual(os.environ.get("LANGSMITH_ENDPOINT"), "https://api.smith.langchain.com")
+            self.assertEqual(os.environ.get("LANGSMITH_API_KEY"), "lsv2_pt_test")
 
         self.assertEqual(profile.checkpointer_backend, "postgres")
         self.assertEqual(profile.connection_id, "primary")

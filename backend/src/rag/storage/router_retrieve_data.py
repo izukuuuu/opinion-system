@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from ...setting.paths import get_project_root, get_configs_root
+from ...setting.settings import settings
 from ...setting.env_loader import get_api_key
 from ...logging.logging import setup_logger, log_success, log_error, log_module_start
 from ...ai.qwen import QwenClient
@@ -1097,10 +1098,10 @@ def router_retrieve(
 
         log_module_start(logger, "RouterRetrieve", f"正在进行Router检索 - 主题: {topic}")
 
-        # 加载LLM配置
-        llm_config_path = get_configs_root() / "llm.yaml"
-        with open(llm_config_path, 'r', encoding='utf-8') as f:
-            llm_config = yaml.safe_load(f)
+        # 加载合并后的LLM配置
+        llm_config = settings.get_llm_config()
+        if not isinstance(llm_config, dict):
+            llm_config = {}
         
         # 获取router_retrieve配置
         router_config = llm_config.get('router_retrieve_llm', {})
@@ -1152,4 +1153,3 @@ def router_retrieve(
             "error": str(e),
             "traceback": traceback.format_exc()
         }
-

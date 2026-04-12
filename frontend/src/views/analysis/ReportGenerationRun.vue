@@ -38,7 +38,7 @@
             v-model="reportForm.end" type="date" class="input" /></label>
         <label class="space-y-2 text-secondary"><span class="text-xs font-semibold text-muted">模式</span>
           <AppSelect :options="modeSelectOptions" :value="reportForm.mode" @change="reportForm.mode = $event" />
-          <p class="text-xs text-muted">“深入”会加强本地归档、基础分析和 BERTopic 结果的交叉研读，不会额外发起外部网页检索。</p>
+          <p class="text-xs text-muted">“深入”会加强本地归档、基础分析和 BERTopic 结果的交叉研读。</p>
         </label>
       </div>
 

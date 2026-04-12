@@ -7,6 +7,7 @@ import time
 import traceback
 
 from ..utils.setting.paths import bucket, ensure_bucket, get_project_root
+from ..utils.setting.settings import settings
 from ..utils.logging.logging import (
     setup_logger,
     log_module_start,
@@ -604,41 +605,35 @@ def run_report(topic: str, start_date: str, end_date: Optional[str] = None) -> b
             tmpl = _load_prompt_yaml(topic, logger)
             messages = _compose_llm_input(topic, date_folder, sections_text, tmpl)
 
-            # 3) 读取 LLM 配置（若存在）
-            project_root = Path(__file__).resolve().parents[2]
-            llm_cfg_path = project_root / "configs" / "llm.yaml"
+            # 3) 读取合并后的 LLM 配置（静态模板 + 本地覆盖 + 运行时设置）
             model_name: Optional[str] = None
             timeout_s: float = 200.0  # 报告文本较长，默认更宽松
             max_retries: int = 2
             try:
-                import yaml  # type: ignore
-                if llm_cfg_path.exists():
-                    with open(llm_cfg_path, "r", encoding="utf-8") as f:
-                        llm_cfg = yaml.safe_load(f)  # type: ignore
-                    if isinstance(llm_cfg, dict):
-                        # 模型名优先级：report.model > report_model > model/chat_model
-                        report_cfg = llm_cfg.get("report") if isinstance(llm_cfg.get("report"), dict) else None
-                        model_name = (
-                            (report_cfg or {}).get("model")
-                            or llm_cfg.get("report_model")
-                            or llm_cfg.get("model")
-                            or llm_cfg.get("chat_model")
-                        )
-                        # 超时优先级：report.timeout > report_timeout > timeout > 默认
-                        if report_cfg and "timeout" in report_cfg:
-                            timeout_s = float(report_cfg.get("timeout", timeout_s))
-                        else:
-                            timeout_s = float(llm_cfg.get("report_timeout", llm_cfg.get("timeout", timeout_s)))
-                        # 重试优先级：report.retries > report_retries > retries > 默认
-                        if report_cfg and "retries" in report_cfg:
-                            max_retries = int(report_cfg.get("retries", max_retries))
-                        else:
-                            max_retries = int(llm_cfg.get("report_retries", llm_cfg.get("retries", max_retries)))
+                llm_cfg = settings.get_llm_config()
+                if isinstance(llm_cfg, dict):
+                    langchain_cfg = llm_cfg.get("langchain") if isinstance(llm_cfg.get("langchain"), dict) else {}
+                    report_runtime = (
+                        (((langchain_cfg.get("report") or {}).get("runtime") or {}).get("model") or {})
+                        if isinstance(langchain_cfg, dict)
+                        else {}
+                    )
+                    model_name = (
+                        str(report_runtime.get("model") or "").strip()
+                        or str(langchain_cfg.get("report_model") or "").strip()
+                        or str(langchain_cfg.get("model") or "").strip()
+                    ) or None
+                    timeout_s = float(
+                        report_runtime.get("timeout", langchain_cfg.get("report_timeout", langchain_cfg.get("timeout", timeout_s)))
+                    )
+                    max_retries = int(
+                        report_runtime.get("max_retries", langchain_cfg.get("max_retries", max_retries))
+                    )
                 # 保护性下限：避免被设置得过小导致大文本易超时
                 timeout_s = max(timeout_s, 90.0)
                 log_success(logger, f"LLM配置：timeout={timeout_s:.0f}s, retries={max_retries}", "Report")
             except Exception:
-                log_error(logger, f"读取 llm.yaml 失败，使用默认配置 | {traceback.format_exc()}", "Report")
+                log_error(logger, f"读取 LLM 配置失败，使用默认配置 | {traceback.format_exc()}", "Report")
 
             # 4) 调用大模型
             full_text = asyncio.run(

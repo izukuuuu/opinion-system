@@ -205,6 +205,26 @@ def _langsmith_project() -> str:
     )
 
 
+def _langsmith_endpoint() -> str:
+    observability = _read_llm_runtime_config().get("observability") if isinstance(_read_llm_runtime_config().get("observability"), dict) else {}
+    langsmith = observability.get("langsmith") if isinstance(observability.get("langsmith"), dict) else {}
+    return (
+        _env_text("LANGSMITH_ENDPOINT")
+        or _env_text("OPINION_REPORT_LANGSMITH_ENDPOINT")
+        or str(langsmith.get("endpoint") or "").strip()
+    )
+
+
+def _langsmith_api_key() -> str:
+    observability = _read_llm_runtime_config().get("observability") if isinstance(_read_llm_runtime_config().get("observability"), dict) else {}
+    langsmith = observability.get("langsmith") if isinstance(observability.get("langsmith"), dict) else {}
+    return (
+        _env_text("LANGSMITH_API_KEY")
+        or _env_text("OPINION_REPORT_LANGSMITH_API_KEY")
+        or str(langsmith.get("api_key") or "").strip()
+    )
+
+
 def _langsmith_enabled() -> bool:
     observability = _read_llm_runtime_config().get("observability") if isinstance(_read_llm_runtime_config().get("observability"), dict) else {}
     langsmith = observability.get("langsmith") if isinstance(observability.get("langsmith"), dict) else {}
@@ -224,6 +244,12 @@ def _configure_langsmith(project: str) -> None:
         return
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
     os.environ.setdefault("LANGCHAIN_PROJECT", project)
+    endpoint = _langsmith_endpoint()
+    api_key = _langsmith_api_key()
+    if endpoint:
+        os.environ.setdefault("LANGSMITH_ENDPOINT", endpoint)
+    if api_key:
+        os.environ.setdefault("LANGSMITH_API_KEY", api_key)
 
 
 def _require_production_backend() -> None:

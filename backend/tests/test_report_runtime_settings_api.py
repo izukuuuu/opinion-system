@@ -25,6 +25,7 @@ class ReportRuntimeSettingsApiTests(unittest.TestCase):
                     "runtime": {
                         "model": {"provider": "openai", "model": "glm-5", "base_url": "https://example.com", "temperature": 0.2, "max_tokens": 18000, "timeout": 420.0, "max_retries": 2},
                         "persistence": {"enabled": True, "source_mode": "reuse_active", "schema_name": "report_runtime"},
+                        "observability": {"langsmith": {"enabled": True, "project": "opinion-system-report", "endpoint": "https://api.smith.langchain.com", "api_key": "lsv2_pt_test"}},
                     }
                 }
             },
@@ -45,6 +46,9 @@ class ReportRuntimeSettingsApiTests(unittest.TestCase):
         self.assertEqual(data["provider"], "openai")
         self.assertEqual(data["persistence"]["active_connection_id"], "primary")
         self.assertEqual(data["persistence"]["schema_name"], "report_runtime")
+        self.assertEqual(data["observability"]["project"], "opinion-system-report")
+        self.assertEqual(data["observability"]["endpoint"], "https://api.smith.langchain.com")
+        self.assertTrue(data["observability"]["api_key"]["configured"])
 
     def test_put_report_runtime_persistence_writes_canonical_tree(self) -> None:
         stored = {"langchain": {"report": {"runtime": {"persistence": {"enabled": False, "source_mode": "reuse_active", "schema_name": "report_runtime"}}}}}
@@ -89,6 +93,34 @@ class ReportRuntimeSettingsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         payload = response.get_json()
         self.assertEqual(payload["status"], "error")
+
+    def test_put_report_runtime_observability_writes_langsmith_config(self) -> None:
+        stored = {"langchain": {"report": {"runtime": {"observability": {"langsmith": {"enabled": False, "project": "default"}}}}}}
+        persisted = {}
+
+        def _persist(config):
+            persisted.update(config)
+
+        client = self._client()
+        with patch("server_support.settings_config.load_llm_config", return_value=stored), patch(
+            "server_support.settings_config.persist_llm_config", side_effect=_persist
+        ):
+            response = client.put(
+                "/api/settings/report-runtime/observability",
+                json={
+                    "enabled": True,
+                    "project": "report-prod",
+                    "endpoint": "https://api.smith.langchain.com",
+                    "api_key": "lsv2_pt_test",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        langsmith = persisted["langchain"]["report"]["runtime"]["observability"]["langsmith"]
+        self.assertEqual(langsmith["enabled"], True)
+        self.assertEqual(langsmith["project"], "report-prod")
+        self.assertEqual(langsmith["endpoint"], "https://api.smith.langchain.com")
+        self.assertEqual(langsmith["api_key"], "lsv2_pt_test")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from ...utils.logging.logging import setup_logger, log_success, log_error
 from ...utils.setting.paths import bucket, get_project_root
+from ...utils.setting.settings import settings
 from types import SimpleNamespace
 from ...utils.rag.tagrag.tag_retrieve_data import retrieve_documents as retrieve_tagrag_documents
 from ...utils.rag.ragrouter.router_retrieve_data import AdvancedRAGSearcher, SearchParams
@@ -72,12 +73,9 @@ class ExplainBase:
             Dict[str, Any]: LLM配置
         """
         try:
-            project_root = get_project_root()
-            llm_config_file = project_root / "configs" / "llm.yaml"
-            
-            with open(llm_config_file, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            
+            config = settings.get_llm_config()
+            if not isinstance(config, dict):
+                config = {}
             explain_config = config.get('explain_llm', {})
             return explain_config
             
@@ -688,10 +686,9 @@ class ExplainBase:
             # 使用解读文本作为查询，进行RAG检索与增强解读（顺序执行）
             # 参数：实体数量20，句子数量10，文本块数量5，启用LLM整理，扩展性模式，只返回LLM
             try:
-                # 加载LLM配置
-                llm_config_path = get_configs_root() / "llm.yaml"
-                with open(llm_config_path, 'r', encoding='utf-8') as f:
-                    llm_config = yaml.safe_load(f)
+                llm_config = settings.get_llm_config()
+                if not isinstance(llm_config, dict):
+                    llm_config = {}
                 
                 # 获取router_retrieve配置
                 router_config = llm_config.get('router_retrieve_llm', {})

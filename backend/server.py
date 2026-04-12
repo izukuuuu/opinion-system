@@ -18,7 +18,7 @@ from flask_cors import CORS
 # 并通过 ``from server_support import ...`` 或具体模块导入，保持 server.py 专注于路由逻辑。
 
 BACKEND_DIR = Path(__file__).resolve().parent
-SRC_DIR = BACKEND_DIR / "src"
+SRC_DIR = BACKEND_DIR / "src"                   
 for path in (BACKEND_DIR, SRC_DIR):
     s_path = str(path)
     if s_path not in sys.path:

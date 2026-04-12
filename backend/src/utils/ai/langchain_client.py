@@ -40,6 +40,17 @@ def _read_langchain_config() -> Dict[str, Any]:
     return langchain_cfg
 
 
+def _read_report_runtime_model_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    report = cfg.get("report")
+    if not isinstance(report, dict):
+        return {}
+    runtime = report.get("runtime")
+    if not isinstance(runtime, dict):
+        return {}
+    model = runtime.get("model")
+    return model if isinstance(model, dict) else {}
+
+
 def _read_llm_credentials() -> Dict[str, Any]:
     llm_config = settings.get_llm_config()
     if not isinstance(llm_config, dict):
@@ -59,16 +70,22 @@ def _resolve_client_config(
     max_retries: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     cfg = _read_langchain_config()
+    report_runtime_model = _read_report_runtime_model_config(cfg) if task == "report" else {}
     runtime_override = cfg.get(f"{task}_runtime")
     if not isinstance(runtime_override, dict):
         runtime_override = {}
     credentials = _read_llm_credentials()
 
-    provider = str(runtime_override.get("provider") or cfg.get("provider") or "qwen").strip().lower()
+    provider = str(
+        report_runtime_model.get("provider")
+        or runtime_override.get("provider")
+        or cfg.get("provider")
+        or "qwen"
+    ).strip().lower()
     default_model = str(cfg.get("model") or "").strip()
     task_model = str(cfg.get(f"{task}_model") or "").strip()
     role_model = str(cfg.get(f"{str(model_role or '').strip()}_model") or "").strip() if model_role else ""
-    override_model = str(runtime_override.get("model") or "").strip()
+    override_model = str(report_runtime_model.get("model") or runtime_override.get("model") or "").strip()
     resolved_model = (override_model or model or role_model or task_model or default_model).strip()
     if not resolved_model:
         resolved_model = "qwen-plus" if provider == "qwen" else "gpt-4o-mini"
@@ -78,7 +95,7 @@ def _resolve_client_config(
         if not api_key:
             api_key = get_openai_api_key()
         base_url = (
-            str(runtime_override.get("base_url") or cfg.get("base_url") or "").strip()
+            str(report_runtime_model.get("base_url") or runtime_override.get("base_url") or cfg.get("base_url") or "").strip()
             or get_openai_base_url()
             or "https://api.openai.com/v1"
         )
@@ -87,7 +104,7 @@ def _resolve_client_config(
         api_key = str(credentials.get("report_api_key") or "").strip() if task == "report" else ""
         if not api_key:
             api_key = get_api_key()
-        base_url = str(runtime_override.get("base_url") or cfg.get("base_url") or "").strip() or QWEN_COMPAT_BASE_URL
+        base_url = str(report_runtime_model.get("base_url") or runtime_override.get("base_url") or cfg.get("base_url") or "").strip() or QWEN_COMPAT_BASE_URL
 
     if not api_key:
         return None
@@ -100,6 +117,10 @@ def _resolve_client_config(
         if temperature is not None
         else _as_float(
             runtime_override.get("temperature")
+            if report_runtime_model.get("temperature") is None and runtime_override.get("temperature") is not None
+            else report_runtime_model.get("temperature")
+            if report_runtime_model.get("temperature") is not None
+            else runtime_override.get("temperature")
             if runtime_override.get("temperature") is not None
             else role_temperature
             if role_temperature is not None
@@ -116,6 +137,10 @@ def _resolve_client_config(
         if max_tokens is not None
         else _as_int(
             runtime_override.get("max_tokens")
+            if report_runtime_model.get("max_tokens") is None and runtime_override.get("max_tokens") is not None
+            else report_runtime_model.get("max_tokens")
+            if report_runtime_model.get("max_tokens") is not None
+            else runtime_override.get("max_tokens")
             if runtime_override.get("max_tokens") is not None
             else role_max_tokens
             if role_max_tokens is not None
@@ -132,6 +157,10 @@ def _resolve_client_config(
         if timeout is not None
         else _as_float(
             runtime_override.get("timeout")
+            if report_runtime_model.get("timeout") is None and runtime_override.get("timeout") is not None
+            else report_runtime_model.get("timeout")
+            if report_runtime_model.get("timeout") is not None
+            else runtime_override.get("timeout")
             if runtime_override.get("timeout") is not None
             else role_timeout
             if role_timeout is not None
@@ -148,6 +177,10 @@ def _resolve_client_config(
         if max_retries is not None
         else _as_int(
             runtime_override.get("max_retries")
+            if report_runtime_model.get("max_retries") is None and runtime_override.get("max_retries") is not None
+            else report_runtime_model.get("max_retries")
+            if report_runtime_model.get("max_retries") is not None
+            else runtime_override.get("max_retries")
             if runtime_override.get("max_retries") is not None
             else role_retries
             if role_retries is not None

@@ -75,6 +75,20 @@ def _report_runtime_model_payload(config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _report_runtime_observability_payload(config: Dict[str, Any]) -> Dict[str, Any]:
+    langchain = config.get("langchain") if isinstance(config.get("langchain"), dict) else {}
+    report = langchain.get("report") if isinstance(langchain.get("report"), dict) else {}
+    runtime = report.get("runtime") if isinstance(report.get("runtime"), dict) else {}
+    observability = runtime.get("observability") if isinstance(runtime.get("observability"), dict) else {}
+    langsmith = observability.get("langsmith") if isinstance(observability.get("langsmith"), dict) else {}
+    return {
+        "enabled": bool(langsmith.get("enabled", False)),
+        "project": str(langsmith.get("project") or "opinion-system-report").strip() or "opinion-system-report",
+        "endpoint": str(langsmith.get("endpoint") or "").strip(),
+        "api_key": _summarise_api_key(langsmith.get("api_key") if isinstance(langsmith.get("api_key"), str) else None),
+    }
+
+
 def _report_runtime_persistence_payload() -> Dict[str, Any]:
     llm_config = load_llm_config()
     langchain = llm_config.get("langchain") if isinstance(llm_config.get("langchain"), dict) else {}
@@ -295,11 +309,17 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
         config = load_llm_config()
         payload = _report_runtime_model_payload(config)
         payload["persistence"] = _report_runtime_persistence_payload()
+        payload["observability"] = _report_runtime_observability_payload(config)
         return success({"data": payload})
 
     @app.get("/api/settings/report-runtime/persistence")
     def get_report_runtime_persistence():
         return success({"data": _report_runtime_persistence_payload()})
+
+    @app.get("/api/settings/report-runtime/observability")
+    def get_report_runtime_observability():
+        config = load_llm_config()
+        return success({"data": _report_runtime_observability_payload(config)})
 
     @app.put("/api/settings/llm/credentials")
     def update_llm_credentials():
@@ -393,7 +413,48 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
         saved = load_llm_config()
         data = _report_runtime_model_payload(saved)
         data["persistence"] = _report_runtime_persistence_payload()
+        data["observability"] = _report_runtime_observability_payload(saved)
         return success({"data": data})
+
+    @app.put("/api/settings/report-runtime/observability")
+    def update_report_runtime_observability():
+        payload = request.get_json(silent=True) or {}
+        config = load_llm_config()
+        _langchain, _report, runtime = _ensure_report_runtime_tree(config)
+        observability = runtime.get("observability") if isinstance(runtime.get("observability"), dict) else {}
+        if not isinstance(observability, dict):
+            observability = {}
+        langsmith = observability.get("langsmith") if isinstance(observability.get("langsmith"), dict) else {}
+        if not isinstance(langsmith, dict):
+            langsmith = {}
+
+        if "enabled" in payload:
+            value = payload.get("enabled")
+            if isinstance(value, bool):
+                langsmith["enabled"] = value
+            else:
+                langsmith["enabled"] = str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+        if "project" in payload:
+            langsmith["project"] = str(payload.get("project") or "").strip() or "opinion-system-report"
+
+        if "endpoint" in payload:
+            langsmith["endpoint"] = str(payload.get("endpoint") or "").strip()
+
+        if payload.get("clear_api_key"):
+            langsmith.pop("api_key", None)
+        elif "api_key" in payload:
+            api_key = str(payload.get("api_key") or "").strip()
+            if api_key:
+                langsmith["api_key"] = api_key
+            else:
+                langsmith.pop("api_key", None)
+
+        observability["langsmith"] = langsmith
+        runtime["observability"] = observability
+        persist_llm_config(config)
+        saved = load_llm_config()
+        return success({"data": _report_runtime_observability_payload(saved)})
 
     @app.put("/api/settings/report-runtime/persistence")
     def update_report_runtime_persistence():
