@@ -365,7 +365,7 @@ def _normalise_report_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict
         "message": str(task.get("message") or "").strip() or "等待处理。",
         "percentage": percentage,
         "progress_text": f"{percentage}%",
-        "detail_text": mode == "research" and "research 模式" or "fast 模式",
+        "detail_text": mode == "research" and "本地深度分析模式" or "fast 模式",
         "updated_at": str(task.get("updated_at") or "").strip(),
         "started_at": str(task.get("started_at") or "").strip(),
         "finished_at": str(task.get("finished_at") or "").strip(),

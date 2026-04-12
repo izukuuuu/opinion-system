@@ -1,0 +1,159 @@
+{
+  "version": "1.0",
+  "skill_evals": [
+    {
+      "skill_id": "agenda-frame-coherence",
+      "layer": "semantic",
+      "objective": "验证 AgendaFrameMap 能稳定表达 issue/attribute/frame 关系，而不是退化成主题摘要",
+      "source_of_truth": "AgendaFrameMap + ReportIR.agenda_frame_map",
+      "assertion": "issue-attribute edges、frame components、frame shifts 与 counter-frames 在相同输入下保持可解释且可追溯",
+      "failure_signal": "frame component 缺失、counter-frame 丢失、issue/attribute 混写或只剩 prose 摘要"
+    },
+    {
+      "skill_id": "actor-alias-collapse",
+      "layer": "semantic",
+      "objective": "验证主体别名是否被稳定合并到同一 actor registry",
+      "source_of_truth": "ReportIR.actor_registry + stance_matrix",
+      "assertion": "同一主体别名不会在不同入口或重跑后生成多个 canonical actor_id",
+      "failure_signal": "同义主体重复出现、stance rows 引用不同 actor_id"
+    },
+    {
+      "skill_id": "stance-matrix-consistency",
+      "layer": "semantic",
+      "objective": "验证立场矩阵在同步接口、异步任务、resume 后保持一致",
+      "source_of_truth": "ReportIR.stance_matrix",
+      "assertion": "相同输入下 stance/stance_shift/conflict_actor_ids 不应因入口不同而漂移",
+      "failure_signal": "三条入口产出的 stance_matrix 内容不一致"
+    },
+    {
+      "skill_id": "claim-evidence-traceability",
+      "layer": "evidence",
+      "objective": "验证 claim 到 evidence 的映射完整性",
+      "source_of_truth": "ReportIR.claim_set + evidence_ledger",
+      "assertion": "supported claim 必须存在 support_evidence_ids 且可在 evidence_ledger 中回溯",
+      "failure_signal": "supported claim 无证据、证据 id 不存在、traceability_stats 不一致"
+    },
+    {
+      "skill_id": "risk-boundary-check",
+      "layer": "semantic",
+      "objective": "验证风险项不超出证据边界",
+      "source_of_truth": "ReportIR.risk_register + claim_set + evidence_ledger",
+      "assertion": "每个 risk 至少绑定 trigger_claim_ids 或 trigger_evidence_ids，且不可引用不存在对象",
+      "failure_signal": "出现无触发项的风险、风险引用的 claim/evidence 不存在"
+    },
+    {
+      "skill_id": "recommendation-claim-gate",
+      "layer": "semantic",
+      "objective": "验证 recommendation 不绕过已冻结 claim",
+      "source_of_truth": "ReportIR.recommendation_candidates + claim_set",
+      "assertion": "每个 recommendation 至少绑定一个 support_claim_id，且不得直接从风格层生成",
+      "failure_signal": "recommendation 无 claim 绑定、绑定的 claim 不存在"
+    },
+    {
+      "skill_id": "full-markdown-no-new-facts",
+      "layer": "compiler",
+      "objective": "验证正式文稿不会引入 ReportIR 中不存在的新事实",
+      "source_of_truth": "ReportIR + compiled markdown",
+      "assertion": "markdown 中的事实句必须能映射到 claim_id / evidence_id，而不是自由发挥",
+      "failure_signal": "文稿中出现新的日期、主体关系、风险判断且 IR 无对应记录"
+    },
+    {
+      "skill_id": "interrupt-resume-lineage",
+      "layer": "runtime",
+      "objective": "验证 interrupt/resume 后 artifact lineage 仍单调可追踪",
+      "source_of_truth": "task state + artifact manifest + events",
+      "assertion": "resume 只追加新版本，不覆盖 lineage，task/thread 关系保持稳定",
+      "failure_signal": "artifact version 倒退、thread_id 漂移、resume 覆盖旧 manifest"
+    },
+    {
+      "skill_id": "conflict-graph-quality",
+      "layer": "semantic",
+      "objective": "验证 claim-actor conflict graph 能稳定表达冲突边、主体位置与收敛状态",
+      "source_of_truth": "ConflictMap + ReportIR.conflict_map",
+      "assertion": "同一输入下 claims、edges、resolution_summary 保持稳定，且 unresolved reason 不丢失",
+      "failure_signal": "冲突边缺失、主体错配、resolution status 漂移或 unresolved reason 被吞掉"
+    },
+    {
+      "skill_id": "mechanism-traceability",
+      "layer": "semantic",
+      "objective": "验证传播机制对象都能回链到时间锚点与证据引用",
+      "source_of_truth": "MechanismSummary + timeline + evidence_ledger",
+      "assertion": "amplification path、trigger event、phase shift、cross-platform bridge 必须带时间或证据支撑",
+      "failure_signal": "机制对象退化成 prose 摘要、缺少 evidence_refs 或无法对齐 timeline"
+    },
+    {
+      "skill_id": "mechanism-synthesis-fault",
+      "layer": "semantic",
+      "objective": "验证机制图不会把传播路径、桥接、触发与因果候选混成同一类描述",
+      "source_of_truth": "MechanismSummary + trace grading",
+      "assertion": "path / bridge / trigger / cause candidate 必须具有可区分的 typed surface 与证据锚点",
+      "failure_signal": "机制对象被 prose 摘要吞没、阶段转折与因果候选无法区分"
+    },
+    {
+      "skill_id": "decision-utility-usefulness",
+      "layer": "semantic",
+      "objective": "验证决策可用性门禁能阻止结构不完整的判断直接进入正式文稿",
+      "source_of_truth": "UtilityAssessment + compiler gate + final markdown",
+      "assertion": "缺对象/时点/动作/前提的建议必须回退补全或进入 semantic review",
+      "failure_signal": "utility gate 漏放结构不完整的建议或让其直接进入 final markdown"
+    },
+    {
+      "skill_id": "routing-fault",
+      "layer": "runtime",
+      "objective": "验证 router dispatch 是否可解释、可回放、且对 judgment artifacts 有真实贡献",
+      "source_of_truth": "RouterFacet + DispatchPlan + dispatch_quality_ledger",
+      "assertion": "每次 dispatch 都能回放 facet、target specialist、expected artifacts 与实际贡献",
+      "failure_signal": "路由依赖 prose token、dispatch 没有贡献记录、无法解释为什么派给某个 specialist"
+    },
+    {
+      "skill_id": "frame-synthesis-fault",
+      "layer": "semantic",
+      "objective": "验证 frame synthesis 不会把问题定义、责任归因、价值判断与解决路径糊成同一层",
+      "source_of_truth": "AgendaFrameMap.frames + frame_shifts + counter_frames",
+      "assertion": "problem/cause/judgment/remedy 结构可区分，frame shift 与 counter-frame 可解释",
+      "failure_signal": "只剩 frame label 或 prose 摘要，无法还原 frame 组件与变化"
+    },
+    {
+      "skill_id": "conflict-synthesis-fault",
+      "layer": "semantic",
+      "objective": "验证冲突图不会把主体错配、时间错位与证据冲突混成同一类",
+      "source_of_truth": "ConflictMap.edges + resolution_summary",
+      "assertion": "冲突边类型与 unresolved reason 必须可区分且可解释",
+      "failure_signal": "不同类型冲突被混写、resolution_summary 无法解释当前未收敛原因"
+    },
+    {
+      "skill_id": "utility-gate-fault",
+      "layer": "semantic",
+      "objective": "验证 utility gate 的回退理由、建议 pass 与最终改善结果可在 trace 中追溯",
+      "source_of_truth": "UtilityAssessment.fallback_trace + approval records + final markdown gate",
+      "assertion": "每次 fallback 都能说明缺失维度、建议回退 pass 和是否改善",
+      "failure_signal": "utility gate 只给最终决策，不解释为什么回退、回退到哪一步、是否改善"
+    }
+  ],
+  "system_regressions": [
+    {
+      "skill_id": "runtime-contract",
+      "layer": "runtime",
+      "objective": "确保 runtime object 不泄漏到 state/event/cache",
+      "source_of_truth": "task state + event payload + cache payload",
+      "assertion": "对外对象全部 JSON-serializable 且受 schema 管理",
+      "failure_signal": "StructuredTool、runner、middleware 等对象出现在持久化 payload"
+    },
+    {
+      "skill_id": "lineage-contract",
+      "layer": "runtime",
+      "objective": "确保同一专题区间不会从不同入口生成不同 truth source",
+      "source_of_truth": "task/thread + artifact manifest + cache paths",
+      "assertion": "structured/full 产物统一挂在同一 task/thread lineage 下",
+      "failure_signal": "同步接口、异步任务、legacy fallback 产出不同 system of record"
+    },
+    {
+      "skill_id": "frontend-contract",
+      "layer": "view",
+      "objective": "确保三视图绑定同一 task/thread 与 artifact manifest",
+      "source_of_truth": "frontend store snapshot + route view model",
+      "assertion": "运行台、语义报告、正式文稿读取同一 canonical task/thread",
+      "failure_signal": "页面靠 topic+date 猜状态或使用不同 artifact 入口"
+    }
+  ]
+}

@@ -1,6 +1,16 @@
 ---
 name: chart-interpretation-guidelines
 description: Translate chart and metric outputs into concise analytical statements without reading them as proof of unsupported causal claims.
+capability_ids:
+  - semantic.mechanism_builder
+  - compiler.full_markdown_compile
+runtime_surfaces:
+  - deep_report_subagent
+  - plain_compat
+agent_families:
+  - propagation_analyst
+  - document_composer
+guidance_only: true
 metadata:
   report:
     skillKey: chart_interpretation_guidelines

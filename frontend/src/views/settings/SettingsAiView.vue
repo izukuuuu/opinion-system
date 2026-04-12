@@ -503,6 +503,17 @@
             <p class="text-sm text-muted">需要单独维护报告链路时，在这里覆盖设置即可。</p>
           </div>
 
+          <div class="rounded-2xl bg-base-soft px-4 py-4 text-sm text-secondary space-y-2">
+            <p class="font-medium text-primary">持久化状态</p>
+            <p>{{ reportRuntime.persistence.status_message || '当前未加载持久化摘要。' }}</p>
+            <div class="grid gap-2 text-xs text-muted md:grid-cols-2">
+              <p>默认连接：{{ reportRuntime.persistence.active_connection_name || '--' }}</p>
+              <p>数据库引擎：{{ reportRuntime.persistence.active_connection_engine || '--' }}</p>
+              <p>目标 Database：{{ reportRuntime.persistence.resolved_database || '--' }}</p>
+              <p>Schema：{{ reportRuntime.persistence.schema_name || '--' }}</p>
+            </div>
+          </div>
+
           <div class="space-y-5">
             <div class="grid gap-6 md:grid-cols-2">
               <div>
@@ -708,7 +719,16 @@ const reportRuntime = reactive({
   temperature: 0.2,
   max_tokens: 12000,
   timeout: 300,
-  max_retries: 2
+  max_retries: 2,
+  persistence: {
+    enabled: false,
+    active_connection_name: '',
+    active_connection_engine: '',
+    resolved_database: '',
+    schema_name: 'report_runtime',
+    status: '',
+    status_message: ''
+  }
 })
 
 const credentialState = reactive({
@@ -1031,6 +1051,14 @@ const applyReportRuntimeResult = (result) => {
   reportRuntime.api_key_summary.configured = Boolean(apiKeySummary.configured)
   reportRuntime.api_key_summary.last_four = String(apiKeySummary.last_four || '')
   reportRuntime.api_key = ''
+  const persistence = result.persistence && typeof result.persistence === 'object' ? result.persistence : {}
+  reportRuntime.persistence.enabled = Boolean(persistence.enabled)
+  reportRuntime.persistence.active_connection_name = String(persistence.active_connection_name || '').trim()
+  reportRuntime.persistence.active_connection_engine = String(persistence.active_connection_engine || '').trim()
+  reportRuntime.persistence.resolved_database = String(persistence.resolved_database || '').trim()
+  reportRuntime.persistence.schema_name = String(persistence.schema_name || 'report_runtime').trim() || 'report_runtime'
+  reportRuntime.persistence.status = String(persistence.status || '').trim()
+  reportRuntime.persistence.status_message = String(persistence.status_message || '').trim()
 }
 
 const fetchReportRuntimeSettings = async () => {

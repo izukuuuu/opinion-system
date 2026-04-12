@@ -11,6 +11,20 @@ This skill defines the strict design standards for the frontend of the Opinion S
 
 Prefer reading this skill first for any visual or interaction polish work under `frontend/src/**`.
 
+## Rule Priority
+
+This skill is the primary rule set for frontend visual work in this repository.
+
+`[DESIGN.md](/f:/opinion-system/DESIGN.md)` is a **secondary guide** only. It may inform atmosphere, composition, typography mood, and interaction tone, but it must **not** override the hard constraints already defined here.
+
+When there is any conflict:
+
+1. This skill wins.
+2. Existing project tokens, shared component rules, and `frontend/src/assets/colors.css` win.
+3. `DESIGN.md` only supplies aesthetic direction that can be adapted safely.
+
+Do not treat `DESIGN.md` as a replacement design system. Treat it as a reference for visual taste.
+
 ### Strong Match Keywords
 
 - hover
@@ -30,6 +44,35 @@ Prefer reading this skill first for any visual or interaction polish work under 
 - Requests to adjust button, tab, card, modal, or input appearance
 - Requests to remove or soften hover effects, shadows, borders, or animations
 - Requests to align frontend visuals with the Opinion System design language
+
+## Secondary Visual Guide From `DESIGN.md`
+
+Use the repository root `DESIGN.md` as a soft reference when you need more aesthetic direction after applying the rules in this skill.
+
+### What May Be Borrowed
+
+- Warm, calm, editorial atmosphere instead of cold "AI dashboard" styling
+- Clear serif/sans hierarchy when the existing page can support it without breaking the current system
+- Generous whitespace and slower section pacing
+- Soft containment, rounded shapes, and low-drama elevation
+- Warm neutral surfaces and ring-like emphasis instead of loud shadow-heavy depth
+- Chapter-like layout rhythm, including light/dark section contrast where it fits the existing product
+
+### What Must Not Be Imported Blindly
+
+- Do not hardcode palette values from `DESIGN.md`
+- Do not bypass `frontend/src/assets/colors.css`
+- Do not replace existing project brand colors just to imitate the guide
+- Do not introduce external fonts as a requirement unless the task explicitly includes font setup
+- Do not copy Anthropic-specific branding, naming, or one-to-one component styling
+- Do not let the guide weaken existing usability, accessibility, or consistency rules
+
+### Safe Adaptation Pattern
+
+- First satisfy this skill's hard constraints
+- Then use `DESIGN.md` to refine tone, spacing, hierarchy, and surface treatment
+- Translate any borrowed idea into existing project tokens, utilities, and reusable components
+- If the guide and the current product language disagree, keep the current product language
 
 ## 0. Design Philosophy: Material You (M3) with Strict Constraints
 

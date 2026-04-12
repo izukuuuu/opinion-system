@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "paths": [
+    {
+      "path_id": "deep_report.payloads.discourse_conflict_map",
+      "current_surface": "lightweight dict",
+      "target_surface": "ConflictMap",
+      "status": "transitional"
+    },
+    {
+      "path_id": "deep_report.report_ir.fallback_builders",
+      "current_surface": "structured payload dict",
+      "target_surface": "ReportIR typed assembly",
+      "status": "partially_typed"
+    },
+    {
+      "path_id": "legacy.full_report_service",
+      "current_surface": "legacy payload / prose",
+      "target_surface": "compat-only",
+      "status": "quarantined"
+    }
+  ]
+}

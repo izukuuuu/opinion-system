@@ -37,24 +37,24 @@ import CollapsibleSidebar from '../../components/navigation/CollapsibleSidebar.v
 const steps = [
   {
     key: 'run',
-    label: '运行报告',
+    label: '任务工作台',
     to: { name: 'report-generation-run' },
     icon: PlayCircleIcon,
-    description: '选择专题并生成报告'
+    description: '查看任务轨迹与当前产物'
   },
   {
     key: 'view',
-    label: '查看报告',
+    label: '语义报告',
     to: { name: 'report-generation-view' },
     icon: ChartBarSquareIcon,
-    description: '读取结果并导出报告'
+    description: '读取结构化报告'
   },
   {
     key: 'ai',
-    label: 'AI 完整报告',
+    label: '正式文稿',
     to: { name: 'report-generation-ai' },
     icon: DocumentDuplicateIcon,
-    description: '阅读 Markdown 长报告'
+    description: '查看舆情分析文稿'
   }
 ]
 

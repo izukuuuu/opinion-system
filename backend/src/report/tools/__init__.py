@@ -12,9 +12,20 @@ from typing import Any, Dict, Tuple
 
 _EXPORT_MAP: Dict[str, Tuple[str, str]] = {
     "REPORT_ANALYSIS_TOOLS": (".registry", "REPORT_ANALYSIS_TOOLS"),
+    "READ_TOOL": (".registry", "READ_TOOL"),
+    "SYNTHESIS_TOOL": (".registry", "SYNTHESIS_TOOL"),
+    "STATE_MUTATING_TOOL": (".registry", "STATE_MUTATING_TOOL"),
+    "MANUAL_TOOL": (".registry", "MANUAL_TOOL"),
+    "ReportToolSpec": (".registry", "ReportToolSpec"),
+    "get_report_tool": (".registry", "get_report_tool"),
     "get_report_tool_bundle": (".registry", "get_report_tool_bundle"),
+    "get_report_tool_catalog": (".registry", "get_report_tool_catalog"),
     "get_report_tool_rounds": (".registry", "get_report_tool_rounds"),
+    "get_report_tool_spec": (".registry", "get_report_tool_spec"),
+    "select_report_tools": (".registry", "select_report_tools"),
     "ensure_langchain_toolset_valid": (".validation", "ensure_langchain_toolset_valid"),
+    "validate_report_toolset": (".registry", "validate_report_toolset"),
+    "validate_skill_tool_ids": (".registry", "validate_skill_tool_ids"),
     "validate_langchain_toolset": (".validation", "validate_langchain_toolset"),
     "recommendation_tool": (".decision_tools", "recommendation_tool"),
     "risk_assessment_tool": (".decision_tools", "risk_assessment_tool"),
@@ -47,4 +58,3 @@ def __getattr__(name: str) -> Any:
     value = getattr(module, attr_name)
     globals()[name] = value
     return value
-

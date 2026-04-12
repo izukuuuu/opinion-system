@@ -69,8 +69,7 @@ def build_title_subtitle_prompt(topic: str, facts: Dict[str, Any]) -> str:
         "3) 如事实中包含 section_agent_analysis，可优先吸收其中的主线判断与叙述角度；\n"
         "4) 如事实中包含 skill_context，可吸收其中的标题写作约束与全篇主线要求；\n"
         "5) 如事实中包含 deep_analysis / methodology_context / reference_snippets / dynamic_theories，可用于增强表达；\n"
-        "6) 如事实中包含 legacy_rag_sections 或 legacy_report_text，可用于增强表达；\n"
-        "7) 仅输出 JSON。\n\n"
+        "6) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -97,8 +96,7 @@ def build_stage_notes_prompt(facts: Dict[str, Any]) -> str:
         "4) 可结合 section_agent_analysis 的 judgement / evidence / angle 强化阶段划分；\n"
         "5) 如事实中包含 skill_context，可吸收其中对传播阶段划分的偏好与边界；\n"
         "6) 可结合 deep_analysis.keyEvents / deep_analysis.stage / theory_hints 强化阶段解读；\n"
-        "7) 可结合 legacy_rag_sections / legacy_report_text 强化阶段解读；\n"
-        "8) 仅输出 JSON。\n\n"
+        "7) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -127,8 +125,7 @@ def build_insights_prompt(facts: Dict[str, Any]) -> str:
         "4) 可吸收 section_agent_analysis 的 judgement / watchpoints，使卡片更有主线和边界感；\n"
         "5) 如事实中包含 skill_context，可吸收其中的结论压缩方式和建议表达约束；\n"
         "6) deep_analysis / methodology_context / reference_snippets / expert_notes 可作为研判背景；\n"
-        "7) legacy_rag_sections / legacy_report_text 可作为证据性背景；\n"
-        "8) 仅输出 JSON。\n\n"
+        "7) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -245,7 +242,7 @@ def build_full_report_layout_prompt(facts: Dict[str, Any]) -> str:
     return (
         "请作为 report layout designer，根据已选 scene_profile 与 style_profile 生成轻量布局计划。\n"
         "要求：\n"
-        "1) section_plan 的顺序应体现当前文书体裁和 scene 的章节推进关系；\n"
+        "1) section_plan 的顺序应体现当前文书体裁和 scene 的章节推进关系，并服从 scene_profile.template_sections 对应的模板骨架；\n"
         "2) section_plan.id 优先沿用 scene_profile.section_blueprint 中已有 id，不随意新造；\n"
         "3) target_words 只作为篇幅引导，应与文书类型匹配，monitor_brief 更紧凑，analysis_report 更完整；\n"
         "4) evidence_focus 只能引用输入事实里的证据类型、结构变量或已验证断言，不得凭空新增事实；\n"
@@ -374,7 +371,8 @@ def build_full_report_brief_prompt(facts: Dict[str, Any]) -> str:
         "6) brief 必须明确要求正文避免技术审计口吻，不出现内部字段名、模块名、英文键名或“该数据来自……”式脚注表达；\n"
         "7) 如果输入中存在 style_profile、scene_profile、layout_plan、section_budget、language_requirements、language_contract 或 style_language_requirements，必须把它们视为写作契约，而不是可选偏好；\n"
         "8) 如果输入中存在 evidence_semantics / indicator_relationships / time_framework / risk_action_map / claim_verifications，应优先据此组织章节主线，而不是直接复述中间层字段；\n"
-        "9) 仅输出 JSON。\n\n"
+        "9) 不要为正式报告单独生成“待核验提醒”“证据边界”“校验记录”类用户可见章节；证据不足只体现在判断收敛和动作收敛上；\n"
+        "10) 仅输出 JSON。\n\n"
         f"【输出 JSON Schema】\n{_json_block(schema)}\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -386,7 +384,7 @@ def build_full_report_section_prompt(facts: Dict[str, Any]) -> str:
     target_words = int(section.get("target_words") or 0)
     section_hint = f"建议正文长度约 {target_words} 字。" if target_words > 0 else "建议篇幅适中。"
     rewrite_instruction = str(section.get("rewrite_instruction") or "").strip()
-    rewrite_hint = f"10) 本轮重写重点：{rewrite_instruction}\n" if rewrite_instruction else ""
+    rewrite_hint = f"11) 本轮重写重点：{rewrite_instruction}\n" if rewrite_instruction else ""
     return (
         f"请撰写完整报告中的“{title}”这一节，输出该节专属 Markdown 正文。\n"
         "要求：\n"
@@ -398,8 +396,9 @@ def build_full_report_section_prompt(facts: Dict[str, Any]) -> str:
         "6) 如有必要，可调用工具补充参考证据、理论锚点、时间窗比较、政策文核查或条目级验证，但不得把工具输出以技术痕迹形式暴露在正文；\n"
         "7) 正文应以分析语言完成“证据→结构→机制→结论”的转译，不得写成模块结果拼接；\n"
         "8) 不得编造新的数字、日期、机构、政策名称或传播链路；\n"
-        "9) 不得出现内部字段名、模块名、英文键名、工具名或“该数据来自……”类脚注表达；\n"
-        "10) 节内如需补充层级，只允许少量 H3，不要再输出本节同名 H2。\n"
+        "9) 对 unverified / conflicting 内容，只能通过降低判断强度、改写为暂不下结论或暂不建议直接启动来处理，不得向用户展示“待核验提醒”“证据边界”之类中间态标题或提示；\n"
+        "10) 不得出现内部字段名、模块名、英文键名、工具名或“该数据来自……”类脚注表达；\n"
+        "11) 节内如需补充层级，只允许少量 H3，不要再输出本节同名 H2。\n"
         f"{rewrite_hint}\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
@@ -459,10 +458,11 @@ def build_full_report_markdown_prompt(facts: Dict[str, Any]) -> str:
         "10) 若输入中存在 indicator_relationships，必须显式解释指标之间的约束关系，例如主导主题变化如何解释声量波动、渠道结构如何影响触达效率；\n"
         "11) 若输入中存在 time_framework，必须区分叙事时间与分析时间，并通过时间节点或阶段区间建立映射，不得混用；\n"
         "12) 若输入中存在 risk_action_map，建议部分必须先写风险作用机制，再写执行条件与动作，不得从风险直接跳到建议；\n"
-        "13) 若输入中存在 claim_verifications，关键断言必须服从其 verification_status：supported 才可写成明确判断，partially_supported 只能写成倾向性判断，unverified 必须写成待核验线索，conflicting 必须写成存在分歧；\n"
+        "13) 若输入中存在 claim_verifications，关键断言必须服从其 verification_status：supported 才可写成明确判断，partially_supported 只能写成倾向性判断，unverified / conflicting 不能写成用户可见的待核验提示，只能通过降低判断强度、保留不确定性或直接省略来处理；\n"
         "14) 结构拆解章节不要把声量、主题、情绪、主体写成互不相干的数据清单，应写出结构失衡如何形成、如何相互强化、最终带来什么传播或治理后果；\n"
         "15) 建议部分必须区分“可立即启动”和“前提未满足、暂不启动”，未经验证的假设不得写成既定动作；如 recommendation_guardrails 提供了动作或判断护栏，必须严格执行；\n"
-        "16) 不要输出目录，不要输出图片占位符，图片会由系统后处理插入。\n\n"
+        "16) 不要生成“待核验提醒”“证据边界”“校验记录”这类面向用户的中间态章节、callout 或附录块；\n"
+        "17) 不要输出目录，不要输出图片占位符，图片会由系统后处理插入。\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )
 
@@ -477,8 +477,9 @@ def build_full_report_revise_prompt(facts: Dict[str, Any]) -> str:
         "4) 必须更充分地吸收 knowledge_context / skill_context / style_profile / scene_profile / layout_plan / section_budget 的术语、体裁约束、语言合同和分析视角；\n"
         "5) 必须清除技术审计口吻、字段说明口吻和系统内部痕迹，正文不得出现内部字段名、模块名、键名或工具名，也不得出现“该数据来自……”类脚注表达；\n"
         "6) 若输入中存在 evidence_semantics / indicator_relationships / time_framework / risk_action_map / claim_verifications，必须检查正文是否已完成对应的报告化转译，而不是保留分析中间层；\n"
-        "7) claim_verifications 中 verification_status 为 unverified 或 conflicting 的断言不得在正文中写成确定事实；\n"
+        "7) claim_verifications 中 verification_status 为 unverified 或 conflicting 的断言不得在正文中写成确定事实，也不得改写成面向用户的待核验提醒；\n"
         "8) 若输入中存在 repair_focus / forbidden_terms / writing_guardrails / recommendation_guardrails，必须逐项消除对应问题并改写成正式业务语言；\n"
-        "9) 不能新增输入中不存在的事实。\n\n"
+        "9) 删除或收敛所有“待核验提醒”“证据边界”“校验记录”式中间态表达；\n"
+        "10) 不能新增输入中不存在的事实。\n\n"
         f"【事实数据】\n{_json_block(facts)}"
     )

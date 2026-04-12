@@ -1,6 +1,15 @@
 ---
 name: quality-validation-backlink
 description: Validate a report for unsupported claims, time misalignment, and subject confusion, then push issues back to the right stage.
+capability_ids:
+  - semantic.utility_gate
+  - evidence.normalize_retrieve_verify
+runtime_surfaces:
+  - deep_report_subagent
+agent_families:
+  - decision_utility_judge
+  - validator
+guidance_only: true
 metadata:
   report:
     skillKey: quality_validation_backlink

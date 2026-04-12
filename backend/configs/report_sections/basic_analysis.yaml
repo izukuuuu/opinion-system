@@ -1,0 +1,28 @@
+section_id: basic-analysis-insight
+factory: basic_analysis
+kicker: 平台基础能力
+title: 基础分析洞察
+summary_field: basic_analysis_insight.summary
+default_summary: 当前区间尚未形成基础分析章节洞察。
+
+blocks:
+  - type: narrative
+    block_id: basic-analysis-summary
+    title: 章节判断
+    source_field: basic_analysis_insight.summary
+    default_content: 当前区间尚未形成基础分析章节洞察。
+
+  - type: bullets
+    block_id: basic-analysis-findings
+    title: 核心发现
+    source_field: basic_analysis_insight.key_findings
+    empty_items:
+      - 当前基础分析章节暂未沉淀更多结构化发现。
+
+  - type: callout
+    block_id: basic-analysis-uncertainty
+    title: 边界说明
+    tone_from: basic_analysis_insight.uncertainty_notes
+    source_field: basic_analysis_insight.uncertainty_notes
+    joiner: "；"
+    default_content: 基础分析模块已就绪，可直接作为本报告的稳定基础章节。

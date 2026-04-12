@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "objects": [
+    {
+      "object_id": "agenda_frame_map",
+      "required_surfaces": ["issue_scope", "attribute_scope", "frame_structure", "counter_frame", "frame_shift"],
+      "current_gaps": ["issue-attribute 共现仍偏启发式", "frame articulation 尚未形成独立 specialist eval"],
+      "next_focus": "把 AgendaFrameMap 做成可直接服务 risk/recommendation/compiler 的方法对象"
+    },
+    {
+      "object_id": "conflict_map",
+      "required_surfaces": ["object_scope", "target_binding", "argument_relations", "evidence_density", "resolution_confidence", "unresolved_reason"],
+      "current_gaps": ["claim proposition slots still heuristic", "argument unit 与 support/attack relation 还需更强评测"],
+      "next_focus": "提高 target-aware 冲突图的证据密度与论证结构分辨率"
+    },
+    {
+      "object_id": "mechanism_summary",
+      "required_surfaces": ["time_anchor", "evidence_refs", "bridge structure", "cause_candidates", "confidence"],
+      "current_gaps": ["机制对象仍偏模板化", "cause candidate 解释仍偏薄", "bridge node 质量尚未单独评测"],
+      "next_focus": "提升路径、桥接节点、阶段转折与因果候选的 specialist 质量"
+    },
+    {
+      "object_id": "utility_assessment",
+      "required_surfaces": ["decision structure", "missing_dimensions", "fallback_trace", "improvement_trace", "uncertainty_boundary"],
+      "current_gaps": ["需要更细的 trace grading", "机制解释与主要矛盾维度仍需单独评分"],
+      "next_focus": "把 utility gate 变成可闭环优化的 typed judge 与管理意义裁决器"
+    }
+  ]
+}

@@ -24,6 +24,65 @@
       {{ databaseState.message }}
     </p>
 
+    <section class="rounded-3xl border border-soft bg-surface p-5 space-y-4">
+      <div class="space-y-1">
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">报告运行时持久化</p>
+        <h3 class="text-base font-semibold text-primary">PostgreSQL Durable Checkpoint</h3>
+        <p class="text-sm text-secondary">复用当前默认数据库连接，在同一个 PostgreSQL database 中使用独立 schema 保存报告运行时 checkpoint。</p>
+      </div>
+      <p v-if="runtimePersistenceState.error" class="settings-message-error">{{ runtimePersistenceState.error }}</p>
+      <p v-if="runtimePersistenceState.message" class="settings-message-success">{{ runtimePersistenceState.message }}</p>
+      <div class="grid gap-3 md:grid-cols-2">
+        <article class="rounded-2xl bg-base-soft px-4 py-3">
+          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">当前默认连接</p>
+          <p class="mt-2 text-sm text-secondary">{{ runtimePersistenceState.form.active_connection_name || '未设置' }}</p>
+          <p class="mt-1 text-xs text-muted">{{ runtimePersistenceState.form.active_connection_id || '--' }}</p>
+        </article>
+        <article class="rounded-2xl bg-base-soft px-4 py-3">
+          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">数据库引擎</p>
+          <p class="mt-2 text-sm text-secondary">{{ runtimePersistenceState.form.active_connection_engine || '未识别' }}</p>
+          <p class="mt-1 text-xs text-muted">仅支持 PostgreSQL</p>
+        </article>
+        <article class="rounded-2xl bg-base-soft px-4 py-3">
+          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">目标 Database</p>
+          <p class="mt-2 text-sm text-secondary">{{ runtimePersistenceState.form.resolved_database || '--' }}</p>
+          <p class="mt-1 text-xs text-muted">{{ runtimePersistenceState.form.resolved_host || '--' }}</p>
+        </article>
+        <article class="rounded-2xl bg-base-soft px-4 py-3">
+          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">当前状态</p>
+          <p class="mt-2 text-sm text-secondary">{{ runtimePersistenceState.form.status_message || '未加载' }}</p>
+          <p class="mt-1 text-xs text-muted">{{ runtimePersistenceState.form.status || '--' }}</p>
+        </article>
+      </div>
+      <div class="grid gap-4 md:grid-cols-[auto,minmax(0,1fr),auto] md:items-end">
+        <AppCheckbox
+          v-model="runtimePersistenceState.form.enabled"
+          label-class="text-sm font-medium text-secondary"
+          :disabled="runtimePersistenceState.saving || runtimePersistenceDisabled"
+        >
+          启用报告运行时持久化
+        </AppCheckbox>
+        <label class="flex flex-col gap-2 text-sm font-medium text-secondary">
+          <span>Schema 名称</span>
+          <input
+            v-model.trim="runtimePersistenceState.form.schema_name"
+            type="text"
+            class="input"
+            placeholder="report_runtime"
+            :disabled="runtimePersistenceState.saving || runtimePersistenceDisabled"
+          />
+        </label>
+        <button
+          type="button"
+          class="btn-primary px-5 py-2.5"
+          :disabled="runtimePersistenceSaveDisabled"
+          @click="saveRuntimePersistence"
+        >
+          {{ runtimePersistenceState.saving ? '保存中…' : '保存持久化配置' }}
+        </button>
+      </div>
+    </section>
+
     <ul v-if="databaseState.connections.length" class="space-y-4">
       <li v-for="connection in databaseState.connections" :key="connection.id"
         class="rounded-3xl border border-soft bg-surface p-5 action-card">
@@ -210,6 +269,25 @@ const databaseState = reactive({
   active: "",
 });
 
+const runtimePersistenceState = reactive({
+  loading: false,
+  saving: false,
+  error: "",
+  message: "",
+  form: {
+    enabled: false,
+    source_mode: "reuse_active",
+    active_connection_id: "",
+    active_connection_name: "",
+    active_connection_engine: "",
+    schema_name: "report_runtime",
+    resolved_database: "",
+    resolved_host: "",
+    status: "",
+    status_message: ""
+  }
+});
+
 const databaseModalVisible = ref(false);
 const databaseModalMode = ref("create");
 // 'url' | 'structured'
@@ -317,6 +395,80 @@ const databaseModalConfirmDisabled = computed(() => {
     !databaseForm.url
   );
 });
+
+const runtimePersistenceDisabled = computed(() => {
+  const status = String(runtimePersistenceState.form.status || "").trim()
+  return status === "unsupported_engine" || status === "missing_active"
+})
+
+const runtimePersistenceSaveDisabled = computed(() => (
+  runtimePersistenceState.saving ||
+  runtimePersistenceState.loading ||
+  !String(runtimePersistenceState.form.schema_name || "").trim() ||
+  runtimePersistenceDisabled.value
+))
+
+const applyRuntimePersistenceResult = (result) => {
+  const payload = result && typeof result === "object" ? result : {}
+  runtimePersistenceState.form.enabled = Boolean(payload.enabled)
+  runtimePersistenceState.form.source_mode = String(payload.source_mode || "reuse_active").trim() || "reuse_active"
+  runtimePersistenceState.form.active_connection_id = String(payload.active_connection_id || "").trim()
+  runtimePersistenceState.form.active_connection_name = String(payload.active_connection_name || "").trim()
+  runtimePersistenceState.form.active_connection_engine = String(payload.active_connection_engine || "").trim()
+  runtimePersistenceState.form.schema_name = String(payload.schema_name || "report_runtime").trim() || "report_runtime"
+  runtimePersistenceState.form.resolved_database = String(payload.resolved_database || "").trim()
+  runtimePersistenceState.form.resolved_host = String(payload.resolved_host || "").trim()
+  runtimePersistenceState.form.status = String(payload.status || "").trim()
+  runtimePersistenceState.form.status_message = String(payload.status_message || "").trim()
+}
+
+const fetchRuntimePersistence = async () => {
+  runtimePersistenceState.loading = true
+  runtimePersistenceState.error = ""
+  try {
+    const endpoint = await buildApiUrl("/settings/report-runtime/persistence")
+    const response = await fetch(endpoint)
+    if (!response.ok) {
+      throw new Error("获取报告运行时持久化配置失败")
+    }
+    const payload = await response.json()
+    const result = payload && typeof payload === "object" ? payload.data ?? {} : {}
+    applyRuntimePersistenceResult(result)
+  } catch (err) {
+    runtimePersistenceState.error = err instanceof Error ? err.message : "获取报告运行时持久化配置失败"
+  } finally {
+    runtimePersistenceState.loading = false
+  }
+}
+
+const saveRuntimePersistence = async () => {
+  runtimePersistenceState.saving = true
+  runtimePersistenceState.error = ""
+  runtimePersistenceState.message = ""
+  try {
+    const endpoint = await buildApiUrl("/settings/report-runtime/persistence")
+    const response = await fetch(endpoint, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: runtimePersistenceState.form.enabled,
+        source_mode: "reuse_active",
+        schema_name: (runtimePersistenceState.form.schema_name || "").trim() || "report_runtime"
+      }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    const result = payload && typeof payload === "object" ? payload.data ?? {} : {}
+    if (!response.ok || payload.status === "error") {
+      throw new Error((payload && typeof payload === "object" ? payload.message : "") || "保存报告运行时持久化配置失败")
+    }
+    applyRuntimePersistenceResult(result)
+    runtimePersistenceState.message = "报告运行时持久化配置已保存"
+  } catch (err) {
+    runtimePersistenceState.error = err instanceof Error ? err.message : "保存报告运行时持久化配置失败"
+  } finally {
+    runtimePersistenceState.saving = false
+  }
+}
 
 const fetchDatabaseConnections = async () => {
   databaseState.loading = true;
@@ -442,6 +594,7 @@ const handleDatabaseModalConfirm = async () => {
     databaseState.message =
       databaseModalMode.value === "create" ? "新增连接成功" : "连接信息已更新";
     await fetchDatabaseConnections();
+    await fetchRuntimePersistence();
     closeDatabaseModal();
   } catch (err) {
     databaseFormState.error =
@@ -464,6 +617,7 @@ const activateConnection = async (connectionId) => {
     }
     databaseState.message = "已设为默认连接";
     databaseState.active = connectionId;
+    await fetchRuntimePersistence();
   } catch (err) {
     databaseState.error =
       err instanceof Error ? err.message : "设置默认连接失败";
@@ -485,6 +639,7 @@ const deleteDatabaseConnection = async (connectionId) => {
     }
     databaseState.message = "删除成功";
     await fetchDatabaseConnections();
+    await fetchRuntimePersistence();
   } catch (err) {
     databaseState.error =
       err instanceof Error ? err.message : "删除数据库连接失败";
@@ -493,6 +648,7 @@ const deleteDatabaseConnection = async (connectionId) => {
 
 onMounted(() => {
   fetchDatabaseConnections();
+  fetchRuntimePersistence();
 });
 </script>
 

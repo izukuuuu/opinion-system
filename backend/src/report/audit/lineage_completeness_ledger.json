@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "artifacts": [
+    {
+      "artifact_id": "agenda_frame_map",
+      "required_fields": ["policy_version", "thread_id", "graph_run_id", "parent_artifact_ids", "source_artifact_ids"],
+      "status": "required"
+    },
+    {
+      "artifact_id": "conflict_map",
+      "required_fields": ["policy_version", "thread_id", "graph_run_id", "parent_artifact_ids", "source_artifact_ids"],
+      "status": "required"
+    },
+    {
+      "artifact_id": "mechanism_summary",
+      "required_fields": ["policy_version", "thread_id", "graph_run_id", "parent_artifact_ids", "source_artifact_ids"],
+      "status": "required"
+    },
+    {
+      "artifact_id": "utility_assessment",
+      "required_fields": ["policy_version", "thread_id", "graph_run_id", "parent_artifact_ids", "source_artifact_ids"],
+      "status": "required"
+    }
+  ]
+}

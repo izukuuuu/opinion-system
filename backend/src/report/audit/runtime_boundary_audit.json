@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "keep_inside_runtime": [
+    "tool objects / StructuredTool instances",
+    "runner / middleware / deep agent invocation internals",
+    "langgraph checkpointer internals and unresolved execution state",
+    "temporary workspace state files used only during a live run"
+  ],
+  "must_snapshot": [
+    "task state",
+    "event payload",
+    "interrupt payload",
+    "artifact manifest",
+    "ReportIR",
+    "report_ir_summary",
+    "structured projection payload",
+    "full markdown payload metadata"
+  ],
+  "current_boundary_risks": [
+    "legacy progress path已切换到 cache / manifest snapshot，但仍需防止日志目录回退逻辑重新进入主链",
+    "structured_result_digest 仍作为兼容摘要保留，必须继续确保 artifact manifest 才是唯一 readiness truth",
+    "runtime bootstrap 结果仍会写 explain outputs，lineage 尚未完全并入 task/thread artifact graph；当前主链实现固定在 runtime_bootstrap.py",
+    "full_report_service / structured_service 已删除，但对应 compat seam 的 retirement map 和 guard tests 仍需保持同步"
+  ],
+  "rules": [
+    "凡离开 agent_runtime 或 deep_report 执行闭包边界的对象，必须进入 schema family",
+    "task state、event payload、artifact payload 共享版本化 contract，只允许字段裁剪，不允许类型漂移",
+    "compat 字段可以保留，但只能从新 schema 派生，不能继续作为事实源",
+    "cache payload 只能保存 snapshot，不得存活 runtime object、runner object、tool object"
+  ]
+}

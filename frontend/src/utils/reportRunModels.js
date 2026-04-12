@@ -90,13 +90,32 @@ export function todoStatusLabel(status) {
 export function subagentLabel(id) {
   const mapping = {
     retrieval_router: '检索路由',
+    agenda_frame_builder: '议题框架',
     evidence_organizer: '证据整理',
     timeline_analyst: '时间线与因果',
     stance_conflict: '主体与立场',
+    claim_actor_conflict: '冲突构建',
     propagation_analyst: '传播结构',
+    decision_utility_judge: '效用裁决',
     report_coordinator: '总控汇总',
     writer: '文稿生成',
-    validator: '质量校验'
+    validator: '质量校验',
+    load_context: '加载上下文',
+    planner_agent: '章节规划',
+    existing_analysis_workers_subgraph: '分析子图',
+    ir_merge: 'IR 合并',
+    trace_binder: 'Trace 绑定',
+    section_realizer_agent: '受限成稿',
+    section_realizer_worker: '章节成稿 Worker',
+    section_realizer_finalize: '章节成稿汇总',
+    unit_validator: '单元校验',
+    repair_patch_planner: '修复规划',
+    repairer_agent: '定点修复',
+    repair_worker: '修复 Worker',
+    repair_finalize: '修复汇总',
+    compile_blocked: '编译门禁',
+    markdown_compiler: '正式编译',
+    artifact_renderer: '产物渲染'
   }
   return mapping[String(id || '').trim()] || String(id || '处理节点')
 }
@@ -112,14 +131,151 @@ function normalizePrimaryTodoStatus(status) {
 function displayAgentLabel(agent) {
   const id = String(agent || '').trim()
   if (!id) return ''
+  if (id === 'approval') return '人工确认'
   if (id === 'report_coordinator') return '总控代理'
   return subagentLabel(id)
+}
+
+function shortThreadLabel(threadId) {
+  const text = String(threadId || '').trim()
+  if (!text) return '--'
+  if (text.length <= 28) return text
+  return `${text.slice(0, 18)}...${text.slice(-6)}`
+}
+
+function shortLocatorLabel(value) {
+  const text = String(value || '').trim()
+  if (!text) return '--'
+  if (text.length <= 42) return text
+  return `${text.slice(0, 24)}...${text.slice(-12)}`
+}
+
+function runtimeModeLabel(mode) {
+  const mapping = {
+    'deep-report-coordinator': 'Deep Coordinator',
+    'deep-report-subagent': 'Deep Subagent',
+    'deep-report-root-graph': 'LangGraph 主图',
+    'deep-report-compile': 'LangGraph 编译图',
+    'report-agent-deep': 'Deep Agent',
+    'report-agent-plain': 'LangGraph 兼容代理',
+    'report-api': 'API 入口'
+  }
+  return mapping[String(mode || '').trim()] || String(mode || '').trim() || '未标注'
+}
+
+function latestApprovalRecord(approvals = []) {
+  return [...(Array.isArray(approvals) ? approvals : [])].reverse().find((item) => item && typeof item === 'object') || null
+}
+
+function resolveRuntimeDiagnostics(taskState = {}, approvals = []) {
+  const runState = taskState.runState && typeof taskState.runState === 'object' ? taskState.runState : {}
+  const orchestratorDiagnostics = taskState.orchestratorState?.runtime_diagnostics && typeof taskState.orchestratorState.runtime_diagnostics === 'object'
+    ? taskState.orchestratorState.runtime_diagnostics
+    : {}
+  const latestApproval = latestApprovalRecord(approvals)
+  const toolArgs = latestApproval?.action?.tool_args && typeof latestApproval.action.tool_args === 'object'
+    ? latestApproval.action.tool_args
+    : {}
+  const interruptPayload = latestApproval?.action?.graph_interrupt && typeof latestApproval.action.graph_interrupt === 'object'
+    ? latestApproval.action.graph_interrupt
+    : {}
+  const currentThreadId = String(taskState.threadId || runState.thread_id || orchestratorDiagnostics.thread_id || '').trim()
+  const checkpointBackend = String(runState.checkpoint_backend || orchestratorDiagnostics.checkpoint_backend || toolArgs.checkpoint_backend || '').trim()
+  const checkpointLocator = String(runState.checkpoint_locator || orchestratorDiagnostics.checkpoint_locator || toolArgs.checkpoint_locator || toolArgs.checkpoint_path || '').trim()
+  const runtimeMode = String(runState.runtime_mode || orchestratorDiagnostics.runtime_mode || '').trim()
+  const latestInterruptId = String(latestApproval?.interrupt_id || interruptPayload.interrupt_id || '').trim()
+  const langsmithEnabled = Boolean(runState.langsmith_enabled ?? orchestratorDiagnostics.langsmith_enabled)
+  const langsmithProject = String(runState.langsmith_project || orchestratorDiagnostics.langsmith_project || '').trim()
+  const environment = String(runState.environment || orchestratorDiagnostics.environment || '').trim()
+  return {
+    threadId: currentThreadId,
+    threadLabel: shortThreadLabel(currentThreadId),
+    checkpointBackend,
+    checkpointBackendLabel: checkpointBackend ? checkpointBackend.toUpperCase() : '--',
+    checkpointLocator,
+    checkpointLocatorLabel: shortLocatorLabel(checkpointLocator),
+    latestInterruptId,
+    latestInterruptLabel: latestInterruptId || '--',
+    runtimeMode,
+    runtimeModeLabel: runtimeModeLabel(runtimeMode),
+    langsmithEnabled,
+    langsmithProject,
+    tracingLabel: langsmithEnabled ? `LangSmith · ${langsmithProject || 'default'}` : 'Tracing 未开启',
+    environment: environment || '--'
+  }
+}
+
+function utilityDecisionLabel(decision, approvals = []) {
+  const normalized = String(decision || '').trim()
+  const hasPendingApproval = approvals.some((item) => String(item?.status || '').trim() !== 'resolved')
+  if (hasPendingApproval || normalized === 'require_semantic_review') return '需审批'
+  if (normalized === 'fallback_recompile') return '待补全'
+  if (normalized === 'pass') return '已通过'
+  return '处理中'
+}
+
+function approvalDecisionLabel(decision) {
+  const normalized = String(decision || '').trim()
+  if (normalized === 'approve') return '已确认'
+  if (normalized === 'edit') return '已修改'
+  if (normalized === 'reject') return '已拒绝'
+  return '待处理'
+}
+
+function buildRouteSummary(routerFacets = [], dispatchTargets = []) {
+  if (!routerFacets.length && !dispatchTargets.length) return '当前还没有可展示的分派计划。'
+  const dimensions = []
+  if (routerFacets.some((item) => String(item?.platform || '').trim())) dimensions.push('平台')
+  if (routerFacets.some((item) => String(item?.event_stage || '').trim())) dimensions.push('事件阶段')
+  if (routerFacets.some((item) => String(item?.task_goal || item?.output_goal || '').trim())) dimensions.push('任务目标')
+  if (routerFacets.some((item) => String(item?.time_start || item?.time_end || item?.date_window || '').trim())) dimensions.push('时间窗')
+  if (routerFacets.some((item) => String(item?.risk_sensitivity || '').trim())) dimensions.push('风险等级')
+  if (dimensions.length) return `已按${dimensions.join('、')}生成分派计划。`
+  if (dispatchTargets.length) return '已生成当前轮次的 specialist 分派计划。'
+  return '当前还没有可展示的分派计划。'
+}
+
+function normalizeArtifactKey(key) {
+  const normalized = String(key || '').trim()
+  return normalized === 'report_ir' ? 'ir' : normalized
+}
+
+function artifactDisplayMeta(key) {
+  const normalized = normalizeArtifactKey(key)
+  const mapping = {
+    structured_projection: { label: '语义报告', description: '当前结构化结果视图。' },
+    ir: { label: 'Report IR', description: '本轮语义中枢与证据编译结果。' },
+    conflict_map: { label: '冲突图谱', description: '梳理主体冲突和主张关系。' },
+    mechanism_summary: { label: '机制分析', description: '归纳传播路径和触发机制。' },
+    utility_assessment: { label: '裁决依据', description: '确认是否具备进入正式文稿的条件。' },
+    draft_bundle: { label: '受约束草稿', description: '按 section 编译的草稿单元。' },
+    draft_bundle_v2: { label: '受约束草稿 V2', description: 'IR-first 的 DraftUnitV2 结构化草稿。' },
+    validation_result: { label: '验证结果', description: '记录失败单元、gate 和 repair 状态。' },
+    repair_plan: { label: '修复计划', description: '记录 patchable failures 的定点修复计划。' },
+    graph_state: { label: '图运行快照', description: '记录当前 graph node、repair 次数和最终 gate。' },
+    approval_records: { label: '审批记录', description: '记录语义审查和人工确认。' },
+    full_markdown: { label: '正式文稿', description: '最终 Markdown 输出。' }
+  }
+  return mapping[normalized] || { label: normalized || '产物', description: '当前产物。' }
 }
 
 function toolDisplayName(toolName) {
   const mapping = {
     task: '委派子任务',
     write_todos: '更新执行计划',
+    normalize_task: '冻结任务边界',
+    get_corpus_coverage: '诊断语料覆盖',
+    retrieve_evidence_cards: '整理证据卡',
+    build_event_timeline: '生成时间线',
+    compute_report_metrics: '生成指标对象',
+    extract_actor_positions: '提取主体立场',
+    build_agenda_frame_map: '构建议题框架',
+    build_claim_actor_conflict: '构建冲突图谱',
+    build_mechanism_summary: '生成传播机制',
+    detect_risk_signals: '识别风险信号',
+    judge_decision_utility: '裁决决策可用性',
+    verify_claim_v2: '校验关键断言',
+    build_section_packet: '组装章节材料包',
     read_file: '读取文件',
     write_file: '写入文件',
     edit_file: '修改文件',
@@ -131,9 +287,22 @@ function toolDisplayName(toolName) {
     run_volume_analysis: '分析传播规模',
     save_structured_report: '保存结构化结果',
     write_final_report: '写入正式文稿',
-    overwrite_report_cache: '更新结果缓存'
+    overwrite_report_cache: '更新结果缓存',
+    graph_interrupt: '语义边界确认'
   }
   return mapping[String(toolName || '').trim()] || String(toolName || '执行动作')
+}
+
+const LOW_SIGNAL_TOOL_NAMES = new Set(['read_file', 'write_file', 'edit_file', 'ls', 'grep'])
+
+function isLowSignalToolName(toolName) {
+  return LOW_SIGNAL_TOOL_NAMES.has(String(toolName || '').trim())
+}
+
+function extractJsonField(text, field) {
+  const escaped = String(field || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = String(text || '').match(new RegExp(`"${escaped}"\\s*:\\s*"([^"]*)"`, 'i'))
+  return match ? String(match[1] || '').trim() : ''
 }
 
 function sanitizeEventText(value) {
@@ -151,6 +320,77 @@ function sanitizeEventPreview(value) {
   return text.replace(/\s+/g, ' ').trim().slice(0, 180)
 }
 
+function formatReceiptCounts(counts) {
+  const payload = counts && typeof counts === 'object' ? counts : {}
+  const mapping = {
+    matched_count: '命中',
+    sampled_count: '采样',
+    platform_count: '平台',
+    cards_count: '证据卡',
+    timeline_count: '时间线节点',
+    metric_count: '指标',
+    actor_count: '主体',
+    actors_count: '主体',
+    claims_count: '断言',
+    conflicts_count: '冲突边',
+    paths_count: '放大路径',
+    triggers_count: '触发节点',
+    bridge_nodes_count: '桥接节点',
+    risks_count: '风险',
+    missing_dimensions_count: '缺口维度',
+    checked_count: '已校验',
+    supported_count: 'supported',
+    partially_supported_count: 'partially_supported',
+    unsupported_count: 'unsupported',
+    contradicted_count: 'contradicted',
+    uncertainty_count: '不确定性提示'
+  }
+  return Object.entries(payload)
+    .filter(([, value]) => Number.isFinite(Number(value)))
+    .map(([key, value]) => {
+      const label = mapping[key] || key
+      return `${label}：${Number(value)}`
+    })
+}
+
+function shouldDisplayReceiptCounts(toolName, counts) {
+  if (String(toolName || '').trim() === 'normalize_task') return false
+  return formatReceiptCounts(counts).length > 0
+}
+
+function formatRangeLabel(range) {
+  const payload = range && typeof range === 'object' ? range : {}
+  const start = String(payload.start || '').trim()
+  const end = String(payload.end || '').trim() || start
+  if (!start && !end) return ''
+  if (start && end) return `${start} 至 ${end}`
+  return start || end
+}
+
+function formatExecutionValue(value) {
+  const payload = value && typeof value === 'object' ? value : {}
+  const topic = String(payload.topic_identifier || '').trim()
+  const range = formatRangeLabel({ start: payload.start, end: payload.end })
+  const mode = String(payload.mode || '').trim()
+  const parts = []
+  if (topic) parts.push(topic)
+  if (range) parts.push(range)
+  if (mode) parts.push(`模式 ${mode}`)
+  return parts.join(' / ')
+}
+
+function buildReceiptToolCallIdSet(events = []) {
+  const ids = new Set()
+  for (const item of Array.isArray(events) ? events : []) {
+    const payload = item?.payload && typeof item.payload === 'object' ? item.payload : {}
+    if (String(item?.type || '').trim() !== 'agent.memo') continue
+    if (!String(payload.stage_id || '').trim() || !String(payload.decision_summary || '').trim()) continue
+    const toolCallId = String(payload.tool_call_id || '').trim()
+    if (toolCallId) ids.add(toolCallId)
+  }
+  return ids
+}
+
 function summarizeToolResultPreview(toolName, rawPreview) {
   const text = String(rawPreview || '').trim()
   if (!text) return ''
@@ -160,6 +400,31 @@ function summarizeToolResultPreview(toolName, rawPreview) {
     if (toolName === 'overwrite_report_cache') return '结果缓存更新失败。'
     return `${toolDisplayName(toolName)}失败。`
   }
+  if (toolName === 'normalize_task') return '任务边界已冻结。'
+  if (toolName === 'get_corpus_coverage') {
+    if (/"contract_mismatch"\s*:\s*true/.test(text)) return '检索范围与真实任务边界不一致。'
+    if (/"source_resolution"\s*:\s*"overlap_fetch_range"/.test(text)) return '当前请求区间与已有语料部分重叠。'
+    if (/"source_resolution"\s*:\s*"unavailable"/.test(text)) return '当前没有命中的原始语料归档。'
+    return /"matched_count"\s*:\s*0/.test(text) ? '当前范围内没有命中文档。' : '已返回覆盖诊断结果。'
+  }
+  if (toolName === 'retrieve_evidence_cards') return /"result"\s*:\s*\[\s*\]/.test(text) ? '没有召回到可用证据卡。' : '已返回证据卡结果。'
+  if (toolName === 'build_event_timeline') return /"result"\s*:\s*\[\s*\]/.test(text) ? '没有形成可回链的时间线节点。' : '已生成时间线节点。'
+  if (toolName === 'compute_report_metrics') return '已生成指标对象。'
+  if (toolName === 'extract_actor_positions') return /"result"\s*:\s*\[\s*\]/.test(text) ? '当前没有识别到明确主体立场。' : '已提取主体立场关系。'
+  if (toolName === 'build_agenda_frame_map') return '已构建议题框架对象。'
+  if (toolName === 'build_claim_actor_conflict') return /"claims"\s*:\s*\[\s*\]/.test(text) ? '当前冲突图谱为空。' : '已生成断言冲突图谱。'
+  if (toolName === 'build_mechanism_summary') return /"amplification_paths"\s*:\s*\[\s*\]/.test(text) ? '当前传播机制对象为空。' : '已生成传播机制对象。'
+  if (toolName === 'detect_risk_signals') return /"result"\s*:\s*\[\s*\]/.test(text) ? '暂未识别到风险信号。' : '已返回风险信号结果。'
+  if (toolName === 'judge_decision_utility') {
+    const decision = extractJsonField(text, 'decision')
+    return decision ? `当前裁决为 ${decision}。` : '已更新决策可用性裁决。'
+  }
+  if (toolName === 'verify_claim_v2') return '已完成关键断言回链校验。'
+  if (toolName === 'build_section_packet') {
+    const sectionId = extractJsonField(text, 'section_id')
+    return sectionId ? `已组装 ${sectionId} 章节材料包。` : '已组装章节材料包。'
+  }
+  if (toolName === 'save_structured_report') return '结构化结果已保存。'
   return sanitizeEventPreview(text)
 }
 
@@ -242,8 +507,8 @@ function deriveStageCards(taskState, agents) {
   const approvals = Array.isArray(taskState.approvals) ? taskState.approvals : []
   const pendingApprovals = approvals.filter((item) => String(item?.status || '').trim() !== 'resolved')
   const failed = status === 'failed'
-  const hasStructuredResult = Boolean(taskState.artifacts?.report_ready || Object.keys(taskState.structuredResultDigest || {}).length)
-  const hasFullReport = Boolean(taskState.artifacts?.full_report_ready)
+  const hasStructuredResult = Boolean(taskState.id && taskState.threadId && taskState.artifactManifest?.structured_projection?.status === 'ready')
+  const hasFullReport = Boolean(taskState.id && taskState.threadId && taskState.artifactManifest?.full_markdown?.status === 'ready')
   const researchAgents = agents.filter((item) => RESEARCH_SUBAGENT_IDS.includes(item.id))
   const researchDone = researchAgents.filter((item) => item.rawStatus === 'done').length
   const researchStarted = researchAgents.filter((item) => item.rawStatus !== 'idle').length
@@ -345,26 +610,334 @@ function calculateProgress(taskState, stageCards, agents) {
 }
 
 function buildArtifactCards(taskState) {
+  const manifest = taskState.artifactManifest && typeof taskState.artifactManifest === 'object'
+    ? taskState.artifactManifest
+    : {}
   return [
     {
-      key: 'report_ready',
-      label: '结构化结果',
-      description: '供查看页读取的结构化对象。',
-      ready: Boolean(taskState.artifacts?.report_ready)
+      key: 'structured_projection',
+      label: '语义报告',
+      description: '由 Report IR 派生的结构化投影视图。',
+      ready: Boolean(taskState.id && taskState.threadId && manifest.structured_projection?.status === 'ready')
     },
     {
-      key: 'full_report_ready',
+      key: 'report_ir',
+      label: 'Report IR',
+      description: '本次任务的语义中枢与证据编译结果。',
+      ready: Boolean(manifest.ir?.status === 'ready')
+    },
+    {
+      key: 'draft_bundle',
+      label: '受约束草稿',
+      description: '按 section 编译的 draft units，仍保留 trace 绑定。',
+      ready: Boolean(manifest.draft_bundle?.status === 'ready')
+    },
+    {
+      key: 'draft_bundle_v2',
+      label: '受约束草稿 V2',
+      description: '按 DraftUnitV2 编译的结构化草稿单元。',
+      ready: Boolean(manifest.draft_bundle_v2?.status === 'ready')
+    },
+    {
+      key: 'validation_result',
+      label: '验证结果',
+      description: '单元级验证结果、失败类型与 compile gate。',
+      ready: Boolean(manifest.validation_result?.status === 'ready')
+    },
+    {
+      key: 'repair_plan',
+      label: '修复计划',
+      description: '自动 repair loop 生成的 patch plan。',
+      ready: Boolean(manifest.repair_plan?.status === 'ready')
+    },
+    {
+      key: 'graph_state',
+      label: '图运行快照',
+      description: '记录当前节点、repair 次数和 gate 状态。',
+      ready: Boolean(manifest.graph_state?.status === 'ready')
+    },
+    {
+      key: 'approval_records',
+      label: '审批记录',
+      description: '语义审查和人工确认会追加到同一条 lineage。',
+      ready: Boolean(manifest.approval_records?.status === 'ready')
+    },
+    {
+      key: 'full_markdown',
       label: '正式文稿',
-      description: '供 AI 报告页读取的完整文稿。',
-      ready: Boolean(taskState.artifacts?.full_report_ready)
-    },
-    {
-      key: 'report_runtime_artifact',
-      label: '运行时草稿',
-      description: '审批通过后保存的本次文稿版本。',
-      ready: Boolean(taskState.artifacts?.report_runtime_artifact)
+      description: '由 Report IR 编译得到的正式 Markdown 文稿。',
+      ready: Boolean(taskState.id && taskState.threadId && manifest.full_markdown?.status === 'ready')
     }
   ]
+}
+
+function summarizeFacet(facet) {
+  if (!facet || typeof facet !== 'object') return ''
+  const parts = [
+    facet.task_goal,
+    facet.event_stage,
+    facet.platform,
+    facet.risk_sensitivity
+  ].map((item) => String(item || '').trim()).filter(Boolean)
+  if (parts.length) return parts.join(' / ')
+  const fallback = [
+    facet.actor_scope,
+    facet.source_type,
+    facet.date_window
+  ].map((item) => {
+    if (Array.isArray(item)) return item.filter(Boolean).join('、')
+    if (item && typeof item === 'object') return Object.values(item).filter(Boolean).join(' → ')
+    return String(item || '').trim()
+  }).filter(Boolean)
+  return fallback.join(' / ')
+}
+
+function summarizeApprovalReason(approval) {
+  const graphInterrupt = approval?.action?.graph_interrupt
+  const graphSummary = String(graphInterrupt?.value?.summary || '').trim()
+  if (graphSummary) return graphSummary
+  return String(approval?.summary || '').trim()
+}
+
+function buildGraphObservability(taskState, timelineEvents) {
+  const rawEvents = Array.isArray(taskState.events) ? taskState.events : []
+  const latestGraphEvent = [...rawEvents].reverse().find((item) => {
+    const type = String(item?.type || '').trim()
+    return type.startsWith('graph.') || ['validation.failed', 'repair.loop.started', 'repair.loop.completed', 'compile.blocked', 'compile.started', 'compile.completed', 'interrupt.human_review'].includes(type)
+  }) || null
+  const routerEvent = [...rawEvents].reverse().find((item) => Array.isArray(item?.payload?.router_facets) || Array.isArray(item?.payload?.dispatch_targets))
+  const latestTransition = timelineEvents[0] || null
+  const routerFacetPayload = Array.isArray(routerEvent?.payload?.router_facets)
+    ? routerEvent.payload.router_facets
+    : []
+  const routerFacets = routerFacetPayload.map(summarizeFacet).filter(Boolean)
+  const dispatchTargets = Array.isArray(routerEvent?.payload?.dispatch_targets)
+    ? routerEvent.payload.dispatch_targets.map((item) => displayAgentLabel(item) || String(item || '').trim()).filter(Boolean)
+    : []
+  const dispatchQuality = routerEvent?.payload?.dispatch_quality_summary && typeof routerEvent.payload.dispatch_quality_summary === 'object'
+    ? routerEvent.payload.dispatch_quality_summary
+    : {}
+  const runningAgent = (Array.isArray(taskState.subagents) ? taskState.subagents : []).find((item) => String(item?.status || '').trim() === 'running')
+  const graphPayload = latestGraphEvent?.payload && typeof latestGraphEvent.payload === 'object' ? latestGraphEvent.payload : {}
+  const graphNode = String(graphPayload.current_node || latestGraphEvent?.agent || '').trim()
+  const validation = graphPayload.validation_result_v2 && typeof graphPayload.validation_result_v2 === 'object'
+    ? graphPayload.validation_result_v2
+    : {}
+  const repairCount = Number(graphPayload.repair_count ?? validation.repair_count ?? 0)
+  const failureCount = Number(validation.metadata?.failure_count ?? graphPayload.failure_count ?? (Array.isArray(validation.failures) ? validation.failures.length : 0) ?? 0)
+  const compileGate = String(validation.gate || taskState.lastDiagnostic?.gate || '').trim()
+  const currentActor = String(
+    graphNode
+    || taskState.currentActor
+    || taskState.orchestratorState?.agent
+    || runningAgent?.id
+    || (taskState.status === 'waiting_approval' ? 'approval' : 'report_coordinator')
+  ).trim()
+  const currentOperation = sanitizeRuntimeMessage(taskState.currentOperation || taskState.orchestratorState?.message || taskState.message)
+  let currentNodeLabel = displayAgentLabel(currentActor) || phaseLabel(taskState.phase)
+  if (taskState.status === 'waiting_approval') currentNodeLabel = '语义边界确认'
+  else if (currentActor === 'writer') currentNodeLabel = '正式文稿编译'
+  else if (currentActor === 'validator') currentNodeLabel = '语义校验'
+  else if (currentActor === 'report_coordinator' && routerFacets.length && String(taskState.phase || '').trim() === 'interpret') currentNodeLabel = '路由与汇总'
+  let nextStep = ''
+  if (String(taskState.status || '').trim() === 'waiting_approval') nextStep = '等待人工处理后恢复正式写入。'
+  else if (String(taskState.status || '').trim() === 'completed') nextStep = '本轮任务已完成，可直接查看语义报告和正式文稿。'
+  else if (String(taskState.status || '').trim() === 'failed') nextStep = latestTransition?.nextStep || '先查看失败详情，再决定是否重跑。'
+  else nextStep = sanitizeRuntimeMessage(latestGraphEvent?.message) || latestTransition?.nextStep || String(taskState.reportIrSummary?.utility_assessment?.next_action || taskState.structuredResultDigest?.utility_assessment?.next_action || '').trim() || currentOperation || '等待下一步调度。'
+  return {
+    currentStageLabel: phaseLabel(taskState.phase),
+    currentStageMessage: sanitizeRuntimeMessage(taskState.message) || currentOperation || '等待阶段进度。',
+    currentNodeLabel,
+    currentActorLabel: displayAgentLabel(currentActor) || '协调器',
+    nextStep,
+    threadLabel: shortThreadLabel(taskState.threadId),
+    connectionLabel: taskState.connectionMode === 'streaming'
+      ? '实时同步'
+      : (taskState.connectionMode === 'polling_fallback' ? '自动刷新' : (taskState.connectionMode === 'reconnecting' ? '重连中' : '待连接')),
+    routerSummary: buildRouteSummary(routerFacetPayload, dispatchTargets),
+    routerFacets,
+    dispatchTargets,
+    dispatchCount: Number(dispatchQuality.count || dispatchTargets.length || 0),
+    dispatchArtifacts: Array.isArray(dispatchQuality.contributed_artifacts)
+      ? dispatchQuality.contributed_artifacts.map((item) => artifactDisplayMeta(item).label || String(item || '').trim()).filter(Boolean)
+      : [],
+    repairCount,
+    failureCount,
+    compileGate,
+    graphStatus: latestGraphEvent ? eventTypeLabel(latestGraphEvent.type) : ''
+  }
+}
+
+function buildArtifactObservability(taskState) {
+  const manifest = taskState.artifactManifest && typeof taskState.artifactManifest === 'object' ? taskState.artifactManifest : {}
+  const approvals = Array.isArray(taskState.approvals) ? taskState.approvals : []
+  const fallbackCount = Number(taskState.reportIrSummary?.utility_assessment?.fallback_trace_count || taskState.structuredResultDigest?.fallback_trace_count || 0)
+  const approvalState = approvals.some((item) => String(item?.status || '').trim() !== 'resolved')
+    ? '待处理'
+    : (approvals.length ? approvalDecisionLabel(approvals[approvals.length - 1]?.decision) : '未触发')
+  const phaseQueues = {
+    interpret: ['conflict_map', 'mechanism_summary', 'utility_assessment', 'ir', 'structured_projection'],
+    write: ['draft_bundle_v2', 'validation_result', 'repair_plan', 'graph_state', 'full_markdown'],
+    review: ['validation_result', 'repair_plan', 'graph_state', 'approval_records', 'full_markdown'],
+    persist: ['approval_records', 'full_markdown']
+  }
+  const allEntries = Object.entries(manifest)
+    .filter(([key]) => !['versions', 'runtime_log'].includes(String(key || '').trim()))
+    .map(([key, record]) => ({
+      key,
+      meta: artifactDisplayMeta(key),
+      record: record && typeof record === 'object' ? record : {},
+      ready: String(record?.status || '').trim() === 'ready',
+      createdAt: new Date(String(record?.created_at || '').trim() || 0).getTime() || 0
+    }))
+  const latestReady = [...allEntries].filter((item) => item.ready).sort((a, b) => a.createdAt - b.createdAt).pop() || null
+  const phaseQueue = phaseQueues[String(taskState.phase || '').trim()] || ['structured_projection', 'ir', 'draft_bundle', 'full_markdown']
+  const currentKey = phaseQueue.find((key) => String(manifest[normalizeArtifactKey(key)]?.status || '').trim() !== 'ready')
+    || (String(taskState.status || '').trim() === 'completed' ? 'full_markdown' : phaseQueue[phaseQueue.length - 1])
+  const items = [latestReady?.key, currentKey, 'full_markdown']
+    .map((key) => normalizeArtifactKey(key))
+    .filter((key, index, list) => key && list.indexOf(key) === index)
+    .map((key) => {
+      const record = manifest[key] && typeof manifest[key] === 'object' ? manifest[key] : {}
+      const meta = artifactDisplayMeta(key)
+      const ready = String(record.status || '').trim() === 'ready'
+      let statusText = ready ? (key === 'approval_records' ? '已记录' : '已生成') : '未开始'
+      if (!ready && key === normalizeArtifactKey(currentKey)) {
+        statusText = String(taskState.status || '').trim() === 'waiting_approval' && key === 'approval_records'
+          ? '待确认'
+          : (['queued', 'running', 'waiting_approval'].includes(String(taskState.status || '').trim()) ? '生成中' : '未开始')
+      }
+      if (!ready && key === 'full_markdown' && String(taskState.status || '').trim() === 'completed') statusText = '已生成'
+      return {
+        key,
+        label: meta.label,
+        description: meta.description,
+        ready,
+        isCurrent: key === normalizeArtifactKey(currentKey),
+        isOutput: key === 'full_markdown',
+        statusText,
+        createdAtLabel: formatTimestamp(record.created_at),
+        sourceLabel: Array.isArray(record.source_artifact_ids) && record.source_artifact_ids.length
+          ? record.source_artifact_ids.join('、')
+          : (Array.isArray(record.parent_artifact_ids) && record.parent_artifact_ids.length ? record.parent_artifact_ids.join('、') : '当前主线'),
+        reviewState: key === 'approval_records' || key === 'full_markdown' ? approvalState : '',
+        fallbackState: fallbackCount > 0 && ['utility_assessment', 'draft_bundle', 'full_markdown'].includes(key) ? `已回退 ${fallbackCount} 次` : ''
+      }
+    })
+  return {
+    items,
+    upcomingLine: items.some((item) => item.ready) ? '' : '后续将生成：Report IR → 受约束草稿 → 正式文稿'
+  }
+}
+
+function buildDecisionObservability(taskState, approvals) {
+  const utility = taskState.reportIrSummary?.utility_assessment && typeof taskState.reportIrSummary.utility_assessment === 'object'
+    ? taskState.reportIrSummary.utility_assessment
+    : (taskState.structuredResultDigest?.utility_assessment && typeof taskState.structuredResultDigest.utility_assessment === 'object'
+        ? taskState.structuredResultDigest.utility_assessment
+        : {})
+  const latestApproval = [...approvals].reverse()[0] || null
+  const fallbackTrace = Array.isArray(utility.fallback_trace) ? utility.fallback_trace : []
+  const missingDimensions = Array.isArray(utility.missing_dimensions) ? utility.missing_dimensions : []
+  const rawDecision = String(utility.decision || '').trim() || (taskState.status === 'completed' ? 'pass' : 'pending')
+  const hasPendingApproval = approvals.some((item) => String(item?.status || '').trim() !== 'resolved')
+  let finalReason = ''
+  if (hasPendingApproval) finalReason = summarizeApprovalReason(latestApproval) || '正式文稿触发语义边界审查，等待人工确认。'
+  else if (rawDecision === 'fallback_recompile' && fallbackTrace.length) finalReason = String(fallbackTrace[0]?.reason || '').trim() || '当前判断还不够完整，暂时不能进入正式文稿。'
+  else if (missingDimensions.length) finalReason = `当前还缺少 ${missingDimensions.slice(0, 3).join('、')}。`
+  else if (rawDecision === 'pass') finalReason = taskState.status === 'completed' ? '当前结果已满足正式输出条件。' : '当前判断已满足进入下一步的条件。'
+  else finalReason = sanitizeRuntimeMessage(taskState.currentOperation || taskState.message) || '当前还没有决策说明。'
+  let nextAction = String(utility.next_action || '').trim()
+  if (hasPendingApproval) nextAction = '等待人工处理后恢复正式写入。'
+  else if (!nextAction && rawDecision === 'pass') nextAction = taskState.status === 'completed' ? '可直接查看最终结果。' : '继续进入正式文稿编译。'
+  else if (!nextAction) nextAction = '等待下一步调度。'
+  return {
+    utilityDecision: rawDecision,
+    utilityDecisionLabel: utilityDecisionLabel(rawDecision, approvals),
+    missingDimensions,
+    fallbackTrace,
+    fallbackSummary: fallbackTrace.length
+      ? fallbackTrace.map((item) => String(item?.reason || item?.suggested_pass || item?.dimension || '').trim()).filter(Boolean).slice(0, 2).join('；')
+      : '未触发回退重编译',
+    reviewReason: hasPendingApproval ? '已触发审批' : (latestApproval ? approvalDecisionLabel(latestApproval.decision) : '未触发审批'),
+    approvalDecision: latestApproval?.decision ? approvalDecisionLabel(latestApproval.decision) : '未发生人工裁决',
+    finalReason,
+    nextAction,
+    hasPendingApproval
+  }
+}
+
+function buildApprovalObservability(taskState, approvals) {
+  const rawEvents = Array.isArray(taskState.events) ? taskState.events : []
+  const interruptEvent = [...rawEvents].reverse().find((item) => String(item?.type || '').trim() === 'approval.required')
+  const resumeEvent = [...rawEvents].reverse().find((item) => item?.payload?.resume_from || String(item?.type || '').trim() === 'approval.resolved')
+  const latestApproval = latestApprovalRecord(approvals)
+  const hasPending = approvals.some((item) => String(item?.status || '').trim() !== 'resolved')
+  const toolArgs = latestApproval?.action?.tool_args && typeof latestApproval.action.tool_args === 'object'
+    ? latestApproval.action.tool_args
+    : {}
+  const reason = hasPending
+    ? (summarizeApprovalReason(latestApproval) || sanitizeRuntimeMessage(interruptEvent?.message) || '任务正在等待人工确认。')
+    : (resumeEvent?.payload?.resume_from
+        ? `已从 ${String(resumeEvent.payload.resume_from || '').trim()} 恢复执行。`
+        : (latestApproval ? `${approvalDecisionLabel(latestApproval.decision)}，后续会沿同一条主线继续推进。` : '未触发审批，任务会在必要时暂停等待确认。'))
+  return {
+    compactStatus: hasPending
+      ? '等待处理'
+      : (latestApproval ? approvalDecisionLabel(latestApproval.decision) : '未触发审批'),
+    reason,
+    affectedLabel: String(latestApproval?.title || '').trim() || (hasPending ? '正式文稿' : ''),
+    resumeLabel: resumeEvent?.payload?.resume_from ? String(resumeEvent.payload.resume_from || '').trim() : '',
+    interruptLabel: String(latestApproval?.interrupt_id || latestApproval?.action?.graph_interrupt?.interrupt_id || '').trim(),
+    checkpointLabel: String(toolArgs.checkpoint_locator || toolArgs.checkpoint_path || '').trim(),
+    actionSummary: hasPending && Array.isArray(latestApproval?.allowed_decisions)
+      ? latestApproval.allowed_decisions.map((item) => approvalDecisionLabel(item)).join(' / ')
+      : '',
+    canOpenPanel: hasPending || approvals.length > 0
+  }
+}
+
+function buildTodoObservability(taskState) {
+  const rawEvents = Array.isArray(taskState.events) ? taskState.events : []
+  const latestTodoEvent = [...rawEvents].reverse().find((item) => String(item?.type || '').trim() === 'todo.updated')
+  const eventTodos = Array.isArray(latestTodoEvent?.payload?.todos) ? latestTodoEvent.payload.todos : []
+  const sourceTodos = Array.isArray(taskState.todos) && taskState.todos.length ? taskState.todos : eventTodos
+  const items = sourceTodos
+    .filter((item) => item && typeof item === 'object')
+    .map((item, index) => {
+      const status = normalizePrimaryTodoStatus(item.status)
+      return {
+        id: String(item.id || `todo-${index + 1}`).trim() || `todo-${index + 1}`,
+        order: index + 1,
+        label: String(item.label || item.content || `任务 ${index + 1}`).trim() || `任务 ${index + 1}`,
+        status,
+        statusText: todoStatusLabel(status),
+        isCurrent: status === 'running'
+      }
+    })
+  const completedCount = items.filter((item) => item.status === 'completed').length
+  const runningCount = items.filter((item) => item.status === 'running').length
+  const failedCount = items.filter((item) => item.status === 'failed').length
+  const pendingCount = items.filter((item) => item.status === 'pending').length
+  let summary = '当前还没有任务清单。'
+  if (items.length) {
+    if (failedCount) summary = `任务清单共 ${items.length} 项，当前有 ${failedCount} 项执行失败。`
+    else if (runningCount) summary = `任务清单共 ${items.length} 项，已完成 ${completedCount} 项，当前正在推进 ${runningCount} 项。`
+    else if (completedCount === items.length) summary = `任务清单共 ${items.length} 项，当前已全部完成。`
+    else summary = `任务清单共 ${items.length} 项，已完成 ${completedCount} 项，待开始 ${pendingCount} 项。`
+  }
+  return {
+    items,
+    totalCount: items.length,
+    completedCount,
+    runningCount,
+    failedCount,
+    pendingCount,
+    summary,
+    updatedAtLabel: formatTimestamp(latestTodoEvent?.ts || latestTodoEvent?.timestamp),
+    updatedMessage: sanitizeRuntimeMessage(latestTodoEvent?.message) || '',
+    updatedBy: displayAgentLabel(latestTodoEvent?.agent) || ''
+  }
 }
 
 function eventTypeLabel(type) {
@@ -384,6 +957,16 @@ function eventTypeLabel(type) {
     'subagent.completed': '子代理完成',
     'approval.required': '等待确认',
     'approval.resolved': '确认完成',
+    'graph.node.started': '图节点启动',
+    'graph.node.completed': '图节点完成',
+    'graph.node.failed': '图节点失败',
+    'validation.failed': '验证失败',
+    'repair.loop.started': '修复开始',
+    'repair.loop.completed': '修复完成',
+    'compile.blocked': '编译阻止',
+    'compile.started': '正式编译',
+    'compile.completed': '编译完成',
+    'interrupt.human_review': '等待人工复核',
     'task.completed': '任务完成',
     'task.failed': '任务失败',
     'task.cancelled': '任务取消',
@@ -394,10 +977,10 @@ function eventTypeLabel(type) {
 
 function eventPrimaryStatus(type) {
   const normalized = String(type || '').trim()
-  if (['task.failed', 'task.cancelled'].includes(normalized)) return 'failed'
-  if (['task.completed', 'artifact.ready', 'artifact.updated', 'approval.resolved', 'subagent.completed', 'tool.result'].includes(normalized)) return 'completed'
-  if (['approval.required'].includes(normalized)) return 'running'
-  if (['phase.started', 'phase.progress', 'agent.started', 'tool.called', 'subagent.started'].includes(normalized)) return 'running'
+  if (['task.failed', 'task.cancelled', 'graph.node.failed', 'validation.failed', 'compile.blocked'].includes(normalized)) return 'failed'
+  if (['task.completed', 'artifact.ready', 'artifact.updated', 'approval.resolved', 'subagent.completed', 'tool.result', 'graph.node.completed', 'repair.loop.completed', 'compile.completed'].includes(normalized)) return 'completed'
+  if (['approval.required', 'interrupt.human_review'].includes(normalized)) return 'running'
+  if (['phase.started', 'phase.progress', 'agent.started', 'tool.called', 'subagent.started', 'graph.node.started', 'repair.loop.started', 'compile.started'].includes(normalized)) return 'running'
   return 'pending'
 }
 
@@ -437,6 +1020,43 @@ export function buildDebugEvent(event = {}) {
   }
 
   if (type === 'agent.memo') {
+    const receiptStage = String(payload.stage_id || '').trim()
+    const receiptSummary = sanitizeEventText(payload.decision_summary || event?.message)
+    const receiptToolName = String(payload.tool_name || '').trim()
+    if (receiptStage && receiptSummary) {
+      const diagnosticKind = String(payload.diagnostic_kind || '').trim()
+      if (diagnosticKind === 'contract_violation') model.title = '任务边界异常已识别'
+      else if (diagnosticKind === 'contract_binding_failed') model.title = '合同绑定失败'
+      else if (diagnosticKind === 'legacy_adapter_hit') model.title = '命中兼容入口'
+      else if (diagnosticKind === 'partial_range_coverage') model.title = '语料区间部分覆盖已识别'
+      else if (diagnosticKind === 'scope_clipped_to_contract') model.title = '检索时间窗已裁剪'
+      else if (diagnosticKind === 'source_unavailable') model.title = '语料源未命中'
+      else model.title = `${toolDisplayName(receiptToolName)} 已形成阶段判断`
+      model.message = receiptSummary
+      model.nextStep = sanitizeEventText(payload.next_action)
+      const countLines = formatReceiptCounts(payload.counts)
+      if (shouldDisplayReceiptCounts(receiptToolName, payload.counts)) model.detailLines.push(`计数：${countLines.join('，')}`)
+      const contractValue = formatExecutionValue(payload.contract_value)
+      const proposedValue = formatExecutionValue(payload.agent_proposed_value)
+      const effectiveValue = formatExecutionValue(payload.effective_value)
+      if (contractValue) model.detailLines.push(`合同绑定：${contractValue}`)
+      if (proposedValue) model.detailLines.push(`原始提议：${proposedValue}`)
+      if (effectiveValue) model.detailLines.push(`系统生效：${effectiveValue}`)
+      const requestedRange = formatRangeLabel(payload.requested_range)
+      const effectiveRange = formatRangeLabel(payload.effective_range)
+      const resolvedFetchRange = formatRangeLabel(payload.resolved_fetch_range)
+      if (requestedRange) model.detailLines.push(`请求区间：${requestedRange}`)
+      if (effectiveRange) model.detailLines.push(`执行区间：${effectiveRange}`)
+      if (resolvedFetchRange) model.detailLines.push(`命中归档区间：${resolvedFetchRange}`)
+      if (payload.contract_topic_identifier) model.detailLines.push(`任务专题：${sanitizeEventText(payload.contract_topic_identifier)}`)
+      if (payload.effective_topic_identifier && payload.effective_topic_identifier !== payload.contract_topic_identifier) {
+        model.detailLines.push(`当前执行专题：${sanitizeEventText(payload.effective_topic_identifier)}`)
+      }
+      if (payload.violation_origin) model.detailLines.push(`异常来源：${sanitizeEventText(payload.violation_origin)}`)
+      if (payload.repair_action) model.detailLines.push(`修正动作：${sanitizeEventText(payload.repair_action)}`)
+      if (payload.skip_reason) model.detailLines.push(`跳过原因：${sanitizeEventText(payload.skip_reason)}`)
+      return model
+    }
     model.title = sanitizeEventText(event?.title) || '节点说明'
     model.message = stage ? failureMessageFromStage(stage) : sanitizeEventText(event?.message)
     model.nextStep = nextStepFromStage(stage)
@@ -455,6 +1075,17 @@ export function buildDebugEvent(event = {}) {
   if (type === 'tool.result') {
     model.title = `${toolName} 已返回`
     model.message = summarizeToolResultPreview(payload.tool_name, payload.result_preview)
+    return model
+  }
+
+  if (type === 'phase.context' && String(payload.diagnostic_kind || '').trim()) {
+    const diagnosticKind = String(payload.diagnostic_kind || '').trim()
+    if (diagnosticKind === 'legacy_runtime_version') model.title = '旧运行时任务已阻止恢复'
+    else model.title = sanitizeEventText(event?.title) || '阶段诊断'
+    model.message = sanitizeEventText(event?.message)
+    if (payload.runtime_contract_version) model.detailLines.push(`当前 ABI：${sanitizeEventText(payload.runtime_contract_version)}`)
+    if (payload.task_runtime_contract_version) model.detailLines.push(`任务 ABI：${sanitizeEventText(payload.task_runtime_contract_version)}`)
+    if (payload.next_action) model.nextStep = sanitizeEventText(payload.next_action)
     return model
   }
 
@@ -486,6 +1117,69 @@ export function buildDebugEvent(event = {}) {
     return model
   }
 
+  if (type === 'graph.node.started' || type === 'graph.node.completed' || type === 'graph.node.failed') {
+    const nodeName = String(payload.current_node || event?.agent || '').trim()
+    model.actorLabel = displayAgentLabel(nodeName) || model.actorLabel
+    model.title = `${displayAgentLabel(nodeName) || '图节点'}${type.endsWith('started') ? ' 已启动' : (type.endsWith('completed') ? ' 已完成' : ' 执行失败')}`
+    model.message = sanitizeEventText(event?.message) || '图执行状态已更新。'
+    const visitedNodes = Array.isArray(payload.visited_nodes) ? payload.visited_nodes.map((item) => displayAgentLabel(item) || String(item || '').trim()).filter(Boolean) : []
+    if (visitedNodes.length) model.detailLines.push(`已访问节点：${visitedNodes.join('、')}`)
+    return model
+  }
+
+  if (type === 'validation.failed') {
+    const validation = payload.validation_result_v2 && typeof payload.validation_result_v2 === 'object' ? payload.validation_result_v2 : {}
+    const failures = Array.isArray(validation.failures) ? validation.failures : []
+    model.title = '单元验证未通过'
+    model.message = sanitizeEventText(event?.message) || `当前有 ${failures.length} 个单元未通过验证。`
+    if (validation.gate) model.detailLines.push(`当前 gate：${sanitizeEventText(validation.gate)}`)
+    if (Number.isFinite(Number(payload.repair_count))) model.detailLines.push(`修复轮次：第 ${Number(payload.repair_count)} 轮`)
+    const firstFailure = failures[0] && typeof failures[0] === 'object' ? failures[0] : null
+    if (firstFailure?.failure_type) model.detailLines.push(`首个失败：${sanitizeEventText(firstFailure.failure_type)} / ${sanitizeEventText(firstFailure.target_unit_id)}`)
+    return model
+  }
+
+  if (type === 'repair.loop.started' || type === 'repair.loop.completed') {
+    model.title = type === 'repair.loop.started' ? '开始自动修复' : '自动修复已完成'
+    model.message = sanitizeEventText(event?.message) || ''
+    if (Number.isFinite(Number(payload.repair_count))) model.detailLines.push(`修复轮次：第 ${Number(payload.repair_count)} 轮`)
+    const plan = payload.repair_plan_v2 && typeof payload.repair_plan_v2 === 'object' ? payload.repair_plan_v2 : {}
+    const patchCount = Array.isArray(plan.patches) ? plan.patches.length : Number(plan.metadata?.patch_count || 0)
+    if (patchCount) model.detailLines.push(`计划补丁：${patchCount}`)
+    return model
+  }
+
+  if (type === 'compile.blocked') {
+    const validation = payload.validation_result_v2 && typeof payload.validation_result_v2 === 'object' ? payload.validation_result_v2 : {}
+    model.title = '正式编译已阻止'
+    model.message = sanitizeEventText(event?.message) || '当前停在编译前门禁。'
+    if (validation.gate) model.detailLines.push(`当前 gate：${sanitizeEventText(validation.gate)}`)
+    const failureCount = Array.isArray(validation.failures) ? validation.failures.length : 0
+    if (failureCount) model.detailLines.push(`失败单元：${failureCount}`)
+    model.nextStep = '先查看失败单元和候选 trace，再决定是否人工复核。'
+    return model
+  }
+
+  if (type === 'compile.started' || type === 'compile.completed') {
+    model.title = type === 'compile.started' ? '正式编译开始' : '正式编译完成'
+    model.message = sanitizeEventText(event?.message) || ''
+    if (Number.isFinite(Number(payload.validated_unit_count))) model.detailLines.push(`已验证单元：${Number(payload.validated_unit_count)}`)
+    if (Number.isFinite(Number(payload.markdown_issue_count))) model.detailLines.push(`Markdown 风险：${Number(payload.markdown_issue_count)}`)
+    return model
+  }
+
+  if (type === 'interrupt.human_review') {
+    const validation = payload.validation_result_v2 && typeof payload.validation_result_v2 === 'object' ? payload.validation_result_v2 : {}
+    model.title = '等待人工复核'
+    model.message = sanitizeEventText(event?.message) || '自动修复已停止，当前需要人工复核。'
+    if (validation.gate) model.detailLines.push(`当前 gate：${sanitizeEventText(validation.gate)}`)
+    if (Array.isArray(validation.failures) && validation.failures.length) {
+      const item = validation.failures[0]
+      model.detailLines.push(`优先检查：${sanitizeEventText(item?.failure_type)} / ${sanitizeEventText(item?.target_unit_id)}`)
+    }
+    return model
+  }
+
   if (type === 'task.completed') {
     model.title = '任务已完成'
     model.message = '结构化结果和正式文稿已经就绪。'
@@ -510,6 +1204,16 @@ function buildTimelineEvents(events = []) {
     'agent.memo',
     'subagent.started',
     'subagent.completed',
+    'graph.node.started',
+    'graph.node.completed',
+    'graph.node.failed',
+    'validation.failed',
+    'repair.loop.started',
+    'repair.loop.completed',
+    'compile.blocked',
+    'compile.started',
+    'compile.completed',
+    'interrupt.human_review',
     'artifact.ready',
     'artifact.updated',
     'approval.required',
@@ -518,10 +1222,18 @@ function buildTimelineEvents(events = []) {
     'task.completed',
     'task.cancelled'
   ])
+  const receiptToolCallIds = buildReceiptToolCallIdSet(events)
   return (Array.isArray(events) ? events : [])
     .filter((item) => item && String(item.type || '').trim() !== 'heartbeat')
+    .filter((item) => {
+      const type = String(item?.type || '').trim()
+      if (KEY_TYPES.has(type)) return true
+      if (!['tool.called', 'tool.result'].includes(type)) return false
+      const payload = item?.payload && typeof item.payload === 'object' ? item.payload : {}
+      if (type === 'tool.result' && receiptToolCallIds.has(String(payload.tool_call_id || '').trim())) return false
+      return !isLowSignalToolName(payload.tool_name)
+    })
     .map(buildDebugEvent)
-    .filter((item) => KEY_TYPES.has(item.type))
     .slice(-12)
     .reverse()
 }
@@ -534,6 +1246,12 @@ function buildTimelineEvents(events = []) {
  *   agentDrawer: object[],
  *   debugEvents: object[],
  *   inspector: object,
+ *   graphObservability: object,
+ *   todoObservability: object,
+ *   artifactObservability: object,
+ *   decisionObservability: object,
+ *   approvalObservability: object,
+ *   runtimeDiagnostics: object,
  *   approvals: object[],
  *   artifacts: object[],
  *   hasTask: boolean,
@@ -544,8 +1262,17 @@ export function buildRunConsoleViewModel(taskState = {}) {
   const agents = buildResearchAgents(taskState)
   const stageTimeline = deriveStageCards(taskState, agents)
   const progress = calculateProgress(taskState, stageTimeline, agents)
-  const debugEvents = (Array.isArray(taskState.events) ? taskState.events : [])
+  const rawEvents = (Array.isArray(taskState.events) ? taskState.events : [])
     .filter((item) => String(item?.type || '').trim() !== 'heartbeat')
+  const receiptToolCallIds = buildReceiptToolCallIdSet(rawEvents)
+  const meaningfulRawEvents = rawEvents.filter((item) => {
+    const type = String(item?.type || '').trim()
+    if (!['tool.called', 'tool.result'].includes(type)) return true
+    const payload = item?.payload && typeof item.payload === 'object' ? item.payload : {}
+    if (type === 'tool.result' && receiptToolCallIds.has(String(payload.tool_call_id || '').trim())) return false
+    return !isLowSignalToolName(payload.tool_name)
+  })
+  const debugEvents = (meaningfulRawEvents.length ? meaningfulRawEvents : rawEvents)
     .map(buildDebugEvent)
     .slice(-40)
     .reverse()
@@ -556,13 +1283,19 @@ export function buildRunConsoleViewModel(taskState = {}) {
     || stageTimeline.find((item) => item.status === 'failed')
     || stageTimeline.find((item) => item.status === 'pending')
     || stageTimeline[stageTimeline.length - 1]
-  const digest = taskState.structuredResultDigest && typeof taskState.structuredResultDigest === 'object'
-    ? taskState.structuredResultDigest
-    : {}
+  const digest = taskState.reportIrSummary && typeof taskState.reportIrSummary === 'object' && Object.keys(taskState.reportIrSummary).length
+    ? taskState.reportIrSummary
+    : (taskState.structuredResultDigest && typeof taskState.structuredResultDigest === 'object' ? taskState.structuredResultDigest : {})
   const digestCounts = digest.counts || {}
   const artifacts = buildArtifactCards(taskState)
   const recentSuccessArtifact = [...artifacts].reverse().find((item) => item.ready) || null
   const latestFailure = debugEvents.find((item) => item.primaryStatus === 'failed') || null
+  const graphObservability = buildGraphObservability(taskState, timelineEvents)
+  const todoObservability = buildTodoObservability(taskState)
+  const artifactObservability = buildArtifactObservability(taskState)
+  const decisionObservability = buildDecisionObservability(taskState, approvals)
+  const approvalObservability = buildApprovalObservability(taskState, approvals)
+  const runtimeDiagnostics = resolveRuntimeDiagnostics(taskState, approvals)
   const runSummary = {
     title: String(taskState.topic || '').trim() || '当前任务',
     rangeText: taskState.start ? `${taskState.start} → ${taskState.end || taskState.start}` : '待补齐',
@@ -573,12 +1306,12 @@ export function buildRunConsoleViewModel(taskState = {}) {
     headline: !taskState.id
       ? '尚未创建任务'
       : (taskState.status === 'failed'
-          ? (latestFailure?.title || '任务没有完成')
-          : (sanitizeRuntimeMessage(taskState.message) || '任务正在推进')),
+        ? (latestFailure?.title || '任务没有完成')
+        : (sanitizeRuntimeMessage(taskState.message) || '任务正在推进')),
     subline: !taskState.id
       ? '创建任务后，页面会切换为单次 run 控制台。'
       : (taskState.status === 'completed'
-          ? '结构化结果和正式文稿都已写好。'
+          ? '语义报告和正式文稿都已写好。'
           : (taskState.status === 'waiting_approval'
               ? '任务暂停等待你确认后继续。'
               : `当前阶段：${phaseLabel(taskState.phase)}`)),
@@ -595,9 +1328,10 @@ export function buildRunConsoleViewModel(taskState = {}) {
     digestSummary: String(digest.summary || '').trim(),
     digestCounts: [
       { label: '时间线', value: Number(digestCounts.timeline || 0) },
-      { label: '主体', value: Number(digestCounts.subjects || 0) },
+      { label: '主体', value: Number(digestCounts.subjects || digestCounts.actors || 0) },
+      { label: '断言', value: Number(digestCounts.claims || 0) },
       { label: '证据', value: Number(digestCounts.evidence || 0) },
-      { label: '引用', value: Number(digestCounts.citations || 0) }
+      { label: '风险', value: Number(digestCounts.risks || 0) }
     ],
     failure: latestFailure
   }
@@ -610,6 +1344,12 @@ export function buildRunConsoleViewModel(taskState = {}) {
     agentDrawer: agents,
     debugEvents,
     inspector,
+    graphObservability,
+    todoObservability,
+    artifactObservability,
+    decisionObservability,
+    approvalObservability,
+    runtimeDiagnostics,
     approvals,
     artifacts
   }

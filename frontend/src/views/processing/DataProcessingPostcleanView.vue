@@ -179,7 +179,7 @@
           <div class="flex items-center justify-between gap-3">
             <div>
               <h3 class="text-base font-semibold text-primary">发布者模糊识别</h3>
-              <p class="mt-1 text-sm text-secondary">发布者名称包含这些词时会被匹配；默认包含橱窗、好物、旗舰。</p>
+              <p class="mt-1 text-sm text-secondary">发布者名称包含这些词时会被匹配。</p>
             </div>
             <span class="shrink-0 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">{{ fuzzyPatternList.length }} 项</span>
           </div>

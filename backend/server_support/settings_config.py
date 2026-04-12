@@ -6,6 +6,7 @@ from flask import Flask, Response, jsonify, request, send_file, stream_with_cont
 
 from server_support import (
     build_settings_backup,
+    get_active_database_connection,
     restore_settings_backup,
     load_databases_config,
     persist_databases_config,
@@ -26,6 +27,102 @@ def _summarise_api_key(value: Optional[str]) -> Dict[str, Any]:
         return {"configured": False, "last_four": ""}
     last_four = value[-4:] if len(value) >= 4 else value
     return {"configured": True, "last_four": last_four}
+
+
+def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _ensure_report_runtime_tree(config: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    langchain = config.get("langchain")
+    if not isinstance(langchain, dict):
+        langchain = {}
+        config["langchain"] = langchain
+    report = langchain.get("report")
+    if not isinstance(report, dict):
+        report = {}
+        langchain["report"] = report
+    runtime = report.get("runtime")
+    if not isinstance(runtime, dict):
+        runtime = {}
+        report["runtime"] = runtime
+    return langchain, report, runtime
+
+
+def _report_runtime_model_payload(config: Dict[str, Any]) -> Dict[str, Any]:
+    langchain = config.get("langchain") if isinstance(config.get("langchain"), dict) else {}
+    report = langchain.get("report") if isinstance(langchain.get("report"), dict) else {}
+    runtime = report.get("runtime") if isinstance(report.get("runtime"), dict) else {}
+    model = runtime.get("model") if isinstance(runtime.get("model"), dict) else {}
+    legacy = langchain.get("report_runtime") if isinstance(langchain.get("report_runtime"), dict) else {}
+    resolved = _deep_merge_dict(legacy, model)
+    credentials = config.get("credentials") if isinstance(config.get("credentials"), dict) else {}
+    return {
+        "provider": str(resolved.get("provider") or langchain.get("provider") or "qwen").strip() or "qwen",
+        "model": str(resolved.get("model") or langchain.get("report_model") or langchain.get("model") or "").strip(),
+        "base_url": str(resolved.get("base_url") or langchain.get("base_url") or "").strip(),
+        "temperature": resolved.get("temperature", langchain.get("temperature", 0.3)),
+        "max_tokens": resolved.get("max_tokens", langchain.get("report_max_tokens", langchain.get("max_tokens", 3000))),
+        "timeout": resolved.get("timeout", langchain.get("report_timeout", langchain.get("timeout", 120.0))),
+        "max_retries": resolved.get("max_retries", langchain.get("max_retries", 2)),
+        "api_key": _summarise_api_key(credentials.get("report_api_key") if isinstance(credentials.get("report_api_key"), str) else None),
+    }
+
+
+def _report_runtime_persistence_payload() -> Dict[str, Any]:
+    llm_config = load_llm_config()
+    langchain = llm_config.get("langchain") if isinstance(llm_config.get("langchain"), dict) else {}
+    report = langchain.get("report") if isinstance(langchain.get("report"), dict) else {}
+    runtime = report.get("runtime") if isinstance(report.get("runtime"), dict) else {}
+    persistence = runtime.get("persistence") if isinstance(runtime.get("persistence"), dict) else {}
+    databases = load_databases_config()
+    active = get_active_database_connection(databases)
+    active_engine = str(active.get("engine") or "").strip().lower()
+    active_url = str(active.get("url") or "").strip()
+    resolved_database = ""
+    resolved_host = ""
+    if active_url:
+        try:
+            from sqlalchemy.engine.url import make_url
+
+            parsed = make_url(active_url)
+            resolved_database = str(parsed.database or "").strip()
+            resolved_host = str(parsed.host or "").strip()
+        except Exception:
+            resolved_database = ""
+            resolved_host = ""
+    enabled = bool(persistence.get("enabled", False))
+    schema_name = str(persistence.get("schema_name") or "report_runtime").strip() or "report_runtime"
+    source_mode = str(persistence.get("source_mode") or "reuse_active").strip() or "reuse_active"
+    status = "ready"
+    status_message = "当前默认数据库连接可用于报告运行时持久化。"
+    if not active:
+        status = "missing_active"
+        status_message = "当前没有默认数据库连接，无法启用报告运行时持久化。"
+    elif active_engine != "postgresql":
+        status = "unsupported_engine"
+        status_message = "报告运行时持久化只支持 PostgreSQL，请先将默认连接切换为 PostgreSQL。"
+    elif not enabled:
+        status = "disabled"
+        status_message = "当前未启用报告运行时持久化。"
+    return {
+        "enabled": enabled,
+        "source_mode": source_mode,
+        "active_connection_id": str(active.get("id") or "").strip(),
+        "active_connection_name": str(active.get("name") or "").strip(),
+        "active_connection_engine": active_engine,
+        "schema_name": schema_name,
+        "resolved_database": resolved_database,
+        "resolved_host": resolved_host,
+        "status": status,
+        "status_message": status_message,
+    }
 
 def register_settings_endpoints(app: Flask, project_manager: Any):
     
@@ -196,21 +293,13 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
     @app.get("/api/settings/llm/report-runtime")
     def get_report_runtime_settings():
         config = load_llm_config()
-        langchain = config.get("langchain") if isinstance(config.get("langchain"), dict) else {}
-        report_runtime = langchain.get("report_runtime") if isinstance(langchain.get("report_runtime"), dict) else {}
-        credentials = config.get("credentials") if isinstance(config.get("credentials"), dict) else {}
-        report_key = credentials.get("report_api_key")
-        payload = {
-            "provider": str(report_runtime.get("provider") or langchain.get("provider") or "qwen").strip() or "qwen",
-            "model": str(report_runtime.get("model") or langchain.get("report_model") or langchain.get("model") or "").strip(),
-            "base_url": str(report_runtime.get("base_url") or langchain.get("base_url") or "").strip(),
-            "temperature": report_runtime.get("temperature", langchain.get("temperature", 0.3)),
-            "max_tokens": report_runtime.get("max_tokens", langchain.get("report_max_tokens", langchain.get("max_tokens", 3000))),
-            "timeout": report_runtime.get("timeout", langchain.get("report_timeout", langchain.get("timeout", 120.0))),
-            "max_retries": report_runtime.get("max_retries", langchain.get("max_retries", 2)),
-            "api_key": _summarise_api_key(report_key if isinstance(report_key, str) else None),
-        }
+        payload = _report_runtime_model_payload(config)
+        payload["persistence"] = _report_runtime_persistence_payload()
         return success({"data": payload})
+
+    @app.get("/api/settings/report-runtime/persistence")
+    def get_report_runtime_persistence():
+        return success({"data": _report_runtime_persistence_payload()})
 
     @app.put("/api/settings/llm/credentials")
     def update_llm_credentials():
@@ -257,10 +346,8 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
     def update_report_runtime_settings():
         payload = request.get_json(silent=True) or {}
         config = load_llm_config()
-        langchain = config.get("langchain", {})
-        if not isinstance(langchain, dict):
-            langchain = {}
-        report_runtime = langchain.get("report_runtime", {})
+        langchain, _report, runtime = _ensure_report_runtime_tree(config)
+        report_runtime = runtime.get("model") if isinstance(runtime.get("model"), dict) else {}
         if not isinstance(report_runtime, dict):
             report_runtime = {}
 
@@ -287,8 +374,7 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
             except (TypeError, ValueError):
                 return error("Field 'timeout' must be a number")
 
-        langchain["report_runtime"] = report_runtime
-        config["langchain"] = langchain
+        runtime["model"] = report_runtime
 
         credentials = config.get("credentials", {})
         if not isinstance(credentials, dict):
@@ -305,23 +391,46 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
 
         persist_llm_config(config)
         saved = load_llm_config()
-        saved_langchain = saved.get("langchain") if isinstance(saved.get("langchain"), dict) else {}
-        saved_runtime = saved_langchain.get("report_runtime") if isinstance(saved_langchain.get("report_runtime"), dict) else {}
-        saved_credentials = saved.get("credentials") if isinstance(saved.get("credentials"), dict) else {}
-        return success(
-            {
-                "data": {
-                    "provider": str(saved_runtime.get("provider") or saved_langchain.get("provider") or "qwen").strip() or "qwen",
-                    "model": str(saved_runtime.get("model") or saved_langchain.get("report_model") or saved_langchain.get("model") or "").strip(),
-                    "base_url": str(saved_runtime.get("base_url") or saved_langchain.get("base_url") or "").strip(),
-                    "temperature": saved_runtime.get("temperature", saved_langchain.get("temperature", 0.3)),
-                    "max_tokens": saved_runtime.get("max_tokens", saved_langchain.get("report_max_tokens", saved_langchain.get("max_tokens", 3000))),
-                    "timeout": saved_runtime.get("timeout", saved_langchain.get("report_timeout", saved_langchain.get("timeout", 120.0))),
-                    "max_retries": saved_runtime.get("max_retries", saved_langchain.get("max_retries", 2)),
-                    "api_key": _summarise_api_key(saved_credentials.get("report_api_key") if isinstance(saved_credentials.get("report_api_key"), str) else None),
-                }
-            }
-        )
+        data = _report_runtime_model_payload(saved)
+        data["persistence"] = _report_runtime_persistence_payload()
+        return success({"data": data})
+
+    @app.put("/api/settings/report-runtime/persistence")
+    def update_report_runtime_persistence():
+        payload = request.get_json(silent=True) or {}
+        config = load_llm_config()
+        _langchain, _report, runtime = _ensure_report_runtime_tree(config)
+        persistence = runtime.get("persistence") if isinstance(runtime.get("persistence"), dict) else {}
+        if not isinstance(persistence, dict):
+            persistence = {}
+
+        enabled = payload.get("enabled", persistence.get("enabled", False))
+        if isinstance(enabled, bool):
+            persistence["enabled"] = enabled
+        else:
+            persistence["enabled"] = str(enabled or "").strip().lower() in {"1", "true", "yes", "on"}
+
+        source_mode = str(payload.get("source_mode") or persistence.get("source_mode") or "reuse_active").strip() or "reuse_active"
+        if source_mode != "reuse_active":
+            return error("Field 'source_mode' only supports 'reuse_active'")
+        persistence["source_mode"] = source_mode
+
+        if "schema_name" in payload:
+            schema_name = str(payload.get("schema_name") or "").strip() or "report_runtime"
+            persistence["schema_name"] = schema_name
+        elif not str(persistence.get("schema_name") or "").strip():
+            persistence["schema_name"] = "report_runtime"
+        persistence["backend"] = "postgres" if persistence.get("enabled") else "sqlite"
+
+        runtime["persistence"] = persistence
+        snapshot = _report_runtime_persistence_payload()
+        if persistence.get("enabled") and snapshot["status"] == "unsupported_engine":
+            return error(snapshot["status_message"])
+        if persistence.get("enabled") and snapshot["status"] == "missing_active":
+            return error(snapshot["status_message"])
+
+        persist_llm_config(config)
+        return success({"data": _report_runtime_persistence_payload()})
 
     @app.put("/api/settings/llm/filter")
     def update_llm_filter():

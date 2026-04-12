@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict
+
+from .graph_runtime import run_report_compilation_graph
+from .schemas import FactualConformanceIssue
+from .report_ir import summarize_report_ir
 
 
 def _report_source(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -11,105 +15,88 @@ def _report_source(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def render_markdown(payload: Dict[str, Any]) -> str:
-    source = _report_source(payload)
-    conclusion = source.get("conclusion") if isinstance(source.get("conclusion"), dict) else {}
-    timeline = source.get("timeline") if isinstance(source.get("timeline"), list) else []
-    stance = source.get("stance_matrix") if isinstance(source.get("stance_matrix"), list) else []
-    risks = source.get("risk_judgement") if isinstance(source.get("risk_judgement"), list) else []
-    actions = source.get("suggested_actions") if isinstance(source.get("suggested_actions"), list) else []
-    propagation = source.get("propagation_features") if isinstance(source.get("propagation_features"), list) else []
-    unverified = source.get("unverified_points") if isinstance(source.get("unverified_points"), list) else []
-    citations = source.get("citations") if isinstance(source.get("citations"), list) else []
-    task = source.get("task") if isinstance(source.get("task"), dict) else {}
-    lines: List[str] = [
-        f"# {str(task.get('topic_label') or task.get('topic_identifier') or '专题报告').strip()}",
-        "",
-        f"> 区间：{str(task.get('start') or '').strip()} -> {str(task.get('end') or '').strip()} | 模式：{str(task.get('mode') or '').strip()}",
-        "",
-        "## 结论摘要",
-        str(conclusion.get("executive_summary") or "暂无摘要。").strip(),
-        "",
-    ]
-    findings = [str(item).strip() for item in (conclusion.get("key_findings") or []) if str(item or "").strip()]
-    if findings:
-        lines.append("### 核心发现")
-        lines.extend([f"- {item}" for item in findings[:8]])
-        lines.append("")
-    if timeline:
-        lines.append("## 时间线")
-        for item in timeline[:10]:
-            if not isinstance(item, dict):
-                continue
-            lines.append(f"### {str(item.get('date') or '').strip()} {str(item.get('title') or '').strip()}".strip())
-            description = str(item.get("description") or "").strip()
-            if description:
-                lines.append(description)
-            impact = str(item.get("impact") or "").strip()
-            if impact:
-                lines.append(f"- 影响：{impact}")
-            lines.append("")
-    if stance:
-        lines.append("## 立场矩阵")
-        for item in stance[:12]:
-            if not isinstance(item, dict):
-                continue
-            lines.append(
-                f"- **{str(item.get('subject') or '').strip()}**：{str(item.get('stance') or '').strip()}。{str(item.get('summary') or '').strip()}"
-            )
-        lines.append("")
-    if propagation:
-        lines.append("## 传播结构")
-        for item in propagation[:8]:
-            if not isinstance(item, dict):
-                continue
-            lines.append(f"- **{str(item.get('dimension') or '').strip()}**：{str(item.get('finding') or '').strip()}")
-        lines.append("")
-    if risks:
-        lines.append("## 风险判断")
-        for item in risks[:8]:
-            if not isinstance(item, dict):
-                continue
-            lines.append(
-                f"- **{str(item.get('label') or '').strip()}**（{str(item.get('level') or '').strip()}）：{str(item.get('summary') or '').strip()}"
-            )
-        lines.append("")
-    if actions:
-        lines.append("## 建议动作")
-        for item in actions[:8]:
-            if not isinstance(item, dict):
-                continue
-            lines.append(f"- **{str(item.get('action') or '').strip()}**：{str(item.get('rationale') or '').strip()}")
-        lines.append("")
-    if unverified:
-        lines.append("## 待核验点")
-        for item in unverified[:8]:
-            if not isinstance(item, dict):
-                continue
-            lines.append(f"- {str(item.get('statement') or '').strip()}：{str(item.get('reason') or '').strip()}")
-        lines.append("")
-    if citations:
-        lines.append("## 引用索引")
-        for item in citations[:20]:
-            if not isinstance(item, dict):
-                continue
-            title = str(item.get("title") or "").strip()
-            url = str(item.get("url") or "").strip()
-            snippet = str(item.get("snippet") or "").strip()
-            prefix = f"- [{str(item.get('citation_id') or '').strip()}] {title}".strip()
-            if url:
-                prefix += f" ({url})"
-            lines.append(prefix)
-            if snippet:
-                lines.append(f"  {snippet}")
-        lines.append("")
-    return "\n".join(lines).strip()
+    compiled = compile_markdown_artifacts(payload)
+    return str(compiled.get("markdown") or "").strip()
+
+
+def compile_markdown_artifacts(
+    payload: Dict[str, Any],
+    *,
+    allow_review_pending: bool = False,
+    event_callback: Callable[[Dict[str, Any]], None] | None = None,
+    checkpointer_path: str = "",
+    graph_thread_id: str = "",
+    review_decision: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    report_ir = payload.get("report_ir") if isinstance(payload.get("report_ir"), dict) else {}
+    if not report_ir:
+        raise ValueError("render_markdown requires ReportIR and no longer accepts raw structured payload compilation.")
+    utility_assessment = report_ir.get("utility_assessment") if isinstance(report_ir.get("utility_assessment"), dict) else {}
+    utility_decision = str(utility_assessment.get("decision") or "pass").strip() or "pass"
+    compiled = run_report_compilation_graph(
+        payload,
+        event_callback=event_callback,
+        checkpointer_path=checkpointer_path,
+        graph_thread_id=graph_thread_id,
+        review_decision=review_decision,
+    )
+    if str(compiled.get("status") or "").strip() == "interrupted":
+        return compiled
+    markdown_conformance = compiled.get("factual_conformance") if isinstance(compiled.get("factual_conformance"), dict) else {}
+    if (
+        utility_decision == "pass"
+        and not (markdown_conformance.get("issues") or [])
+        and not (markdown_conformance.get("semantic_deltas") or [])
+    ):
+        markdown_conformance = {
+            **markdown_conformance,
+            "passed": True,
+            "can_auto_recover": False,
+            "requires_human_review": False,
+        }
+    if utility_decision != "pass":
+        issues = markdown_conformance.get("issues") if isinstance(markdown_conformance.get("issues"), list) else []
+        issues.append(
+            FactualConformanceIssue(
+                issue_id="utility-gate",
+                issue_type="utility_gate_violation",
+                message="当前 judgment object 尚未满足进入正式文稿的决策可用性门禁。",
+                section_role="utility",
+                sentence=str(utility_assessment.get("next_action") or "").strip(),
+                trace_ids=[],
+                suggested_action=str(utility_assessment.get("next_action") or "").strip(),
+            ).model_dump()
+        )
+        markdown_conformance = {
+            **markdown_conformance,
+            "issues": issues,
+            "passed": False,
+            "can_auto_recover": utility_decision == "fallback_recompile",
+            "requires_human_review": utility_decision == "require_semantic_review",
+            "metadata": {
+                **dict(markdown_conformance.get("metadata") or {}),
+                "utility_assessment": utility_assessment,
+            },
+        }
+    compiled["factual_conformance"] = markdown_conformance
+    compiled["utility_assessment"] = utility_assessment
+    compiled["review_required"] = bool(markdown_conformance.get("requires_human_review") or compiled.get("review_required"))
+    if utility_decision == "fallback_recompile":
+        raise ValueError("compile_markdown_artifacts aborted: UtilityAssessment requires fallback_recompile before final markdown.")
+    if not markdown_conformance.get("passed") and not allow_review_pending:
+        raise ValueError("compile_markdown_artifacts aborted: final markdown contains novel claims.")
+    return compiled
 
 
 def build_structured_digest(payload: Dict[str, Any]) -> Dict[str, Any]:
+    report_ir = payload.get("report_ir") if isinstance(payload.get("report_ir"), dict) else {}
+    if report_ir:
+        return summarize_report_ir(report_ir)
     source = _report_source(payload)
     task = source.get("task") if isinstance(source.get("task"), dict) else {}
     conclusion = source.get("conclusion") if isinstance(source.get("conclusion"), dict) else {}
     report_document = payload.get("report_document") if isinstance(payload.get("report_document"), dict) else {}
+    report_ir = payload.get("report_ir") if isinstance(payload.get("report_ir"), dict) else {}
     return {
         "topic": str(task.get("topic_label") or task.get("topic_identifier") or "").strip(),
         "range": {
@@ -129,25 +116,60 @@ def build_structured_digest(payload: Dict[str, Any]) -> Dict[str, Any]:
             "actions": len(source.get("suggested_actions") or []),
             "citations": len(source.get("citations") or []),
             "sections": len(report_document.get("sections") or []),
-            "charts": len(payload.get("chart_catalog") or []),
+            "figures": len(report_ir.get("figures") or payload.get("figures") or []),
         },
     }
 
 
-def build_full_payload(structured_payload: Dict[str, Any], markdown: str, *, cache_version: int) -> Dict[str, Any]:
+def build_full_payload(
+    structured_payload: Dict[str, Any],
+    markdown: str,
+    *,
+    cache_version: int,
+    draft_bundle: Dict[str, Any] | None = None,
+    styled_draft_bundle: Dict[str, Any] | None = None,
+    factual_conformance: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     source = _report_source(structured_payload)
     task = source.get("task") if isinstance(source.get("task"), dict) else {}
     title = str(task.get("topic_label") or task.get("topic_identifier") or "AI 完整报告").strip() or "AI 完整报告"
+    report_ir = structured_payload.get("report_ir") if isinstance(structured_payload.get("report_ir"), dict) else {}
+    artifact_manifest = structured_payload.get("artifact_manifest") if isinstance(structured_payload.get("artifact_manifest"), dict) else {}
+    utility_assessment = report_ir.get("utility_assessment") if isinstance(report_ir.get("utility_assessment"), dict) else {}
     full_payload = {
         **structured_payload,
         "title": title,
-        "subtitle": "统一结构化报告阅读视图",
+        "subtitle": "Report IR 驱动的正式文稿视图",
         "rangeText": f"{str(task.get('start') or '').strip()} -> {str(task.get('end') or '').strip()}",
         "markdown": str(markdown or "").strip(),
+        "draft_bundle": draft_bundle if isinstance(draft_bundle, dict) else {},
+        "styled_draft_bundle": styled_draft_bundle if isinstance(styled_draft_bundle, dict) else {},
+        "report_ir_summary": summarize_report_ir(report_ir) if report_ir else {},
         "meta": {
             "cache_version": int(cache_version),
             "thread_id": str(task.get("thread_id") or "").strip(),
             "structured_digest": build_structured_digest(structured_payload),
+            "report_ir_summary": summarize_report_ir(report_ir) if report_ir else {},
+            "artifact_manifest": artifact_manifest,
+            "figure_ids": [str(item.get("figure_id") or "").strip() for item in (report_ir.get("figures") or []) if isinstance(item, dict)],
+            "figure_policy_version": str((((report_ir.get("figures") or [{}])[0] if isinstance(report_ir.get("figures"), list) and report_ir.get("figures") else {}).get("policy_version")) or "figure-policy.v1"),
+            "draft_trace_summary": {
+                "unit_count": len(((draft_bundle or {}).get("units")) or []),
+                "section_order": list(((draft_bundle or {}).get("section_order")) or []),
+            },
+            "style_trace_summary": {
+                "unit_count": len(((styled_draft_bundle or {}).get("units")) or []),
+                "rewrite_ops": list(((styled_draft_bundle or {}).get("rewrite_ops")) or []),
+                "policy_version": str((styled_draft_bundle or {}).get("policy_version") or ""),
+            },
+            "factual_conformance": factual_conformance if isinstance(factual_conformance, dict) else {},
+            "utility_assessment": utility_assessment,
+            "utility_gate_trace": {
+                "decision": str(utility_assessment.get("decision") or "").strip(),
+                "missing_dimensions": list(utility_assessment.get("missing_dimensions") or []),
+                "fallback_trace": list(utility_assessment.get("fallback_trace") or []),
+                "improvement_trace": list(utility_assessment.get("improvement_trace") or []),
+            },
         },
     }
     if isinstance(structured_payload.get("meta"), dict):

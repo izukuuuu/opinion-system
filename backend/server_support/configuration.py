@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from typing import Any, Dict
 
 import yaml
@@ -41,6 +42,16 @@ LOGGER = logging.getLogger(__name__)
 
 DATABASES_CONFIG_NAME = "databases"
 LLM_CONFIG_NAME = "llm"
+
+
+def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
 
 
 def _load_static_llm_config() -> Dict[str, Any]:
@@ -85,6 +96,18 @@ def load_databases_config() -> Dict[str, Any]:
         connections = []
     config["connections"] = connections
     return config
+
+
+def get_active_database_connection(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    data = config if isinstance(config, dict) else load_databases_config()
+    active_id = str(data.get("active") or "").strip()
+    connections = data.get("connections") if isinstance(data.get("connections"), list) else []
+    for connection in connections:
+        if not isinstance(connection, dict):
+            continue
+        if str(connection.get("id") or "").strip() == active_id:
+            return connection
+    return {}
 
 
 def persist_databases_config(config: Dict[str, Any]) -> None:
@@ -139,15 +162,21 @@ def load_llm_config() -> Dict[str, Any]:
     dynamic_langchain = config.get("langchain")
     if isinstance(dynamic_langchain, dict):
         langchain.update(dynamic_langchain)
-    static_report_runtime = static_langchain.get("report_runtime") if isinstance(static_langchain, dict) else None
-    dynamic_report_runtime = dynamic_langchain.get("report_runtime") if isinstance(dynamic_langchain, dict) else None
-    report_runtime: Dict[str, Any] = {}
-    if isinstance(static_report_runtime, dict):
-        report_runtime.update(static_report_runtime)
-    if isinstance(dynamic_report_runtime, dict):
-        report_runtime.update(dynamic_report_runtime)
-    if report_runtime:
-        langchain["report_runtime"] = report_runtime
+
+    static_report_tree = static_langchain.get("report") if isinstance(static_langchain, dict) and isinstance(static_langchain.get("report"), dict) else {}
+    dynamic_report_tree = dynamic_langchain.get("report") if isinstance(dynamic_langchain, dict) and isinstance(dynamic_langchain.get("report"), dict) else {}
+    report_tree = _deep_merge_dict(static_report_tree, dynamic_report_tree)
+    runtime_tree = report_tree.get("runtime") if isinstance(report_tree.get("runtime"), dict) else {}
+    runtime_tree = deepcopy(runtime_tree)
+
+    legacy_static_runtime = static_langchain.get("report_runtime") if isinstance(static_langchain, dict) and isinstance(static_langchain.get("report_runtime"), dict) else {}
+    legacy_dynamic_runtime = dynamic_langchain.get("report_runtime") if isinstance(dynamic_langchain, dict) and isinstance(dynamic_langchain.get("report_runtime"), dict) else {}
+    legacy_runtime = _deep_merge_dict(legacy_static_runtime, legacy_dynamic_runtime)
+    model_tree = runtime_tree.get("model") if isinstance(runtime_tree.get("model"), dict) else {}
+    runtime_tree["model"] = _deep_merge_dict(legacy_runtime, model_tree)
+    report_tree["runtime"] = runtime_tree
+    if report_tree:
+        langchain["report"] = report_tree
     config["langchain"] = langchain
 
     credentials = config.get("credentials")
@@ -184,6 +213,7 @@ __all__ = [
     "DATABASES_CONFIG_NAME",
     "LLM_CONFIG_NAME",
     "filter_ai_overview",
+    "get_active_database_connection",
     "load_config",
     "load_databases_config",
     "load_llm_config",

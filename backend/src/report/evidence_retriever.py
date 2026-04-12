@@ -2,17 +2,22 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timedelta
-import heapq
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 from ..utils.setting.paths import bucket, get_data_root
 
 
 _TOKEN_RE = re.compile(r"[\u4e00-\u9fffA-Za-z0-9_-]{2,16}")
 _NEGATION_HINTS = ("辟谣", "不实", "并非", "未发布", "网传", "谣言", "假的", "误读", "未经证实")
+_POLICY_HINTS = ("控烟", "禁烟", "无烟", "二手烟", "吸烟", "戒烟", "烟草", "公共场所", "卫健委", "条例", "执法")
+_POLICY_CONTEXT_HINTS = ("政策", "通知", "条例", "卫健委", "公共场所", "控烟", "禁烟", "执法", "宣传", "健康", "二手烟")
+_KITCHEN_NOISE_HINTS = ("厨房", "油烟", "油烟机", "抽油烟", "灶台", "做饭", "烟灶", "神器")
 
 
 def _extract_date_text(value: Any) -> str:
@@ -40,104 +45,17 @@ def _tokenize(text: Any, *, max_items: int = 18) -> List[str]:
     tokens: List[str] = []
     seen = set()
     for token in _TOKEN_RE.findall(raw):
-        token = str(token or "").strip()
-        if len(token) < 2:
+        cleaned = str(token or "").strip()
+        if len(cleaned) < 2:
             continue
-        key = token.lower()
+        key = cleaned.lower()
         if key in seen:
             continue
         seen.add(key)
-        tokens.append(token)
+        tokens.append(cleaned)
         if len(tokens) >= max_items:
             break
     return tokens
-
-
-def _resolve_overall_jsonl(topic_identifier: str, start: str, end: str) -> Optional[Path]:
-    folder = f"{start}_{end}" if end and end != start else start
-    candidate = bucket("fetch", topic_identifier, folder) / "总体.jsonl"
-    if candidate.exists():
-        return candidate
-    return None
-
-
-def _iter_upload_jsonl_files(topic_identifier: str) -> List[Path]:
-    uploads_dir = get_data_root() / "projects" / topic_identifier / "uploads" / "jsonl"
-    if not uploads_dir.exists() or not uploads_dir.is_dir():
-        return []
-    return sorted([path for path in uploads_dir.glob("*.jsonl") if path.is_file()])
-
-
-def _iter_source_rows(topic_identifier: str, start: str, end: str) -> Iterable[Dict[str, Any]]:
-    overall_path = _resolve_overall_jsonl(topic_identifier, start, end)
-    source_files = [overall_path] if overall_path else _iter_upload_jsonl_files(topic_identifier)
-    for file_path in source_files:
-        if not file_path or not file_path.exists():
-            continue
-        try:
-            with file_path.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    raw = line.strip()
-                    if not raw:
-                        continue
-                    try:
-                        payload = json.loads(raw)
-                    except Exception:
-                        continue
-                    if isinstance(payload, dict):
-                        yield payload
-        except Exception:
-            continue
-
-
-def _record_text(row: Dict[str, Any]) -> str:
-    parts = [
-        str(row.get("title") or "").strip(),
-        str(row.get("contents") or row.get("content") or "").strip(),
-        str(row.get("author") or "").strip(),
-        str(row.get("hit_words") or "").strip(),
-        str(row.get("classification") or "").strip(),
-    ]
-    return "\n".join(part for part in parts if part)
-
-
-def _make_snippet(text: str, tokens: List[str], max_chars: int = 120) -> str:
-    raw = re.sub(r"\s+", " ", str(text or "")).strip()
-    if not raw:
-        return ""
-    position = -1
-    chosen = ""
-    for token in tokens:
-        idx = raw.find(token)
-        if idx >= 0 and (position < 0 or idx < position):
-            position = idx
-            chosen = token
-    if position < 0:
-        return raw[:max_chars]
-    start = max(0, position - 24)
-    end = min(len(raw), position + max_chars - 24)
-    snippet = raw[start:end].strip()
-    if start > 0:
-        snippet = "..." + snippet
-    if end < len(raw):
-        snippet = snippet + "..."
-    return snippet or chosen
-
-
-def _score_row(text: str, title: str, tokens: List[str]) -> Tuple[float, List[str]]:
-    matched: List[str] = []
-    score = 0.0
-    lowered_text = text.lower()
-    lowered_title = title.lower()
-    for token in tokens:
-        lowered = token.lower()
-        if lowered in lowered_title:
-            matched.append(token)
-            score += 2.2
-        elif lowered in lowered_text:
-            matched.append(token)
-            score += 1.0
-    return score, matched
 
 
 def _normalise_platforms(platforms: Any) -> List[str]:
@@ -149,7 +67,7 @@ def _normalise_platforms(platforms: Any) -> List[str]:
 def _normalise_terms(values: Any, *, max_items: int = 18) -> List[str]:
     if not isinstance(values, list):
         return []
-    terms: List[str] = []
+    result: List[str] = []
     seen = set()
     for item in values:
         token = str(item or "").strip()
@@ -159,16 +77,25 @@ def _normalise_terms(values: Any, *, max_items: int = 18) -> List[str]:
         if key in seen:
             continue
         seen.add(key)
-        terms.append(token)
-        if len(terms) >= max_items:
+        result.append(token)
+        if len(result) >= max_items:
             break
-    return terms
+    return result
 
 
 def _build_query_terms(query: str, entities: Optional[List[str]] = None, *, max_items: int = 18) -> List[str]:
     entity_terms = _normalise_terms(entities, max_items=max_items)
-    query_terms = entity_terms + [token for token in _tokenize(query) if token not in entity_terms]
-    return query_terms[:max_items]
+    seen = {item.lower() for item in entity_terms}
+    output = list(entity_terms)
+    for token in _tokenize(query, max_items=max_items):
+        key = token.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(token)
+        if len(output) >= max_items:
+            break
+    return output[:max_items]
 
 
 def _within_range(date_text: str, start: str = "", end: str = "") -> bool:
@@ -177,6 +104,177 @@ def _within_range(date_text: str, start: str = "", end: str = "") -> bool:
     if end and date_text and date_text > end:
         return False
     return True
+
+
+def _parse_fetch_range(folder_name: str) -> Tuple[str, str]:
+    text = str(folder_name or "").strip()
+    if "_" in text:
+        start, end = text.split("_", 1)
+        return _extract_date_text(start), _extract_date_text(end)
+    single = _extract_date_text(text)
+    return single, single
+
+
+def _fetch_root(topic_identifier: str) -> Path:
+    return get_data_root() / "projects" / topic_identifier / "fetch"
+
+
+def _date_distance_days(left: Optional[datetime], right: Optional[datetime]) -> int:
+    if left is None or right is None:
+        return 10**9
+    return abs((left - right).days)
+
+
+def _resolve_source_bundle(topic_identifier: str, start: str, end: str) -> Dict[str, Any]:
+    request_start_text = _extract_date_text(start)
+    request_end_text = _extract_date_text(end or start)
+    folder = f"{start}_{end}" if end and end != start else start
+    exact = bucket("fetch", topic_identifier, folder) / "总体.jsonl"
+    if exact.exists():
+        return {
+            "files": [exact],
+            "source_resolution": "exact_fetch_range",
+            "resolved_fetch_range": {"start": request_start_text, "end": request_end_text or request_start_text},
+            "partial_range_coverage": False,
+        }
+
+    request_start = _extract_date_obj(start)
+    request_end = _extract_date_obj(end or start)
+    covering: List[Tuple[int, str, str, Path]] = []
+    overlap: List[Tuple[int, int, int, str, str, Path]] = []
+    root = _fetch_root(topic_identifier)
+    if root.exists() and root.is_dir() and request_start and request_end:
+        for item in root.iterdir():
+            if not item.is_dir():
+                continue
+            range_start, range_end = _parse_fetch_range(item.name)
+            start_dt = _extract_date_obj(range_start)
+            end_dt = _extract_date_obj(range_end)
+            overall = item / "总体.jsonl"
+            if not overall.exists() or start_dt is None or end_dt is None:
+                continue
+            if start_dt <= request_start and end_dt >= request_end:
+                covering.append((max(0, (end_dt - start_dt).days), range_start, range_end, overall))
+                continue
+            overlap_start = max(start_dt, request_start)
+            overlap_end = min(end_dt, request_end)
+            if overlap_start <= overlap_end:
+                overlap_days = max(0, (overlap_end - overlap_start).days) + 1
+                boundary_distance = _date_distance_days(start_dt, request_start) + _date_distance_days(end_dt, request_end)
+                coverage_span = max(0, (end_dt - start_dt).days)
+                overlap.append((overlap_days, boundary_distance, coverage_span, range_start, range_end, overall))
+    if covering:
+        covering.sort(key=lambda item: (item[0], item[1], item[2], str(item[3])))
+        best = covering[0]
+        return {
+            "files": [best[3]],
+            "source_resolution": "covering_fetch_range",
+            "resolved_fetch_range": {"start": best[1], "end": best[2]},
+            "partial_range_coverage": False,
+        }
+    if overlap:
+        overlap.sort(key=lambda item: (-item[0], item[1], item[2], item[3], item[4], str(item[5])))
+        best = overlap[0]
+        return {
+            "files": [best[5]],
+            "source_resolution": "overlap_fetch_range",
+            "resolved_fetch_range": {"start": best[3], "end": best[4]},
+            "partial_range_coverage": True,
+        }
+
+    uploads_dir = get_data_root() / "projects" / topic_identifier / "uploads" / "jsonl"
+    uploads = sorted([path for path in uploads_dir.glob("*.jsonl") if path.is_file()]) if uploads_dir.exists() else []
+    if uploads:
+        return {
+            "files": uploads,
+            "source_resolution": "uploads_jsonl",
+            "resolved_fetch_range": {"start": "", "end": ""},
+            "partial_range_coverage": False,
+        }
+    return {
+        "files": [],
+        "source_resolution": "unavailable",
+        "resolved_fetch_range": {"start": "", "end": ""},
+        "partial_range_coverage": False,
+    }
+
+
+def resolve_source_scope(topic_identifier: str, start: str, end: str) -> Dict[str, Any]:
+    bundle = _resolve_source_bundle(topic_identifier, start, end)
+    return {
+        "source_files": [str(path) for path in bundle.get("files") or []],
+        "source_resolution": str(bundle.get("source_resolution") or "").strip(),
+        "resolved_fetch_range": dict(bundle.get("resolved_fetch_range") or {}),
+        "partial_range_coverage": bool(bundle.get("partial_range_coverage")),
+    }
+
+
+def _resolve_source_files(topic_identifier: str, start: str, end: str) -> Tuple[List[Path], str]:
+    bundle = _resolve_source_bundle(topic_identifier, start, end)
+    return list(bundle.get("files") or []), str(bundle.get("source_resolution") or "").strip()
+
+
+def _record_text(row: Dict[str, Any]) -> str:
+    parts = [
+        str(row.get("title") or "").strip(),
+        str(row.get("contents") or row.get("content") or "").strip(),
+        str(row.get("author") or "").strip(),
+        str(row.get("hit_words") or "").strip(),
+        str(row.get("classification") or "").strip(),
+        str(row.get("organization") or row.get("org") or "").strip(),
+    ]
+    return "\n".join(part for part in parts if part)
+
+
+def _normalise_title(title: str) -> str:
+    text = re.sub(r"\s+", "", str(title or "").strip()).lower()
+    return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]+", "", text)
+
+
+def _iter_source_entries(topic_identifier: str, start: str, end: str) -> Iterable[Tuple[Dict[str, Any], str, int]]:
+    source_files, _ = _resolve_source_files(topic_identifier, start, end)
+    for file_path in source_files:
+        try:
+            with file_path.open("r", encoding="utf-8") as handle:
+                for row_index, line in enumerate(handle, start=1):
+                    raw = line.strip()
+                    if not raw:
+                        continue
+                    try:
+                        payload = json.loads(raw)
+                    except Exception:
+                        continue
+                    if isinstance(payload, dict):
+                        yield payload, str(file_path), row_index
+        except Exception:
+            continue
+
+
+def _iter_filtered_entries(
+    *,
+    topic_identifier: str,
+    start: str,
+    end: str,
+    platforms: Optional[List[str]] = None,
+    time_start: str = "",
+    time_end: str = "",
+) -> Iterable[Tuple[Dict[str, Any], str, int]]:
+    allowed_platforms = set(_normalise_platforms(platforms))
+    lower_bound = str(time_start or "").strip() or str(start or "").strip()
+    upper_bound = str(time_end or "").strip() or str(end or "").strip()
+    for row, source_file, row_index in _iter_source_entries(topic_identifier, start, end):
+        date_text = _extract_date_text(row.get("published_at") or row.get("publish_time") or row.get("date"))
+        if not _within_range(date_text, lower_bound, upper_bound):
+            continue
+        platform = str(row.get("platform") or "").strip()
+        if allowed_platforms and platform and platform not in allowed_platforms:
+            continue
+        yield row, source_file, row_index
+
+
+def _iter_source_rows(topic_identifier: str, start: str, end: str) -> Iterable[Dict[str, Any]]:
+    for row, _, _ in _iter_source_entries(topic_identifier, start, end):
+        yield row
 
 
 def _iter_filtered_rows(
@@ -188,32 +286,273 @@ def _iter_filtered_rows(
     time_start: str = "",
     time_end: str = "",
 ) -> Iterable[Dict[str, Any]]:
-    allowed_platforms = set(_normalise_platforms(platforms))
-    lower_bound = str(time_start or "").strip() or str(start or "").strip()
-    upper_bound = str(time_end or "").strip() or str(end or "").strip()
-    for row in _iter_source_rows(topic_identifier, start, end):
-        date_text = _extract_date_text(row.get("published_at") or row.get("publish_time") or row.get("date"))
-        if not _within_range(date_text, lower_bound, upper_bound):
-            continue
-        platform = str(row.get("platform") or "").strip()
-        if allowed_platforms and platform and platform not in allowed_platforms:
-            continue
+    for row, _, _ in _iter_filtered_entries(
+        topic_identifier=topic_identifier,
+        start=start,
+        end=end,
+        platforms=platforms,
+        time_start=time_start,
+        time_end=time_end,
+    ):
         yield row
 
 
-def _build_scored_item(row: Dict[str, Any], *, matched_terms: List[str], score: float) -> Dict[str, Any]:
-    title = str(row.get("title") or "").strip()
+def iter_filtered_records(
+    *,
+    topic_identifier: str,
+    start: str,
+    end: str,
+    platforms: Optional[List[str]] = None,
+    time_start: str = "",
+    time_end: str = "",
+) -> Iterable[Dict[str, Any]]:
+    for row, source_file, row_index in _iter_filtered_entries(
+        topic_identifier=topic_identifier,
+        start=start,
+        end=end,
+        platforms=platforms,
+        time_start=time_start,
+        time_end=time_end,
+    ):
+        payload = dict(row)
+        payload["_source_file"] = source_file
+        payload["_source_row_index"] = row_index
+        yield payload
+
+
+def _make_snippet(text: str, tokens: List[str], max_chars: int = 120) -> str:
+    raw = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not raw:
+        return ""
+    for token in tokens:
+        pos = raw.find(token)
+        if pos >= 0:
+            start = max(0, pos - 24)
+            end = min(len(raw), pos + max_chars - 24)
+            snippet = raw[start:end].strip()
+            if start > 0:
+                snippet = "..." + snippet
+            if end < len(raw):
+                snippet = snippet + "..."
+            return snippet
+    return raw[:max_chars]
+
+
+def _score_row(text: str, title: str, tokens: List[str]) -> Tuple[float, List[str], Dict[str, float]]:
+    matched: List[str] = []
+    title_score = 0.0
+    body_score = 0.0
+    lowered_text = text.lower()
+    lowered_title = title.lower()
+    for token in tokens:
+        lowered = token.lower()
+        if lowered in lowered_title:
+            matched.append(token)
+            title_score += 2.2
+        elif lowered in lowered_text:
+            matched.append(token)
+            body_score += 1.0
+    return title_score + body_score, matched, {"title": round(title_score, 4), "body": round(body_score, 4)}
+
+
+def _query_has_policy_intent(query_text: str, query_terms: Sequence[str]) -> bool:
+    haystack = f"{str(query_text or '').strip()} {' '.join(query_terms)}"
+    return any(hint in haystack for hint in _POLICY_HINTS)
+
+
+def _source_quality_bonus(row: Dict[str, Any]) -> float:
+    score = 0.0
     platform = str(row.get("platform") or "").strip()
+    source_type = str(row.get("source_type") or "").strip()
+    author_type = str(row.get("author_type") or row.get("account_type") or row.get("publisher_type") or "").strip()
+    is_official = row.get("is_official")
+    if platform == "新闻":
+        score += 0.2
+    if "官方" in author_type or "官方" in source_type:
+        score += 0.25
+    if is_official not in (None, "", False, 0, "0", "false", "False"):
+        score += 0.35
+    return round(score, 4)
+
+
+def _policy_context_adjustment(row: Dict[str, Any], query_text: str, query_terms: Sequence[str]) -> float:
+    if not _query_has_policy_intent(query_text, query_terms):
+        return 0.0
     text = _record_text(row)
+    score = sum(0.18 for hint in _POLICY_CONTEXT_HINTS if hint in text)
+    if any(hint in text for hint in _KITCHEN_NOISE_HINTS):
+        score -= 1.8
+    return round(score, 4)
+
+
+def _compute_tfidf_scores(docs: Sequence[str], query_text: str) -> List[float]:
+    if not docs or not str(query_text or "").strip():
+        return [0.0 for _ in docs]
+    try:
+        vectorizer = TfidfVectorizer(analyzer="char", ngram_range=(2, 4), lowercase=True, min_df=1, max_features=30000)
+        matrix = vectorizer.fit_transform(docs)
+        query_vec = vectorizer.transform([str(query_text or "").strip()])
+        scores = (matrix @ query_vec.T).toarray().reshape(-1)
+        return [float(value) for value in scores.tolist()]
+    except Exception:
+        return [0.0 for _ in docs]
+
+
+def _maybe_embedding_scores(docs: Sequence[str], query_text: str, mode: str) -> List[float]:
+    safe_mode = str(mode or "fast").strip().lower()
+    if safe_mode != "research" or not docs or not str(query_text or "").strip():
+        return [0.0 for _ in docs]
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+        vectors = model.encode([str(query_text or "").strip(), *docs], normalize_embeddings=True)
+        query_vec = np.asarray(vectors[0], dtype=np.float32)
+        doc_vecs = np.asarray(vectors[1:], dtype=np.float32)
+        scores = np.matmul(doc_vecs, query_vec)
+        return [float(value) for value in scores.tolist()]
+    except Exception:
+        return [0.0 for _ in docs]
+
+
+def _select_diverse_candidates(candidates: List[Dict[str, Any]], *, top_k: int) -> List[Dict[str, Any]]:
+    remaining = list(candidates)
+    selected: List[Dict[str, Any]] = []
+    platform_counts: Counter[str] = Counter()
+    date_counts: Counter[str] = Counter()
+    while remaining and len(selected) < max(1, int(top_k or 1)):
+        best_index = 0
+        best_score = -10**9
+        for index, candidate in enumerate(remaining[:120]):
+            adjusted = float(candidate["score"])
+            adjusted -= 0.35 * platform_counts.get(candidate["platform"] or "未知", 0)
+            adjusted -= 0.18 * date_counts.get(candidate["date_text"] or "未知", 0)
+            if adjusted > best_score:
+                best_score = adjusted
+                best_index = index
+        chosen = remaining.pop(best_index)
+        selected.append(chosen)
+        platform_counts[chosen["platform"] or "未知"] += 1
+        date_counts[chosen["date_text"] or "未知"] += 1
+    return selected
+
+
+def _retrieve_candidates(
+    *,
+    topic_identifier: str,
+    start: str,
+    end: str,
+    query_text: str,
+    entities: Optional[List[str]] = None,
+    platforms: Optional[List[str]] = None,
+    time_start: str = "",
+    time_end: str = "",
+    top_k: int = 20,
+    mode: str = "fast",
+) -> Dict[str, Any]:
+    rows = list(
+        _iter_filtered_entries(
+            topic_identifier=topic_identifier,
+            start=start,
+            end=end,
+            platforms=platforms,
+            time_start=time_start,
+            time_end=time_end,
+        )
+    )
+    query_terms = _build_query_terms(query_text, entities)
+    docs = [
+        "\n".join(
+            [
+                str(row.get("title") or "").strip(),
+                str(row.get("title") or "").strip(),
+                _record_text(row),
+                str(row.get("platform") or "").strip(),
+                str(row.get("author") or "").strip(),
+            ]
+        )
+        for row, _, _ in rows
+    ]
+    lexical_scores = _compute_tfidf_scores(docs, query_text)
+    embedding_scores = _maybe_embedding_scores(docs[: min(len(docs), max(12, top_k * 3))], query_text, mode)
+    candidates: List[Dict[str, Any]] = []
+    for index, (row, source_file, row_index) in enumerate(rows):
+        title = str(row.get("title") or "").strip()
+        text = _record_text(row)
+        token_score, matched_terms, token_breakdown = _score_row(text, title, query_terms)
+        lexical_score = lexical_scores[index] if index < len(lexical_scores) else 0.0
+        embedding_score = embedding_scores[index] if index < len(embedding_scores) else 0.0
+        if query_terms and token_score <= 0.0 and lexical_score <= 0.0 and embedding_score <= 0.0:
+            continue
+        source_bonus = _source_quality_bonus(row)
+        context_adjustment = _policy_context_adjustment(row, query_text, query_terms)
+        total_score = token_score + lexical_score * 6.0 + embedding_score * 2.5 + source_bonus + context_adjustment
+        if total_score <= 0.0:
+            continue
+        platform = str(row.get("platform") or "").strip()
+        date_text = _extract_date_text(row.get("published_at") or row.get("publish_time") or row.get("date")) or "未知"
+        url = str(row.get("url") or "").strip()
+        dedupe_key = url.lower() if url else _normalise_title(title)
+        candidates.append(
+            {
+                "title": title,
+                "snippet": _make_snippet(text, matched_terms or _tokenize(title or text)),
+                "url": url,
+                "published_at": str(row.get("published_at") or row.get("publish_time") or row.get("date") or "").strip(),
+                "platform": platform,
+                "author": str(row.get("author") or "").strip(),
+                "matched_terms": matched_terms[:6],
+                "score": round(total_score, 4),
+                "source_file": source_file,
+                "source_row_index": row_index,
+                "score_breakdown": {
+                    **token_breakdown,
+                    "lexical": round(lexical_score * 6.0, 4),
+                    "embedding": round(embedding_score * 2.5, 4),
+                    "source_quality": source_bonus,
+                    "policy_context": context_adjustment,
+                },
+                "date_text": date_text,
+                "dedupe_key": dedupe_key or f"{source_file}:{row_index}",
+                "row_text": text,
+            }
+        )
+
+    by_key: Dict[str, Dict[str, Any]] = {}
+    for candidate in sorted(candidates, key=lambda item: float(item["score"]), reverse=True):
+        key = str(candidate["dedupe_key"] or "").strip()
+        if key not in by_key:
+            by_key[key] = candidate
+    deduped = list(by_key.values())
+    selected = _select_diverse_candidates(deduped, top_k=max(3, min(int(top_k or 20), 50)))
+    source_distribution: Dict[str, int] = {}
+    time_distribution: Dict[str, int] = {}
+    matched_terms_counter: Counter[str] = Counter()
+    for candidate in deduped:
+        source_distribution[candidate["platform"] or "未知"] = source_distribution.get(candidate["platform"] or "未知", 0) + 1
+        time_distribution[candidate["date_text"]] = time_distribution.get(candidate["date_text"], 0) + 1
+        matched_terms_counter.update(candidate["matched_terms"])
+    source_files, source_resolution = _resolve_source_files(topic_identifier, start, end)
+    retrieval_strategy = "tfidf_lexical"
+    if str(mode or "fast").strip().lower() == "research":
+        retrieval_strategy = "tfidf_lexical+embedding" if any(score > 0 for score in embedding_scores) else "tfidf_lexical"
     return {
-        "title": title,
-        "snippet": _make_snippet(text, matched_terms or _tokenize(title or text)),
-        "url": str(row.get("url") or "").strip(),
-        "published_at": str(row.get("published_at") or row.get("publish_time") or row.get("date") or "").strip(),
-        "platform": platform,
-        "author": str(row.get("author") or "").strip(),
-        "matched_terms": matched_terms[:6],
-        "score": round(score, 3),
+        "query": str(query_text or "").strip(),
+        "query_terms": query_terms[:10],
+        "time_start": str(time_start or start or "").strip(),
+        "time_end": str(time_end or end or "").strip(),
+        "items": [{key: value for key, value in item.items() if key not in {"dedupe_key", "date_text", "row_text"}} for item in selected],
+        "source_distribution": source_distribution,
+        "time_distribution": dict(sorted(time_distribution.items(), key=lambda item: item[0])),
+        "high_signal_terms": [term for term, _ in matched_terms_counter.most_common(8)],
+        "scanned_records": len(rows),
+        "matched_records": len(candidates),
+        "candidate_count": len(candidates),
+        "deduped_count": len(deduped),
+        "source_files": [str(path) for path in source_files],
+        "source_resolution": source_resolution,
+        "retrieval_strategy": retrieval_strategy,
+        "mode": "research" if str(mode or "").strip().lower() == "research" else "fast",
     }
 
 
@@ -227,73 +566,32 @@ def verify_claim_with_records(
     platforms: Optional[List[str]] = None,
     retrieve_mode: str = "claim_verification",
     top_k: int = 20,
+    mode: str = "fast",
 ) -> Dict[str, Any]:
     claim_text = str(claim or "").strip()
-    entity_terms = [str(item).strip() for item in (entities or []) if str(item or "").strip()]
-    query_terms = entity_terms + [token for token in _tokenize(claim_text) if token not in entity_terms]
-    query_terms = query_terms[:18]
-    allowed_platforms = set(_normalise_platforms(platforms))
-    safe_top_k = max(3, min(int(top_k or 20), 50))
-
-    supporting_heap: List[Tuple[float, int, Dict[str, Any]]] = []
-    contradicting_heap: List[Tuple[float, int, Dict[str, Any]]] = []
-    source_distribution: Dict[str, int] = {}
-    scanned = 0
-    matched = 0
-    sequence = 0
-
-    for row in _iter_source_rows(topic_identifier, start, end):
-        scanned += 1
-        date_text = _extract_date_text(row.get("published_at") or row.get("publish_time") or row.get("date"))
-        if start and date_text and date_text < start:
-            continue
-        if end and date_text and date_text > end:
-            continue
-
-        platform = str(row.get("platform") or "").strip()
-        if allowed_platforms and platform and platform not in allowed_platforms:
-            continue
-
-        title = str(row.get("title") or "").strip()
-        text = _record_text(row)
-        if not text:
-            continue
-        score, matched_terms = _score_row(text, title, query_terms)
-        if score <= 0:
-            continue
-        matched += 1
-        source_distribution[platform or "未知"] = source_distribution.get(platform or "未知", 0) + 1
-        snippet = _make_snippet(text, matched_terms or query_terms)
-        item = {
-            "title": title,
-            "snippet": snippet,
-            "url": str(row.get("url") or "").strip(),
-            "published_at": str(row.get("published_at") or row.get("publish_time") or row.get("date") or "").strip(),
-            "platform": platform,
-            "author": str(row.get("author") or "").strip(),
-            "matched_terms": matched_terms[:6],
-            "score": round(score, 3),
-        }
-        lowered_text = text.lower()
-        target_heap = contradicting_heap if any(hint in lowered_text for hint in _NEGATION_HINTS) else supporting_heap
-        sequence += 1
-        if len(target_heap) < safe_top_k:
-            heapq.heappush(target_heap, (score, sequence, item))
+    retrieval = _retrieve_candidates(
+        topic_identifier=topic_identifier,
+        start=start,
+        end=end,
+        query_text=claim_text,
+        entities=entities,
+        platforms=platforms,
+        top_k=max(12, int(top_k or 20) * 2),
+        mode=mode,
+    )
+    claim_negated = any(hint in claim_text for hint in _NEGATION_HINTS)
+    supporting_items: List[Dict[str, Any]] = []
+    contradicting_items: List[Dict[str, Any]] = []
+    for item in retrieval["items"]:
+        row_negated = any(hint in str(item.get("snippet") or "") for hint in _NEGATION_HINTS) or any(
+            hint in str(item.get("title") or "") for hint in _NEGATION_HINTS
+        )
+        payload = dict(item)
+        payload["evidence_alignment"] = "support" if row_negated == claim_negated else "contradict"
+        if payload["evidence_alignment"] == "support":
+            supporting_items.append(payload)
         else:
-            heapq.heappushpop(target_heap, (score, sequence, item))
-
-    supporting_items = [item for _, _, item in sorted(supporting_heap, key=lambda pair: pair[0], reverse=True)]
-    contradicting_items = [item for _, _, item in sorted(contradicting_heap, key=lambda pair: pair[0], reverse=True)]
-
-    representative_quotes = [
-        {
-            "quote": str(item.get("snippet") or "").strip(),
-            "title": str(item.get("title") or "").strip(),
-            "platform": str(item.get("platform") or "").strip(),
-        }
-        for item in supporting_items[:3]
-        if str(item.get("snippet") or "").strip()
-    ]
+            contradicting_items.append(payload)
 
     if supporting_items and contradicting_items:
         verification_status = "conflicting"
@@ -307,15 +605,29 @@ def verify_claim_with_records(
     return {
         "claim": claim_text,
         "retrieve_mode": str(retrieve_mode or "claim_verification").strip(),
-        "query_terms": query_terms[:10],
-        "supporting_items": supporting_items[:safe_top_k],
-        "contradicting_items": contradicting_items[: max(3, min(8, safe_top_k // 2))],
+        "query_terms": retrieval["query_terms"],
+        "supporting_items": supporting_items[: max(3, min(int(top_k or 20), 50))],
+        "contradicting_items": contradicting_items[: max(3, min(8, max(1, int(top_k or 20)) // 2))],
         "insufficient_evidence": verification_status in {"unverified", "partially_supported"},
-        "representative_quotes": representative_quotes,
-        "source_distribution": source_distribution,
+        "representative_quotes": [
+            {
+                "quote": str(item.get("snippet") or "").strip(),
+                "title": str(item.get("title") or "").strip(),
+                "platform": str(item.get("platform") or "").strip(),
+            }
+            for item in supporting_items[:3]
+            if str(item.get("snippet") or "").strip()
+        ],
+        "source_distribution": retrieval["source_distribution"],
         "verification_status": verification_status,
-        "scanned_records": scanned,
-        "matched_records": matched,
+        "scanned_records": retrieval["scanned_records"],
+        "matched_records": retrieval["matched_records"],
+        "candidate_count": retrieval["candidate_count"],
+        "deduped_count": retrieval["deduped_count"],
+        "source_files": retrieval["source_files"],
+        "source_resolution": retrieval["source_resolution"],
+        "retrieval_strategy": retrieval["retrieval_strategy"],
+        "mode": retrieval["mode"],
     }
 
 
@@ -330,64 +642,20 @@ def search_raw_records(
     time_start: str = "",
     time_end: str = "",
     top_k: int = 20,
+    mode: str = "fast",
 ) -> Dict[str, Any]:
-    query_text = str(query or "").strip()
-    query_terms = _build_query_terms(query_text, entities)
-    safe_top_k = max(3, min(int(top_k or 20), 50))
-    items_heap: List[Tuple[float, int, Dict[str, Any]]] = []
-    source_distribution: Dict[str, int] = {}
-    time_distribution: Dict[str, int] = {}
-    matched_terms_counter: Counter[str] = Counter()
-    scanned = 0
-    matched = 0
-    sequence = 0
-
-    for row in _iter_filtered_rows(
+    return _retrieve_candidates(
         topic_identifier=topic_identifier,
         start=start,
         end=end,
+        query_text=str(query or "").strip(),
+        entities=entities,
         platforms=platforms,
         time_start=time_start,
         time_end=time_end,
-    ):
-        scanned += 1
-        title = str(row.get("title") or "").strip()
-        text = _record_text(row)
-        if not text:
-            continue
-        if query_terms:
-            score, matched_terms = _score_row(text, title, query_terms)
-            if score <= 0:
-                continue
-        else:
-            score = 1.0
-            matched_terms = []
-        matched += 1
-        platform = str(row.get("platform") or "").strip() or "未知"
-        date_text = _extract_date_text(row.get("published_at") or row.get("publish_time") or row.get("date")) or "未知"
-        source_distribution[platform] = source_distribution.get(platform, 0) + 1
-        time_distribution[date_text] = time_distribution.get(date_text, 0) + 1
-        matched_terms_counter.update(matched_terms)
-        item = _build_scored_item(row, matched_terms=matched_terms, score=score)
-        sequence += 1
-        if len(items_heap) < safe_top_k:
-            heapq.heappush(items_heap, (score, sequence, item))
-        else:
-            heapq.heappushpop(items_heap, (score, sequence, item))
-
-    items = [item for _, _, item in sorted(items_heap, key=lambda pair: pair[0], reverse=True)]
-    return {
-        "query": query_text,
-        "query_terms": query_terms[:10],
-        "time_start": str(time_start or start or "").strip(),
-        "time_end": str(time_end or end or "").strip(),
-        "items": items,
-        "source_distribution": source_distribution,
-        "time_distribution": dict(sorted(time_distribution.items(), key=lambda pair: pair[0])),
-        "high_signal_terms": [term for term, _ in matched_terms_counter.most_common(8)],
-        "scanned_records": scanned,
-        "matched_records": matched,
-    }
+        top_k=top_k,
+        mode=mode,
+    )
 
 
 def summarize_source_scope(
@@ -414,7 +682,6 @@ def summarize_source_scope(
         author_type = str(row.get("author_type") or row.get("account_type") or row.get("publisher_type") or "").strip()
         source_type = str(row.get("source_type") or "").strip()
         is_official = row.get("is_official")
-
         if platform:
             platform_present += 1
             platform_counter[platform] += 1
@@ -432,9 +699,7 @@ def summarize_source_scope(
     if org_present:
         available_dimensions.append("organization")
     if official_present:
-        available_dimensions.extend(
-            item for item in ("author_type", "official_source_flag") if item not in available_dimensions
-        )
+        available_dimensions.extend(item for item in ("author_type", "official_source_flag") if item not in available_dimensions)
 
     missing_dimensions = []
     if not official_present:
@@ -442,18 +707,7 @@ def summarize_source_scope(
     if not org_present:
         missing_dimensions.append("organization")
 
-    writable_subjects = ["平台分布"]
-    if author_present:
-        writable_subjects.append("作者署名或头部发布者")
-    if org_present:
-        writable_subjects.append("组织名称")
-
-    prohibited_inference = []
-    if not official_present:
-        prohibited_inference.append("不能从当前数据直接推导政务、官方或机构账号是否缺位、是否同步发布、是否响应迟缓。")
-    if not org_present:
-        prohibited_inference.append("不能从当前数据直接推导具体机构之间的分工或责任链。")
-
+    source_files, source_resolution = _resolve_source_files(topic_identifier, start, end)
     return {
         "scanned_records": scanned,
         "platforms": [{"name": name, "count": count} for name, count in platform_counter.most_common(max(1, top_platforms))],
@@ -466,12 +720,14 @@ def summarize_source_scope(
         },
         "available_dimensions": available_dimensions,
         "missing_dimensions": missing_dimensions,
-        "writable_subjects": writable_subjects,
-        "prohibited_inference": prohibited_inference,
-        "boundary_summary": (
-            "当前主体范围直接来自原始条目字段统计，只能支撑平台、作者和已显式存在的组织/主体字段判断；"
-            "缺失维度不得被扩写成机构行为结论。"
-        ),
+        "writable_subjects": ["平台分布", *([] if not author_present else ["作者署名或头部发布者"]), *([] if not org_present else ["组织名称"])],
+        "prohibited_inference": [
+            *([] if official_present else ["不能从当前数据直接推导政务、官方或机构账号是否缺位、是否同步发布、是否响应迟缓。"]),
+            *([] if org_present else ["不能从当前数据直接推导具体机构之间的分工或责任链。"]),
+        ],
+        "boundary_summary": "当前主体范围直接来自原始条目字段统计，只能支撑平台、作者和已显式存在的组织/主体字段判断；缺失维度不得被扩写成机构行为结论。",
+        "source_files": [str(path) for path in source_files],
+        "source_resolution": source_resolution,
     }
 
 
@@ -496,17 +752,16 @@ def analyze_temporal_event_window(
             "shift_summary": "时间锚点格式无效，无法进行时窗比较。",
         }
 
-    safe_window_days = max(1, min(int(window_days or 7), 30))
     query_terms = _build_query_terms(str(query or "").strip(), entities)
+    safe_window_days = max(1, min(int(window_days or 7), 30))
     safe_top_k = max(2, min(int(top_k or 6), 12))
     windows: Dict[str, Dict[str, Any]] = {
-        "pre_window": {"count": 0, "term_counter": Counter(), "items_heap": []},
-        "anchor_window": {"count": 0, "term_counter": Counter(), "items_heap": []},
-        "post_window": {"count": 0, "term_counter": Counter(), "items_heap": []},
+        "pre_window": {"count": 0, "items": [], "terms": Counter()},
+        "anchor_window": {"count": 0, "items": [], "terms": Counter()},
+        "post_window": {"count": 0, "items": [], "terms": Counter()},
     }
-    sequence = 0
 
-    for row in _iter_filtered_rows(topic_identifier=topic_identifier, start=start, end=end, platforms=platforms):
+    for row in iter_filtered_records(topic_identifier=topic_identifier, start=start, end=end, platforms=platforms):
         row_dt = _extract_date_obj(row.get("published_at") or row.get("publish_time") or row.get("date"))
         if row_dt is None:
             continue
@@ -522,39 +777,41 @@ def analyze_temporal_event_window(
 
         title = str(row.get("title") or "").strip()
         text = _record_text(row)
-        if not text:
-            continue
         if query_terms:
-            score, matched_terms = _score_row(text, title, query_terms)
+            score, matched_terms, _ = _score_row(text, title, query_terms)
             if score <= 0:
                 continue
         else:
             score = 1.0
             matched_terms = _tokenize(title or text, max_items=6)
+        payload = {
+            "title": title,
+            "snippet": _make_snippet(text, matched_terms or _tokenize(title or text)),
+            "url": str(row.get("url") or "").strip(),
+            "published_at": str(row.get("published_at") or row.get("publish_time") or row.get("date") or "").strip(),
+            "platform": str(row.get("platform") or "").strip(),
+            "author": str(row.get("author") or "").strip(),
+            "matched_terms": matched_terms[:6],
+            "score": round(score, 4),
+            "source_file": str(row.get("_source_file") or "").strip(),
+        }
+        windows[bucket_key]["count"] += 1
+        windows[bucket_key]["terms"].update(matched_terms)
+        windows[bucket_key]["items"].append(payload)
+        windows[bucket_key]["items"].sort(key=lambda item: float(item["score"]), reverse=True)
+        del windows[bucket_key]["items"][safe_top_k:]
 
-        bucket = windows[bucket_key]
-        bucket["count"] += 1
-        bucket["term_counter"].update(matched_terms)
-        item = _build_scored_item(row, matched_terms=matched_terms, score=score)
-        sequence += 1
-        heap: List[Tuple[float, int, Dict[str, Any]]] = bucket["items_heap"]
-        if len(heap) < safe_top_k:
-            heapq.heappush(heap, (score, sequence, item))
-        else:
-            heapq.heappushpop(heap, (score, sequence, item))
-
-    normalized_windows: Dict[str, Any] = {}
-    for bucket_key, bucket in windows.items():
-        items = [item for _, _, item in sorted(bucket["items_heap"], key=lambda pair: pair[0], reverse=True)]
-        normalized_windows[bucket_key] = {
-            "count": int(bucket.get("count") or 0),
-            "top_terms": [term for term, _ in bucket["term_counter"].most_common(6)],
-            "sample_items": items,
+    normalized: Dict[str, Any] = {}
+    for key, bucket in windows.items():
+        normalized[key] = {
+            "count": int(bucket["count"]),
+            "top_terms": [term for term, _ in bucket["terms"].most_common(6)],
+            "sample_items": list(bucket["items"]),
         }
 
-    pre_count = int(normalized_windows["pre_window"]["count"] or 0)
-    anchor_count = int(normalized_windows["anchor_window"]["count"] or 0)
-    post_count = int(normalized_windows["post_window"]["count"] or 0)
+    pre_count = normalized["pre_window"]["count"]
+    anchor_count = normalized["anchor_window"]["count"]
+    post_count = normalized["post_window"]["count"]
     if anchor_count > max(pre_count, post_count):
         shift_summary = "锚点日期附近讨论最集中，说明该时间点与传播放大存在明显同步关系。"
     elif post_count > pre_count:
@@ -564,13 +821,16 @@ def analyze_temporal_event_window(
     else:
         shift_summary = "当前时间窗内的有效样本有限，只能做弱趋势判断。"
 
+    source_files, source_resolution = _resolve_source_files(topic_identifier, start, end)
     return {
         "anchor_date": anchor_dt.strftime("%Y-%m-%d"),
         "query_terms": query_terms[:10],
         "window_days": safe_window_days,
         "verification_status": "ok",
-        "windows": normalized_windows,
+        "windows": normalized,
         "shift_summary": shift_summary,
+        "source_files": [str(path) for path in source_files],
+        "source_resolution": source_resolution,
     }
 
 
@@ -592,17 +852,12 @@ def compare_content_focus(
     bucket_a = _normalise_terms(bucket_a_terms, max_items=16)
     bucket_b = _normalise_terms(bucket_b_terms, max_items=16)
     safe_top_k = max(2, min(int(top_k or 8), 12))
-
-    def _empty_bucket(label: str) -> Dict[str, Any]:
-        return {"label": label, "count": 0, "top_terms": [], "sample_items": [], "total_score": 0.0}
-
-    bucket_stats: Dict[str, Dict[str, Any]] = {
-        "bucket_a": _empty_bucket("bucket_a"),
-        "bucket_b": _empty_bucket("bucket_b"),
+    stats: Dict[str, Dict[str, Any]] = {
+        "bucket_a": {"count": 0, "items": [], "terms": Counter(), "total_score": 0.0},
+        "bucket_b": {"count": 0, "items": [], "terms": Counter(), "total_score": 0.0},
     }
-    sequence = 0
 
-    for row in _iter_filtered_rows(
+    for row in iter_filtered_records(
         topic_identifier=topic_identifier,
         start=start,
         end=end,
@@ -612,66 +867,70 @@ def compare_content_focus(
     ):
         title = str(row.get("title") or "").strip()
         text = _record_text(row)
-        if not text:
-            continue
         if query_terms:
-            base_score, _ = _score_row(text, title, query_terms)
+            base_score, _, _ = _score_row(text, title, query_terms)
             if base_score <= 0:
                 continue
         else:
             base_score = 1.0
-        a_score, a_terms = _score_row(text, title, bucket_a)
-        b_score, b_terms = _score_row(text, title, bucket_b)
+        a_score, a_terms, _ = _score_row(text, title, bucket_a)
+        b_score, b_terms, _ = _score_row(text, title, bucket_b)
         if a_score <= 0 and b_score <= 0:
             continue
-
         bucket_key = "bucket_a" if a_score >= b_score else "bucket_b"
         matched_terms = a_terms if bucket_key == "bucket_a" else b_terms
         score = base_score + max(a_score, b_score)
-        bucket = bucket_stats[bucket_key]
+        bucket = stats[bucket_key]
         bucket["count"] += 1
-        bucket["total_score"] = round(float(bucket.get("total_score") or 0.0) + score, 3)
-        term_counter: Counter[str] = bucket.setdefault("term_counter", Counter())
-        term_counter.update(matched_terms)
-        item = _build_scored_item(row, matched_terms=matched_terms, score=score)
-        sequence += 1
-        heap: List[Tuple[float, int, Dict[str, Any]]] = bucket.setdefault("items_heap", [])
-        if len(heap) < safe_top_k:
-            heapq.heappush(heap, (score, sequence, item))
-        else:
-            heapq.heappushpop(heap, (score, sequence, item))
+        bucket["total_score"] = round(float(bucket["total_score"]) + score, 4)
+        bucket["terms"].update(matched_terms)
+        bucket["items"].append(
+            {
+                "title": title,
+                "snippet": _make_snippet(text, matched_terms or _tokenize(title or text)),
+                "url": str(row.get("url") or "").strip(),
+                "published_at": str(row.get("published_at") or row.get("publish_time") or row.get("date") or "").strip(),
+                "platform": str(row.get("platform") or "").strip(),
+                "author": str(row.get("author") or "").strip(),
+                "matched_terms": matched_terms[:6],
+                "score": round(score, 4),
+                "source_file": str(row.get("_source_file") or "").strip(),
+            }
+        )
+        bucket["items"].sort(key=lambda item: float(item["score"]), reverse=True)
+        del bucket["items"][safe_top_k:]
 
-    normalized_buckets: Dict[str, Any] = {}
-    for bucket_key, bucket in bucket_stats.items():
-        items = [item for _, _, item in sorted(bucket.get("items_heap") or [], key=lambda pair: pair[0], reverse=True)]
-        normalized_buckets[bucket_key] = {
-            "label": str(bucket.get("label") or bucket_key).strip(),
-            "count": int(bucket.get("count") or 0),
-            "top_terms": [term for term, _ in (bucket.get("term_counter") or Counter()).most_common(6)],
-            "sample_items": items,
-            "total_score": round(float(bucket.get("total_score") or 0.0), 3),
+    normalized = {
+        key: {
+            "label": key,
+            "count": int(value["count"]),
+            "top_terms": [term for term, _ in value["terms"].most_common(6)],
+            "sample_items": list(value["items"]),
+            "total_score": round(float(value["total_score"]), 4),
         }
-
-    a_count = int(normalized_buckets["bucket_a"]["count"] or 0)
-    b_count = int(normalized_buckets["bucket_b"]["count"] or 0)
-    if a_count > b_count:
+        for key, value in stats.items()
+    }
+    if normalized["bucket_a"]["count"] > normalized["bucket_b"]["count"]:
         dominant_focus = "bucket_a"
         comparison = "相关讨论更偏向第一组语义桶。"
-    elif b_count > a_count:
+    elif normalized["bucket_b"]["count"] > normalized["bucket_a"]["count"]:
         dominant_focus = "bucket_b"
         comparison = "相关讨论更偏向第二组语义桶。"
     else:
         dominant_focus = "balanced"
         comparison = "两组语义桶在当前样本中的讨论强度接近。"
 
+    source_files, source_resolution = _resolve_source_files(topic_identifier, start, end)
     return {
         "query_terms": query_terms[:10],
         "time_start": str(time_start or start or "").strip(),
         "time_end": str(time_end or end or "").strip(),
         "bucket_a_terms": bucket_a[:10],
         "bucket_b_terms": bucket_b[:10],
-        "bucket_a": normalized_buckets["bucket_a"],
-        "bucket_b": normalized_buckets["bucket_b"],
+        "bucket_a": normalized["bucket_a"],
+        "bucket_b": normalized["bucket_b"],
         "dominant_focus": dominant_focus,
         "comparison": comparison,
+        "source_files": [str(path) for path in source_files],
+        "source_resolution": source_resolution,
     }

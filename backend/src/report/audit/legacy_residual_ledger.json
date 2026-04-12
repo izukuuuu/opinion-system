@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "residual_logic": [
+    {
+      "module": "full_report_service",
+      "residual_area": "legacy analysis helper paths",
+      "exclusive_capability": "none_required_for_mainline",
+      "status": "retired"
+    },
+    {
+      "module": "structured_service",
+      "residual_area": "legacy structured payload generation",
+      "exclusive_capability": "none_required_for_mainline",
+      "status": "retired"
+    },
+    {
+      "module": "runtime",
+      "residual_area": "bootstrap compatibility bridge",
+      "exclusive_capability": "none_required_for_mainline",
+      "status": "retired"
+    }
+  ]
+}

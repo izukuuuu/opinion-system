@@ -3,11 +3,12 @@
     <section class="card-surface space-y-5 p-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="space-y-1">
-          <h2 class="text-xl font-semibold text-primary">AI 完整报告</h2>
-          <p class="text-sm text-secondary">完整报告页不再依赖 markdown 排版，直接复用统一的结构化报告文档和图表目录。</p>
+          <h2 class="text-xl font-semibold text-primary">正式文稿</h2>
+          <p class="text-sm text-secondary">这里展示舆情分析 Markdown 文稿，语义底稿和运行信息保留在其它视图查看。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="topicsState.loading" @click="loadTopics">
+          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="topicsState.loading"
+            @click="loadTopics">
             <ArrowPathIcon class="h-4 w-4" :class="topicsState.loading ? 'animate-spin' : ''" />
             {{ topicsState.loading ? '同步中…' : '刷新专题' }}
           </button>
@@ -15,7 +16,8 @@
             <PlayCircleIcon class="h-4 w-4" />
             前往运行页
           </button>
-          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="historyState.loading || !reportForm.topic" @click="handleRefreshHistory">
+          <button type="button" class="btn-secondary inline-flex items-center gap-2"
+            :disabled="historyState.loading || !reportForm.topic" @click="handleRefreshHistory">
             <ClockIcon class="h-4 w-4" />
             {{ historyState.loading ? '加载中…' : '刷新记录' }}
           </button>
@@ -25,24 +27,17 @@
       <div class="grid gap-4 lg:grid-cols-[1.2fr,1fr,1fr,1fr]">
         <label class="space-y-2 text-secondary">
           <span class="text-xs font-semibold text-muted">专题</span>
-          <AppSelect
-            :options="topicSelectOptions"
-            :value="reportForm.topic"
-            :disabled="topicsState.loading || !topicOptions.length"
-            @change="reportForm.topic = $event"
-          />
+          <AppSelect :options="topicSelectOptions" :value="reportForm.topic"
+            :disabled="topicsState.loading || !topicOptions.length" @change="reportForm.topic = $event" />
           <p v-if="topicsState.error" class="text-xs text-danger">{{ topicsState.error }}</p>
         </label>
 
         <label class="space-y-2 text-secondary">
           <span class="text-xs font-semibold text-muted">历史记录</span>
-          <AppSelect
-            :options="historySelectOptions"
-            :value="selectedHistoryId"
+          <AppSelect :options="historySelectOptions" :value="selectedHistoryId"
             :disabled="historyState.loading || !reportHistory.length"
             :placeholder="historyState.loading ? '加载历史中…' : reportHistory.length ? '选择历史记录' : '暂无历史记录'"
-            @change="handleSelectHistory"
-          />
+            @change="handleSelectHistory" />
           <p v-if="historyState.error" class="text-xs text-muted">{{ historyState.error }}</p>
         </label>
 
@@ -65,26 +60,31 @@
           <span v-else-if="availableRange.notice" class="ml-2 text-warning">{{ availableRange.notice }}</span>
         </p>
         <div class="flex flex-wrap items-center gap-2">
-          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="fullReportState.loading || fullReportState.regenerating" @click="handleLoad">
+          <button type="button" class="btn-secondary inline-flex items-center gap-2"
+            :disabled="fullReportState.loading || fullReportState.regenerating" @click="handleLoad">
             <ArrowPathIcon class="h-4 w-4" :class="fullReportState.loading ? 'animate-spin' : ''" />
             {{ fullReportState.loading ? '读取中…' : '读取 AI 报告' }}
           </button>
-          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="fullReportState.loading || fullReportState.regenerating" @click="handleRegenerate">
+          <button type="button" class="btn-secondary inline-flex items-center gap-2"
+            :disabled="fullReportState.loading || fullReportState.regenerating" @click="handleRegenerate">
             <SparklesIcon class="h-4 w-4" :class="fullReportState.regenerating ? 'animate-pulse' : ''" />
             {{ fullReportState.regenerating ? '重写中…' : '重新生成' }}
           </button>
-          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="!fullReport" @click="exportMarkdown">
+          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="!fullReport"
+            @click="exportMarkdown">
             <DocumentDuplicateIcon class="h-4 w-4" />
             导出 Markdown
           </button>
-          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="!fullReport" @click="exportHtml">
+          <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="!fullReport"
+            @click="exportHtml">
             <ArrowDownTrayIcon class="h-4 w-4" />
             导出 HTML
           </button>
         </div>
       </div>
 
-      <div v-if="fullReportState.error" class="rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-sm text-danger">
+      <div v-if="fullReportState.error"
+        class="rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-sm text-danger">
         {{ fullReportState.error }}
       </div>
     </section>
@@ -99,9 +99,24 @@
           </div>
           <div class="space-y-2 text-sm text-secondary">
             <p>{{ fullReport.rangeText || reportRange }}</p>
-            <p>图表位点：{{ chartCatalog.length }} 个</p>
-            <p>引用索引：{{ citationCount }} 条</p>
+            <p v-if="sceneLabel">场景：{{ sceneLabel }}</p>
+            <p v-if="templateName">模板：{{ templateName }}</p>
+            <p>插图资源：{{ assetsCount }} 个</p>
             <p v-if="fullReportState.lastLoaded">读取时间：{{ fullReportState.lastLoaded }}</p>
+          </div>
+        </section>
+
+        <section class="card-surface space-y-4 p-5">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">运行来源</p>
+            <p class="mt-2 text-sm text-secondary">这里显示这份文稿对应的任务线索，方便你确认是否经过人工介入或回退重写。</p>
+          </div>
+          <div class="space-y-2 text-sm text-secondary">
+            <p>线程：{{ provenance.threadId }}</p>
+            <p>正式文稿：{{ provenance.fullMarkdownStatus }}</p>
+            <p>介入记录：{{ provenance.approvalStatus }}</p>
+            <p>回退重写：{{ provenance.fallbackText }}</p>
+            <p>放行判断：{{ provenance.utilityDecision }}</p>
           </div>
         </section>
 
@@ -110,39 +125,23 @@
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">章节导航</p>
           </div>
           <nav class="space-y-1.5">
-            <a
-              v-for="item in tocItems"
-              :key="item.id"
-              :href="`#${item.id}`"
-              class="block rounded-xl px-3 py-2 text-sm transition hover:bg-brand-soft hover:text-brand-700"
-              :class="item.kind === 'appendix' ? 'font-semibold text-secondary' : 'font-semibold text-primary'"
-            >
-              {{ item.label }}
+            <a v-for="item in tocItems" :key="item.id" :href="`#${item.id}`"
+              class="block rounded-xl px-3 py-2 text-sm font-semibold text-primary transition hover:bg-brand-soft hover:text-brand-700">
+              {{ item.text }}
             </a>
+            <p v-if="!tocItems.length" class="rounded-2xl bg-base-soft px-3 py-3 text-sm text-secondary">正文还没有可用目录。</p>
           </nav>
-        </section>
-
-        <section v-if="hero.highlights?.length" class="card-surface space-y-3 p-5">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">核心发现</p>
-          </div>
-          <article v-for="item in hero.highlights" :key="item" class="rounded-3xl border border-soft bg-surface-muted/40 p-4">
-            <p class="text-sm leading-7 text-primary">{{ item }}</p>
-          </article>
         </section>
       </aside>
 
-      <article class="card-surface space-y-6 overflow-hidden p-6">
+      <article class="card-surface overflow-hidden p-6">
         <div class="border-b border-soft pb-5">
-          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">结构化文稿预览</p>
-          <p class="mt-2 text-sm text-secondary">当前预览、结构化结果页和导出 HTML 都来自同一份 `report_document`，不再走独立的 markdown 模板。</p>
+          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">正式文稿</p>
+          <p class="mt-2 text-sm text-secondary">当前页面和导出 HTML 使用同一份 Markdown 成品渲染，结构化底稿不在这里展开。</p>
         </div>
 
-        <ReportDocumentRenderer
-          :document="reportDocument"
-          :chart-catalog="chartCatalog"
-          :report-data="reportBundle"
-        />
+        <div v-if="reportHtml" ref="markdownRoot" class="ai-report-markdown mt-6" v-html="reportHtml" />
+        <div v-else class="mt-6 rounded-3xl bg-base-soft px-4 py-6 text-sm text-secondary">当前没有可展示的正式文稿。</div>
       </article>
     </section>
 
@@ -153,7 +152,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowDownTrayIcon,
@@ -164,9 +163,10 @@ import {
   SparklesIcon
 } from '@heroicons/vue/24/outline'
 import AppSelect from '../../components/AppSelect.vue'
-import ReportDocumentRenderer from '../../components/report/ReportDocumentRenderer.vue'
 import { useReportGeneration } from '../../composables/useReportGeneration'
-import { buildStandaloneReportHtml } from '../../utils/reportDocumentHtml'
+import { buildStandaloneAiReportHtml } from '../../utils/aiReportHtml'
+import { exportableAiMarkdown, extractMarkdownToc, renderAiReportMarkdown } from '../../utils/aiReportMarkdown'
+import { buildFigureContractMap, destroyFigurePlaceholders, hydrateFigurePlaceholders } from '../../utils/reportFigures'
 
 const router = useRouter()
 
@@ -180,6 +180,7 @@ const {
   selectedHistoryId,
   fullReportState,
   fullReportData,
+  taskState,
   loadTopics,
   loadHistory,
   loadFullReport,
@@ -188,32 +189,37 @@ const {
 } = useReportGeneration()
 
 const fullReport = computed(() => (fullReportData.value && typeof fullReportData.value === 'object' ? fullReportData.value : null))
-const reportBundle = computed(() => (fullReport.value?.report_data && typeof fullReport.value.report_data === 'object' ? fullReport.value.report_data : fullReport.value || {}))
-const reportDocument = computed(() => (fullReport.value?.report_document && typeof fullReport.value.report_document === 'object' ? fullReport.value.report_document : {}))
-const chartCatalog = computed(() => (Array.isArray(fullReport.value?.chart_catalog) ? fullReport.value.chart_catalog : []))
-const hero = computed(() => (reportDocument.value?.hero && typeof reportDocument.value.hero === 'object' ? reportDocument.value.hero : {}))
-const task = computed(() => (reportBundle.value?.task && typeof reportBundle.value.task === 'object' ? reportBundle.value.task : {}))
-
-const reportTitle = computed(() => fullReport.value?.title || hero.value.title || task.value.topic_label || task.value.topic_identifier || 'AI 完整报告')
-const reportSubtitle = computed(() => fullReport.value?.subtitle || hero.value.subtitle || '统一结构化报告阅读视图')
-const reportRange = computed(() => `${task.value.start || '--'} → ${task.value.end || '--'}`)
-const citationCount = computed(() => (Array.isArray(reportBundle.value?.citations) ? reportBundle.value.citations.length : 0))
-
-const tocItems = computed(() => {
-  const sections = Array.isArray(reportDocument.value?.sections) ? reportDocument.value.sections : []
-  const items = sections.map((section) => ({
-    id: section.section_id,
-    label: section.kicker || section.title || section.section_id,
-    kind: 'section'
-  }))
-  if (reportDocument.value?.appendix?.blocks?.length) {
-    items.push({
-      id: 'report-appendix',
-      label: reportDocument.value.appendix.title || '附录',
-      kind: 'appendix'
-    })
+const meta = computed(() => (fullReport.value?.meta && typeof fullReport.value.meta === 'object' ? fullReport.value.meta : {}))
+const markdown = computed(() => String(fullReport.value?.markdown || '').trim())
+const reportIr = computed(() => (fullReport.value?.report_ir && typeof fullReport.value.report_ir === 'object' ? fullReport.value.report_ir : {}))
+const artifactManifest = computed(() => (fullReport.value?.artifact_manifest && typeof fullReport.value.artifact_manifest === 'object' ? fullReport.value.artifact_manifest : {}))
+const reportTitle = computed(() => fullReport.value?.title || '正式文稿')
+const reportSubtitle = computed(() => fullReport.value?.subtitle || '正式 Markdown 报告')
+const reportRange = computed(() => fullReport.value?.rangeText || '-- → --')
+const sceneLabel = computed(() => String(meta.value.scene_label || '').trim())
+const templateName = computed(() => String(meta.value.template_name || '').trim())
+const assetsCount = computed(() => (Array.isArray(fullReport.value?.assets) ? fullReport.value.assets.length : 0))
+const reportHtml = computed(() => renderAiReportMarkdown(markdown.value, {
+  assets: fullReport.value?.assets || [],
+  reportIr: reportIr.value,
+  artifactManifest: artifactManifest.value
+}))
+const tocItems = computed(() => extractMarkdownToc(markdown.value))
+const figureContracts = computed(() => buildFigureContractMap(reportIr.value, artifactManifest.value))
+const markdownRoot = ref(null)
+const provenance = computed(() => {
+  const manifest = taskState.artifactManifest && typeof taskState.artifactManifest === 'object' ? taskState.artifactManifest : {}
+  const approvalStatus = manifest.approval_records?.status === 'ready'
+    ? '已记录'
+    : (Array.isArray(taskState.approvals) && taskState.approvals.some((item) => String(item?.status || '').trim() !== 'resolved') ? '待处理' : '未触发')
+  const fallbackCount = Number(taskState.reportIrSummary?.fallback_trace_count || taskState.structuredResultDigest?.fallback_trace_count || 0)
+  return {
+    threadId: taskState.threadId || '未绑定',
+    fullMarkdownStatus: manifest.full_markdown?.status === 'ready' ? '已生成' : '未就绪',
+    approvalStatus,
+    fallbackText: fallbackCount > 0 ? `已回退 ${fallbackCount} 次` : '未触发',
+    utilityDecision: String(taskState.reportIrSummary?.utility_assessment?.decision || taskState.structuredResultDigest?.utility_assessment?.decision || 'pending').trim() || 'pending'
   }
-  return items
 })
 
 const topicSelectOptions = computed(() => topicOptions.value.map((option) => ({ value: option, label: option })))
@@ -247,17 +253,31 @@ const goToRunPage = () => router.push({ name: 'report-generation-run' })
 
 const exportMarkdown = () => {
   if (!fullReport.value) return
-  const markdown = String(fullReport.value.markdown || '').trim()
-  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+  const exportText = exportableAiMarkdown(markdown.value, { assets: fullReport.value.assets || [] })
+  const blob = new Blob([exportText], { type: 'text/markdown;charset=utf-8' })
   downloadBlob(blob, `${reportTitle.value || 'ai-report'}.md`)
 }
 
 const exportHtml = () => {
   if (!fullReport.value) return
-  const html = buildStandaloneReportHtml(fullReport.value, { lastLoaded: fullReportState.lastLoaded })
+  const html = buildStandaloneAiReportHtml(fullReport.value, { lastLoaded: fullReportState.lastLoaded })
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   downloadBlob(blob, `${reportTitle.value || 'ai-report'}.html`)
 }
+
+async function hydrateMarkdownFigures() {
+  await nextTick()
+  destroyFigurePlaceholders(markdownRoot.value)
+  await hydrateFigurePlaceholders(markdownRoot.value, figureContracts.value)
+}
+
+watch([reportHtml, figureContracts], () => {
+  hydrateMarkdownFigures()
+}, { flush: 'post', immediate: true })
+
+onBeforeUnmount(() => {
+  destroyFigurePlaceholders(markdownRoot.value)
+})
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob)
@@ -270,3 +290,102 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url)
 }
 </script>
+
+<style scoped>
+.ai-report-markdown {
+  color: var(--color-text-primary);
+}
+
+.ai-report-markdown :deep(.ai-report-heading) {
+  scroll-margin-top: 96px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.ai-report-markdown :deep(.ai-report-heading-1) {
+  margin: 0 0 1.5rem;
+  font-size: clamp(1.9rem, 1.4rem + 1.4vw, 2.6rem);
+  line-height: 1.12;
+}
+
+.ai-report-markdown :deep(.ai-report-heading-2) {
+  margin: 2.2rem 0 1rem;
+  font-size: clamp(1.35rem, 1.1rem + 0.8vw, 1.8rem);
+  line-height: 1.22;
+}
+
+.ai-report-markdown :deep(.ai-report-heading-3) {
+  margin: 1.5rem 0 0.7rem;
+  font-size: 1.1rem;
+  line-height: 1.35;
+}
+
+.ai-report-markdown :deep(p),
+.ai-report-markdown :deep(li),
+.ai-report-markdown :deep(blockquote) {
+  line-height: 1.9;
+  color: var(--color-text-primary);
+}
+
+.ai-report-markdown :deep(p),
+.ai-report-markdown :deep(ul),
+.ai-report-markdown :deep(ol),
+.ai-report-markdown :deep(table),
+.ai-report-markdown :deep(blockquote) {
+  margin: 0 0 1rem;
+}
+
+.ai-report-markdown :deep(ul),
+.ai-report-markdown :deep(ol) {
+  padding-left: 1.35rem;
+}
+
+.ai-report-markdown :deep(blockquote) {
+  border-left: 4px solid rgba(20, 93, 160, 0.26);
+  background: rgba(232, 241, 250, 0.52);
+  border-radius: 0 1rem 1rem 0;
+  padding: 0.9rem 1rem;
+  color: var(--color-text-secondary);
+}
+
+.ai-report-markdown :deep(table) {
+  width: 100%;
+  overflow: hidden;
+  border-collapse: collapse;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 1rem;
+}
+
+.ai-report-markdown :deep(th),
+.ai-report-markdown :deep(td) {
+  padding: 0.8rem 0.9rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.ai-report-markdown :deep(thead th) {
+  color: var(--color-text-secondary);
+  background: var(--color-surface-muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ai-report-markdown :deep(img) {
+  display: block;
+  max-width: 100%;
+  margin: 1.25rem auto;
+  border-radius: 1.25rem;
+  border: 1px solid var(--color-border-soft);
+  background: #fff;
+}
+
+.ai-report-markdown :deep(code) {
+  padding: 0.12rem 0.42rem;
+  border-radius: 0.5rem;
+  background: rgba(15, 23, 42, 0.06);
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.84em;
+}
+</style>

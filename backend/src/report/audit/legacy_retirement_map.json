@@ -1,0 +1,82 @@
+{
+  "version": "1.0",
+  "retirement_targets": [
+    {
+      "module": "full_report_service",
+      "residual_area": "legacy analysis and full-report helper graph",
+      "exclusive_method_capability": "none",
+      "still_imported": false,
+      "implementation_removed": true,
+      "mainline_callers": [],
+      "cleanup_notes": [
+        "legacy 生成逻辑已从仓库主链删除",
+        "仅保留 retirement map 与 guard test 作为删除记录"
+      ],
+      "required_guard_tests": [
+        "backend.tests.test_report_contract_guards.ReportContractGuardTests.test_api_and_worker_do_not_reimport_full_report_service_entrypoint",
+        "backend.tests.test_report_contract_guards.ReportContractGuardTests.test_removed_legacy_services_are_recorded_in_retirement_map"
+      ],
+      "replacement_owner": [
+        "AgendaFrameMap",
+        "ConflictMap",
+        "MechanismSummary",
+        "UtilityAssessment",
+        "deep_report compiler passes"
+      ],
+      "delete_order": 1,
+      "blocking_smoke": [],
+      "cleanup_ready": true
+    },
+    {
+      "module": "structured_service",
+      "residual_area": "legacy structured payload generation",
+      "exclusive_method_capability": "none",
+      "still_imported": false,
+      "implementation_removed": true,
+      "mainline_callers": [],
+      "cleanup_notes": [
+        "legacy 结构化实现已从仓库主链删除",
+        "结构化结果与 digest 由 deep_report 主链承担"
+      ],
+      "required_guard_tests": [
+        "backend.tests.test_full_report_pipeline.FullReportPipelineTests.test_worker_generates_markdown_full_report_after_structured_payload"
+      ],
+      "replacement_owner": [
+        "deep_report/service.py",
+        "ReportIR",
+        "ArtifactManifest"
+      ],
+      "delete_order": 2,
+      "blocking_smoke": [],
+      "cleanup_ready": true
+    },
+    {
+      "module": "runtime",
+      "residual_area": "bootstrap compatibility path",
+      "exclusive_method_capability": "none",
+      "still_imported": false,
+      "implementation_removed": true,
+      "mainline_callers": [],
+      "cleanup_notes": [
+        "主链已改为直接依赖 runtime_bootstrap，runtime.py compat bridge 已从仓库删除",
+        "删除后继续由 runtime smoke 和 contract guard 保护 resume/failure path 不回流到旧入口"
+      ],
+      "required_guard_tests": [
+        "backend.tests.test_report_contract_guards.ReportContractGuardTests.test_runtime_compat_bridge_is_removed_and_cannot_reenter_mainline",
+        "backend.tests.test_report_runtime_smoke.ReportRuntimeSmokeTests.test_resume_after_failure_smoke_keeps_thread_and_lineage",
+        "backend.tests.test_full_report_pipeline.FullReportPipelineTests.test_worker_generates_markdown_full_report_after_structured_payload"
+      ],
+      "replacement_owner": [
+        "deep_report runtime",
+        "typed interrupt surface",
+        "task/thread lineage"
+      ],
+      "delete_order": 3,
+      "blocking_smoke": [
+        "Resume After Failure Path",
+        "Happy Path E2E"
+      ],
+      "cleanup_ready": true
+    }
+  ]
+}

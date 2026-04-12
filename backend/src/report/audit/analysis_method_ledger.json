@@ -1,0 +1,107 @@
+{
+  "version": "1.0",
+  "methods": [
+    {
+      "artifact_id": "agenda_frame_map",
+      "method_line": "issue-attribute-frame",
+      "theory_variables": [
+        "issue_salience",
+        "attribute_salience",
+        "issue_attribute_edges",
+        "frame.problem",
+        "frame.cause",
+        "frame.judgment",
+        "frame.remedy",
+        "frame_shift",
+        "counter_frame"
+      ],
+      "graph_shape": [
+        "router",
+        "issue_attribute_extraction",
+        "issue_attribute_graph",
+        "frame_articulation",
+        "frame_conflict_synthesis"
+      ],
+      "theory_sources": [
+        "agenda-setting / network agenda-setting",
+        "computational framing",
+        "frame articulation"
+      ]
+    },
+    {
+      "artifact_id": "conflict_map",
+      "method_line": "stance-target-conflict",
+      "theory_variables": [
+        "target_object",
+        "argument_unit",
+        "support_edge",
+        "attack_edge",
+        "conversation_position",
+        "resolution_status"
+      ],
+      "graph_shape": [
+        "evidence_normalization",
+        "target_binding",
+        "argument_extraction",
+        "support_attack_recognition",
+        "resolution_synthesis"
+      ],
+      "theory_sources": [
+        "target-specific stance",
+        "argument-aware conflict synthesis",
+        "explainable stance detection"
+      ]
+    },
+    {
+      "artifact_id": "mechanism_summary",
+      "method_line": "diffusion-bridge-trigger",
+      "theory_variables": [
+        "trigger_event",
+        "amplification_path",
+        "bridge_node",
+        "phase_shift",
+        "cause_candidate",
+        "cross_platform_transfer",
+        "narrative_carrier",
+        "refutation_lag"
+      ],
+      "graph_shape": [
+        "time_slicing",
+        "bridge_detection",
+        "trigger_extraction",
+        "event_causality_candidates",
+        "mechanism_synthesis"
+      ],
+      "theory_sources": [
+        "narrative diffusion",
+        "event causality extraction",
+        "computational social communication"
+      ]
+    },
+    {
+      "artifact_id": "utility_assessment",
+      "method_line": "decision-utility",
+      "theory_variables": [
+        "object_scope",
+        "time_window",
+        "primary_contradiction",
+        "mechanism_explanation",
+        "issue_frame_context",
+        "recommendation_preconditions",
+        "recommendation_side_effects",
+        "uncertainty_boundary"
+      ],
+      "graph_shape": [
+        "utility_assessment",
+        "fallback_trace",
+        "utility_improvement_trace",
+        "semantic_review_interrupt"
+      ],
+      "theory_sources": [
+        "decision utility",
+        "risk conditionality",
+        "actionability assessment"
+      ]
+    }
+  ]
+}

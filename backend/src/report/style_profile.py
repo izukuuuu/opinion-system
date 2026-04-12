@@ -17,7 +17,7 @@ STYLE_PROFILES: Dict[str, Dict[str, Any]] = {
         "fallback_sections": [
             {"id": "summary", "title": "摘要", "goal": "概括核心判断与主要边界。"},
             {"id": "analysis", "title": "分析正文", "goal": "展开机制、结构与阶段变化。"},
-            {"id": "risk", "title": "风险与边界", "goal": "说明风险项、证据边界与待核验点。"},
+            {"id": "risk", "title": "风险判断", "goal": "说明风险项及其现实影响。"},
             {"id": "action", "title": "建议与条件", "goal": "提出动作建议并交代执行条件。"},
         ],
         "asset_labels": {

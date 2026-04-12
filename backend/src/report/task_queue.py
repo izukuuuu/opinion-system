@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from filelock import FileLock
 
+from .deep_report.runtime_contract import RUNTIME_CONTRACT_VERSION
 from ..utils.setting.paths import get_data_root
 
 LOGGER = logging.getLogger(__name__)
@@ -39,11 +40,36 @@ AGENT_LABELS = {
     "layout_planner": "Layout Planner",
     "budget_planner": "Budget Planner",
     "report_editor": "Report Editor",
+    "report_coordinator": "Report Coordinator",
+    "archive_evidence_organizer": "Archive Evidence Organizer",
+    "bertopic_evolution_analyst": "BERTopic Evolution Analyst",
+    "exploration_subgraph": "Exploration Subgraph",
+    "compile_subgraph": "Compile Subgraph",
+    "load_context": "Load Context",
+    "planner_agent": "Planner Agent",
+    "existing_analysis_workers_subgraph": "Analysis Workers",
+    "ir_merge": "IR Merge",
+    "trace_binder": "Trace Binder",
+    "section_realizer_agent": "Section Realizer",
+    "section_realizer_worker": "Section Realizer Worker",
+    "section_realizer_finalize": "Section Realizer Finalize",
+    "unit_validator": "Unit Validator",
+    "repair_patch_planner": "Repair Patch Planner",
+    "repairer_agent": "Repairer",
+    "repair_worker": "Repair Worker",
+    "repair_finalize": "Repair Finalize",
+    "compile_blocked": "Compile Gate",
+    "markdown_compiler": "Markdown Compiler",
+    "artifact_renderer": "Artifact Renderer",
 }
 PHASE_LABELS = {
     "prepare": "准备数据",
     "analyze": "基础分析",
     "explain": "总体解读",
+    "planning": "任务规划",
+    "exploration": "本地探索",
+    "structure": "结构综合",
+    "compile": "正式编译",
     "interpret": "综合研判",
     "write": "报告编排",
     "review": "润色定稿",
@@ -90,6 +116,7 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
             "start": start,
             "end": end,
             "mode": mode,
+            "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
             "project": str(payload.get("project") or "").strip(),
             "dataset_id": str(payload.get("dataset_id") or "").strip(),
             "aliases": [
@@ -103,8 +130,11 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
         "approvals": [],
         "structured_result_digest": {},
         "structured_result_path": "",
+        "report_ir_summary": {},
+        "artifact_manifest": {},
         "run_state": {
             "thread_id": thread_id,
+            "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
             "status": "queued",
             "phase": "prepare",
             "message": "等待报告 worker 接单。",
@@ -121,10 +151,8 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
         "last_diagnostic": {},
         "trust": _initial_trust(),
         "artifacts": {
-            "report_ready": False,
             "report_cache_path": "",
             "report_title": "",
-            "full_report_ready": False,
             "full_report_cache_path": "",
             "full_report_title": "",
             "view": {
@@ -140,6 +168,7 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": now,
         "started_at": "",
         "finished_at": "",
+        "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
     }
     _save_task(task)
     append_event(
@@ -393,6 +422,7 @@ def write_worker_status(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def mark_task_started(task_id: str, *, phase: str, percentage: int, message: str) -> Dict[str, Any]:
     def _mutate(task: Dict[str, Any]) -> None:
+        current_run_state = task.get("run_state") if isinstance(task.get("run_state"), dict) else {}
         if str(task.get("status") or "") == "queued":
             task["status"] = "running"
             task["started_at"] = task.get("started_at") or _utc_now()
@@ -404,6 +434,7 @@ def mark_task_started(task_id: str, *, phase: str, percentage: int, message: str
         task["error"] = ""
         task["worker_pid"] = _safe_int(task.get("worker_pid"), 0) or os.getpid()
         task["run_state"] = {
+            **current_run_state,
             "thread_id": str(task.get("thread_id") or "").strip(),
             "status": "running",
             "phase": phase,
@@ -431,6 +462,7 @@ def mark_task_progress(task_id: str, *, phase: str, percentage: int, message: st
                 "message": message,
                 "worker_pid": _safe_int(task.get("worker_pid"), 0) or os.getpid(),
                 "run_state": {
+                    **(task.get("run_state") if isinstance(task.get("run_state"), dict) else {}),
                     "thread_id": str(task.get("thread_id") or "").strip(),
                     "status": "running",
                     "phase": phase,
@@ -567,10 +599,8 @@ def mark_artifact_ready(task_id: str, *, message: str, payload: Dict[str, Any]) 
     def _mutate(task: Dict[str, Any]) -> None:
         artifacts = task.setdefault("artifacts", {})
         artifacts.update(payload or {})
-        if payload.get("report_cache_path"):
-            artifacts["report_ready"] = True
-        if payload.get("full_report_cache_path"):
-            artifacts["full_report_ready"] = True
+        if isinstance(payload.get("artifact_manifest"), dict):
+            task["artifact_manifest"] = payload.get("artifact_manifest")
 
     return _mutate_task_with_event(
         task_id,
@@ -685,6 +715,11 @@ def set_structured_result_digest(task_id: str, *, digest: Dict[str, Any], path: 
             {
                 "structured_result_digest": digest if isinstance(digest, dict) else {},
                 "structured_result_path": str(path or "").strip(),
+                "report_ir_summary": (
+                    digest.get("report_ir_summary")
+                    if isinstance(digest, dict) and isinstance(digest.get("report_ir_summary"), dict)
+                    else task.get("report_ir_summary") if isinstance(task.get("report_ir_summary"), dict) else {}
+                ),
             }
         ),
         event_type="artifact.updated",
@@ -694,6 +729,11 @@ def set_structured_result_digest(task_id: str, *, digest: Dict[str, Any], path: 
         payload={
             "structured_result_digest": digest if isinstance(digest, dict) else {},
             "structured_result_path": str(path or "").strip(),
+            "report_ir_summary": (
+                digest.get("report_ir_summary")
+                if isinstance(digest, dict) and isinstance(digest.get("report_ir_summary"), dict)
+                else {}
+            ),
         },
     )
 
@@ -713,11 +753,13 @@ def update_task_trust(task_id: str, *, trust: Dict[str, Any], phase: str = "writ
 
 def mark_approval_required(task_id: str, *, approvals: List[Dict[str, Any]], phase: str, message: str) -> Dict[str, Any]:
     def _mutate(task: Dict[str, Any]) -> None:
+        current_run_state = task.get("run_state") if isinstance(task.get("run_state"), dict) else {}
         task["approvals"] = approvals
         task["status"] = "waiting_approval"
         task["phase"] = phase
         task["message"] = message
         task["run_state"] = {
+            **current_run_state,
             "thread_id": str(task.get("thread_id") or "").strip(),
             "status": "waiting_approval",
             "phase": phase,
@@ -774,7 +816,9 @@ def resolve_approval(
             task["status"] = "queued"
             task["message"] = "审批已处理，等待 worker 恢复执行。"
             task["worker_pid"] = 0
+            current_run_state = task.get("run_state") if isinstance(task.get("run_state"), dict) else {}
             task["run_state"] = {
+                **current_run_state,
                 "thread_id": str(task.get("thread_id") or "").strip(),
                 "status": "queued",
                 "phase": str(task.get("phase") or "").strip() or "persist",
@@ -867,6 +911,14 @@ def _mutate_task_with_event(
         task = _load_json(state_path, {})
         if not isinstance(task, dict) or not task.get("id"):
             raise LookupError("未找到指定的报告任务")
+        runtime_payload = payload or {}
+        dedupe_key = str(runtime_payload.get("event_key") or "").strip() if isinstance(runtime_payload, dict) else ""
+        if dedupe_key:
+            seen_keys = task.get("runtime_event_keys") if isinstance(task.get("runtime_event_keys"), list) else []
+            normalized_seen = [str(item).strip() for item in seen_keys if str(item or "").strip()]
+            if dedupe_key in normalized_seen:
+                return attach_recent_events(task, limit=80)
+            task["runtime_event_keys"] = [*normalized_seen[-63:], dedupe_key]
         mutate(task)
         now = _utc_now()
         _apply_runtime_observability(
@@ -876,7 +928,7 @@ def _mutate_task_with_event(
             agent=agent,
             title=title,
             message=message,
-            payload=payload or {},
+            payload=runtime_payload,
             now=now,
         )
         event_id = _safe_int(task.get("event_seq"), 0) + 1
@@ -893,7 +945,7 @@ def _mutate_task_with_event(
             "title": title,
             "message": message,
             "delta": delta,
-            "payload": payload or {},
+            "payload": runtime_payload,
         }
         _atomic_write_json(state_path, task)
         _append_jsonl_line(event_path, event)
@@ -912,13 +964,34 @@ def _apply_runtime_observability(
     now: str,
 ) -> None:
     text = str(message or title or "").strip()
+    runtime_diagnostics = payload.get("runtime_diagnostics") if isinstance(payload.get("runtime_diagnostics"), dict) else {}
     diagnostic_phase = str(payload.get("failed_phase") or "").strip() if isinstance(payload, dict) else ""
     diagnostic_actor = str(payload.get("failed_actor") or "").strip() if isinstance(payload, dict) else ""
+    graph_node = str(payload.get("current_node") or "").strip() if isinstance(payload, dict) else ""
     current_actor = str(task.get("current_actor") or "").strip()
     if event_type == "task.failed":
         current_actor = diagnostic_actor or current_actor or "report_coordinator"
-    elif event_type in {"agent.started", "subagent.started", "agent.memo", "tool.called", "tool.result", "subagent.completed"} and agent:
-        current_actor = agent
+    elif event_type in {
+        "agent.started",
+        "subagent.started",
+        "agent.memo",
+        "tool.called",
+        "tool.result",
+        "subagent.completed",
+        "graph.node.started",
+        "graph.node.completed",
+        "graph.node.failed",
+        "validation.failed",
+        "repair.loop.started",
+        "repair.loop.completed",
+        "compile.blocked",
+        "compile.started",
+        "compile.completed",
+        "interrupt.human_review",
+    }:
+        current_actor = graph_node or agent or current_actor
+    elif event_type.startswith("exploration."):
+        current_actor = agent or current_actor or "exploration_subgraph"
     elif event_type.startswith("approval."):
         current_actor = "approval"
     elif event_type.startswith("phase.") and not current_actor:
@@ -928,7 +1001,7 @@ def _apply_runtime_observability(
     if text:
         task["current_operation"] = text
     orchestrator_phase = diagnostic_phase or phase or str(task.get("phase") or "").strip()
-    if event_type == "task.failed" or agent == "report_coordinator" or event_type.startswith("phase.") or event_type.startswith("approval."):
+    if event_type == "task.failed" or agent == "report_coordinator" or event_type.startswith("phase.") or event_type.startswith("approval.") or event_type.startswith("graph.") or event_type.startswith("exploration.") or event_type in {"validation.failed", "repair.loop.started", "repair.loop.completed", "compile.blocked", "compile.started", "compile.completed", "interrupt.human_review"}:
         task["orchestrator_state"] = {
             "agent": "report_coordinator",
             "status": str(task.get("status") or "").strip() or "running",
@@ -936,7 +1009,25 @@ def _apply_runtime_observability(
             "message": text or str(task.get("message") or "").strip(),
             "updated_at": now,
         }
-    if event_type in {"agent.memo", "task.failed"} and isinstance(payload, dict) and payload:
+        if runtime_diagnostics:
+            task["orchestrator_state"]["runtime_diagnostics"] = runtime_diagnostics
+    if runtime_diagnostics:
+        current = task.get("run_state") if isinstance(task.get("run_state"), dict) else {}
+        task["run_state"] = {
+            **current,
+            **runtime_diagnostics,
+            "thread_id": str(task.get("thread_id") or runtime_diagnostics.get("thread_id") or "").strip(),
+            "status": str(task.get("status") or current.get("status") or "running").strip() or "running",
+            "phase": orchestrator_phase or str(task.get("phase") or current.get("phase") or "").strip(),
+            "message": text or str(task.get("message") or current.get("message") or "").strip(),
+        }
+    if event_type in {
+        "agent.memo",
+        "task.failed",
+        "validation.failed",
+        "compile.blocked",
+        "interrupt.human_review",
+    } and isinstance(payload, dict) and payload:
         task["last_diagnostic"] = payload
 
 
@@ -949,6 +1040,7 @@ def _apply_terminal_state(
     error: str,
     payload: Optional[Dict[str, Any]] = None,
 ) -> None:
+    current_run_state = task.get("run_state") if isinstance(task.get("run_state"), dict) else {}
     task["status"] = status
     task["phase"] = phase
     task["percentage"] = 100 if status != "failed" else max(_safe_int(task.get("percentage"), 0), 1)
@@ -958,6 +1050,7 @@ def _apply_terminal_state(
     task["child_pid"] = 0
     task["finished_at"] = _utc_now()
     task["run_state"] = {
+        **current_run_state,
         "thread_id": str(task.get("thread_id") or "").strip(),
         "status": status,
         "phase": phase,

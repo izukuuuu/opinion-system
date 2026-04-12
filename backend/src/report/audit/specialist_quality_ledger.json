@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "specialists": [
+    {
+      "specialist_id": "agenda_frame_builder",
+      "primary_artifact": "AgendaFrameMap",
+      "quality_axes": ["issue salience", "attribute salience", "frame articulation", "counter-frame detection", "frame shift stability"],
+      "common_failures": ["issue 与 attribute 混写", "problem-cause-remedy 不完整", "counter-frame 被吞掉"]
+    },
+    {
+      "specialist_id": "claim_actor_conflict",
+      "primary_artifact": "ConflictMap",
+      "quality_axes": ["claim clustering", "target binding", "argument extraction", "conflict edge typing", "resolution confidence"],
+      "common_failures": ["主体错配", "target 绑定漂移", "support/attack relation 混淆", "时间错位未显式标注"]
+    },
+    {
+      "specialist_id": "propagation_analyst",
+      "primary_artifact": "MechanismSummary",
+      "quality_axes": ["amplification path", "phase shift", "bridge node", "trigger event", "cause candidate"],
+      "common_failures": ["路径退化成摘要", "桥接节点不稳定", "因果候选过弱", "阶段转折解释过薄"]
+    },
+    {
+      "specialist_id": "decision_utility_judge",
+      "primary_artifact": "UtilityAssessment",
+      "quality_axes": ["decision completeness", "fallback trace quality", "improvement trace quality", "review thresholding"],
+      "common_failures": ["文风完整但决策结构不足", "回退原因不够细", "回退改善幅度不可解释", "review 触发阈值过粗"]
+    }
+  ]
+}

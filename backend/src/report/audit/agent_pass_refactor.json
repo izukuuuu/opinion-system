@@ -1,0 +1,135 @@
+{
+  "version": "1.0",
+  "keep_as_agent": [
+    {
+      "ability": "planner/router",
+      "current_module": "deep_report.service",
+      "target_layer": "runtime",
+      "target_shape": "agent",
+      "reason": "需要根据任务范围、缺口和运行状态决定下一步 handoff"
+    },
+    {
+      "ability": "evidence retriever",
+      "current_module": "deep_report.payloads + deep_report.service",
+      "target_layer": "evidence",
+      "target_shape": "agent",
+      "reason": "涉及开放式检索、coverage 判断和召回策略选择"
+    },
+    {
+      "ability": "claim resolver",
+      "current_module": "deep_report.payloads / full_report_service claim judge logic",
+      "target_layer": "semantic",
+      "target_shape": "agent",
+      "reason": "需要把多源证据压缩成可核验 claim，并处理支持/待核验边界"
+    },
+    {
+      "ability": "conflict arbiter",
+      "current_module": "deep_report actor/conflict pipeline + full_report_service subject/claim matrix logic",
+      "target_layer": "semantic",
+      "target_shape": "agent",
+      "reason": "主体别名消歧、立场冲突裁决和跨源归并仍需要上下文判断"
+    },
+    {
+      "ability": "risk mapper",
+      "current_module": "deep_report risk signals + full_report_service risk mapper",
+      "target_layer": "semantic",
+      "target_shape": "agent",
+      "reason": "风险项需要从已冻结 claim 推导，涉及跨 claim 的语义判断"
+    }
+  ],
+  "convert_to_pass": [
+    {
+      "ability": "scene select",
+      "current_module": "full_report_service",
+      "target_layer": "compiler",
+      "target_shape": "pass",
+      "reason": "输入输出稳定，应由 policy variables 和 scene profile 决定"
+    },
+    {
+      "ability": "layout / budget planning",
+      "current_module": "full_report_service",
+      "target_layer": "compiler",
+      "target_shape": "pass",
+      "reason": "版式与篇幅规划应是 deterministic compiler policy，而非事实推理"
+    },
+    {
+      "ability": "writer context assembly",
+      "current_module": "full_report_service / deep_report.presenter",
+      "target_layer": "compiler",
+      "target_shape": "pass",
+      "reason": "该步骤是稳定的数据整形，不需要开放式检索"
+    },
+    {
+      "ability": "structured projection rendering",
+      "current_module": "deep_report.document",
+      "target_layer": "view",
+      "target_shape": "pass",
+      "reason": "章节与图表位点是从 ReportIR 派生的视图投影"
+    },
+    {
+      "ability": "markdown compiler",
+      "current_module": "deep_report.presenter / compiler",
+      "target_layer": "compiler",
+      "target_shape": "pass",
+      "reason": "正式文稿应从 ReportIR 编译得到，不能反向承担事实生成"
+    },
+    {
+      "ability": "fact/style critic",
+      "current_module": "full_report_service",
+      "target_layer": "compiler",
+      "target_shape": "pass",
+      "reason": "critic 输入输出稳定，应转为 typed contract 而不是 graph mystery node"
+    },
+    {
+      "ability": "sanitize/finalize",
+      "current_module": "full_report_service / deep_report.compiler",
+      "target_layer": "compiler",
+      "target_shape": "pass",
+      "reason": "清洗与边界收口是 deterministic post-pass"
+    },
+    {
+      "ability": "digest / report summary build",
+      "current_module": "presenter / worker / api",
+      "target_layer": "view",
+      "target_shape": "pass",
+      "reason": "摘要对象只服务任务与页面投影"
+    },
+    {
+      "ability": "task / artifact payload shaping",
+      "current_module": "api / task_queue / worker",
+      "target_layer": "view",
+      "target_shape": "pass",
+      "reason": "task snapshot 与 artifact manifest 是固定 contract"
+    }
+  ],
+  "freeze_as_compat": [
+    {
+      "ability": "legacy structured report generation",
+      "current_module": "structured_service",
+      "target_layer": "compat",
+      "target_shape": "freeze",
+      "reason": "保留兼容读取，不再生成主事实对象"
+    },
+    {
+      "ability": "legacy data_report export flow",
+      "current_module": "data_report",
+      "target_layer": "compat",
+      "target_shape": "freeze",
+      "reason": "仅作离线导出兼容，等待 IR 驱动的导出能力替代"
+    },
+    {
+      "ability": "analyze/explain bootstrap fallback",
+      "current_module": "runtime",
+      "target_layer": "compat",
+      "target_shape": "freeze",
+      "reason": "短期仍提供前置兜底，但最终应并入 task/thread artifact lineage"
+    },
+    {
+      "ability": "full_report_service entrypoint",
+      "current_module": "full_report_service",
+      "target_layer": "compat",
+      "target_shape": "freeze",
+      "reason": "整文件不再作为主入口，仅保留待切片能力与兼容导出"
+    }
+  ]
+}

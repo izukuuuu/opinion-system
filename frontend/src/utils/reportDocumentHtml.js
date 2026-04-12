@@ -1,3 +1,5 @@
+import { buildFigureContractMap, renderStaticFigureMarkup } from './reportFigures'
+
 const DEFAULT_DOCUMENT = { hero: {}, sections: [], appendix: { blocks: [] } }
 
 const escapeHtml = (value) =>
@@ -52,7 +54,7 @@ function renderCitationRefs(citationIds, citationMap) {
 function renderSectionBlock(block, context) {
   if (!block || typeof block !== 'object') return ''
   const {
-    chartMap,
+    figureMap,
     evidenceMap,
     timelineMap,
     subjectMap,
@@ -87,17 +89,9 @@ function renderSectionBlock(block, context) {
     `
   }
 
-  if (block.type === 'chart_slot') {
-    const charts = (Array.isArray(block.chart_ids) ? block.chart_ids : []).map((id) => chartMap.get(String(id || '').trim())).filter(Boolean)
-    return `
-      <section class="stack-md">
-        <div class="stack-xs">
-          <h3 class="block-title">${escapeHtml(block.title || '图表')}</h3>
-          ${block.description ? `<p class="body-muted">${escapeHtml(block.description)}</p>` : ''}
-        </div>
-        ${charts.length ? `<div class="chart-grid">${charts.map((chart) => renderChartCard(chart)).join('')}</div>` : '<p class="empty-card">当前区块没有可展示的图表。</p>'}
-      </section>
-    `
+  if (block.type === 'figure_ref') {
+    const figure = figureMap.get(String(block.figure_id || '').trim())
+    return figure ? renderStaticFigureMarkup(figure) : '<p class="empty-card">当前区块没有可展示的图表。</p>'
   }
 
   if (block.type === 'evidence_list') {
@@ -257,45 +251,13 @@ function renderSectionBlock(block, context) {
   return ''
 }
 
-function renderChartCard(chart) {
-  const rows = Array.isArray(chart?.rows) ? chart.rows : []
-  const hasData = Boolean(chart?.has_data ?? chart?.hasData)
-  const emptyMessage = chart?.empty_message || chart?.emptyMessage || '暂无可视化数据'
-  return `
-    <article class="chart-card">
-      <div class="stack-xs">
-        <h4 class="chart-title">${escapeHtml(chart?.title || '图表')}</h4>
-        ${chart?.subtitle ? `<p class="body-muted">${escapeHtml(chart.subtitle)}</p>` : ''}
-      </div>
-      ${hasData
-        ? `<div class="chart-canvas" data-chart-id="${escapeHtml(chart.chart_id)}"></div>`
-        : `<div class="chart-empty">${escapeHtml(emptyMessage)}</div>`}
-      ${rows.length ? `
-        <div class="table-shell">
-          <table>
-            <thead><tr><th>名称</th><th>数值</th></tr></thead>
-            <tbody>
-              ${rows.map((row) => `
-                <tr>
-                  <td>${escapeHtml(row.displayName ?? row.name ?? row.label ?? row.key ?? '未命名')}</td>
-                  <td>${escapeHtml(row.displayValue ?? row.value ?? row.count ?? row.total ?? 0)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      ` : ''}
-    </article>
-  `
-}
-
 export function buildStandaloneReportHtml(payload, { lastLoaded = '' } = {}) {
   const source = payload && typeof payload === 'object' ? payload : {}
   const reportData = source.report_data && typeof source.report_data === 'object' ? source.report_data : source
   const document = source.report_document && typeof source.report_document === 'object' ? source.report_document : DEFAULT_DOCUMENT
-  const chartCatalog = Array.isArray(source.chart_catalog) ? source.chart_catalog : []
-
-  const chartMap = mapById(chartCatalog, 'chart_id')
+  const reportIr = source.report_ir && typeof source.report_ir === 'object' ? source.report_ir : {}
+  const artifactManifest = source.artifact_manifest && typeof source.artifact_manifest === 'object' ? source.artifact_manifest : {}
+  const figureMap = buildFigureContractMap(reportIr, artifactManifest)
   const evidenceMap = mapById(reportData.key_evidence, 'evidence_id')
   const timelineMap = mapById(reportData.timeline, 'event_id')
   const subjectMap = mapById(reportData.subjects, 'subject_id')
@@ -307,7 +269,7 @@ export function buildStandaloneReportHtml(payload, { lastLoaded = '' } = {}) {
   const hero = document.hero && typeof document.hero === 'object' ? document.hero : {}
   const sections = Array.isArray(document.sections) ? document.sections : []
   const appendix = document.appendix && typeof document.appendix === 'object' ? document.appendix : { blocks: [] }
-  const title = source.title || hero.title || reportData?.task?.topic_label || 'AI 完整报告'
+  const title = source.title || hero.title || reportData?.task?.topic_label || '正式文稿'
   const subtitle = source.subtitle || hero.subtitle || source.rangeText || ''
 
   const body = `
@@ -346,7 +308,7 @@ export function buildStandaloneReportHtml(payload, { lastLoaded = '' } = {}) {
         <div class="section-body">
           ${(Array.isArray(section.blocks) ? section.blocks : []).map((block) =>
             renderSectionBlock(block, {
-              chartMap,
+              figureMap,
               evidenceMap,
               timelineMap,
               subjectMap,
@@ -368,7 +330,7 @@ export function buildStandaloneReportHtml(payload, { lastLoaded = '' } = {}) {
         <div class="section-body">
           ${appendix.blocks.map((block) =>
             renderSectionBlock(block, {
-              chartMap,
+              figureMap,
               evidenceMap,
               timelineMap,
               subjectMap,
@@ -450,9 +412,9 @@ export function buildStandaloneReportHtml(payload, { lastLoaded = '' } = {}) {
     .callout-info { background: rgba(231,241,251,0.7); }
     .callout-warning { background: var(--warning-soft); color: var(--warning); }
     .callout-danger { background: var(--danger-soft); color: var(--danger); }
-    .metrics-grid, .chart-grid, .two-col-grid { display: grid; gap: 16px; }
+    .metrics-grid, .two-col-grid { display: grid; gap: 16px; }
     .metrics-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-    .chart-grid, .two-col-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .two-col-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .metric-card {
       padding: 18px;
       border-radius: 20px;
@@ -526,9 +488,7 @@ export function buildStandaloneReportHtml(payload, { lastLoaded = '' } = {}) {
       background: var(--surface);
       line-height: 1.8;
     }
-    .chart-card { padding: 18px; display: grid; gap: 16px; background: linear-gradient(180deg, rgba(248,250,252,0.95), rgba(255,255,255,0.95)); }
-    .chart-canvas { width: 100%; height: 320px; border-radius: 20px; background: #f8fbff; }
-    .chart-empty, .empty-card, .empty-text {
+    .chart-empty, .empty-card, .empty-text, .export-figure-card {
       padding: 16px;
       border-radius: 18px;
       border: 1px dashed var(--line);
@@ -567,20 +527,6 @@ export function buildStandaloneReportHtml(payload, { lastLoaded = '' } = {}) {
       </main>
     </div>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <script>
-    const charts = ${jsonForScript(chartCatalog)};
-    for (const item of charts) {
-      const hasData = Boolean(item && (item.has_data ?? item.hasData))
-      if (!hasData || !item?.chart_id || !item?.option) continue
-      const element = document.querySelector('[data-chart-id="' + CSS.escape(item.chart_id) + '"]')
-      if (!element || !window.echarts) continue
-      const instance = window.echarts.init(element)
-      instance.setOption(item.option, true)
-      window.addEventListener('resize', () => instance.resize())
-    }
-  </script>
 </body>
 </html>`
 }
-

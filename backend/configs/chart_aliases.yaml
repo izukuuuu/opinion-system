@@ -1,0 +1,25 @@
+aliases:
+  volume.overall:
+    - volume:总体
+  trends.overall:
+    - trends:总体
+  trends.trend-flow:
+    - trends:trend-flow
+  trends.trend-share:
+    - trends:trend-share
+  attitude.overall:
+    - attitude:总体
+  classification.overall:
+    - classification:总体
+  keywords.overall:
+    - keywords:总体
+  publishers.overall:
+    - publishers:总体
+  geography.overall:
+    - geography:总体
+  bertopic.summary:
+    - bertopic:summary
+  bertopic.clusters:
+    - bertopic:clusters
+  bertopic.temporal:
+    - bertopic:temporal

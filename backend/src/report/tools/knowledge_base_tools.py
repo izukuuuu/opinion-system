@@ -16,7 +16,7 @@ from langchain.tools import tool
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-SONA_ROOT = PROJECT_ROOT / "backend" / "knowledge_base" / "report" / "sona_feature_analysis"
+SONA_ROOT = PROJECT_ROOT / "backend" / "knowledge_base" / "report" / "sentiment_analysis_methodology"
 LOCAL_REFERENCES_DIR = SONA_ROOT / "舆情深度分析" / "references"
 LOCAL_METHOD_DIR = SONA_ROOT / "舆情深度分析"
 PROJECT_REFERENCES_DIR = SONA_ROOT / "references"

@@ -4,7 +4,7 @@ Report knowledge loader for built-in report methodology assets.
 The current structured report pipeline is not an agent workflow, but it can still
 reuse the strongest part of Sona's design: methodology-aware context assembly.
 This module reads knowledge assets that are maintained inside
-``backend/knowledge_base/report/sona_feature_analysis``.
+``backend/knowledge_base/report/sentiment_analysis_methodology``.
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from .tools.knowledge_base_tools import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SONA_ROOT = REPO_ROOT / "backend" / "knowledge_base" / "report" / "sona_feature_analysis"
+SONA_ROOT = REPO_ROOT / "backend" / "knowledge_base" / "report" / "sentiment_analysis_methodology"
 SONA_METHOD_DIR = SONA_ROOT / "舆情深度分析"
 SONA_REFERENCE_DIR = SONA_METHOD_DIR / "references"
 SONA_EXPERT_NOTES_DIR = SONA_REFERENCE_DIR / "expert_notes"

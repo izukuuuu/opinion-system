@@ -14,15 +14,10 @@ from server_support.archive_locator import ArchiveLocator, compose_folder_name
 from server_support.topic_context import TopicContext, resolve_context
 from src.fetch.data_fetch import get_topic_available_date_range
 from src.project import get_project_manager
-from src.utils.setting.paths import bucket, ensure_bucket, get_logs_root
+from src.utils.setting.paths import bucket
 
-from .runtime import ANALYZE_FILE_MAP, collect_explain_outputs
-from .deep_report import (
-    AI_FULL_REPORT_CACHE_FILENAME,
-    REPORT_CACHE_FILENAME,
-    generate_full_report_payload,
-    generate_report_payload,
-)
+from .deep_report import AI_FULL_REPORT_CACHE_FILENAME, REPORT_CACHE_FILENAME, generate_full_report_payload, generate_report_payload
+from .runtime_infra import resolve_runtime_profile
 from .task_queue import (
     cancel_task,
     create_task,
@@ -38,8 +33,6 @@ from .task_queue import (
 
 PROJECT_MANAGER = get_project_manager()
 report_bp = Blueprint("report", __name__)
-REPORT_PROGRESS_FILENAME = "_progress.json"
-AI_SUMMARY_FILENAME = "ai_summary.json"
 
 
 def _resolve_topic(topic_param: str, project_param: str, dataset_id: str) -> Tuple[str, str]:
@@ -90,61 +83,6 @@ def _range_payload(start: str, end: Optional[str]) -> Dict[str, str]:
     return {"start": start_text, "end": end_text}
 
 
-def _report_progress_path(ctx: TopicContext, start: str, end: Optional[str], *, ensure_dir: bool = False) -> Path:
-    folder = compose_folder_name(start, end)
-    report_dir = ensure_bucket("reports", ctx.identifier, folder) if ensure_dir else bucket("reports", ctx.identifier, folder)
-    return report_dir / REPORT_PROGRESS_FILENAME
-
-
-def _load_progress_payload(ctx: TopicContext, start: str, end: Optional[str]) -> Dict[str, Any]:
-    path = _report_progress_path(ctx, start, end)
-    if not path.exists():
-        return {}
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            payload = json.load(fh)
-        return payload if isinstance(payload, dict) else {}
-    except Exception:
-        return {}
-
-
-def _resolve_analyze_log_path(ctx: TopicContext, start: str) -> Path:
-    logs_root = get_logs_root()
-    candidates: List[str] = []
-    for value in [ctx.identifier, *(ctx.aliases or [])]:
-        token = str(value or "").strip()
-        if token and token not in candidates:
-            candidates.append(token)
-    for candidate in candidates:
-        path = logs_root / candidate / start / f"{candidate}_{start}.log"
-        if path.exists():
-            return path
-    return logs_root / ctx.identifier / start / f"{ctx.identifier}_{start}.log"
-
-
-def _resolve_report_log_path(ctx: TopicContext, start: str, end: Optional[str]) -> Path:
-    folder = compose_folder_name(start, end)
-    logger_topic = f"ReportStructured_{ctx.identifier}"
-    return get_logs_root() / logger_topic / folder / f"{logger_topic}_{folder}.log"
-
-
-def _read_log_tail(path: Path, *, max_lines: int = 20) -> List[str]:
-    if not path.exists():
-        return []
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            lines = [line.rstrip() for line in fh.readlines() if line.strip()]
-        return lines[-max_lines:]
-    except Exception:
-        return []
-
-
-def _summarise_log_line(line: str) -> str:
-    text = str(line or "").strip()
-    parts = text.split(" - ", 3)
-    return parts[3].strip() if len(parts) == 4 else text
-
-
 def _build_step_log(*, step_id: str, label: str, status: str, message: str, progress: int, time_text: str = "") -> Dict[str, Any]:
     value = max(0, min(100, int(progress)))
     return {
@@ -168,76 +106,101 @@ def _load_report_cache_payload(report_cache: Path) -> Dict[str, Any]:
         return {}
 
 
-def _load_json_payload(path: Path) -> Dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            payload = json.load(fh)
-        return payload if isinstance(payload, dict) else {}
-    except Exception:
-        return {}
+def _artifact_status(manifest: Dict[str, Any], artifact_key: str) -> str:
+    record = manifest.get(artifact_key)
+    if not isinstance(record, dict):
+        return ""
+    return str(record.get("status") or "").strip()
 
 
-def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
-    recent_events = task.get("recent_events") if isinstance(task.get("recent_events"), list) else []
-    artifacts = task.get("artifacts") if isinstance(task.get("artifacts"), dict) else {}
-    trust = task.get("trust") if isinstance(task.get("trust"), dict) else {}
-    run_state = task.get("run_state") if isinstance(task.get("run_state"), dict) else {}
-    approvals = task.get("approvals") if isinstance(task.get("approvals"), list) else []
-    todos = task.get("todos") if isinstance(task.get("todos"), list) else []
-    structured_digest = task.get("structured_result_digest") if isinstance(task.get("structured_result_digest"), dict) else {}
-    explain_ready = bool(artifacts.get("report_ready"))
-    full_report_ready = bool(artifacts.get("full_report_ready"))
-    stage = str(task.get("phase") or "").strip()
-    status = str(task.get("status") or "").strip() or "queued"
-    updated_at = str(task.get("updated_at") or "").strip()
-    message = str(task.get("message") or "").strip()
+def _artifact_ready(manifest: Dict[str, Any], artifact_key: str) -> bool:
+    return _artifact_status(manifest, artifact_key) == "ready"
+
+
+def _task_summary_payload(
+    *,
+    topic: str,
+    topic_identifier: str,
+    start: str,
+    end: Optional[str],
+    stage: str,
+    status: str,
+    message: str,
+    updated_at: str,
+    artifact_manifest: Dict[str, Any],
+    report_ir_summary: Dict[str, Any],
+    structured_result_digest: Dict[str, Any],
+    approvals: List[Dict[str, Any]],
+    recent_events: List[Dict[str, Any]],
+    task_details: Optional[Dict[str, Any]] = None,
+    cache_paths: Optional[Dict[str, str]] = None,
+    worker_details: Optional[Dict[str, Any]] = None,
+    todos: Optional[List[Dict[str, Any]]] = None,
+    agents: Optional[List[Dict[str, Any]]] = None,
+    trust: Optional[Dict[str, Any]] = None,
+    run_state: Optional[Dict[str, Any]] = None,
+    orchestrator_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    structured_ready = _artifact_ready(artifact_manifest, "structured_projection")
+    full_ready = _artifact_ready(artifact_manifest, "full_markdown")
+    percentage = int((task_details or {}).get("percentage") or 0)
+    stage_normalized = {
+        "prepare": "planning",
+        "analyze": "planning",
+        "explain": "planning",
+        "interpret": "exploration",
+        "write": "structure",
+    }.get(stage, stage)
+    planning_status = "ok" if structured_ready or full_ready or stage_normalized not in {"planning"} else ("running" if stage_normalized == "planning" and status == "running" else "queued")
+    exploration_status = "ok" if structured_ready or full_ready or stage_normalized not in {"planning", "exploration"} else ("running" if stage_normalized == "exploration" and status == "running" else "queued")
+    structure_status = "ok" if structured_ready or full_ready or stage_normalized not in {"planning", "exploration", "structure"} else ("running" if stage_normalized == "structure" and status == "running" else "queued")
+    report_status = "ok" if structured_ready or full_ready else ("running" if stage_normalized in {"compile", "review"} and status in {"running", "waiting_approval"} else "queued")
+    cache_status = "ok" if full_ready else ("running" if stage == "persist" and status in {"running", "waiting_approval"} else "queued")
     steps = [
         _build_step_log(
-            step_id="prepare",
-            label="准备数据",
-            status="ok" if stage not in {"prepare", "queued"} else ("running" if status in {"queued", "running"} else status),
-            message="检查基础产物与任务入队状态。",
-            progress=100 if stage not in {"prepare", "queued"} else int(task.get("percentage") or 0),
+            step_id="planning",
+            label="任务规划",
+            status=planning_status,
+            message="建立根图、任务边界与执行清单。",
+            progress=100 if planning_status == "ok" else (percentage if planning_status == "running" else 0),
             time_text=updated_at,
         ),
         _build_step_log(
-            step_id="analyze",
-            label="基础分析",
-            status="ok" if stage not in {"prepare", "queued", "analyze"} else ("running" if stage == "analyze" and status == "running" else "queued"),
-            message="必要时补跑 analyze，确保统计结果齐备。",
-            progress=100 if stage not in {"prepare", "queued", "analyze"} else (int(task.get("percentage") or 0) if stage == "analyze" else 0),
+            step_id="exploration",
+            label="本地探索",
+            status=exploration_status,
+            message="围绕本地归档、基础分析和专题资料完成探索。",
+            progress=100 if exploration_status == "ok" else (percentage if exploration_status == "running" else 0),
             time_text=updated_at,
         ),
         _build_step_log(
-            step_id="explain",
-            label="总体解读",
-            status="ok" if stage not in {"prepare", "queued", "analyze", "explain"} else ("running" if stage == "explain" and status == "running" else "queued"),
-            message="检查或补齐总体文字解读。",
-            progress=100 if stage not in {"prepare", "queued", "analyze", "explain"} else (int(task.get("percentage") or 0) if stage == "explain" else 0),
+            step_id="structure",
+            label="结构综合",
+            status=structure_status,
+            message="汇总探索产物并形成结构化报告种子。",
+            progress=100 if structure_status == "ok" else (percentage if structure_status == "running" else 0),
             time_text=updated_at,
         ),
         _build_step_log(
-            step_id="report",
-            label="报告研判",
-            status="ok" if stage in {"write", "review", "persist", "completed"} else ("running" if stage == "interpret" and status == "running" else "queued"),
-            message="解释与主题 agent 正在生成研判结构。",
-            progress=100 if stage in {"write", "review", "persist", "completed"} else (int(task.get("percentage") or 0) if stage == "interpret" else 0),
+            step_id="compile",
+            label="正式编译",
+            status=report_status,
+            message="执行正式文稿编译、验证和语义门禁。",
+            progress=100 if report_status == "ok" else (percentage if report_status == "running" else 0),
             time_text=updated_at,
         ),
         _build_step_log(
-            step_id="cache",
-            label="报告缓存",
-            status="ok" if status == "completed" else ("running" if stage in {"persist", "review", "write"} and status == "running" else "queued"),
+            step_id="persist",
+            label="写入结果",
+            status=cache_status,
             message="写入最终报告缓存并返回查看页。",
-            progress=100 if status == "completed" else (int(task.get("percentage") or 0) if stage == "persist" else 0),
+            progress=100 if cache_status == "ok" else (percentage if cache_status == "running" else 0),
             time_text=updated_at,
         ),
     ]
     if status == "failed":
         for step in steps:
-            if step["id"] in {"report", "cache"}:
+            if step["id"] in {"structure", "compile", "persist"}:
                 step["status"] = "error"
                 step["message"] = message or "任务执行失败。"
                 break
@@ -248,164 +211,180 @@ def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
                 step["message"] = "任务已取消。"
                 break
     return {
-        "topic": str(task.get("topic") or task.get("topic_identifier") or "").strip(),
-        "topic_identifier": str(task.get("topic_identifier") or "").strip(),
-        "range": _range_payload(str(task.get("start") or ""), str(task.get("end") or "")),
+        "topic": topic,
+        "topic_identifier": topic_identifier,
+        "range": _range_payload(start, end),
         "state": {
-            "stage": stage,
+            "stage": stage_normalized,
             "status": status,
             "message": message,
             "updated_at": updated_at,
         },
         "summary": {
-            "status": "running" if status in {"queued", "running", "waiting_approval"} else ("ok" if status == "completed" else "error"),
-            "message": message or "当前区间暂无执行中的报告任务。",
+            "status": (
+                "running"
+                if status in {"queued", "running", "waiting_approval"}
+                else ("ok" if status == "completed" else ("pending" if status in {"pending", "idle", ""} else "error"))
+            ),
+            "message": message or ("已找到历史结果，可直接查看。" if structured_ready or full_ready else "当前区间暂无执行中的报告任务。"),
         },
         "steps": steps,
         "task": {
-            "id": str(task.get("id") or "").strip(),
-            "thread_id": str(task.get("thread_id") or "").strip(),
+            "id": str((task_details or {}).get("id") or "").strip(),
+            "thread_id": str((task_details or {}).get("thread_id") or "").strip(),
             "status": status,
-            "phase": stage,
-            "percentage": int(task.get("percentage") or 0),
-            "worker_pid": int(task.get("worker_pid") or 0),
-            "child_pid": int(task.get("child_pid") or 0),
-            "cancel_requested": bool(task.get("cancel_requested")),
-            "agents": task.get("agents") or [],
-            "subagents": task.get("agents") or [],
-            "todos": todos,
+            "phase": stage_normalized,
+            "percentage": percentage,
+            "worker_pid": int((worker_details or {}).get("worker_pid") or 0),
+            "child_pid": int((worker_details or {}).get("child_pid") or 0),
+            "cancel_requested": bool((task_details or {}).get("cancel_requested")),
+            "agents": agents or [],
+            "subagents": agents or [],
+            "todos": todos or [],
             "approvals": approvals,
-            "run_state": run_state,
-            "orchestrator_state": task.get("orchestrator_state") if isinstance(task.get("orchestrator_state"), dict) else {},
-            "current_actor": str(task.get("current_actor") or "").strip(),
-            "current_operation": str(task.get("current_operation") or "").strip(),
-            "last_diagnostic": task.get("last_diagnostic") if isinstance(task.get("last_diagnostic"), dict) else {},
-            "structured_result_digest": structured_digest,
-            "trust": trust,
+            "run_state": run_state or {},
+            "orchestrator_state": orchestrator_state or {},
+            "current_actor": str((worker_details or {}).get("current_actor") or "").strip(),
+            "current_operation": str((worker_details or {}).get("current_operation") or "").strip(),
+            "last_diagnostic": (worker_details or {}).get("last_diagnostic") if isinstance((worker_details or {}).get("last_diagnostic"), dict) else {},
+            "structured_result_digest": structured_result_digest,
+            "report_ir_summary": report_ir_summary,
+            "artifact_manifest": artifact_manifest,
+            "trust": trust or {},
             "recent_events": recent_events,
         },
         "explain": {
-            "ready": explain_ready,
-            "source": "legacy_rag" if explain_ready else "fallback",
+            "ready": structured_ready or full_ready,
+            "source": "structured_projection" if structured_ready or full_ready else "pending",
         },
         "report": {
-            "cache_exists": bool(artifacts.get("report_ready")),
-            "cache_path": str(artifacts.get("report_cache_path") or "").strip(),
-            "full_cache_exists": full_report_ready,
-            "full_cache_path": str(artifacts.get("full_report_cache_path") or "").strip(),
+            "cache_exists": structured_ready,
+            "cache_path": str((cache_paths or {}).get("report_cache_path") or "").strip(),
+            "full_cache_exists": full_ready,
+            "full_cache_path": str((cache_paths or {}).get("full_report_cache_path") or "").strip(),
+            "artifact_manifest": artifact_manifest,
         },
     }
 
 
-def _collect_legacy_report_progress(ctx: TopicContext, start: str, end: Optional[str]) -> Dict[str, Any]:
-    state = _load_progress_payload(ctx, start, end)
+def _extract_cache_meta(payload: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    if metadata:
+        return metadata
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _build_historical_progress_payload(ctx: TopicContext, start: str, end: Optional[str]) -> Dict[str, Any]:
     folder = compose_folder_name(start, end)
-    analyze_root = ArchiveLocator(ctx).resolve_result_dir("analyze", start, end) or bucket("analyze", ctx.identifier, folder)
     report_dir = bucket("reports", ctx.identifier, folder)
     report_cache = report_dir / REPORT_CACHE_FILENAME
-    report_cache_payload = _load_report_cache_payload(report_cache)
-    ai_summary_path = analyze_root / AI_SUMMARY_FILENAME
-    explain_state = collect_explain_outputs(ctx, start, end)
-    analyze_log_path = _resolve_analyze_log_path(ctx, start)
-    report_log_path = _resolve_report_log_path(ctx, start, end)
-    analyze_tail = _read_log_tail(analyze_log_path)
-    report_tail = _read_log_tail(report_log_path)
-    latest_analyze = _summarise_log_line(analyze_tail[-1]) if analyze_tail else ""
-    latest_report = _summarise_log_line(report_tail[-1]) if report_tail else ""
-    completed_functions: List[str] = []
-    for func_name, filename in ANALYZE_FILE_MAP.items():
-        if (analyze_root / func_name / "总体" / filename).exists():
-            completed_functions.append(func_name)
-    completed_count = len(completed_functions)
-    total_functions = len(ANALYZE_FILE_MAP)
-    ai_summary_exists = ai_summary_path.exists()
-    report_cache_exists = report_cache.exists()
-    report_meta = report_cache_payload.get("meta") if isinstance(report_cache_payload.get("meta"), dict) else {}
-    state_stage = str(state.get("stage") or "").strip()
-    state_status = str(state.get("status") or "").strip()
-    state_message = str(state.get("message") or "").strip()
-    updated_at = str(state.get("updated_at") or "").strip()
-    explain_ready = bool(explain_state.get("ready"))
-    explain_source = str(report_meta.get("explain_source") or ("legacy_rag" if explain_ready else "fallback")).strip()
-    steps = [
-        _build_step_log(
-            step_id="analyze",
-            label="基础分析",
-            status="ok" if completed_count >= total_functions else ("running" if completed_count > 0 or state_stage == "analyze" else "queued"),
-            message=latest_analyze or ("基础分析已完成。" if completed_count >= total_functions else "等待基础分析结果。"),
-            progress=100 if completed_count >= total_functions else round(completed_count / max(1, total_functions) * 100),
-            time_text=updated_at,
+    full_cache = report_dir / AI_FULL_REPORT_CACHE_FILENAME
+    structured_payload = _load_report_cache_payload(report_cache)
+    full_payload = _load_report_cache_payload(full_cache)
+    structured_meta = _extract_cache_meta(structured_payload)
+    full_meta = _extract_cache_meta(full_payload)
+    artifact_manifest = {}
+    for candidate in (
+        structured_meta.get("artifact_manifest"),
+        structured_payload.get("artifact_manifest"),
+        full_meta.get("artifact_manifest"),
+        full_payload.get("artifact_manifest"),
+    ):
+        if isinstance(candidate, dict) and candidate:
+            artifact_manifest = candidate
+            break
+    report_ir_summary = {}
+    for candidate in (
+        structured_meta.get("report_ir_summary"),
+        structured_payload.get("report_ir_summary"),
+        full_meta.get("report_ir_summary"),
+        full_payload.get("report_ir_summary"),
+    ):
+        if isinstance(candidate, dict) and candidate:
+            report_ir_summary = candidate
+            break
+    has_history = bool(structured_payload or full_payload or artifact_manifest)
+    stage = "completed" if has_history else ""
+    status = "completed" if has_history else "pending"
+    message = "已找到历史结果，可直接查看。" if has_history else "当前区间暂无执行中的报告任务。"
+    updated_at = str(
+        (full_meta.get("generated_at") or full_meta.get("updated_at") or structured_meta.get("generated_at") or structured_meta.get("updated_at") or "")
+    ).strip()
+    structured_result_digest = {
+        "summary": str(report_ir_summary.get("summary") or "").strip(),
+        "counts": report_ir_summary.get("counts") if isinstance(report_ir_summary.get("counts"), dict) else {},
+        "utility_assessment": report_ir_summary.get("utility_assessment") if isinstance(report_ir_summary.get("utility_assessment"), dict) else {},
+        "fallback_trace_count": (
+            (report_ir_summary.get("utility_assessment") or {}).get("fallback_trace_count")
+            if isinstance(report_ir_summary.get("utility_assessment"), dict)
+            else 0
         ),
-        _build_step_log(
-            step_id="ai_summary",
-            label="AI 摘要",
-            status="ok" if ai_summary_exists else ("running" if completed_count >= total_functions else "queued"),
-            message="ai_summary.json 已生成。" if ai_summary_exists else "等待 AI 摘要整理。",
-            progress=100 if ai_summary_exists else (60 if completed_count >= total_functions else 0),
-            time_text=updated_at,
-        ),
-        _build_step_log(
-            step_id="explain",
-            label="总体解读",
-            status="ok" if explain_ready or report_cache_exists else ("running" if state_stage == "explain" and state_status == "running" else "queued"),
-            message=state_message if state_stage == "explain" else ("总体文字解读已就绪。" if explain_ready else "等待补齐总体文字解读。"),
-            progress=100 if explain_ready or report_cache_exists else round(int(explain_state.get("available_count") or 0) / max(1, int(explain_state.get("expected_count") or len(ANALYZE_FILE_MAP))) * 100),
-            time_text=updated_at,
-        ),
-        _build_step_log(
-            step_id="report",
-            label="报告研判",
-            status="ok" if report_cache_exists else ("running" if state_stage == "report" and state_status == "running" else "queued"),
-            message=latest_report or state_message or "等待生成结构化报告。",
-            progress=100 if report_cache_exists else (75 if state_stage == "report" else 0),
-            time_text=updated_at,
-        ),
-        _build_step_log(
-            step_id="cache",
-            label="报告缓存",
-            status="ok" if report_cache_exists else ("running" if state_stage == "report" and state_status == "running" else "queued"),
-            message=f"缓存已写入 {report_cache.name}。" if report_cache_exists else "等待写入报告缓存。",
-            progress=100 if report_cache_exists else 0,
-            time_text=updated_at,
-        ),
-    ]
-    return {
-        "topic": ctx.display_name or ctx.identifier,
-        "topic_identifier": ctx.identifier,
-        "range": _range_payload(start, end),
-        "state": state,
-        "summary": {
-            "status": "ok" if report_cache_exists else ("running" if state_status == "running" else "pending"),
-            "message": state_message or ("报告已生成，可直接读取。" if report_cache_exists else "当前区间暂无执行中的报告任务。"),
-        },
-        "steps": steps,
-        "analyze": {
-            "root": str(analyze_root),
-            "completed_functions": completed_functions,
-            "expected_functions": list(ANALYZE_FILE_MAP.keys()),
-            "completed_count": completed_count,
-            "total_count": total_functions,
-            "ai_summary_exists": ai_summary_exists,
-            "ai_summary_path": str(ai_summary_path),
-            "log_path": str(analyze_log_path),
-            "log_tail": analyze_tail,
-        },
-        "explain": {
-            "root": str(explain_state.get("root") or ""),
-            "available_functions": explain_state.get("available_functions") or [],
-            "available_count": int(explain_state.get("available_count") or 0),
-            "expected_count": int(explain_state.get("expected_count") or len(ANALYZE_FILE_MAP)),
-            "ready": explain_ready,
-            "source": explain_source,
-        },
-        "report": {
-            "cache_exists": report_cache_exists,
-            "cache_path": str(report_cache),
-            "log_path": str(report_log_path),
-            "log_tail": report_tail,
-            "progress_path": str(_report_progress_path(ctx, start, end)),
-        },
+        "source": "historical_cache" if has_history else "empty",
     }
+    return _task_summary_payload(
+        topic=ctx.display_name or ctx.identifier,
+        topic_identifier=ctx.identifier,
+        start=start,
+        end=end,
+        stage=stage,
+        status=status,
+        message=message,
+        updated_at=updated_at,
+        artifact_manifest=artifact_manifest,
+        report_ir_summary=report_ir_summary,
+        structured_result_digest=structured_result_digest,
+        approvals=[],
+        recent_events=[],
+        cache_paths={
+            "report_cache_path": str(report_cache) if structured_payload else "",
+            "full_report_cache_path": str(full_cache) if full_payload else "",
+        },
+    )
+
+
+def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
+    recent_events = task.get("recent_events") if isinstance(task.get("recent_events"), list) else []
+    artifacts = task.get("artifacts") if isinstance(task.get("artifacts"), dict) else {}
+    trust = task.get("trust") if isinstance(task.get("trust"), dict) else {}
+    run_state = task.get("run_state") if isinstance(task.get("run_state"), dict) else {}
+    approvals = task.get("approvals") if isinstance(task.get("approvals"), list) else []
+    todos = task.get("todos") if isinstance(task.get("todos"), list) else []
+    structured_digest = task.get("structured_result_digest") if isinstance(task.get("structured_result_digest"), dict) else {}
+    report_ir_summary = task.get("report_ir_summary") if isinstance(task.get("report_ir_summary"), dict) else {}
+    artifact_manifest = task.get("artifact_manifest") if isinstance(task.get("artifact_manifest"), dict) else {}
+    return _task_summary_payload(
+        topic=str(task.get("topic") or task.get("topic_identifier") or "").strip(),
+        topic_identifier=str(task.get("topic_identifier") or "").strip(),
+        start=str(task.get("start") or ""),
+        end=str(task.get("end") or ""),
+        stage=str(task.get("phase") or "").strip(),
+        status=str(task.get("status") or "").strip() or "queued",
+        message=str(task.get("message") or "").strip(),
+        updated_at=str(task.get("updated_at") or "").strip(),
+        artifact_manifest=artifact_manifest,
+        report_ir_summary=report_ir_summary,
+        structured_result_digest=structured_digest,
+        approvals=approvals,
+        recent_events=recent_events,
+        task_details=task,
+        cache_paths={
+            "report_cache_path": str(artifacts.get("report_cache_path") or "").strip(),
+            "full_report_cache_path": str(artifacts.get("full_report_cache_path") or "").strip(),
+        },
+        worker_details={
+            "worker_pid": task.get("worker_pid"),
+            "child_pid": task.get("child_pid"),
+            "current_actor": task.get("current_actor"),
+            "current_operation": task.get("current_operation"),
+            "last_diagnostic": task.get("last_diagnostic"),
+        },
+        todos=todos,
+        agents=task.get("agents") or [],
+        trust=trust,
+        run_state=run_state,
+        orchestrator_state=task.get("orchestrator_state") if isinstance(task.get("orchestrator_state"), dict) else {},
+    )
 
 
 def _create_or_reuse_task(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
@@ -417,6 +396,7 @@ def _create_or_reuse_task(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], bool
     mode = str(payload.get("mode") or "fast").strip().lower() or "fast"
     if not start:
         raise ValueError("Missing required field(s): start")
+    resolve_runtime_profile(purpose="report-api")
     ctx = _build_topic_context(topic_param, project_param, dataset_id)
     existing = find_existing_task(
         topic_identifier=ctx.identifier,
@@ -575,7 +555,7 @@ def get_report_progress():
     )
     if task:
         return success({"data": _build_task_progress_payload(task)})
-    return success({"data": _collect_legacy_report_progress(ctx, start, end)})
+    return success({"data": _build_historical_progress_payload(ctx, start, end)})
 
 
 @report_bp.post("/regenerate")

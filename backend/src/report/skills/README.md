@@ -7,7 +7,9 @@
 - 每个技能优先使用独立目录，目录内主文件为 `SKILL.md`
 - `SKILL.md` 使用 Markdown 正文，支持 YAML frontmatter
 - frontmatter 至少包含 `name`、`description`
-- 推荐使用 `allowed_tools` 和 `metadata.report.*`
+- `allowed_tools` 是唯一的工具声明入口；`metadata.report.*` 只保留非工具元数据
+- capability 约束使用 `capability_ids`、`runtime_surfaces`、`agent_families`
+- 没有工具契约的写作/解释类 skill 必须显式标记 `guidance_only: true`
 - 长方法论、示例、模板等支持材料放在 `references/`、`assets/`、`scripts/`
 
 运行时行为：
@@ -19,7 +21,9 @@
 
 当前内置技能：
 
-- `sona-feature-analysis`
+- `sentiment-analysis-methodology`
+- `basic-analysis-framework`
+- `bertopic-evolution-framework`
 
 兼容目标：
 

@@ -10,6 +10,12 @@ from ...project.manager import get_project_manager
 # 目录层级类型
 LAYERS = Literal['raw', 'merge', 'clean', 'filter', 'fetch', 'analyze', 'reports', 'results', 'fluid']
 
+
+def _is_backend_app_root(path: Path) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    return all((path / name).exists() for name in ("src", "configs", "data"))
+
 def get_project_root() -> Path:
     """
     获取项目根目录，支持多种检测方式：
@@ -83,8 +89,13 @@ def get_data_root() -> Path:
         Path: 数据根目录路径
     """
     project_root = get_project_root()
+    if _is_backend_app_root(project_root):
+        data_dir = project_root / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        return data_dir
+
     backend_dir = project_root / "backend"
-    if backend_dir.exists():
+    if _is_backend_app_root(backend_dir):
         backend_data = backend_dir / "data"
         backend_data.mkdir(parents=True, exist_ok=True)
         return backend_data
@@ -238,4 +249,3 @@ def iter_topics():
     for item in data_root.iterdir():
         if item.is_dir() and not item.name.startswith('.'):
             yield item.name
-

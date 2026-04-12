@@ -10,6 +10,18 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, TypedDict
 import yaml
 
 from ...utils.setting import settings
+from ..capability_manifest import (
+    get_report_capability,
+    get_skill_agent_families,
+    get_skill_capability_ids,
+    get_skill_runtime_surfaces,
+    is_guidance_only_skill,
+    RUNTIME_SUBAGENT,
+    select_runtime_capability_ids,
+    select_runtime_skill_ids,
+    validate_report_capability_ids,
+)
+from ..tools import validate_skill_tool_ids
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -77,6 +89,10 @@ FALLBACK_SKILL_CONTEXT: Dict[str, Any] = {
     "styleLanguageRequirements": {},
     "sectionGuidance": {},
     "toolNames": [],
+    "capabilityIds": [],
+    "runtimeSurfaces": [],
+    "agentFamilies": [],
+    "guidanceOnly": True,
     "constraints": [],
     "metadata": {},
     "instructionsMarkdown": "",
@@ -108,6 +124,13 @@ class SkillCatalogEntry(TypedDict, total=False):
     source_path: str
     aliases: List[str]
     metadata: Dict[str, Any]
+    toolNames: List[str]
+    capabilityIds: List[str]
+    runtimeSurfaces: List[str]
+    agentFamilies: List[str]
+    guidanceOnly: bool
+    virtualSource: str
+    virtual_source: str
 
 
 class ResolvedSkill(TypedDict, total=False):
@@ -126,6 +149,10 @@ class ResolvedSkill(TypedDict, total=False):
     styleLanguageRequirements: Dict[str, Any]
     sectionGuidance: Dict[str, Any]
     toolNames: List[str]
+    capabilityIds: List[str]
+    runtimeSurfaces: List[str]
+    agentFamilies: List[str]
+    guidanceOnly: bool
     constraints: List[str]
     metadata: Dict[str, Any]
     instructionsMarkdown: str
@@ -137,6 +164,8 @@ class ResolvedSkill(TypedDict, total=False):
     sourceKind: str
     sourceScope: str
     aliases: List[str]
+    virtualSource: str
+    virtual_source: str
 
 
 @dataclass(frozen=True)
@@ -160,6 +189,10 @@ class ParsedSkill:
     style_language_requirements: Dict[str, Any]
     section_guidance: Dict[str, Any]
     tool_names: List[str]
+    capability_ids: List[str]
+    runtime_surfaces: List[str]
+    agent_families: List[str]
+    guidance_only: bool
     constraints: List[str]
     metadata: Dict[str, Any]
     compatibility: str
@@ -171,6 +204,10 @@ class ParsedSkill:
     source_scope: str
     source_root: Path
     skill_dir: Optional[Path]
+
+    @property
+    def virtual_source(self) -> str:
+        return f"/report-skills/{self.source_scope}/{self.agent_skill_name}"
 
     def catalog(self) -> SkillCatalogEntry:
         return {
@@ -189,6 +226,13 @@ class ParsedSkill:
             "source_path": str(self.source_path.resolve()),
             "aliases": list(self.aliases),
             "metadata": dict(self.metadata),
+            "toolNames": list(self.tool_names),
+            "capabilityIds": list(self.capability_ids),
+            "runtimeSurfaces": list(self.runtime_surfaces),
+            "agentFamilies": list(self.agent_families),
+            "guidanceOnly": bool(self.guidance_only),
+            "virtualSource": self.virtual_source,
+            "virtual_source": self.virtual_source,
         }
 
     def resolved(self, topic: str = "") -> ResolvedSkill:
@@ -209,6 +253,10 @@ class ParsedSkill:
             "styleLanguageRequirements": dict(self.style_language_requirements),
             "sectionGuidance": dict(self.section_guidance),
             "toolNames": list(self.tool_names),
+            "capabilityIds": list(self.capability_ids),
+            "runtimeSurfaces": list(self.runtime_surfaces),
+            "agentFamilies": list(self.agent_families),
+            "guidanceOnly": bool(self.guidance_only),
             "constraints": list(self.constraints),
             "metadata": dict(self.metadata),
             "instructionsMarkdown": self.body,
@@ -220,6 +268,8 @@ class ParsedSkill:
             "sourceKind": self.source_kind,
             "sourceScope": self.source_scope,
             "aliases": list(self.aliases),
+            "virtualSource": self.virtual_source,
+            "virtual_source": self.virtual_source,
         }
 
 
@@ -298,6 +348,19 @@ def _coerce_string_list(value: Any, *, max_items: int = 16) -> List[str]:
 
 def _coerce_mapping(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def _extract_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:
@@ -399,6 +462,58 @@ def _coerce_metadata(value: Any) -> Dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _strip_derived_report_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(metadata or {})
+    report_meta = _coerce_mapping(payload.get("report"))
+    if report_meta:
+        report_meta = {
+            key: value
+            for key, value in report_meta.items()
+            if str(key or "") not in {"toolNames", "allowed_tools", "capabilityIds", "runtimeSurfaces", "agentFamilies", "guidanceOnly"}
+        }
+        payload["report"] = report_meta
+    return payload
+
+
+def _validate_skill_contract(
+    *,
+    skill_key: str,
+    tool_names: List[str],
+    capability_ids: List[str],
+    runtime_surfaces: List[str],
+    agent_families: List[str],
+    guidance_only: bool,
+) -> Tuple[List[str], List[str], List[str], bool]:
+    normalized_capability_ids = validate_report_capability_ids(capability_ids)
+    normalized_runtime_surfaces = _coerce_string_list(runtime_surfaces, max_items=12)
+    normalized_agent_families = _coerce_string_list(agent_families, max_items=16)
+    if not tool_names and not guidance_only:
+        raise ValueError(f"Skill {skill_key} must be guidance-only when it declares no allowed_tools.")
+    if not normalized_capability_ids and not guidance_only:
+        raise ValueError(f"Skill {skill_key} must declare capability_ids or be guidance-only.")
+    if normalized_capability_ids and normalized_runtime_surfaces:
+        allowed_runtime_surfaces = {
+            surface
+            for capability_id in normalized_capability_ids
+            for surface in get_report_capability(capability_id).runtime_surfaces
+        }
+        declared_runtime_surfaces = set(normalized_runtime_surfaces)
+        if allowed_runtime_surfaces and not declared_runtime_surfaces.issubset(allowed_runtime_surfaces):
+            invalid = sorted(declared_runtime_surfaces.difference(allowed_runtime_surfaces))
+            raise ValueError(f"Skill {skill_key} declares runtime_surfaces outside its capability contract: {invalid}")
+    if normalized_capability_ids and normalized_agent_families:
+        allowed_agent_families = {
+            entrypoint
+            for capability_id in normalized_capability_ids
+            for entrypoint in get_report_capability(capability_id).entrypoints
+        }
+        declared_agent_families = set(normalized_agent_families)
+        if allowed_agent_families and not declared_agent_families.issubset(allowed_agent_families):
+            invalid = sorted(declared_agent_families.difference(allowed_agent_families))
+            raise ValueError(f"Skill {skill_key} declares agent_families outside its capability contract: {invalid}")
+    return normalized_capability_ids, normalized_runtime_surfaces, normalized_agent_families, bool(guidance_only)
+
+
 def _configured_skill_extra_dirs() -> List[Path]:
     try:
         settings.reload()
@@ -435,8 +550,8 @@ def _configured_default_skill_key() -> str:
         settings.reload()
     except Exception:
         pass
-    raw = settings.get("llm.langchain.report.skills.default", "sona_feature_analysis")
-    return str(raw or "sona_feature_analysis").strip() or "sona_feature_analysis"
+    raw = settings.get("llm.langchain.report.skills.default", "sentiment_analysis_methodology")
+    return str(raw or "sentiment_analysis_methodology").strip() or "sentiment_analysis_methodology"
 
 
 def _configured_project_agents_enabled() -> bool:
@@ -576,6 +691,14 @@ def _serialize_skill_markdown(skill: ParsedSkill) -> str:
         frontmatter["compatibility"] = skill.compatibility[:500]
     if skill.tool_names:
         frontmatter["allowed_tools"] = " ".join(skill.tool_names)
+    if skill.capability_ids:
+        frontmatter["capability_ids"] = list(skill.capability_ids)
+    if skill.runtime_surfaces:
+        frontmatter["runtime_surfaces"] = list(skill.runtime_surfaces)
+    if skill.agent_families:
+        frontmatter["agent_families"] = list(skill.agent_families)
+    if skill.guidance_only:
+        frontmatter["guidance_only"] = True
     if skill.metadata:
         frontmatter["metadata"] = skill.metadata
     body = str(skill.body or "").strip()
@@ -620,7 +743,7 @@ def _build_skill_record(path: Path, source_kind: str, root: SkillRootSpec) -> Op
         return None
 
     frontmatter, body = _extract_frontmatter(text)
-    metadata = _coerce_metadata(frontmatter.get("metadata"))
+    metadata = _strip_derived_report_metadata(_coerce_metadata(frontmatter.get("metadata")))
     report_meta = _coerce_mapping(metadata.get("report"))
     openclaw_meta = _coerce_mapping(metadata.get("openclaw"))
     sections = _extract_markdown_sections(body)
@@ -669,12 +792,50 @@ def _build_skill_record(path: Path, source_kind: str, root: SkillRootSpec) -> Op
     section_guidance = _coerce_mapping(report_meta.get("sectionGuidance"))
     if not section_guidance:
         section_guidance = _coerce_mapping(_extract_json_block(sections.get("section_guidance", "")))
-    tool_names = _coerce_string_list(report_meta.get("toolNames"), max_items=24) or _extract_list_block(
-        sections.get("tool_hints", "")
-    )
     declared_allowed_tools = frontmatter.get("allowed_tools")
     if isinstance(declared_allowed_tools, str):
-        tool_names = _coerce_string_list(declared_allowed_tools.split(), max_items=24) or tool_names
+        tool_names = _coerce_string_list(declared_allowed_tools.split(), max_items=24)
+    elif isinstance(declared_allowed_tools, list):
+        tool_names = _coerce_string_list(declared_allowed_tools, max_items=24)
+    else:
+        tool_names = []
+    tool_names = validate_skill_tool_ids(tool_names)
+    declared_capability_ids = frontmatter.get("capability_ids", frontmatter.get("target_capabilities"))
+    if isinstance(declared_capability_ids, str):
+        capability_ids = _coerce_string_list(declared_capability_ids.split(), max_items=16)
+    elif isinstance(declared_capability_ids, list):
+        capability_ids = _coerce_string_list(declared_capability_ids, max_items=16)
+    else:
+        capability_ids = []
+    if not capability_ids:
+        capability_ids = get_skill_capability_ids(skill_key)
+    declared_runtime_surfaces = frontmatter.get("runtime_surfaces")
+    if isinstance(declared_runtime_surfaces, str):
+        runtime_surfaces = _coerce_string_list(declared_runtime_surfaces.split(), max_items=12)
+    elif isinstance(declared_runtime_surfaces, list):
+        runtime_surfaces = _coerce_string_list(declared_runtime_surfaces, max_items=12)
+    else:
+        runtime_surfaces = []
+    if not runtime_surfaces:
+        runtime_surfaces = get_skill_runtime_surfaces(skill_key)
+    declared_agent_families = frontmatter.get("agent_families")
+    if isinstance(declared_agent_families, str):
+        agent_families = _coerce_string_list(declared_agent_families.split(), max_items=16)
+    elif isinstance(declared_agent_families, list):
+        agent_families = _coerce_string_list(declared_agent_families, max_items=16)
+    else:
+        agent_families = []
+    if not agent_families:
+        agent_families = get_skill_agent_families(skill_key)
+    guidance_only = _coerce_bool(frontmatter.get("guidance_only"), default=is_guidance_only_skill(skill_key))
+    capability_ids, runtime_surfaces, agent_families, guidance_only = _validate_skill_contract(
+        skill_key=skill_key,
+        tool_names=tool_names,
+        capability_ids=capability_ids,
+        runtime_surfaces=runtime_surfaces,
+        agent_families=agent_families,
+        guidance_only=guidance_only,
+    )
     constraints = _coerce_string_list(report_meta.get("constraints"), max_items=16) or _extract_list_block(
         sections.get("constraints", "")
     )
@@ -699,6 +860,10 @@ def _build_skill_record(path: Path, source_kind: str, root: SkillRootSpec) -> Op
         style_language_requirements=style_language_requirements,
         section_guidance=section_guidance,
         tool_names=tool_names,
+        capability_ids=capability_ids,
+        runtime_surfaces=runtime_surfaces,
+        agent_families=agent_families,
+        guidance_only=guidance_only,
         constraints=constraints,
         metadata=metadata,
         compatibility=compatibility,
@@ -804,6 +969,83 @@ def build_report_skill_runtime_assets(topic: str = "") -> Dict[str, Any]:
     }
 
 
+def select_report_skill_sources(
+    skill_assets: Dict[str, Any],
+    *,
+    available_tool_ids: Sequence[str] | None = None,
+    preferred_skill_keys: Sequence[str] | None = None,
+    runtime_target: str = "",
+    agent_name: str = "",
+) -> List[str]:
+    catalog = skill_assets.get("catalog") if isinstance(skill_assets, dict) else []
+    if not isinstance(catalog, list):
+        return []
+    available = [str(item or "").strip() for item in (available_tool_ids or []) if str(item or "").strip()]
+    runtime_key = str(runtime_target or "").strip()
+    agent_key = str(agent_name or "").strip()
+    runtime_capability_ids = set(select_runtime_capability_ids(runtime_target=runtime_key, agent_name=agent_key)) if runtime_key else set()
+    default_preferred_skill_keys = (
+        select_runtime_skill_ids(runtime_target=runtime_key, agent_name=agent_key)
+        if runtime_key and not preferred_skill_keys
+        else []
+    )
+    requested_aliases = {
+        alias.lower()
+        for value in ([*preferred_skill_keys] if preferred_skill_keys else default_preferred_skill_keys)
+        for alias in _build_aliases(value)
+    }
+    selected: List[str] = []
+    seen = set()
+    for item in catalog:
+        if not isinstance(item, dict):
+            continue
+        aliases = {
+            str(alias or "").strip().lower()
+            for alias in (item.get("aliases") or [])
+            if str(alias or "").strip()
+        }
+        if requested_aliases and not aliases.intersection(requested_aliases):
+            continue
+        skill_capability_ids = {
+            str(capability_id or "").strip()
+            for capability_id in (item.get("capabilityIds") or [])
+            if str(capability_id or "").strip()
+        }
+        skill_runtime_surfaces = {
+            str(surface or "").strip()
+            for surface in (item.get("runtimeSurfaces") or [])
+            if str(surface or "").strip()
+        }
+        skill_agent_families = {
+            str(family or "").strip()
+            for family in (item.get("agentFamilies") or [])
+            if str(family or "").strip()
+        }
+        guidance_only = bool(item.get("guidanceOnly"))
+        if runtime_key and skill_runtime_surfaces and runtime_key not in skill_runtime_surfaces:
+            continue
+        if runtime_capability_ids:
+            if skill_capability_ids:
+                if not runtime_capability_ids.intersection(skill_capability_ids):
+                    continue
+            elif not guidance_only:
+                continue
+        if agent_key and skill_agent_families and agent_key not in skill_agent_families:
+            continue
+        if agent_key and guidance_only and not skill_agent_families and runtime_key == RUNTIME_SUBAGENT:
+            continue
+        try:
+            validate_skill_tool_ids(item.get("toolNames") or [], available_tool_ids=available or None)
+        except ValueError:
+            continue
+        virtual_source = str(item.get("virtualSource") or item.get("virtual_source") or "").strip()
+        if not virtual_source or virtual_source in seen:
+            continue
+        seen.add(virtual_source)
+        selected.append(virtual_source)
+    return selected
+
+
 __all__ = [
     "SkillCatalogEntry",
     "ResolvedSkill",
@@ -812,4 +1054,5 @@ __all__ = [
     "load_report_skill_context",
     "read_report_skill_resource",
     "resolve_report_skill",
+    "select_report_skill_sources",
 ]

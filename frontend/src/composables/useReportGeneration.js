@@ -53,10 +53,22 @@ const taskEvents = computed(() => taskState?.events || [])
 const activeTask = computed(() => (taskState?.id ? {
   id: taskState.id,
   threadId: taskState.threadId,
+  topic: taskState.topic,
+  topicIdentifier: taskState.topicIdentifier,
+  start: taskState.start,
+  end: taskState.end,
+  mode: taskState.mode,
   status: taskState.status,
   phase: taskState.phase,
   percentage: taskState.percentage,
   message: taskState.message,
+  updatedAt: taskState.updatedAt,
+  startedAt: taskState.startedAt,
+  finishedAt: taskState.finishedAt,
+  workerPid: taskState.workerPid,
+  childPid: taskState.childPid,
+  cancelRequested: taskState.cancelRequested,
+  reused: taskState.reused,
   trust: taskState.trust,
   artifacts: taskState.artifacts,
   subagents: taskState.subagents,
@@ -65,20 +77,35 @@ const activeTask = computed(() => (taskState?.id ? {
   approvals: taskState.approvals,
   runState: taskState.runState,
   orchestratorState: taskState.orchestratorState,
+  currentActor: taskState.currentActor,
   currentOperation: taskState.currentOperation,
   lastDiagnostic: taskState.lastDiagnostic,
   structuredResultDigest: taskState.structuredResultDigest,
-  events: taskState.events
+  reportIrSummary: taskState.reportIrSummary,
+  artifactManifest: taskState.artifactManifest,
+  events: taskState.events,
+  connectionMode: taskState.connectionMode,
+  lifecycleState: taskState.lifecycleState
 } : null))
 const taskStageList = [
-  { id: 'prepare', label: '准备数据' },
-  { id: 'analyze', label: '基础分析' },
-  { id: 'explain', label: '总体解读' },
-  { id: 'interpret', label: '综合研判' },
-  { id: 'write', label: '报告编排' },
+  { id: 'planning', label: '任务规划' },
+  { id: 'exploration', label: '本地探索' },
+  { id: 'structure', label: '结构综合' },
+  { id: 'compile', label: '正式编译' },
   { id: 'review', label: '润色定稿' },
   { id: 'persist', label: '写入结果' }
 ]
+
+function normalizeTaskPhase(phase) {
+  const raw = String(phase || '').trim()
+  if (['prepare', 'analyze', 'explain', 'planning'].includes(raw)) return 'planning'
+  if (['interpret', 'exploration'].includes(raw)) return 'exploration'
+  if (['write', 'structure'].includes(raw)) return 'structure'
+  if (raw === 'compile') return 'compile'
+  if (raw === 'review') return 'review'
+  if (raw === 'persist' || raw === 'completed') return 'persist'
+  return raw || 'planning'
+}
 
 let initialized = false
 let rangeRequestId = 0
@@ -139,12 +166,27 @@ function createTaskStreamController() {
     'task.failed',
     'task.cancelled',
     'todo.updated',
+    'exploration.todo.updated',
     'subagent.started',
+    'exploration.subagent.started',
     'subagent.completed',
+    'exploration.subagent.completed',
+    'exploration.artifact.ready',
+    'exploration.validation.failed',
     'approval.required',
     'approval.resolved',
     'artifact.updated',
     'trust.updated',
+    'graph.node.started',
+    'graph.node.completed',
+    'graph.node.failed',
+    'validation.failed',
+    'repair.loop.started',
+    'repair.loop.completed',
+    'compile.blocked',
+    'compile.started',
+    'compile.completed',
+    'interrupt.human_review',
     'done',
     'heartbeat'
   ]
@@ -625,27 +667,39 @@ async function loadReport(rangeOverride = null) {
     reportState.error = availableRange.notice || 'Topic / Start / End 为必填'
     return null
   }
+  await resumeLastReportTask(resolvedRange)
+  const hasStructuredArtifact = Boolean(taskState?.id && taskState?.threadId && taskState?.artifactManifest?.structured_projection?.status === 'ready')
+  if (!hasStructuredArtifact) {
+    reportState.error = '请先在运行页进入对应任务，等语义报告产物就绪后再查看。'
+    return null
+  }
+  const taskRange = {
+    topic: String(taskState?.topicIdentifier || resolvedRange.topic || '').trim(),
+    start: String(taskState?.start || resolvedRange.start || '').trim(),
+    end: String(taskState?.end || resolvedRange.end || '').trim(),
+    mode: String(taskState?.mode || resolvedRange.mode || 'fast').trim() || 'fast'
+  }
   reportState.loading = true
   reportState.error = ''
   analysisState.error = ''
   analysisState.loading = true
   try {
-    const params = new URLSearchParams({ topic: resolvedRange.topic, start: resolvedRange.start, end: resolvedRange.end })
+    const params = new URLSearchParams({ topic: taskRange.topic, start: taskRange.start, end: taskRange.end })
     const [reportResponse] = await Promise.all([
       callApi(`/api/report?${params.toString()}`, { method: 'GET' }),
-      loadAnalyzeResults(resolvedRange, { silent: true })
+      loadAnalyzeResults(taskRange, { silent: true })
     ])
     const payload = reportResponse?.data || null
     if (!payload || typeof payload !== 'object') throw new Error('报告接口返回为空')
     reportData.value = payload
     reportState.lastLoaded = currentTimeString()
-    reportForm.topic = resolvedRange.topic
-    reportForm.start = resolvedRange.start
-    reportForm.end = resolvedRange.end
-    await loadHistory(resolvedRange.topic)
-    const matched = reportHistory.value.find((item) => item.start === resolvedRange.start && item.end === resolvedRange.end)
+    reportForm.topic = taskRange.topic
+    reportForm.start = taskRange.start
+    reportForm.end = taskRange.end
+    await loadHistory(taskRange.topic)
+    const matched = reportHistory.value.find((item) => item.start === taskRange.start && item.end === taskRange.end)
     if (matched) selectedHistoryId.value = matched.id
-    await loadProgress(resolvedRange, { silent: true })
+    await loadProgress(taskRange, { silent: true })
     return payload
   } catch (error) {
     reportData.value = null
@@ -654,7 +708,7 @@ async function loadReport(rangeOverride = null) {
     reportState.error = message.includes('未找到分析结果目录')
       ? '当前专题暂无基础分析结果，请前往“运行报告”，系统会先自动补跑基础分析再生成报告。'
       : message
-    await loadProgress(resolvedRange, { silent: true })
+    await loadProgress(taskRange, { silent: true })
     return null
   } finally {
     reportState.loading = false
@@ -668,14 +722,26 @@ async function loadFullReport(rangeOverride = null, { regenerate = false } = {})
     fullReportState.error = availableRange.notice || 'Topic / Start / End 为必填'
     return null
   }
+  await resumeLastReportTask(resolvedRange)
+  const hasFullArtifact = Boolean(taskState?.id && taskState?.threadId && taskState?.artifactManifest?.full_markdown?.status === 'ready')
+  if (!hasFullArtifact && !regenerate) {
+    fullReportState.error = '请先在运行页进入对应任务，等正式文稿产物就绪后再查看。'
+    return null
+  }
+  const taskRange = {
+    topic: String(taskState?.topicIdentifier || resolvedRange.topic || '').trim(),
+    start: String(taskState?.start || resolvedRange.start || '').trim(),
+    end: String(taskState?.end || resolvedRange.end || '').trim(),
+    mode: String(taskState?.mode || resolvedRange.mode || 'fast').trim() || 'fast'
+  }
   fullReportState.loading = !regenerate
   fullReportState.regenerating = regenerate
   fullReportState.error = ''
   try {
     const params = new URLSearchParams({
-      topic: resolvedRange.topic,
-      start: resolvedRange.start,
-      end: resolvedRange.end
+      topic: taskRange.topic,
+      start: taskRange.start,
+      end: taskRange.end
     })
     if (regenerate) params.set('regenerate', '1')
     const response = await callApi(`/api/report/full?${params.toString()}`, { method: 'GET' })
@@ -683,18 +749,18 @@ async function loadFullReport(rangeOverride = null, { regenerate = false } = {})
     if (!payload || typeof payload !== 'object') throw new Error('AI 完整报告接口返回为空')
     fullReportData.value = payload
     fullReportState.lastLoaded = currentTimeString()
-    reportForm.topic = resolvedRange.topic
-    reportForm.start = resolvedRange.start
-    reportForm.end = resolvedRange.end
-    await loadHistory(resolvedRange.topic)
-    const matched = reportHistory.value.find((item) => item.start === resolvedRange.start && item.end === resolvedRange.end)
+    reportForm.topic = taskRange.topic
+    reportForm.start = taskRange.start
+    reportForm.end = taskRange.end
+    await loadHistory(taskRange.topic)
+    const matched = reportHistory.value.find((item) => item.start === taskRange.start && item.end === taskRange.end)
     if (matched) selectedHistoryId.value = matched.id
-    await loadProgress(resolvedRange, { silent: true })
+    await loadProgress(taskRange, { silent: true })
     return payload
   } catch (error) {
     fullReportData.value = null
     fullReportState.error = error instanceof Error ? error.message : String(error)
-    await loadProgress(resolvedRange, { silent: true })
+    await loadProgress(taskRange, { silent: true })
     return null
   } finally {
     fullReportState.loading = false
@@ -756,7 +822,7 @@ function applyTaskSnapshot(task, { reused = false } = {}) {
   applyProgressPayload({
     topic: taskState.topic,
     range: { start: taskState.start, end: taskState.end },
-    state: { stage: taskState.phase, status: taskState.status, message: taskState.message, updated_at: taskState.updatedAt },
+    state: { stage: normalizeTaskPhase(taskState.phase), status: taskState.status, message: taskState.message, updated_at: taskState.updatedAt },
     summary: {
       status: taskState.status === 'completed'
         ? 'ok'
@@ -768,13 +834,14 @@ function applyTaskSnapshot(task, { reused = false } = {}) {
 }
 
 function buildProgressStepsFromTask() {
-  const currentIndex = taskStageList.findIndex((item) => item.id === taskState.phase)
+  const normalizedPhase = normalizeTaskPhase(taskState.phase)
+  const currentIndex = taskStageList.findIndex((item) => item.id === normalizedPhase)
   return taskStageList.map((item, index) => ({
     id: item.id,
     label: item.label,
-    status: index < currentIndex ? 'ok' : (item.id === taskState.phase ? (taskState.status === 'completed' ? 'ok' : (taskState.status === 'failed' ? 'error' : 'running')) : 'pending'),
-    message: item.id === taskState.phase ? taskState.message : '',
-    progress: item.id === taskState.phase ? taskState.percentage : (index < currentIndex ? 100 : 0),
+    status: index < currentIndex ? 'ok' : (item.id === normalizedPhase ? (taskState.status === 'completed' ? 'ok' : (taskState.status === 'failed' ? 'error' : 'running')) : 'pending'),
+    message: item.id === normalizedPhase ? taskState.message : '',
+    progress: item.id === normalizedPhase ? taskState.percentage : (index < currentIndex ? 100 : 0),
     time: taskState.updatedAt
   }))
 }

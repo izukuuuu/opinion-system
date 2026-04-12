@@ -13,17 +13,20 @@ from langchain.agents.middleware import (
     wrap_tool_call,
 )
 from langchain_core.messages import AIMessage, ToolMessage
-from langgraph.checkpoint.memory import InMemorySaver
 
 from ..utils.ai import build_langchain_chat_model
 from ..utils.setting import settings
+from .capability_manifest import RUNTIME_AGENT
+from .runtime_infra import build_report_runnable_config, build_runtime_diagnostics, get_shared_report_checkpointer
 from .skills import (
     build_report_skill_runtime_assets,
     discover_report_skills,
     read_report_skill_resource,
     resolve_report_skill,
+    select_report_skill_sources,
 )
-from .tools import ensure_langchain_toolset_valid, get_report_tool_bundle
+from .tools import ensure_langchain_toolset_valid, select_report_tools
+from .tools.registry import READ_ONLY, get_report_tool_spec
 
 
 class ToolPolicy(TypedDict, total=False):
@@ -59,6 +62,53 @@ class ExplorationTrace(TypedDict, total=False):
     tool_call_count: int
     exploration_turns: int
     runtime: str
+
+
+def _json_safe_runtime_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe_runtime_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_json_safe_runtime_value(item) for item in value]
+    tool_name = str(getattr(value, "name", "") or getattr(value, "__name__", "") or "").strip()
+    if tool_name:
+        return tool_name
+    return str(value)
+
+
+def snapshot_tool_policy(policy: ToolPolicy) -> Dict[str, Any]:
+    payload = policy if isinstance(policy, dict) else {}
+    return {
+        "allowed_tools": [
+            str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "").strip()
+            for tool in (payload.get("allowed_tools") or [])
+            if str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "").strip()
+        ],
+        "required_tools": [
+            str(item).strip()
+            for item in (payload.get("required_tools") or [])
+            if str(item or "").strip()
+        ],
+        "max_exploration_turns": int(payload.get("max_exploration_turns") or 0),
+        "tool_choice_policy": str(payload.get("tool_choice_policy") or "").strip(),
+        "parallel_tool_calls": bool(payload.get("parallel_tool_calls")),
+        "stop_conditions": [
+            str(item).strip()
+            for item in (payload.get("stop_conditions") or [])
+            if str(item or "").strip()
+        ],
+        "escalation_conditions": [
+            str(item).strip()
+            for item in (payload.get("escalation_conditions") or [])
+            if str(item or "").strip()
+        ],
+        "exploration_mode": str(payload.get("exploration_mode") or "").strip(),
+        "scope_id": str(payload.get("scope_id") or "").strip(),
+    }
 
 
 def ensure_langchain_uuid_compat() -> None:
@@ -231,7 +281,7 @@ def _build_runtime_middleware(
 
 
 def build_section_tool_policy(scene_id: str, section_id: str) -> ToolPolicy:
-    tools = get_report_tool_bundle(scene_id, section_id)
+    tools = select_report_tools(runtime_target="agent_runtime_section", scene_id=scene_id, section_id=section_id)
     deep_sections = {
         ("policy_dynamics", "evolution"),
         ("public_hotspot", "propagation"),
@@ -274,28 +324,12 @@ def build_section_tool_policy(scene_id: str, section_id: str) -> ToolPolicy:
 
 def _build_analysis_tool_policy(scene_id: str, agent_name: str) -> ToolPolicy:
     pair = (str(scene_id or "").strip(), str(agent_name or "").strip())
-    scope_map = {
-        ("policy_dynamics", "evidence_analyst"): ["raw_item_search_tool", "temporal_event_window_tool", "content_focus_compare_tool"],
-        ("public_hotspot", "evidence_analyst"): ["raw_item_search_tool", "temporal_event_window_tool", "content_focus_compare_tool"],
-        ("crisis_response", "evidence_analyst"): ["raw_item_search_tool", "temporal_event_window_tool", "content_focus_compare_tool"],
-        ("policy_dynamics", "mechanism_analyst"): ["theory_matcher_tool", "reference_search_tool"],
-        ("public_hotspot", "mechanism_analyst"): ["theory_matcher_tool", "reference_search_tool"],
-        ("crisis_response", "mechanism_analyst"): ["theory_matcher_tool", "reference_search_tool"],
-        ("policy_dynamics", "claim_judge"): ["claim_verifier_tool"],
-        ("public_hotspot", "claim_judge"): ["claim_verifier_tool"],
-        ("crisis_response", "claim_judge"): ["claim_verifier_tool"],
-    }
-    available = (
-        get_report_tool_bundle(scene_id, "evolution")
-        + get_report_tool_bundle(scene_id, "response")
-        + get_report_tool_bundle(scene_id, "impact")
-    )
-    by_name = {str(getattr(tool, "name", "") or "").strip(): tool for tool in available if str(getattr(tool, "name", "") or "").strip()}
-    selected = [by_name[name] for name in scope_map.get(pair, []) if name in by_name]
+    selected = select_report_tools(runtime_target="agent_runtime_analysis", scene_id=scene_id, agent_name=agent_name)
+    selected_names = [str(getattr(tool, "name", "") or "").strip() for tool in selected if str(getattr(tool, "name", "") or "").strip()]
     max_turns = 2 if str(agent_name or "").strip() == "evidence_analyst" else 1
     return {
         "allowed_tools": selected,
-        "required_tools": [name for name in scope_map.get(pair, [])[:1]] if str(agent_name or "").strip() == "evidence_analyst" else [],
+        "required_tools": selected_names[:1] if pair[1] == "evidence_analyst" else [],
         "max_exploration_turns": max_turns,
         "tool_choice_policy": "required_any" if selected and str(agent_name or "").strip() == "evidence_analyst" else "auto",
         "parallel_tool_calls": False,
@@ -311,6 +345,21 @@ def _build_thread_id(context: ReportAgentContext, suffix: str) -> str:
     scene_id = str(context.get("scene_id") or "scene").strip()
     section_id = str(context.get("section_id") or context.get("tool_policy", {}).get("scope_id") or "scope").strip()
     return f"{topic_identifier}:{scene_id}:{section_id}:{suffix}"
+
+
+def _build_interrupt_on(tools: List[Any]) -> Dict[str, Any]:
+    mapping: Dict[str, Any] = {}
+    for tool in tools:
+        tool_name = str(getattr(tool, "name", "") or "").strip()
+        if not tool_name:
+            continue
+        try:
+            spec = get_report_tool_spec(tool_name)
+        except Exception:
+            continue
+        if spec.mutability != READ_ONLY:
+            mapping[tool_name] = True
+    return mapping
 
 
 def create_report_deep_agent(
@@ -353,19 +402,27 @@ def create_report_deep_agent(
         topic=topic,
     )
     skill_assets = build_report_skill_runtime_assets(topic)
+    skill_sources = select_report_skill_sources(
+        skill_assets,
+        available_tool_ids=[tool.name for tool in allowed_tools if str(getattr(tool, "name", "") or "").strip()],
+        runtime_target=RUNTIME_AGENT,
+    )
     middleware = _build_runtime_middleware(
         policy=policy,
     )
+    thread_id = _build_thread_id(context, name)
+    checkpointer, runtime_profile = get_shared_report_checkpointer(purpose=f"agent-runtime:{name}")
 
     agent = create_deep_agent(
         model=llm,
         tools=allowed_tools,
         system_prompt=runtime_system_prompt,
         middleware=middleware,
-        skills=skill_assets.get("sources") or None,
+        skills=skill_sources or None,
         context_schema=ReportAgentContext,
-        checkpointer=InMemorySaver(),
+        checkpointer=checkpointer,
         backend=StateBackend,
+        interrupt_on=_build_interrupt_on(list(allowed_tools)),
         name=name,
         debug=False,
     )
@@ -375,11 +432,16 @@ def create_report_deep_agent(
         "client_cfg": client_cfg,
         "context": runtime_context,
         "policy": policy,
-        "thread_id": _build_thread_id(context, name),
+        "thread_id": thread_id,
         "runtime": "deepagents",
         "seed_state": seed_state,
-        "skill_sources": skill_assets.get("sources") or [],
+        "skill_sources": skill_sources,
         "skill_catalog": skill_assets.get("catalog") or [],
+        "runtime_diagnostics": build_runtime_diagnostics(
+            purpose=f"agent-runtime:{name}",
+            thread_id=thread_id,
+            locator_hint=runtime_profile.checkpoint_locator,
+        ),
     }
 
 
@@ -420,12 +482,14 @@ def _create_plain_report_agent_runner(
         policy=policy,
     )
     compatibility_tools = [_build_plain_load_skill_tool(topic)]
+    thread_id = _build_thread_id(context, name)
+    checkpointer, runtime_profile = get_shared_report_checkpointer(purpose=f"agent-runtime:{name}:plain")
     agent = create_agent(
         model=llm,
         system_prompt=runtime_system_prompt,
         tools=[*allowed_tools, *compatibility_tools],
         middleware=middleware,
-        checkpointer=InMemorySaver(),
+        checkpointer=checkpointer,
         context_schema=ReportAgentContext,
         name=name,
         debug=False,
@@ -435,8 +499,13 @@ def _create_plain_report_agent_runner(
         "client_cfg": client_cfg,
         "context": runtime_context,
         "policy": policy,
-        "thread_id": _build_thread_id(context, name),
+        "thread_id": thread_id,
         "runtime": "plain",
+        "runtime_diagnostics": build_runtime_diagnostics(
+            purpose=f"agent-runtime:{name}:plain",
+            thread_id=thread_id,
+            locator_hint=runtime_profile.checkpoint_locator,
+        ),
     }
 
 
@@ -538,9 +607,18 @@ def run_report_agent_step(
         **(agent_runner.get("seed_state") if isinstance(agent_runner.get("seed_state"), dict) else {}),
         "messages": [{"role": "user", "content": user_prompt}],
     }
+    thread_id = str(agent_runner.get("thread_id") or "report_agent").strip()
+    runtime_name = str(agent_runner.get("runtime") or "plain").strip() or "plain"
+    runtime_diagnostics = agent_runner.get("runtime_diagnostics") if isinstance(agent_runner.get("runtime_diagnostics"), dict) else {}
     result = agent.invoke(
         payload,
-        config={"configurable": {"thread_id": str(agent_runner.get("thread_id") or "report_agent")}},
+        config=build_report_runnable_config(
+            thread_id=thread_id,
+            purpose=f"agent-step:{runtime_name}",
+            tags=[runtime_name, str(agent_runner.get("context", {}).get("scene_id") or "").strip()],
+            metadata={"runtime_diagnostics": runtime_diagnostics},
+            locator_hint=str(runtime_diagnostics.get("checkpoint_locator") or "").strip(),
+        ),
         context=agent_runner.get("context") or {},
     )
     messages = result.get("messages") if isinstance(result, dict) and isinstance(result.get("messages"), list) else []
@@ -614,7 +692,7 @@ def run_section_exploration(section_context: Dict[str, Any], tool_policy: ToolPo
             "unresolved_questions": [],
             "boundary": [],
         }
-    payload["policy"] = tool_policy
+    payload["policy"] = snapshot_tool_policy(tool_policy)
     payload["trace"] = result.get("trace") or {}
     payload["_agent_runner"] = runner
     return payload
@@ -667,6 +745,6 @@ def run_section_writer_agent(section_context: Dict[str, Any], exploration_result
     return {
         "markdown": str(result.get("content") or "").strip(),
         "trace": result.get("trace") or {},
-        "policy": writer_policy,
+        "policy": snapshot_tool_policy(writer_policy),
         "_agent_runner": runner,
     }

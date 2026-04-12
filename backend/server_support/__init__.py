@@ -11,6 +11,7 @@ from .backups import (  # type: ignore
 )
 from .configuration import (
     filter_ai_overview,
+    get_active_database_connection,
     load_config,
     load_databases_config,
     load_llm_config,
@@ -137,6 +138,7 @@ __all__ = [
     "restore_settings_backup",
     # Configuration helpers
     "filter_ai_overview",
+    "get_active_database_connection",
     "load_config",
     "load_databases_config",
     "load_llm_config",

@@ -8,6 +8,7 @@ from .loader import (
     load_report_skill_context,
     read_report_skill_resource,
     resolve_report_skill,
+    select_report_skill_sources,
 )
 
 
@@ -19,4 +20,5 @@ __all__ = [
     "load_report_skill_context",
     "read_report_skill_resource",
     "resolve_report_skill",
+    "select_report_skill_sources",
 ]

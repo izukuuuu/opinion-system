@@ -1,0 +1,119 @@
+{
+  "version": "1.0",
+  "direct": [
+    {
+      "source_field": "task",
+      "target_field": "meta / topic_scope.time_scope",
+      "mapping_type": "direct",
+      "rationale": "专题标识、展示名、时间范围、运行模式可直接进入 IR meta"
+    },
+    {
+      "source_field": "timeline",
+      "target_field": "timeline.events",
+      "mapping_type": "direct",
+      "rationale": "现有时间线已具备事件粒度，只需补 support_evidence_ids"
+    },
+    {
+      "source_field": "subjects",
+      "target_field": "actor_registry.actors",
+      "mapping_type": "direct",
+      "rationale": "主体对象已包含 id、name、category，可直接映射为 actor registry"
+    },
+    {
+      "source_field": "stance_matrix",
+      "target_field": "stance_matrix.rows",
+      "mapping_type": "direct",
+      "rationale": "现有立场矩阵可直接进入语义层，保留冲突关系与证据引用"
+    },
+    {
+      "source_field": "unverified_points",
+      "target_field": "unresolved_points.items",
+      "mapping_type": "direct",
+      "rationale": "待核验点就是 unresolved points 的直接来源"
+    },
+    {
+      "source_field": "validation_notes",
+      "target_field": "validation.notes",
+      "mapping_type": "direct",
+      "rationale": "校验说明应直接保留到 IR validation"
+    },
+    {
+      "source_field": "conclusion",
+      "target_field": "narrative_views",
+      "mapping_type": "direct",
+      "rationale": "执行摘要与关键发现属于可复用叙事视图"
+    }
+  ],
+  "restructure": [
+    {
+      "source_field": "key_evidence",
+      "target_field": "evidence_ledger.entries",
+      "mapping_type": "restructure",
+      "rationale": "需要从 finding/source_summary/citation_ids 重组为 evidence ledger"
+    },
+    {
+      "source_field": "risk_judgement",
+      "target_field": "risk_register.risks",
+      "mapping_type": "restructure",
+      "rationale": "风险项需要补 trigger_claim_ids / trigger_evidence_ids，而不是只保留文字摘要"
+    },
+    {
+      "source_field": "suggested_actions",
+      "target_field": "recommendation_candidates.items",
+      "mapping_type": "restructure",
+      "rationale": "建议项需要绑定 support_claim_ids，避免建议绕过已冻结 claim"
+    },
+    {
+      "source_field": "citations",
+      "target_field": "evidence_ledger.entries / validation.traceability_stats",
+      "mapping_type": "restructure",
+      "rationale": "引用索引本身不是语义对象，需要重组为证据账本与 traceability 指标"
+    },
+    {
+      "source_field": "key_evidence + validation_notes + unverified_points",
+      "target_field": "claim_set.claims",
+      "mapping_type": "restructure",
+      "rationale": "claim 集需要从支持证据、待核验点、校验备注共同压缩生成"
+    }
+  ],
+  "projection": [
+    {
+      "source_field": "report_document",
+      "target_field": "structured projection artifact",
+      "mapping_type": "projection",
+      "rationale": "文档章节是视图投影，不是语义事实源"
+    },
+    {
+      "source_field": "figures + artifact_manifest.figures",
+      "target_field": "structured projection artifact / figure lineage artifact",
+      "mapping_type": "projection",
+      "rationale": "figure block 提供语义投影，artifact manifest.figures 提供 dataset/spec/approval lineage"
+    },
+    {
+      "source_field": "markdown",
+      "target_field": "full markdown artifact",
+      "mapping_type": "projection",
+      "rationale": "正式文稿应由 ReportIR 编译得到，而不是反向作为事实源"
+    },
+    {
+      "source_field": "structured_result_digest / report_ir_summary",
+      "target_field": "task/view projection",
+      "mapping_type": "projection",
+      "rationale": "摘要对象仅用于任务列表与运行台展示"
+    },
+    {
+      "source_field": "title / subtitle / rangeText",
+      "target_field": "view metadata",
+      "mapping_type": "projection",
+      "rationale": "标题、副标题和时间文案属于展示层元数据"
+    }
+  ],
+  "drop": [
+    {
+      "source_field": "deprecated report_ready / full_report_ready seam",
+      "target_field": "artifact manifest only",
+      "mapping_type": "drop",
+      "rationale": "旧布尔门已退役，readiness 只允许由 artifact manifest 表达"
+    }
+  ]
+}

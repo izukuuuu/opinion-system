@@ -56,7 +56,7 @@ def build_memory_markdown(topic_label: str) -> str:
     )
 
 
-def build_runtime_assets(topic_label: str) -> Tuple[Dict[str, Dict[str, Any]], list[str], list[str]]:
+def build_runtime_assets(topic_label: str) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any], list[str]]:
     skill_assets = build_report_skill_runtime_assets(topic_label)
     files: Dict[str, Dict[str, Any]] = {}
     staged = skill_assets.get("files") if isinstance(skill_assets.get("files"), dict) else {}
@@ -66,13 +66,8 @@ def build_runtime_assets(topic_label: str) -> Tuple[Dict[str, Dict[str, Any]], l
     files["/workspace/.keep"] = create_file_data("")
     files["/memories/README.md"] = create_file_data("Report runtime memory lives in AGENTS.md.")
     files["/memories/AGENTS.md"] = create_file_data(build_memory_markdown(topic_label))
-    skill_sources = [
-        str(item).strip()
-        for item in (skill_assets.get("sources") or [])
-        if str(item or "").strip()
-    ]
     memory_paths = ["/memories/AGENTS.md"]
-    return files, skill_sources, memory_paths
+    return files, skill_assets, memory_paths
 
 
 def ensure_memory_seed(namespace: tuple[str, ...], topic_label: str) -> None:

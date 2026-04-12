@@ -1,6 +1,7 @@
 ---
 name: propagation-explanation-framework
 description: Explain platform differences, diffusion rhythm, amplification nodes, and polarization patterns in a report-friendly way.
+allowed_tools: compute_report_metrics build_mechanism_summary detect_risk_signals build_basic_analysis_insight
 metadata:
   report:
     skillKey: propagation_explanation_framework

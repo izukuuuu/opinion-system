@@ -1,6 +1,7 @@
 ---
 name: evidence-source-credibility
 description: Normalize raw retrieval hits into evidence blocks, deduplicate overlaps, and keep source credibility and citation boundaries explicit.
+allowed_tools: retrieve_evidence_cards get_basic_analysis_snapshot
 metadata:
   report:
     skillKey: evidence_source_credibility

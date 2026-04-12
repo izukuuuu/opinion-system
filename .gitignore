@@ -1,6 +1,14 @@
 # Python
 backend/venv/
-backend/configs/
+backend/configs/*
+!backend/configs/chart_aliases.yaml
+!backend/configs/report_blueprints/
+backend/configs/report_blueprints/*
+!backend/configs/report_blueprints/analysis_report.yaml
+!backend/configs/report_sections/
+backend/configs/report_sections/*
+!backend/configs/report_sections/basic_analysis.yaml
+!backend/configs/report_sections/bertopic.yaml
 backend/data/*
 !backend/data/.gitkeep
 __pycache__/

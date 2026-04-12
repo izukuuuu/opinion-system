@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "stages": [
+    {
+      "stage_id": "router_dispatch",
+      "fault_types": ["routing_fault", "dispatch_undercoverage", "dispatch_no_contribution"],
+      "trace_surface": ["router_facets", "dispatch_plan", "dispatch_quality_ledger"]
+    },
+    {
+      "stage_id": "agenda_frame_synthesis",
+      "fault_types": ["frame_synthesis_fault", "counter_frame_fault", "frame_shift_fault"],
+      "trace_surface": ["AgendaFrameMap.issues", "AgendaFrameMap.issue_attribute_edges", "AgendaFrameMap.frames", "AgendaFrameMap.frame_shifts"]
+    },
+    {
+      "stage_id": "conflict_synthesis",
+      "fault_types": ["claim_cluster_fault", "target_binding_fault", "argument_relation_fault", "conflict_resolution_fault"],
+      "trace_surface": ["ConflictMap.claims", "ConflictMap.targets", "ConflictMap.arguments", "ConflictMap.edges", "ConflictMap.resolution_summary"]
+    },
+    {
+      "stage_id": "mechanism_analysis",
+      "fault_types": ["path_identification_fault", "bridge_node_fault", "phase_shift_fault", "mechanism_synthesis_fault"],
+      "trace_surface": ["MechanismSummary.amplification_paths", "MechanismSummary.bridge_nodes", "MechanismSummary.phase_shifts", "MechanismSummary.cause_candidates"]
+    },
+    {
+      "stage_id": "utility_gate",
+      "fault_types": ["utility_gate_fault", "fallback_trace_fault", "review_threshold_fault"],
+      "trace_surface": ["UtilityAssessment.missing_dimensions", "UtilityAssessment.fallback_trace", "UtilityAssessment.improvement_trace", "ApprovalRecord"]
+    }
+  ]
+}

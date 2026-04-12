@@ -9,10 +9,18 @@ from typing import Any, Dict, Iterable, List, Tuple
 from server_support.archive_locator import ArchiveLocator, compose_folder_name
 from server_support.topic_context import TopicContext
 
+from ..capability_adapters import (
+    build_basic_analysis_insight,
+    build_bertopic_insight,
+    collect_basic_analysis_snapshot,
+    collect_bertopic_snapshot,
+    ensure_bertopic_results,
+)
 from ...utils.setting.paths import bucket, ensure_bucket, get_data_root
 from ..knowledge_loader import load_report_knowledge
-from ..runtime import ANALYZE_FILE_MAP, collect_explain_outputs, ensure_analyze_results, ensure_explain_results
+from ..runtime_bootstrap import ANALYZE_FILE_MAP, collect_explain_outputs, ensure_analyze_results, ensure_explain_results
 from ..skills import load_report_skill_context
+from .runtime_contract import RUNTIME_CONTRACT_VERSION
 
 
 TOKEN_RE = re.compile(r"[\u4e00-\u9fffA-Za-z0-9_-]{2,24}")
@@ -201,10 +209,20 @@ def build_base_context(
     *,
     topic_label: str,
     mode: str,
+    thread_id: str = "",
 ) -> Dict[str, Any]:
     ctx = TopicContext(identifier=topic_identifier, display_name=topic_label, aliases=[])
+    skill_context = load_report_skill_context(topic_label)
+    document_type = str(skill_context.get("documentType") or "analysis_report").strip() or "analysis_report"
     ensure_analyze_results(topic_identifier, start=start, end=end, ctx=ctx)
     ensure_explain_results(topic_identifier, start=start, end=end, ctx=ctx)
+    bertopic_state = ensure_bertopic_results(
+        topic_identifier,
+        start=start,
+        end=end,
+        ctx=ctx,
+        run_if_missing=document_type == "analysis_report" or str(mode or "").strip().lower() == "research",
+    )
     analyze_root = ArchiveLocator(ctx).resolve_result_dir("analyze", start, end)
     if not analyze_root:
         folder = compose_folder_name(start, end)
@@ -218,7 +236,20 @@ def build_base_context(
     raw_digest = _build_raw_row_digest(topic_identifier, start, end)
     explain_state = collect_explain_outputs(ctx, start, end)
     knowledge_context = load_report_knowledge(topic_label)
-    skill_context = load_report_skill_context(topic_label)
+    basic_analysis_snapshot = collect_basic_analysis_snapshot(
+        topic_identifier,
+        start,
+        end,
+        topic_label=topic_label,
+        ctx=ctx,
+    )
+    bertopic_snapshot = collect_bertopic_snapshot(
+        topic_identifier,
+        start,
+        end,
+        topic_label=topic_label,
+        ctx=ctx,
+    )
     overview = {
         "total_volume": _guess_total_volume(modules.get("volume")),
         "peak": _guess_peak_from_trends(modules.get("trends")),
@@ -233,6 +264,16 @@ def build_base_context(
         "topic_label": topic_label,
         "time_range": {"start": start, "end": end},
         "mode": mode,
+        "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
+        "task_contract": {
+            "contract_id": f"{topic_identifier}:{start}:{end or start}",
+            "topic_identifier": topic_identifier,
+            "topic_label": topic_label,
+            "start": start,
+            "end": end,
+            "mode": mode,
+            "thread_id": str(thread_id or "").strip(),
+        },
         "analyze_root": str(analyze_root),
         "analysis_modules": modules,
         "overview": overview,
@@ -240,6 +281,12 @@ def build_base_context(
         "explain_state": explain_state,
         "knowledge_context": knowledge_context,
         "skill_context": skill_context,
+        "document_type": document_type,
+        "bertopic_state": bertopic_state,
+        "basic_analysis_snapshot": basic_analysis_snapshot,
+        "basic_analysis_insight": build_basic_analysis_insight(basic_analysis_snapshot),
+        "bertopic_snapshot": bertopic_snapshot,
+        "bertopic_insight": build_bertopic_insight(bertopic_snapshot),
     }
 
 
@@ -284,6 +331,9 @@ def build_workspace_files(base_context: Dict[str, Any]) -> Dict[str, Dict[str, A
 
     files: Dict[str, Dict[str, Any]] = {}
     files["/workspace/base_context.json"] = create_file_data(json.dumps(base_context, ensure_ascii=False, indent=2))
+    task_contract = base_context.get("task_contract") if isinstance(base_context.get("task_contract"), dict) else {}
+    if task_contract:
+        files["/workspace/state/task_contract.json"] = create_file_data(json.dumps(task_contract, ensure_ascii=False, indent=2))
     overview = base_context.get("overview") if isinstance(base_context.get("overview"), dict) else {}
     raw_digest = base_context.get("raw_digest") if isinstance(base_context.get("raw_digest"), dict) else {}
     sample_lines = []

@@ -1,0 +1,64 @@
+version: 1
+document_type: analysis_report
+
+layout:
+  preserve_composer_summary_prefix: true
+  sanitize_missing_figure_refs: true
+
+sections:
+  - section_id: summary
+    source: composer
+    optional: true
+
+  - section_id: basic-analysis-insight
+    source: factory
+    factory: basic_analysis
+    required: true
+    fallback: callout
+    title: 基础分析洞察
+    kicker: 平台基础能力
+    visible_if:
+      any_capability_ready:
+        - volume
+        - trends
+        - attitude
+        - classification
+        - keywords
+        - publishers
+        - geography
+
+  - section_id: bertopic-evolution
+    source: factory
+    factory: bertopic
+    required: true
+    fallback: callout
+    title: BERTopic 主题演化
+    kicker: 平台基础能力
+    visible_if:
+      capability_ready:
+        - bertopic
+
+  - section_id: core-dimensions
+    source: composer_or_factory
+    factory: core_dimensions
+    required: true
+
+  - section_id: lifecycle
+    source: composer_or_factory
+    factory: lifecycle
+    required: true
+
+  - section_id: subjects-and-stance
+    source: composer_or_factory
+    factory: subjects_and_stance
+    required: true
+
+  - section_id: propagation-and-response
+    source: composer_or_factory
+    factory: propagation_and_response
+    required: true
+
+appendix:
+  source: default_or_composer
+  include_citations: true
+  include_validation_notes: true

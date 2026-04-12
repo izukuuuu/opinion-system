@@ -21,17 +21,18 @@ from server_support.topic_context import TopicContext  # type: ignore
 from src.report.deep_report import (  # type: ignore
     AI_FULL_REPORT_CACHE_FILENAME,
     REPORT_CACHE_FILENAME,
+    RUNTIME_CONTRACT_VERSION,
     ReportRuntimeFailure,
     run_or_resume_deep_report_task,
 )
 from src.report.deep_report.assets import build_artifacts_root  # type: ignore
-from src.report.runtime import ensure_analyze_results, ensure_explain_results  # type: ignore
+from src.report.runtime_bootstrap import ensure_analyze_results, ensure_explain_results  # type: ignore
 from src.report.task_queue import (  # type: ignore
     append_agent_memo,
     append_event,
     get_task,
-    mark_approval_required,
     mark_agent_started,
+    mark_approval_required,
     mark_artifact_ready,
     mark_task_cancelled,
     mark_task_completed,
@@ -57,6 +58,10 @@ PHASE_PERCENTAGE = {
     "prepare": 5,
     "analyze": 18,
     "explain": 32,
+    "planning": 42,
+    "exploration": 58,
+    "structure": 70,
+    "compile": 82,
     "interpret": 58,
     "write": 82,
     "review": 93,
@@ -148,6 +153,12 @@ def main() -> None:
 def _run_task(task_id: str) -> None:
     task = get_task(task_id)
     request = dict(task.get("request") or {})
+    task_runtime_version = str(
+        request.get("runtime_contract_version")
+        or task.get("runtime_contract_version")
+        or ((task.get("run_state") or {}).get("runtime_contract_version") if isinstance(task.get("run_state"), dict) else "")
+        or ""
+    ).strip()
     topic_identifier = str(request.get("topic_identifier") or task.get("topic_identifier") or "").strip()
     topic_label = str(request.get("topic") or task.get("topic") or topic_identifier).strip() or topic_identifier
     start = str(request.get("start") or task.get("start") or "").strip()
@@ -247,8 +258,8 @@ def _run_task(task_id: str) -> None:
                 task_id,
                 agent="researcher",
                 phase="explain",
-                message="当前任务使用 research 模式，会保留更完整的调研轨迹。",
-                delta="当前任务使用 research 模式，会保留更完整的调研轨迹。",
+                message="当前任务使用 research 模式，会加强本地归档与分析结果的研读轨迹。",
+                delta="当前任务使用 research 模式，会加强本地归档与分析结果的研读轨迹。",
             )
         _raise_if_cancelled(task_id)
         _maybe_update_fallback_todos(
@@ -261,10 +272,43 @@ def _run_task(task_id: str) -> None:
             raise TaskCancelled("审批已拒绝，本次报告未继续写入正式结果。")
 
         resume_payload = _build_resume_payload_from_task(task)
+        if resume_payload is not None and task_runtime_version != RUNTIME_CONTRACT_VERSION:
+            diagnostic = {
+                "category": "legacy_runtime_version",
+                "diagnostic_kind": "legacy_runtime_version",
+                "resume_blocked": True,
+                "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
+                "task_runtime_contract_version": task_runtime_version or "missing",
+                "next_action": "旧任务只允许只读回放或显式重建 contract 后重跑。",
+            }
+            append_event(
+                task_id,
+                event_type="phase.context",
+                phase="persist",
+                title="旧运行时任务已阻止恢复",
+                message="当前任务来自旧 ABI 版本，系统未继续沿新运行时主路径恢复。",
+                payload=diagnostic,
+            )
+            raise ReportRuntimeFailure("旧 ABI 任务不能直接 resume 到当前运行时。", diagnostic)
         if resume_payload is None:
             mark_task_progress(task_id, phase="interpret", percentage=PHASE_PERCENTAGE["interpret"], message="总控代理正在调度子代理并生成结构化结果。")
         else:
             mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="审批已处理，正在恢复正式写入流程。")
+            try:
+                append_event(
+                    task_id,
+                    event_type="phase.context",
+                    phase="persist",
+                    title="任务已恢复",
+                    message="任务正在沿同一 thread 恢复正式写入流程。",
+                    payload={
+                        "resume_from": "approval_resolution",
+                        "before_phase": str(task.get("phase") or "").strip(),
+                        "after_phase": "persist",
+                    },
+                )
+            except LookupError:
+                LOGGER.warning("report worker | resume event skipped because task state is unavailable | task=%s", task_id)
 
         runtime_result = run_or_resume_deep_report_task(
             topic_identifier,
@@ -283,6 +327,35 @@ def _run_task(task_id: str) -> None:
                 str(runtime_result.get("message") or "深度代理执行失败。").strip() or "深度代理执行失败。",
                 diagnostic,
             )
+        runtime_status = str(runtime_result.get("status") or "").strip()
+        if runtime_status == "waiting_approval":
+            structured_payload = runtime_result.get("structured_payload") if isinstance(runtime_result.get("structured_payload"), dict) else {}
+            if structured_payload:
+                set_structured_result_digest(
+                    task_id,
+                    digest=_structured_digest_from_payload(structured_payload),
+                    path=str(cache_path),
+                )
+            mark_artifact_ready(
+                task_id,
+                message="结构化结果已生成，正式文稿触发语义边界审查，等待人工确认。",
+                payload={
+                    "report_cache_path": str(cache_path) if structured_payload else "",
+                    "report_title": str(((structured_payload.get("task") or {}).get("topic_label")) or topic_label).strip() if structured_payload else "",
+                    "artifact_manifest": (
+                        structured_payload.get("artifact_manifest")
+                        if isinstance(structured_payload.get("artifact_manifest"), dict)
+                        else {}
+                    ),
+                },
+            )
+            mark_approval_required(
+                task_id,
+                approvals=runtime_result.get("approvals") if isinstance(runtime_result.get("approvals"), list) else [],
+                phase="review",
+                message=str(runtime_result.get("message") or "正式文稿触发语义边界审查，等待人工确认。").strip(),
+            )
+            return
         report_payload = runtime_result.get("structured_payload") if isinstance(runtime_result.get("structured_payload"), dict) else {}
         full_report_payload = runtime_result.get("full_payload") if isinstance(runtime_result.get("full_payload"), dict) else {}
         if report_payload:
@@ -299,38 +372,20 @@ def _run_task(task_id: str) -> None:
             update_task_trust(
                 task_id,
                 trust=_trust_from_payload(report_payload),
-                phase="write",
+                phase="structure",
                 message="已根据结构化结果更新置信信息。",
             )
             _maybe_update_fallback_todos(
                 task_id,
                 stage="review",
-                phase="write",
-                message="结构化结果已生成，正在准备正式文稿。",
+                phase="structure",
+                message="结构化结果已生成，正在进入正式编译。",
             )
         _raise_if_cancelled(task_id)
-
-        if str(runtime_result.get("status") or "").strip() == "interrupted":
-            approval_items = runtime_result.get("approvals") if isinstance(runtime_result.get("approvals"), list) else []
-            mark_task_progress(task_id, phase="review", percentage=PHASE_PERCENTAGE["review"], message="文稿写入前需要人工确认。")
-            _maybe_update_fallback_todos(
-                task_id,
-                stage="persist",
-                phase="persist",
-                message="正式写入前等待人工确认。",
-            )
-            mark_approval_required(
-                task_id,
-                approvals=approval_items,
-                phase="persist",
-                message=str(runtime_result.get("message") or "文稿写入前需要人工确认。").strip() or "文稿写入前需要人工确认。",
-            )
-            LOGGER.warning("report worker | task interrupted for approval | task=%s approvals=%s", task_id, len(approval_items))
-            return
         if not report_payload:
             raise RuntimeError("深度代理未产出结构化报告缓存。")
-        if not full_report_payload:
-            raise RuntimeError("深度代理未产出完整文稿缓存。")
+        if not isinstance(full_report_payload, dict) or not str(full_report_payload.get("markdown") or "").strip():
+            raise RuntimeError("正式 Markdown 报告生成失败。")
 
         mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="正在整理最终报告产物。")
         _maybe_update_fallback_todos(
@@ -343,13 +398,18 @@ def _run_task(task_id: str) -> None:
             task_id,
             message="结构化报告与 AI 完整报告缓存已写入。",
             payload={
-                "report_ready": True,
                 "report_cache_path": str(cache_path),
                 "report_title": str(((report_payload.get("task") or {}).get("topic_label")) or topic_label).strip(),
-                "full_report_ready": True,
                 "full_report_cache_path": str(full_cache_path),
                 "full_report_title": str(full_report_payload.get("title") or "").strip(),
                 "report_runtime_artifact": str(build_artifacts_root(task_id, get_data_root()) / "report.md"),
+                "artifact_manifest": (
+                    full_report_payload.get("artifact_manifest")
+                    if isinstance(full_report_payload.get("artifact_manifest"), dict)
+                    else report_payload.get("artifact_manifest")
+                    if isinstance(report_payload.get("artifact_manifest"), dict)
+                    else {}
+                ),
                 "view": {
                     "topic": topic_label,
                     "topic_identifier": topic_identifier,
@@ -362,12 +422,17 @@ def _run_task(task_id: str) -> None:
             task_id,
             message="报告已生成。",
             payload={
-                "report_ready": True,
                 "report_cache_path": str(cache_path),
                 "report_title": str(((report_payload.get("task") or {}).get("topic_label")) or topic_label).strip(),
-                "full_report_ready": True,
                 "full_report_cache_path": str(full_cache_path),
                 "full_report_title": str(full_report_payload.get("title") or "").strip(),
+                "artifact_manifest": (
+                    full_report_payload.get("artifact_manifest")
+                    if isinstance(full_report_payload.get("artifact_manifest"), dict)
+                    else report_payload.get("artifact_manifest")
+                    if isinstance(report_payload.get("artifact_manifest"), dict)
+                    else {}
+                ),
             },
         )
         LOGGER.warning(
@@ -409,6 +474,14 @@ def _handle_report_event(task_id: str, event: Dict[str, Any]) -> None:
     message = str(event.get("message") or "").strip()
     agent = str(event.get("agent") or "").strip()
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    normalized_type = {
+        "exploration.todo.updated": "todo.updated",
+        "exploration.subagent.started": "subagent.started",
+        "exploration.subagent.completed": "subagent.completed",
+    }.get(event_type, event_type)
+    event_type = normalized_type
+    if phase == "exploration":
+        phase = "exploration"
     if event_type == "task.failed":
         LOGGER.warning(
             "report worker | callback event | task=%s type=%s phase=%s message=%s payload=%s",
@@ -558,6 +631,7 @@ def _build_failure_diagnostic(task_id: str, exc: Exception) -> Dict[str, Any]:
     diagnostic: Dict[str, Any] = {
         "error_type": type(exc).__name__,
         "error_message": str(exc or "").strip(),
+        "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
         "failed_phase": str(task.get("phase") or "").strip() or "prepare",
         "failed_actor": str(task.get("current_actor") or "").strip() or "report_coordinator",
         "current_operation": str(task.get("current_operation") or "").strip(),
@@ -594,6 +668,37 @@ def _raise_if_cancelled(task_id: str) -> None:
 
 
 def _structured_digest_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    report_ir_summary = payload.get("report_ir_summary") if isinstance(payload.get("report_ir_summary"), dict) else {}
+    if not report_ir_summary and isinstance(payload.get("report_ir"), dict):
+        ir = payload.get("report_ir") or {}
+        meta = ir.get("meta") if isinstance(ir.get("meta"), dict) else {}
+        narrative = ir.get("narrative_views") if isinstance(ir.get("narrative_views"), dict) else {}
+        report_ir_summary = {
+            "topic": str(meta.get("topic_label") or meta.get("topic_identifier") or "").strip(),
+            "range": {
+                "start": str(((meta.get("time_scope") or {}).get("start")) or "").strip(),
+                "end": str(((meta.get("time_scope") or {}).get("end")) or "").strip(),
+            },
+            "summary": str(narrative.get("executive_summary") or "").strip(),
+            "key_findings": [
+                str(item).strip()
+                for item in (narrative.get("key_findings") or [])
+                if str(item or "").strip()
+            ][:6],
+            "counts": {
+                "timeline": len(((ir.get("timeline") or {}).get("events")) or []),
+                "actors": len(((ir.get("actor_registry") or {}).get("actors")) or []),
+                "claims": len(((ir.get("claim_set") or {}).get("claims")) or []),
+                "evidence": len(((ir.get("evidence_ledger") or {}).get("entries")) or []),
+                "risks": len(((ir.get("risk_register") or {}).get("risks")) or []),
+                "unresolved": len(((ir.get("unresolved_points") or {}).get("items")) or []),
+                "recommendations": len(((ir.get("recommendation_candidates") or {}).get("items")) or []),
+            },
+        }
+    if report_ir_summary:
+        digest = dict(report_ir_summary)
+        digest["report_ir_summary"] = report_ir_summary
+        return digest
     task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
     conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
     return {
@@ -615,6 +720,7 @@ def _structured_digest_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "actions": len(payload.get("suggested_actions") or []),
             "citations": len(payload.get("citations") or []),
         },
+        "report_ir_summary": report_ir_summary,
     }
 
 
@@ -715,6 +821,27 @@ def _has_rejected_approval(task: Dict[str, Any]) -> bool:
         and str(item.get("decision") or "").strip().lower() == "reject"
         for item in approvals
     )
+
+
+def _resolved_graph_review(task: Dict[str, Any]) -> Dict[str, Any] | None:
+    approvals = task.get("approvals") if isinstance(task.get("approvals"), list) else []
+    for item in reversed(approvals):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").strip() != "resolved":
+            continue
+        tool_name = str(item.get("tool_name") or "").strip()
+        if tool_name != "graph_interrupt" and str(item.get("approval_kind") or "").strip() != "graph_interrupt":
+            continue
+        decision = str(item.get("decision") or "").strip().lower()
+        if decision not in {"approve", "edit"}:
+            continue
+        return {
+            "approval_id": str(item.get("approval_id") or "").strip(),
+            "decision": decision,
+            "edited_action": item.get("edited_action") if isinstance(item.get("edited_action"), dict) else {},
+        }
+    return None
 
 
 def _build_resume_payload_from_task(task: Dict[str, Any]) -> Any:

@@ -34,9 +34,12 @@ export function createDefaultReportRunState() {
     approvals: [],
     runState: {},
     orchestratorState: {},
+    currentActor: '',
     currentOperation: '',
     lastDiagnostic: {},
     structuredResultDigest: {},
+    reportIrSummary: {},
+    artifactManifest: {},
     events: [],
     lastEventId: 0,
     lifecycleState: 'idle',
@@ -121,10 +124,17 @@ export const useReportRunStore = defineStore('report-run', {
       this.approvals = Array.isArray(task.approvals) ? task.approvals : []
       this.runState = task.run_state && typeof task.run_state === 'object' ? task.run_state : {}
       this.orchestratorState = task.orchestrator_state && typeof task.orchestrator_state === 'object' ? task.orchestrator_state : {}
+      this.currentActor = String(task.current_actor || '').trim()
       this.currentOperation = String(task.current_operation || '').trim()
       this.lastDiagnostic = task.last_diagnostic && typeof task.last_diagnostic === 'object' ? task.last_diagnostic : {}
       this.structuredResultDigest = task.structured_result_digest && typeof task.structured_result_digest === 'object'
         ? task.structured_result_digest
+        : {}
+      this.reportIrSummary = task.report_ir_summary && typeof task.report_ir_summary === 'object'
+        ? task.report_ir_summary
+        : {}
+      this.artifactManifest = task.artifact_manifest && typeof task.artifact_manifest === 'object'
+        ? task.artifact_manifest
         : {}
       this.mergeEvents(task.recent_events || [])
     }

@@ -1,0 +1,28 @@
+section_id: bertopic-evolution
+factory: bertopic
+kicker: 平台基础能力
+title: BERTopic 主题演化
+summary_field: bertopic_insight.summary
+default_summary: 当前区间尚未形成 BERTopic 主题演化章节洞察。
+
+blocks:
+  - type: narrative
+    block_id: bertopic-summary
+    title: 章节判断
+    source_field: bertopic_insight.summary
+    default_content: 当前区间尚未形成 BERTopic 主题演化章节洞察。
+
+  - type: bullets
+    block_id: bertopic-findings
+    title: 主题演化发现
+    source_field: bertopic_insight.key_findings
+    empty_items:
+      - 当前 BERTopic 章节暂未形成可写入的结构化发现。
+
+  - type: callout
+    block_id: bertopic-uncertainty
+    title: 边界说明
+    tone_from: bertopic_insight.uncertainty_notes
+    source_field: bertopic_insight.uncertainty_notes
+    joiner: "；"
+    default_content: BERTopic 结果已就绪，可用于识别主题簇与时序迁移。

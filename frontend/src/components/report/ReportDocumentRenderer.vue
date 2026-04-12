@@ -71,47 +71,9 @@
           <p v-if="!(block.items || []).length" class="mt-3 text-sm text-muted">当前区块暂无要点。</p>
         </section>
 
-        <section v-else-if="block.type === 'chart_slot'" class="space-y-4">
-          <div class="space-y-1">
-            <h3 class="text-base font-semibold text-primary">{{ block.title || '图表' }}</h3>
-            <p v-if="block.description" class="text-sm text-secondary">{{ block.description }}</p>
-          </div>
-          <div class="grid gap-4 md:grid-cols-2">
-            <AnalysisChartPanel
-              v-for="chart in resolveCharts(block.chart_ids)"
-              :key="chart.chart_id"
-              :title="chart.title"
-              :description="chart.subtitle"
-              :option="chart.option"
-              :has-data="Boolean(chart.has_data ?? chart.hasData)"
-              :is-keywords="chart.function_name === 'keywords'"
-              :all-rows="chart.all_rows || chart.allRows || []"
-            >
-              <template #default>
-                <div v-if="shouldShowDataTable(chart)" class="overflow-hidden rounded-2xl border border-soft">
-                  <table class="min-w-full text-sm">
-                    <thead class="bg-surface-muted text-xs uppercase tracking-wide text-muted">
-                      <tr>
-                        <th class="px-3 py-2 text-left">名称</th>
-                        <th class="px-3 py-2 text-left">数值</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr
-                        v-for="(row, index) in chart.rows || []"
-                        :key="`${chart.chart_id}-${index}`"
-                        class="border-t border-soft text-secondary"
-                      >
-                        <td class="px-3 py-2">{{ row.displayName ?? row.name ?? row.label ?? row.key ?? '未命名' }}</td>
-                        <td class="px-3 py-2">{{ row.displayValue ?? row.value ?? row.count ?? row.total ?? 0 }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </template>
-            </AnalysisChartPanel>
-          </div>
-          <div v-if="!resolveCharts(block.chart_ids).length" class="rounded-3xl border border-dashed border-soft px-4 py-8 text-sm text-secondary">
+        <section v-else-if="block.type === 'figure_ref'" class="space-y-4">
+          <ChartFigure v-if="resolveFigure(block.figure_id)" :contract="resolveFigure(block.figure_id)" />
+          <div v-else class="rounded-3xl border border-dashed border-soft px-4 py-8 text-sm text-secondary">
             当前区块没有可展示的图表。
           </div>
         </section>
@@ -302,16 +264,21 @@
 
 <script setup>
 import { computed } from 'vue'
-import AnalysisChartPanel from '../AnalysisChartPanel.vue'
+import ChartFigure from './ChartFigure.vue'
+import { buildFigureContractMap } from '../../utils/reportFigures'
 
 const props = defineProps({
   document: {
     type: Object,
     default: () => ({})
   },
-  chartCatalog: {
-    type: Array,
-    default: () => []
+  reportIr: {
+    type: Object,
+    default: () => ({})
+  },
+  artifactManifest: {
+    type: Object,
+    default: () => ({})
   },
   reportData: {
     type: Object,
@@ -327,14 +294,7 @@ const hero = computed(() => (props.document && typeof props.document.hero === 'o
 const sections = computed(() => Array.isArray(props.document?.sections) ? props.document.sections : [])
 const appendix = computed(() => (props.document && typeof props.document.appendix === 'object' ? props.document.appendix : { blocks: [] }))
 
-const chartMap = computed(() => {
-  const map = new Map()
-  for (const item of Array.isArray(props.chartCatalog) ? props.chartCatalog : []) {
-    const key = String(item?.chart_id || item?.chartId || '').trim()
-    if (key) map.set(key, item)
-  }
-  return map
-})
+const figureMap = computed(() => buildFigureContractMap(props.reportIr, props.artifactManifest))
 
 const evidenceMap = computed(() => new Map((Array.isArray(props.reportData?.key_evidence) ? props.reportData.key_evidence : []).map((item) => [String(item?.evidence_id || '').trim(), item])))
 const timelineMap = computed(() => new Map((Array.isArray(props.reportData?.timeline) ? props.reportData.timeline : []).map((item) => [String(item?.event_id || '').trim(), item])))
@@ -344,8 +304,8 @@ const riskMap = computed(() => new Map((Array.isArray(props.reportData?.risk_jud
 const actionMap = computed(() => new Map((Array.isArray(props.reportData?.suggested_actions) ? props.reportData.suggested_actions : []).map((item) => [String(item?.action_id || '').trim(), item])))
 const citationMap = computed(() => new Map((Array.isArray(props.reportData?.citations) ? props.reportData.citations : []).map((item) => [String(item?.citation_id || '').trim(), item])))
 
-function resolveCharts(ids = []) {
-  return (Array.isArray(ids) ? ids : []).map((id) => chartMap.value.get(String(id || '').trim())).filter(Boolean)
+function resolveFigure(id = '') {
+  return figureMap.value.get(String(id || '').trim()) || null
 }
 
 function resolveEvidence(ids = []) {
@@ -380,15 +340,6 @@ function resolveCitations(ids = []) {
 
 function citationAnchorId(citationId) {
   return `citation-${String(citationId || '').trim()}`
-}
-
-function shouldShowDataTable(chart) {
-  const rows = Array.isArray(chart?.rows) ? chart.rows : []
-  if (!rows.length) return false
-  if (String(chart?.function_name || '') === 'trends') {
-    return !rows.every((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.name || row?.label || '').trim()))
-  }
-  return true
 }
 
 function calloutClass(tone) {

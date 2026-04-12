@@ -1,6 +1,8 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
+import { buildFigureContractMap, replaceFigureDirectives, replaceFigureDirectivesWithStaticMarkup } from './reportFigures'
+
 const HEADING_PATTERN = /^(#{1,6})\s+(.+)$/
 
 function slugify(text, counts) {
@@ -83,9 +85,13 @@ export function extractMarkdownToc(markdown = '') {
     .filter((item) => item.level >= 1 && item.level <= 3)
 }
 
-export function renderAiReportMarkdown(markdown = '', { assets = [] } = {}) {
+export function renderAiReportMarkdown(markdown = '', { assets = [], reportIr = {}, artifactManifest = {}, staticFigures = false } = {}) {
   const assetMap = normalizeAssets(assets)
-  const resolved = replaceAssetUrls(markdown, assetMap)
+  const figureMap = buildFigureContractMap(reportIr, artifactManifest)
+  const withAssets = replaceAssetUrls(markdown, assetMap)
+  const resolved = staticFigures
+    ? replaceFigureDirectivesWithStaticMarkup(withAssets, figureMap)
+    : replaceFigureDirectives(withAssets)
   const prepared = injectHeadingAnchors(resolved)
   const rendered = marked.parse(prepared, {
     breaks: true,
@@ -93,7 +99,7 @@ export function renderAiReportMarkdown(markdown = '', { assets = [] } = {}) {
   })
   return DOMPurify.sanitize(rendered, {
     USE_PROFILES: { html: true },
-    ADD_ATTR: ['target', 'rel', 'class', 'id']
+    ADD_ATTR: ['target', 'rel', 'class', 'id', 'data-report-figure']
   })
 }
 
