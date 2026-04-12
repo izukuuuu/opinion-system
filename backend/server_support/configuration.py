@@ -68,6 +68,20 @@ def _load_static_llm_config() -> Dict[str, Any]:
     return data
 
 
+def _load_local_llm_config() -> Dict[str, Any]:
+    """Load the local ignored LLM override file when present."""
+
+    local_path = CONFIGS_DIR / f"{LLM_CONFIG_NAME}.local.yaml"
+    if not local_path.is_file():
+        return {}
+
+    with local_path.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
 def load_config() -> Dict[str, Any]:
     """Load the static backend configuration file."""
 
@@ -121,7 +135,7 @@ def load_llm_config() -> Dict[str, Any]:
     """Return the configured large language model presets."""
 
     config = load_settings_config(LLM_CONFIG_NAME)
-    static_config = _load_static_llm_config()
+    static_config = _deep_merge_dict(_load_static_llm_config(), _load_local_llm_config())
 
     presets = config.get("presets")
     if not isinstance(presets, list) or any(not isinstance(item, dict) for item in presets):
@@ -179,9 +193,13 @@ def load_llm_config() -> Dict[str, Any]:
         langchain["report"] = report_tree
     config["langchain"] = langchain
 
-    credentials = config.get("credentials")
-    if not isinstance(credentials, dict):
-        credentials = {}
+    credentials: Dict[str, Any] = {}
+    static_credentials = static_config.get("credentials")
+    if isinstance(static_credentials, dict):
+        credentials.update(static_credentials)
+    dynamic_credentials = config.get("credentials")
+    if isinstance(dynamic_credentials, dict):
+        credentials.update(dynamic_credentials)
     config["credentials"] = credentials
 
     return config

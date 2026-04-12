@@ -1,6 +1,8 @@
 # Python
 backend/venv/
 backend/configs/*
+!backend/configs/llm.yaml
+!backend/configs/llm.local.example.yaml
 !backend/configs/chart_aliases.yaml
 !backend/configs/report_blueprints/
 backend/configs/report_blueprints/*

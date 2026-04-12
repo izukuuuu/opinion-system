@@ -142,6 +142,13 @@ def _sqlite_locator(purpose: str, *, locator_hint: str = "") -> str:
     base_dir.mkdir(parents=True, exist_ok=True)
     return str(base_dir / f"{purpose}.sqlite")
 
+
+def _is_explicit_sqlite_locator(locator_hint: str) -> bool:
+    hinted = str(locator_hint or "").strip().lower()
+    if not hinted:
+        return False
+    return hinted.endswith(".sqlite") or hinted.endswith(".db")
+
 def _build_postgres_runtime_connection(*, purpose: str, locator_hint: str = "") -> tuple[str, str, Dict[str, str]]:
     if _source_mode() != SOURCE_REUSE_ACTIVE:
         raise RuntimeError("Report runtime persistence only supports reusing the active database connection.")
@@ -163,7 +170,7 @@ def _build_postgres_runtime_connection(*, purpose: str, locator_hint: str = "") 
     query = dict(parsed.query) if isinstance(parsed.query, dict) else {}
     query["application_name"] = "opinion-system-report-runtime"
     query["options"] = options_value
-    runtime_url = parsed.set(query=query)
+    runtime_url = parsed.set(drivername="postgresql", query=query)
     locator = str(locator_hint or f"postgres://{active.get('id') or 'active'}/{database_name or 'postgres'}?schema={schema_name}&purpose={purpose}").strip()
     redacted = runtime_url.render_as_string(hide_password=True)
     dsn = runtime_url.render_as_string(hide_password=False)
@@ -226,6 +233,27 @@ def _require_production_backend() -> None:
 
 
 def resolve_runtime_profile(*, purpose: str, locator_hint: str = "") -> ReportRuntimeProfile:
+    if _is_explicit_sqlite_locator(locator_hint):
+        sqlite_path = _sqlite_locator(purpose, locator_hint=locator_hint)
+        project = _langsmith_project()
+        _configure_langsmith(project)
+        return ReportRuntimeProfile(
+            environment=_environment(),
+            persistence_enabled=False,
+            source_mode="sqlite_explicit_override",
+            connection_id="",
+            connection_name="",
+            connection_engine="",
+            schema_name="",
+            resolved_database="",
+            resolved_host="",
+            resolved_url_redacted="",
+            checkpointer_backend=BACKEND_SQLITE,
+            checkpoint_locator=sqlite_path,
+            checkpoint_path=sqlite_path,
+            langsmith_enabled=_langsmith_enabled(),
+            langsmith_project=project,
+        )
     _require_production_backend()
     backend = _checkpointer_backend()
     project = _langsmith_project()

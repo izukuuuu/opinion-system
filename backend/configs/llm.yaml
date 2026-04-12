@@ -1,0 +1,66 @@
+filter_llm:
+  provider: qwen
+  model: qwen3.5-plus
+  qps: 50
+  batch_size: 32
+  truncation: 200
+  base_url: ''
+assistant:
+  provider: qwen
+  model: qwen3.5-plus
+  base_url: ''
+  max_tokens: 8192
+  temperature: 0.7
+  system_prompt: ''
+embedding_llm:
+  provider: qwen
+  model: text-embedding-v4
+  dimension: 1024
+langchain:
+  provider: qwen
+  model: qwen3.5-plus
+  report_model: qwen3.5-plus
+  analyze_summary_model: qwen3.5-plus
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  temperature: 0.3
+  max_tokens: 6000
+  report_max_tokens: 18000
+  timeout: 180.0
+  report_timeout: 420.0
+  max_retries: 2
+  max_tool_rounds: 0
+  report_max_tool_rounds: 0
+  report_subagent_max_tool_rounds: 0
+  report:
+    runtime:
+      model:
+        provider: openai
+        model: glm-5
+        base_url: https://coding.dashscope.aliyuncs.com/v1
+        temperature: 0.2
+        max_tokens: 18000
+        timeout: 420.0
+        max_retries: 2
+      environment: production
+      persistence:
+        enabled: true
+        source_mode: reuse_active
+        backend: postgres
+        sqlite_path: ''
+        schema_name: report_runtime
+      observability:
+        langsmith:
+          enabled: true
+          project: opinion-system-report
+    skills:
+      runtime: deepagents
+      default: sona_feature_analysis
+      load:
+        enable_project_agents_dir: false
+        extra_dirs: []
+presets: []
+credentials:
+  openai_api_key: ''
+  openai_base_url: ''
+  qwen_api_key: ''
+  report_api_key: ''
