@@ -17,8 +17,6 @@ from ..capability_manifest import (
     get_skill_runtime_surfaces,
     is_guidance_only_skill,
     RUNTIME_SUBAGENT,
-    select_runtime_capability_ids,
-    select_runtime_skill_ids,
     validate_report_capability_ids,
 )
 from ..tools import validate_skill_tool_ids
@@ -983,15 +981,9 @@ def select_report_skill_sources(
     available = [str(item or "").strip() for item in (available_tool_ids or []) if str(item or "").strip()]
     runtime_key = str(runtime_target or "").strip()
     agent_key = str(agent_name or "").strip()
-    runtime_capability_ids = set(select_runtime_capability_ids(runtime_target=runtime_key, agent_name=agent_key)) if runtime_key else set()
-    default_preferred_skill_keys = (
-        select_runtime_skill_ids(runtime_target=runtime_key, agent_name=agent_key)
-        if runtime_key and not preferred_skill_keys
-        else []
-    )
     requested_aliases = {
         alias.lower()
-        for value in ([*preferred_skill_keys] if preferred_skill_keys else default_preferred_skill_keys)
+        for value in ([*preferred_skill_keys] if preferred_skill_keys else [])
         for alias in _build_aliases(value)
     }
     selected: List[str] = []
@@ -1024,12 +1016,6 @@ def select_report_skill_sources(
         guidance_only = bool(item.get("guidanceOnly"))
         if runtime_key and skill_runtime_surfaces and runtime_key not in skill_runtime_surfaces:
             continue
-        if runtime_capability_ids:
-            if skill_capability_ids:
-                if not runtime_capability_ids.intersection(skill_capability_ids):
-                    continue
-            elif not guidance_only:
-                continue
         if agent_key and skill_agent_families and agent_key not in skill_agent_families:
             continue
         if agent_key and guidance_only and not skill_agent_families and runtime_key == RUNTIME_SUBAGENT:

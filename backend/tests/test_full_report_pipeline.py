@@ -4,21 +4,29 @@ from contextlib import ExitStack
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from flask import Flask
+from langchain.agents.middleware import ToolCallLimitMiddleware, ToolRetryMiddleware
+from langchain.agents.middleware.types import ModelRequest
+from langchain_core.messages import AIMessage, ToolMessage as LCToolMessage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.report.api import report_bp
-from src.report.agent_runtime import _json_safe_runtime_value, snapshot_tool_policy
+from src.report.agent_runtime import _build_runtime_middleware, _json_safe_runtime_value, run_report_agent_step, snapshot_tool_policy
+from src.report.deepagents_backends import _build_artifacts_backend, build_report_backend
 from src.report.deep_report.compiler import sanitize_public_markdown
 from src.report.deep_report.service import (
+    _extract_structured_response,
     _build_tool_intelligence_receipt,
     _ensure_validation_notes_from_claim_checks,
     _normalized_task_contract_violation,
     _ready_for_deterministic_finalize,
+    _result_diagnostic_summary,
 )
+from src.report.deep_report.builder import ReportCoordinatorContext, build_report_deep_agent
 from src.report.worker import _run_task
 
 
@@ -34,7 +42,317 @@ class DummyThread:
         return None
 
 
+class DummyInterrupt:
+    def __init__(self, value, interrupt_id: str = "interrupt-1"):
+        self.value = value
+        self.id = interrupt_id
+
+
+class DummyGraphOutput:
+    def __init__(self, value, interrupts=()):
+        self.value = value
+        self.interrupts = interrupts
+
+
+class DummyAgent:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def invoke(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return self.result
+
+
 class FullReportPipelineTests(unittest.TestCase):
+    @staticmethod
+    def _policy_model_middleware(policy):
+        middleware = _build_runtime_middleware(policy=policy)
+        return next(item for item in middleware if item.__class__.__name__ == "ReportRuntimePolicyMiddleware")
+
+    @staticmethod
+    def _policy_tool_middleware(policy):
+        middleware = _build_runtime_middleware(policy=policy)
+        return next(
+            item
+            for item in middleware
+            if "wrap_tool_call" in item.__class__.__dict__ and item.__class__.__name__ != "ToolRetryMiddleware"
+        )
+
+    def test_result_helpers_support_graph_output_v2_shape(self):
+        result = DummyGraphOutput(
+            value={
+                "structured_response": {"task": {"topic_label": "示例专题"}},
+                "messages": [],
+            },
+            interrupts=(DummyInterrupt({"action_requests": []}),),
+        )
+
+        structured = _extract_structured_response(result)
+        diagnostic = _result_diagnostic_summary(result)
+
+        self.assertEqual(structured["task"]["topic_label"], "示例专题")
+        self.assertEqual(diagnostic["interrupt_count"], 1)
+        self.assertTrue(diagnostic["has_structured_response"])
+
+    def test_build_report_deep_agent_passes_flat_middleware_list(self):
+        middleware_sentinel = object()
+
+        with patch("src.report.deep_report.builder.select_report_tools", return_value=[]), patch(
+            "src.report.deep_report.builder.select_report_skill_sources",
+            return_value=[],
+        ), patch(
+            "src.report.deep_report.builder._build_subagent_specs",
+            return_value=[],
+        ), patch(
+            "src.report.deep_report.builder.get_shared_report_checkpointer",
+            return_value=("checkpointer", {"profile": "ok"}),
+        ), patch(
+            "src.report.deep_report.builder.create_deep_agent",
+            return_value="agent",
+        ) as create_mock:
+            bundle = build_report_deep_agent(
+                llm=object(),
+                topic_identifier="demo-topic",
+                topic_label="示例专题",
+                start_text="2025-01-01",
+                end_text="2025-01-31",
+                mode="fast",
+                thread_id="thread-1",
+                task_id="task-1",
+                skill_assets={},
+                memory_paths=[],
+                runtime_backend=object(),
+                extra_coordinator_tools=[],
+                middleware_factory=lambda _name: [middleware_sentinel],
+            )
+
+        self.assertEqual(bundle["agent"], "agent")
+        self.assertEqual(create_mock.call_args.kwargs["middleware"], [middleware_sentinel])
+        self.assertIs(create_mock.call_args.kwargs["context_schema"], ReportCoordinatorContext)
+
+    def test_run_report_agent_step_supports_graph_output_v2_shape(self):
+        agent = DummyAgent(
+            DummyGraphOutput(
+                {
+                    "messages": [
+                        AIMessage(content="工具调用前置说明", tool_calls=[{"name": "demo_tool", "args": {}, "id": "call-1"}]),
+                        AIMessage(content="最终回答"),
+                    ]
+                }
+            )
+        )
+
+        result = run_report_agent_step(
+            {
+                "agent": agent,
+                "thread_id": "thread-1",
+                "runtime": "deepagents",
+                "context": {},
+                "policy": {"required_tools": [], "max_exploration_turns": 2},
+                "runtime_diagnostics": {},
+            },
+            {"prompt": "请执行"},
+        )
+
+        self.assertEqual(result["content"], "最终回答")
+        self.assertEqual(result["trace"]["runtime"], "deepagents")
+        self.assertEqual(agent.calls[0][1]["version"], "v2")
+
+    def test_build_report_backend_uses_direct_instances(self):
+        from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
+
+        runtime_backend = build_report_backend(
+            artifacts_root=Path("F:/opinion-system/backend/data/_report/runtime/test-artifacts"),
+            memory_namespace=lambda _ctx: ("report", "demo"),
+        )
+
+        self.assertIsInstance(runtime_backend, CompositeBackend)
+        self.assertIsInstance(runtime_backend.default, StateBackend)
+        self.assertIsInstance(runtime_backend.routes["/memories/"], StoreBackend)
+        self.assertEqual(runtime_backend.routes["/artifacts/"].__class__.__name__, "FilesystemBackend")
+
+    def test_artifacts_backend_uses_virtual_mode_guardrails(self):
+        backend = _build_artifacts_backend(Path("F:/opinion-system/backend/data/_report/runtime/test-artifacts"))
+
+        self.assertTrue(backend.virtual_mode)
+
+    def test_parallel_tool_calls_avoid_end_exit_behavior_in_tool_limit_middleware(self):
+        middleware = _build_runtime_middleware(
+            policy={
+                "required_tools": ["claim_verifier_tool"],
+                "max_exploration_turns": 3,
+                "parallel_tool_calls": True,
+            }
+        )
+
+        tool_limit = next(item for item in middleware if isinstance(item, ToolCallLimitMiddleware))
+        self.assertEqual(tool_limit.exit_behavior, "continue")
+
+    def test_serial_tool_calls_keep_end_exit_behavior_in_tool_limit_middleware(self):
+        middleware = _build_runtime_middleware(
+            policy={
+                "required_tools": [],
+                "max_exploration_turns": 2,
+                "parallel_tool_calls": False,
+            }
+        )
+
+        tool_limit = next(item for item in middleware if isinstance(item, ToolCallLimitMiddleware))
+        self.assertEqual(tool_limit.exit_behavior, "end")
+
+    def test_tool_retry_middleware_uses_non_deprecated_continue_mode(self):
+        middleware = _build_runtime_middleware(
+            policy={
+                "required_tools": [],
+                "max_exploration_turns": 2,
+                "parallel_tool_calls": False,
+            }
+        )
+
+        retry_middleware = next(item for item in middleware if isinstance(item, ToolRetryMiddleware))
+        self.assertEqual(retry_middleware.on_failure, "continue")
+
+    def test_required_any_policy_enforces_required_tool_subset_before_first_hit(self):
+        class FakeTool:
+            def __init__(self, name: str):
+                self.name = name
+
+        middleware = self._policy_model_middleware(
+            {
+                "required_tools": ["claim_verifier_tool"],
+                "tool_choice_policy": "required_any",
+                "max_exploration_turns": 2,
+                "parallel_tool_calls": False,
+            }
+        )
+        request = ModelRequest(
+            model=SimpleNamespace(),
+            messages=[AIMessage(content="请开始")],
+            tools=[FakeTool("claim_verifier_tool"), FakeTool("retrieve_evidence_cards")],
+            state={"messages": [AIMessage(content="请开始")]},
+            runtime=SimpleNamespace(),
+        )
+        captured = {}
+
+        def handler(req):
+            captured["request"] = req
+            return AIMessage(content="继续")
+
+        middleware.wrap_model_call(request, handler)
+
+        enforced_request = captured["request"]
+        self.assertEqual([tool.name for tool in enforced_request.tools], ["claim_verifier_tool"])
+        self.assertEqual(enforced_request.tool_choice, "any")
+
+    def test_required_any_policy_releases_tool_subset_after_required_tool_hit(self):
+        class FakeTool:
+            def __init__(self, name: str):
+                self.name = name
+
+        middleware = self._policy_model_middleware(
+            {
+                "required_tools": ["claim_verifier_tool"],
+                "tool_choice_policy": "required_any",
+                "max_exploration_turns": 2,
+                "parallel_tool_calls": False,
+            }
+        )
+        request = ModelRequest(
+            model=SimpleNamespace(),
+            messages=[AIMessage(content="继续")],
+            tools=[FakeTool("claim_verifier_tool"), FakeTool("retrieve_evidence_cards")],
+            state={
+                "messages": [
+                    AIMessage(content="", tool_calls=[{"name": "claim_verifier_tool", "id": "call-1", "args": {}}]),
+                    LCToolMessage(content="ok", tool_call_id="call-1", name="claim_verifier_tool"),
+                ]
+            },
+            runtime=SimpleNamespace(),
+        )
+        captured = {}
+
+        def handler(req):
+            captured["request"] = req
+            return AIMessage(content="继续")
+
+        middleware.wrap_model_call(request, handler)
+
+        released_request = captured["request"]
+        self.assertEqual([tool.name for tool in released_request.tools], ["claim_verifier_tool", "retrieve_evidence_cards"])
+        self.assertIsNone(released_request.tool_choice)
+
+    def test_auto_tool_choice_policy_keeps_required_tools_as_diagnostic_only(self):
+        class FakeTool:
+            def __init__(self, name: str):
+                self.name = name
+
+        middleware = self._policy_model_middleware(
+            {
+                "required_tools": ["claim_verifier_tool"],
+                "tool_choice_policy": "auto",
+                "max_exploration_turns": 2,
+                "parallel_tool_calls": False,
+            }
+        )
+        request = ModelRequest(
+            model=SimpleNamespace(),
+            messages=[AIMessage(content="请开始")],
+            tools=[FakeTool("claim_verifier_tool"), FakeTool("retrieve_evidence_cards")],
+            state={"messages": [AIMessage(content="请开始")]},
+            runtime=SimpleNamespace(),
+        )
+        captured = {}
+
+        def handler(req):
+            captured["request"] = req
+            return AIMessage(content="继续")
+
+        middleware.wrap_model_call(request, handler)
+
+        passthrough_request = captured["request"]
+        self.assertEqual([tool.name for tool in passthrough_request.tools], ["claim_verifier_tool", "retrieve_evidence_cards"])
+        self.assertIsNone(passthrough_request.tool_choice)
+
+    def test_unlisted_deepagents_builtin_tool_is_blocked_in_report_runtime(self):
+        middleware = self._policy_tool_middleware(
+            {
+                "allowed_tools": [],
+                "required_tools": [],
+                "tool_choice_policy": "auto",
+                "max_exploration_turns": 2,
+                "parallel_tool_calls": False,
+            }
+        )
+
+        result = middleware.wrap_tool_call(
+            SimpleNamespace(tool_call={"name": "task", "id": "call-1", "args": {}}, tool=None),
+            lambda _req: LCToolMessage(content="should-not-run", tool_call_id="call-1", name="task"),
+        )
+
+        self.assertIsInstance(result, LCToolMessage)
+        self.assertEqual(result.status, "error")
+        self.assertIn("not allowed", str(result.content))
+
+    def test_read_only_deepagents_builtin_tool_remains_allowed_in_report_runtime(self):
+        middleware = self._policy_tool_middleware(
+            {
+                "allowed_tools": [],
+                "required_tools": [],
+                "tool_choice_policy": "auto",
+                "max_exploration_turns": 2,
+                "parallel_tool_calls": False,
+            }
+        )
+        marker = object()
+
+        result = middleware.wrap_tool_call(
+            SimpleNamespace(tool_call={"name": "read_file", "id": "call-2", "args": {"file_path": "/tmp/a.txt"}}, tool=None),
+            lambda _req: marker,
+        )
+
+        self.assertIs(result, marker)
+
     def test_normalized_task_contract_violation_is_corrected_before_downstream_tools(self):
         tracker = {
             "task_contract": {
@@ -196,7 +514,8 @@ class FullReportPipelineTests(unittest.TestCase):
         self.assertEqual(counts["checked_count"], 3)
         self.assertEqual(counts["unsupported_count"], 1)
         self.assertEqual(counts["contradicted_count"], 1)
-        notes = "\n".join(runtime_files["/workspace/state/validation_notes.md"]["content"])
+        raw_notes = runtime_files["/workspace/state/validation_notes.md"]["content"]
+        notes = raw_notes if isinstance(raw_notes, str) else "\n".join(raw_notes)
         self.assertIn("unsupported：1 条", notes)
         self.assertIn("contradicted：1 条", notes)
 

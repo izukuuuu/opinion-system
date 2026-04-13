@@ -15,8 +15,7 @@ from langchain.agents.middleware import (
 from langchain_core.messages import AIMessage, ToolMessage
 
 from ..utils.ai import build_langchain_chat_model
-from ..utils.setting import settings
-from .capability_manifest import RUNTIME_AGENT
+from .deepagents_backends import build_state_backend
 from .runtime_infra import build_report_runnable_config, build_runtime_diagnostics, get_shared_report_checkpointer
 from .skills import (
     build_report_skill_runtime_assets,
@@ -62,6 +61,18 @@ class ExplorationTrace(TypedDict, total=False):
     tool_call_count: int
     exploration_turns: int
     runtime: str
+
+
+_ALLOWED_RUNTIME_BUILTIN_TOOLS = frozenset(
+    {
+        "write_todos",
+        "ls",
+        "read_file",
+        "glob",
+        "grep",
+        "compact_conversation",
+    }
+)
 
 
 def _json_safe_runtime_value(value: Any) -> Any:
@@ -121,15 +132,6 @@ def ensure_langchain_uuid_compat() -> None:
     except Exception:
         lc_uuid._uuid_utils_uuid7 = lambda timestamp=None, nanos=None: uuid.uuid4()  # type: ignore[attr-defined]
 
-
-def _configured_skills_runtime() -> str:
-    try:
-        settings.reload()
-    except Exception:
-        pass
-    raw = settings.get("llm.langchain.report.skills.runtime", "deepagents")
-    runtime = str(raw or "deepagents").strip().lower()
-    return runtime if runtime in {"deepagents", "plain"} else "deepagents"
 
 
 def _extract_json_text(raw_text: str) -> str:
@@ -258,25 +260,68 @@ def _build_runtime_middleware(
     *,
     policy: ToolPolicy,
 ) -> List[Any]:
+    allowed_tool_names = {
+        str(getattr(tool, "name", "") or "").strip()
+        for tool in (policy.get("allowed_tools") or [])
+        if str(getattr(tool, "name", "") or "").strip()
+    }
     required_tools = [str(item).strip() for item in (policy.get("required_tools") or []) if str(item or "").strip()]
     max_turns = max(1, int(policy.get("max_exploration_turns") or 4))
+    tool_choice_policy = str(policy.get("tool_choice_policy") or "").strip() or "auto"
     parallel_tool_calls = bool(policy.get("parallel_tool_calls"))
+    tool_limit_exit_behavior = "continue" if parallel_tool_calls else "end"
 
-    @wrap_model_call
+    def _required_tools_already_hit(messages: List[Any]) -> bool:
+        required = set(required_tools)
+        if not required:
+            return True
+        for message in messages:
+            if isinstance(message, ToolMessage):
+                tool_name = str(getattr(message, "name", "") or "").strip()
+                if tool_name in required:
+                    return True
+        return False
+
+    @wrap_model_call(name="ReportRuntimePolicyMiddleware")
     def _model_policy(request: Any, handler: Any) -> Any:
-        request.model_settings = {**(request.model_settings or {}), "parallel_tool_calls": parallel_tool_calls}
+        request = request.override(
+            model_settings={**(request.model_settings or {}), "parallel_tool_calls": parallel_tool_calls}
+        )
+        if tool_choice_policy == "required_any" and required_tools:
+            messages = request.state.get("messages", []) if isinstance(request.state, dict) else []
+            if not _required_tools_already_hit(messages if isinstance(messages, list) else []):
+                required_toolset = [
+                    tool
+                    for tool in request.tools
+                    if str(getattr(tool, "name", "") or "").strip() in required_tools
+                ]
+                if required_toolset:
+                    request = request.override(tools=required_toolset, tool_choice="any")
         return handler(request)
 
     @wrap_tool_call
     def _tool_policy(request: Any, handler: Any) -> Any:
+        tool_call = request.tool_call if isinstance(request.tool_call, dict) else {}
+        tool_name = str(tool_call.get("name") or "").strip()
+        if tool_name and tool_name not in allowed_tool_names and tool_name not in _ALLOWED_RUNTIME_BUILTIN_TOOLS:
+            allowed_names = sorted({*allowed_tool_names, *_ALLOWED_RUNTIME_BUILTIN_TOOLS})
+            return ToolMessage(
+                content=(
+                    f"Tool '{tool_name}' is not allowed in this report runtime step. "
+                    f"Allowed tools: {', '.join(allowed_names)}."
+                ),
+                tool_call_id=str(tool_call.get("id") or "").strip() or None,
+                name=tool_name,
+                status="error",
+            )
         return handler(request)
 
     return [
         _model_policy,
         _tool_policy,
         ModelCallLimitMiddleware(run_limit=max_turns + (2 if required_tools else 1), exit_behavior="end"),
-        ToolCallLimitMiddleware(run_limit=max_turns, exit_behavior="end"),
-        ToolRetryMiddleware(max_retries=1, on_failure="return_message"),
+        ToolCallLimitMiddleware(run_limit=max_turns, exit_behavior=tool_limit_exit_behavior),
+        ToolRetryMiddleware(max_retries=1, on_failure="continue"),
     ]
 
 
@@ -362,6 +407,10 @@ def _build_interrupt_on(tools: List[Any]) -> Dict[str, Any]:
     return mapping
 
 
+def _agent_result_payload(result: Any) -> Any:
+    return result if isinstance(result, dict) else getattr(result, "value", result)
+
+
 def create_report_deep_agent(
     policy: ToolPolicy,
     context: ReportAgentContext,
@@ -376,7 +425,6 @@ def create_report_deep_agent(
     ensure_langchain_uuid_compat()
     try:
         from deepagents import create_deep_agent
-        from deepagents.backends import StateBackend
     except Exception:
         return None
 
@@ -405,7 +453,7 @@ def create_report_deep_agent(
     skill_sources = select_report_skill_sources(
         skill_assets,
         available_tool_ids=[tool.name for tool in allowed_tools if str(getattr(tool, "name", "") or "").strip()],
-        runtime_target=RUNTIME_AGENT,
+        runtime_target="agent_runtime",
     )
     middleware = _build_runtime_middleware(
         policy=policy,
@@ -421,12 +469,18 @@ def create_report_deep_agent(
         skills=skill_sources or None,
         context_schema=ReportAgentContext,
         checkpointer=checkpointer,
-        backend=StateBackend,
+        backend=build_state_backend(),
         interrupt_on=_build_interrupt_on(list(allowed_tools)),
         name=name,
         debug=False,
     )
     seed_state = {"files": skill_assets.get("files") or {}} if skill_assets.get("files") else {}
+    diagnostics = build_runtime_diagnostics(
+        purpose=f"agent-runtime:{name}",
+        thread_id=thread_id,
+        locator_hint=runtime_profile.checkpoint_locator,
+    )
+    diagnostics["agent_harness"] = "deepagents"
     return {
         "agent": agent,
         "client_cfg": client_cfg,
@@ -437,11 +491,7 @@ def create_report_deep_agent(
         "seed_state": seed_state,
         "skill_sources": skill_sources,
         "skill_catalog": skill_assets.get("catalog") or [],
-        "runtime_diagnostics": build_runtime_diagnostics(
-            purpose=f"agent-runtime:{name}",
-            thread_id=thread_id,
-            locator_hint=runtime_profile.checkpoint_locator,
-        ),
+        "runtime_diagnostics": diagnostics,
     }
 
 
@@ -519,9 +569,15 @@ def create_report_agent_runner(
     max_tokens: int = 2200,
     temperature: float = 0.2,
     name: str = "report_agent",
+    force_plain: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    runtime = _configured_skills_runtime()
-    if runtime == "deepagents":
+    """Create a report agent runner.
+
+    By default always returns a Deep Agents runner.  Pass ``force_plain=True``
+    only for explicit debug/test purposes — plain runtime is not a regular
+    production path.
+    """
+    if not force_plain:
         runner = create_report_deep_agent(
             policy,
             context,
@@ -532,8 +588,9 @@ def create_report_agent_runner(
             temperature=temperature,
             name=name,
         )
-        if runner is not None:
-            return runner
+        # Do NOT silently fall back to plain when deepagents fails — return
+        # None so callers can detect the failure explicitly.
+        return runner
     return _create_plain_report_agent_runner(
         policy,
         context,
@@ -620,8 +677,10 @@ def run_report_agent_step(
             locator_hint=str(runtime_diagnostics.get("checkpoint_locator") or "").strip(),
         ),
         context=agent_runner.get("context") or {},
+        version="v2",
     )
-    messages = result.get("messages") if isinstance(result, dict) and isinstance(result.get("messages"), list) else []
+    result_payload = _agent_result_payload(result)
+    messages = result_payload.get("messages") if isinstance(result_payload, dict) and isinstance(result_payload.get("messages"), list) else []
     final_content = ""
     for message in reversed(messages):
         if isinstance(message, AIMessage) and not (message.tool_calls or []):

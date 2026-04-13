@@ -10,13 +10,43 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.report.deep_report.graph_runtime import run_report_compilation_graph
+from src.report.deep_report.graph_runtime import _stream_graph_events, run_report_compilation_graph
 from src.report.deep_report.schemas import DraftBundle, DraftUnit
 
 
 class _Dumpable(dict):
     def model_dump(self) -> dict:
         return dict(self)
+
+
+class _DummyInterrupt:
+    def __init__(self, value: object, interrupt_id: str = "interrupt-1") -> None:
+        self.value = value
+        self.id = interrupt_id
+
+
+class _DummyGraphOutput:
+    def __init__(self, value: object, interrupts=()) -> None:
+        self.value = value
+        self.interrupts = interrupts
+
+
+class _DummyGraph:
+    def stream(self, *_args, **_kwargs):
+        yield {"type": "updates", "ns": (), "data": {"planner": {"status": "running"}}}
+        yield {"type": "updates", "ns": (), "data": {"__interrupt__": (_DummyInterrupt({"question": "approve?"}),)}}
+
+
+class _DummyInvokeGraph:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def invoke(self, *_args, **kwargs):
+        self.calls.append(kwargs)
+        return _DummyGraphOutput(
+            {"status": "waiting"},
+            interrupts=(_DummyInterrupt({"question": "approve?"}),),
+        )
 
 
 def _minimal_payload() -> dict:
@@ -66,6 +96,35 @@ def _invalid_draft_bundle(*_args, **_kwargs) -> DraftBundle:
 
 
 class DeepReportGraphRuntimeTests(unittest.TestCase):
+    def test_stream_graph_events_supports_v2_updates_shape(self) -> None:
+        events: list[dict] = []
+
+        state = _stream_graph_events(
+            _DummyGraph(),
+            {"input": "demo"},
+            {"configurable": {"thread_id": "graph-v2"}},
+            events.append,
+        )
+
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(len(state["__interrupt__"]), 1)
+        self.assertEqual(events[0]["type"], "graph.node.update")
+        self.assertEqual(events[0]["agent"], "planner")
+
+    def test_stream_graph_events_without_callback_prefers_v2_invoke_shape(self) -> None:
+        graph = _DummyInvokeGraph()
+
+        state = _stream_graph_events(
+            graph,
+            {"input": "demo"},
+            {"configurable": {"thread_id": "graph-v2"}},
+            None,
+        )
+
+        self.assertEqual(state["status"], "waiting")
+        self.assertEqual(len(state["__interrupt__"]), 1)
+        self.assertEqual(graph.calls[0]["version"], "v2")
+
     def _patched_runtime(self) -> ExitStack:
         stack = ExitStack()
         dumpable = _Dumpable()

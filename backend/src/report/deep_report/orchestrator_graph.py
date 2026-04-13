@@ -76,7 +76,7 @@ def run_report_orchestrator_graph(
     *,
     request: Dict[str, Any],
     root_thread_id: str,
-    run_exploration: Callable[[], Dict[str, Any]],
+    invoke_deep_agent: Callable[[Dict[str, Any]], Dict[str, Any]],
     run_compile: Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]],
     event_callback: Callable[[Dict[str, Any]], None] | None = None,
 ) -> Dict[str, Any]:
@@ -103,7 +103,7 @@ def run_report_orchestrator_graph(
         )
         return {"status": "running", "message": "根图已启动。"}
 
-    def exploration_node(_state: _OrchestratorState) -> Dict[str, Any]:
+    def exploration_node(state: _OrchestratorState) -> Dict[str, Any]:
         _emit(
             event_callback,
             {
@@ -114,7 +114,10 @@ def run_report_orchestrator_graph(
                 "payload": {"root_thread_id": root_thread_id},
             },
         )
-        result = run_exploration() or {}
+        # Map parent state → deep agent input, then map output back to orchestrator state.
+        # Passing state["request"] explicitly makes this node's dependency on parent state
+        # visible from the function body, consistent with LangGraph subgraph wrapper convention.
+        result = invoke_deep_agent(state.get("request") or {}) or {}
         return {
             "exploration_bundle": result.get("exploration_bundle") if isinstance(result.get("exploration_bundle"), dict) else {},
             "structured_payload": result.get("structured_payload") if isinstance(result.get("structured_payload"), dict) else {},
@@ -167,6 +170,17 @@ def run_report_orchestrator_graph(
                     "title": "编译子图完成",
                     "message": "正式文稿与报告缓存已写入。",
                     "payload": {"root_thread_id": root_thread_id},
+                },
+            )
+        else:
+            _emit(
+                event_callback,
+                {
+                    "type": "phase.progress",
+                    "phase": "compile",
+                    "title": "编译子图未返回有效结果",
+                    "message": message or "编译阶段返回了未知状态。",
+                    "payload": {"root_thread_id": root_thread_id, "status": status},
                 },
             )
         return {
@@ -226,10 +240,14 @@ def run_report_orchestrator_graph(
         {"request": request},
         config=config,
         stream_mode="updates",
+        version="v2",
     ):
         if not isinstance(chunk, dict):
             continue
-        for updates in chunk.values():
+        data = chunk.get("data") if chunk.get("type") == "updates" else None
+        if not isinstance(data, dict):
+            continue
+        for updates in data.values():
             if isinstance(updates, dict):
                 state.update(updates)
     return {

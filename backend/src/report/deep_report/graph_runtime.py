@@ -614,14 +614,32 @@ def _stream_graph_events(
     """用 LangGraph 原生 stream(mode='updates') 替代 graph.invoke()。
     将 node 更新事件翻译成现有 graph.node.update 事件格式。
     event_callback 为 None 时 fallback 到直接 invoke。"""
+    def _normalize_invoke_result(result: Any) -> Dict[str, Any]:
+        payload = result if isinstance(result, dict) else getattr(result, "value", result)
+        state = dict(payload) if isinstance(payload, dict) else {"value": payload}
+        interrupts = getattr(result, "interrupts", None)
+        if isinstance(interrupts, (list, tuple)) and interrupts:
+            state["__interrupt__"] = list(interrupts)
+        elif isinstance(state.get("__interrupt__"), tuple) and state.get("__interrupt__"):
+            state["__interrupt__"] = list(state.get("__interrupt__") or ())
+        return state
+
     if not callable(event_callback):
-        return graph.invoke(input_or_command, config=config)  # type: ignore[no-any-return]
+        try:
+            result = graph.invoke(input_or_command, config=config, version="v2")
+        except TypeError:
+            # Older LangGraph builds may not support invoke(version="v2") yet.
+            result = graph.invoke(input_or_command, config=config)
+        return _normalize_invoke_result(result)
 
     last_state: Dict[str, Any] = {}
-    for chunk in graph.stream(input_or_command, config=config, stream_mode="updates"):
+    for chunk in graph.stream(input_or_command, config=config, stream_mode="updates", version="v2"):
         if not isinstance(chunk, dict):
             continue
-        for node_name, updates in chunk.items():
+        data = chunk.get("data") if chunk.get("type") == "updates" else None
+        if not isinstance(data, dict):
+            continue
+        for node_name, updates in data.items():
             if node_name == "__interrupt__":
                 # graph.stream() yields interrupt as a tuple; normalize to list
                 # to match the shape that graph.invoke() returns
@@ -1129,7 +1147,7 @@ def run_report_compilation_graph(
     with open_report_checkpointer(purpose="deep-report-compile", locator_hint=checkpoint_hint) as (checkpointer, runtime_profile):
         graph = builder.compile(checkpointer=checkpointer)
         state = _stream_graph_events(graph, _invoke_input, config, event_callback)
-    if isinstance(state, dict) and isinstance(state.get("__interrupt__"), list):
+    if isinstance(state, dict) and isinstance(state.get("__interrupt__"), list) and state.get("__interrupt__"):
         interrupts = []
         for item in state.get("__interrupt__") or []:
             value = getattr(item, "value", None)

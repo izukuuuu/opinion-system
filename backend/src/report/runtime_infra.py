@@ -200,6 +200,8 @@ def _ensure_postgres_schema(dsn: str, schema_name: str) -> None:
 def _langsmith_project() -> str:
     return (
         _env_text("OPINION_REPORT_LANGSMITH_PROJECT")
+        or _env_text("LANGSMITH_PROJECT")
+        or _env_text("LANGCHAIN_PROJECT")
         or str((((_read_llm_runtime_config().get("observability") if isinstance(_read_llm_runtime_config().get("observability"), dict) else {}).get("langsmith") or {}).get("project") or "")).strip()
         or "opinion-system-report"
     )
@@ -235,19 +237,22 @@ def _langsmith_enabled() -> bool:
     langsmith = observability.get("langsmith") if isinstance(observability.get("langsmith"), dict) else {}
     env_value = _env_text("OPINION_REPORT_LANGSMITH_ENABLED").lower()
     if env_value:
-        explicit = env_value in {"1", "true", "yes", "on"}
-    else:
-        explicit = bool(langsmith.get("enabled", False))
-    if explicit:
-        return True
-    tracing_value = _env_text("LANGCHAIN_TRACING_V2").lower()
-    return tracing_value in {"1", "true", "yes", "on"}
+        return env_value in {"1", "true", "yes", "on"}
+    tracing_value = _env_text("LANGSMITH_TRACING").lower()
+    if tracing_value:
+        return tracing_value in {"1", "true", "yes", "on"}
+    legacy_tracing_value = _env_text("LANGCHAIN_TRACING_V2").lower()
+    if legacy_tracing_value:
+        return legacy_tracing_value in {"1", "true", "yes", "on"}
+    return bool(langsmith.get("enabled", False))
 
 
 def _configure_langsmith(project: str) -> None:
     if not _langsmith_enabled():
         return
+    os.environ.setdefault("LANGSMITH_TRACING", "true")
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGSMITH_PROJECT", project)
     os.environ.setdefault("LANGCHAIN_PROJECT", project)
     endpoint = _langsmith_endpoint()
     api_key = _langsmith_api_key()

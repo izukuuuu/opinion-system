@@ -84,11 +84,15 @@ class ReportRuntimeInfraTests(unittest.TestCase):
                 },
                 "credentials": {"langsmith_api_key": "lsv2_pt_test"},
             },
-        ), patch.dict(os.environ, {}, clear=False):
+        ), patch.dict(os.environ, {}, clear=True):
             profile = resolve_runtime_profile(purpose="deep-report-coordinator")
             config = build_report_runnable_config(thread_id="thread-1", purpose="deep-report-coordinator", task_id="task-1")
             diagnostics = build_runtime_diagnostics(thread_id="thread-1", purpose="deep-report-coordinator", task_id="task-1")
 
+            self.assertEqual(os.environ.get("LANGSMITH_TRACING"), "true")
+            self.assertEqual(os.environ.get("LANGCHAIN_TRACING_V2"), "true")
+            self.assertEqual(os.environ.get("LANGSMITH_PROJECT"), "opinion-system-report")
+            self.assertEqual(os.environ.get("LANGCHAIN_PROJECT"), "opinion-system-report")
             self.assertEqual(os.environ.get("LANGSMITH_ENDPOINT"), "https://api.smith.langchain.com")
             self.assertEqual(os.environ.get("LANGSMITH_API_KEY"), "lsv2_pt_test")
 
@@ -99,6 +103,39 @@ class ReportRuntimeInfraTests(unittest.TestCase):
         self.assertEqual(diagnostics["connection_id"], "primary")
         self.assertEqual(diagnostics["schema_name"], "report_runtime")
         self.assertEqual(config["metadata"]["report_runtime"]["resolved_database"], "postgres")
+
+    def test_standard_langsmith_env_names_enable_runtime_and_backfill_legacy_aliases(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "LANGSMITH_TRACING": "true",
+                "LANGSMITH_PROJECT": "docs-project",
+            },
+            clear=True,
+        ), patch(
+            "src.report.runtime_infra.load_llm_config",
+            return_value={
+                "langchain": {
+                    "report": {
+                        "runtime": {
+                            "environment": "development",
+                            "observability": {"langsmith": {"enabled": False, "project": "config-project"}},
+                        }
+                    }
+                }
+            },
+        ):
+            profile = resolve_runtime_profile(
+                purpose="unit-test",
+                locator_hint="f:/opinion-system/backend/data/_report/checkpoints/unit-test.sqlite",
+            )
+            self.assertEqual(os.environ.get("LANGSMITH_TRACING"), "true")
+            self.assertEqual(os.environ.get("LANGCHAIN_TRACING_V2"), "true")
+            self.assertEqual(os.environ.get("LANGSMITH_PROJECT"), "docs-project")
+            self.assertEqual(os.environ.get("LANGCHAIN_PROJECT"), "docs-project")
+
+        self.assertTrue(profile.langsmith_enabled)
+        self.assertEqual(profile.langsmith_project, "docs-project")
 
     def test_postgres_profile_rejects_non_postgres_active_connection(self) -> None:
         with patch("src.report.runtime_infra.load_databases_config", return_value=MYSQL_DATABASES), patch(

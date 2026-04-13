@@ -6,13 +6,10 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from deepagents import create_deep_agent
-from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend, StoreBackend
 from deepagents.backends.utils import create_file_data
 from langchain.agents.middleware.types import wrap_tool_call
-from langchain.agents.structured_output import AutoStrategy
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain.tools import tool
 from langgraph.types import Command
@@ -22,7 +19,7 @@ from ...utils.ai import build_langchain_chat_model, call_langchain_chat
 from ...utils.setting.paths import get_data_root
 from ...utils.setting.settings import settings
 from ..agent_runtime import ensure_langchain_uuid_compat
-from ..capability_manifest import RUNTIME_COORDINATOR, RUNTIME_SUBAGENT
+from ..deepagents_backends import build_report_backend
 from ..runtime_infra import (
     BACKEND_SQLITE,
     build_report_runnable_config,
@@ -32,7 +29,6 @@ from ..runtime_infra import (
 )
 from ..skills import select_report_skill_sources
 from ..tools import select_report_tools
-from ..tools.registry import READ_ONLY, get_report_tool_spec
 from .assets import RUNTIME_STORE, build_artifacts_root, build_runtime_assets, ensure_memory_seed
 from .deterministic import build_analyze_results_payload, build_base_context, build_workspace_files, ensure_cache_dir
 from .document import (
@@ -43,6 +39,7 @@ from .document import (
     load_report_blueprint,
 )
 from .presenter import build_full_payload, compile_markdown_artifacts
+from .builder import build_report_deep_agent
 from .orchestrator_graph import run_report_orchestrator_graph
 from .report_ir import attach_report_ir, build_artifact_manifest, summarize_report_ir
 from .runtime_contract import RUNTIME_CONTRACT_VERSION
@@ -321,31 +318,13 @@ def _runtime_locator_hint(*, purpose: str, task_id: str = "", sqlite_path: str =
     return str(task_id or purpose).strip() or purpose
 
 
-def _interrupt_on_for_tools(tools: List[Any]) -> Dict[str, Any]:
-    mapping: Dict[str, Any] = {}
-    for tool in tools:
-        tool_name = str(getattr(tool, "name", "") or "").strip()
-        if not tool_name:
-            continue
-        if tool_name in {"write_final_report", "overwrite_report_cache"}:
-            mapping[tool_name] = True
-            continue
-        try:
-            spec = get_report_tool_spec(tool_name)
-        except Exception:
-            continue
-        if spec.mutability != READ_ONLY:
-            mapping[tool_name] = True
-    return mapping
-
-
-def _build_backend_factory(
+def _build_runtime_backends(
     *,
     task_id: str,
     topic_identifier: str,
     topic_label: str,
     seed_files: Dict[str, Dict[str, Any]],
-) -> Tuple[Callable[[Any], CompositeBackend], Dict[str, Dict[str, Any]], Dict[str, Any], List[str]]:
+ ) -> Tuple[Any, Dict[str, Dict[str, Any]], Dict[str, Any], List[str]]:
     runtime_files, skill_assets, memory_paths = build_runtime_assets(topic_label)
     merged_files: Dict[str, Dict[str, Any]] = {}
     merged_files.update(runtime_files)
@@ -353,19 +332,11 @@ def _build_backend_factory(
     artifacts_root = build_artifacts_root(task_id, get_data_root())
     ensure_memory_seed(_namespace_factory(topic_identifier, task_id, "memories")(None), topic_label)
 
-    def factory(runtime: Any) -> CompositeBackend:
-        default_backend = StateBackend(runtime)
-        memory_backend = StoreBackend(runtime, namespace=_namespace_factory(topic_identifier, task_id, "memories"))
-        artifacts_backend = FilesystemBackend(root_dir=artifacts_root, virtual_mode=False)
-        return CompositeBackend(
-            default=default_backend,
-            routes={
-                "/memories/": memory_backend,
-                "/artifacts/": artifacts_backend,
-            },
-        )
-
-    return factory, merged_files, skill_assets, memory_paths
+    runtime_backend = build_report_backend(
+        artifacts_root=artifacts_root,
+        memory_namespace=_namespace_factory(topic_identifier, task_id, "memories"),
+    )
+    return runtime_backend, merged_files, skill_assets, memory_paths
 
 
 def _seed_invoke_payload(files: Dict[str, Dict[str, Any]], prompt: str) -> Dict[str, Any]:
@@ -500,8 +471,23 @@ def _load_json(path) -> Dict[str, Any]:
         return {}
 
 
+def _result_payload(result: Any) -> Any:
+    return result if isinstance(result, dict) else getattr(result, "value", result)
+
+
+def _result_interrupts(result: Any) -> List[Any]:
+    interrupts = getattr(result, "interrupts", None)
+    if isinstance(interrupts, (list, tuple)):
+        return list(interrupts)
+    payload = _result_payload(result)
+    legacy_interrupts = payload.get("__interrupt__") if isinstance(payload, dict) else None
+    if isinstance(legacy_interrupts, (list, tuple)):
+        return list(legacy_interrupts)
+    return []
+
+
 def _extract_structured_response(result: Any) -> Dict[str, Any]:
-    payload = result if isinstance(result, dict) else getattr(result, "value", result)
+    payload = _result_payload(result)
     if not isinstance(payload, dict):
         return {}
     structured = payload.get("structured_response")
@@ -509,7 +495,7 @@ def _extract_structured_response(result: Any) -> Dict[str, Any]:
 
 
 def _result_diagnostic_summary(result: Any) -> Dict[str, Any]:
-    payload = result if isinstance(result, dict) else getattr(result, "value", result)
+    payload = _result_payload(result)
     if not isinstance(payload, dict):
         return {"result_type": type(result).__name__}
     messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
@@ -532,7 +518,7 @@ def _result_diagnostic_summary(result: Any) -> Dict[str, Any]:
         "has_structured_response": bool(payload.get("structured_response")),
         "message_count": len(messages),
         "last_message_preview": last_message_preview,
-        "interrupt_count": len(payload.get("__interrupt__") or []) if isinstance(payload.get("__interrupt__"), list) else 0,
+        "interrupt_count": len(_result_interrupts(result)),
     }
 
 
@@ -2257,99 +2243,6 @@ def _synthesize_structured_report_from_files(
     return _parse_json_object(raw)
 
 
-def _invoke_agent(
-    *,
-    name: str,
-    schema: Type[Any],
-    prompt: str,
-    system_prompt: str,
-    task_context: Dict[str, Any],
-    tools: List[Any],
-    files: Dict[str, Dict[str, Any]],
-    skill_assets: Dict[str, Any],
-    memory_paths: List[str],
-    backend_factory: Callable[[Any], CompositeBackend],
-    thread_id: str,
-    event_callback: Optional[Callable[[Dict[str, Any]], None]],
-    specialist_skills: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    ensure_langchain_uuid_compat()
-    llm, _client_cfg = build_langchain_chat_model(task="report", model_role="report", temperature=0.15, max_tokens=3600)
-    if llm is None:
-        raise ValueError("未找到可用的 LangChain 模型配置")
-    checkpointer, runtime_profile = get_shared_report_checkpointer(purpose=f"deep-report-subagent:{name}")
-    filtered_sources = select_report_skill_sources(
-        skill_assets,
-        available_tool_ids=[tool.name for tool in tools if str(getattr(tool, "name", "") or "").strip()],
-        preferred_skill_keys=specialist_skills or (),
-        runtime_target=RUNTIME_COORDINATOR if name == "deep-report-coordinator" else RUNTIME_SUBAGENT,
-        agent_name="" if name == "deep-report-coordinator" else name,
-    )
-    agent = create_deep_agent(
-        model=llm,
-        tools=tools,
-        system_prompt=system_prompt,
-        skills=filtered_sources or None,
-        memory=memory_paths or None,
-        response_format=AutoStrategy(schema),
-        context_schema=dict,
-        checkpointer=checkpointer,
-        store=RUNTIME_STORE,
-        backend=backend_factory,
-        interrupt_on=_interrupt_on_for_tools(list(tools)),
-        debug=False,
-        name=name,
-    )
-    _emit(
-        event_callback,
-        {
-            "type": "subagent.started",
-            "phase": task_context.get("phase") or "interpret",
-            "agent": name,
-            "title": f"{name} 已启动",
-            "message": task_context.get("message") or "",
-            "payload": {"agent_name": name, "thread_id": thread_id},
-        },
-    )
-    result = agent.invoke(
-        _seed_invoke_payload(files, prompt),
-        config=build_report_runnable_config(
-            thread_id=thread_id,
-            purpose=f"deep-report-subagent:{name}",
-            task_id=str(task_context.get("task_id") or "").strip(),
-            tags=[name, str(task_context.get("phase") or "").strip()],
-            metadata={
-                "runtime_diagnostics": build_runtime_diagnostics(
-                    purpose=f"deep-report-subagent:{name}",
-                    thread_id=thread_id,
-                    task_id=str(task_context.get("task_id") or "").strip(),
-                    locator_hint=runtime_profile.checkpoint_locator,
-                )
-            },
-            locator_hint=runtime_profile.checkpoint_locator,
-        ),
-        context=task_context,
-        version="v2",
-    )
-    payload = result if isinstance(result, dict) else getattr(result, "value", result)
-    structured = payload.get("structured_response") if isinstance(payload, dict) else payload
-    structured_dict = _structured_to_dict(structured)
-    if not structured_dict:
-        raise ValueError(f"{name} 未返回结构化结果")
-    _emit(
-        event_callback,
-        {
-            "type": "subagent.completed",
-            "phase": task_context.get("phase") or "interpret",
-            "agent": name,
-            "title": f"{name} 已完成",
-            "message": f"{name} 已产出结构化结果。",
-            "payload": {"agent_name": name, "result_keys": list(structured_dict.keys())},
-        },
-    )
-    return structured_dict
-
-
 def _prepare_runtime(
     topic_identifier: str,
     start_text: str,
@@ -2359,7 +2252,7 @@ def _prepare_runtime(
     mode: str,
     thread_id: str,
     task_id: str,
-) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]], Callable[[Any], CompositeBackend], Dict[str, Any], List[str]]:
+) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]], Any, Dict[str, Any], List[str]]:
     base_context = build_base_context(
         topic_identifier,
         start_text,
@@ -2369,7 +2262,7 @@ def _prepare_runtime(
         thread_id=thread_id,
     )
     workspace_files = build_workspace_files(base_context)
-    backend_factory, runtime_files, skill_assets, memory_paths = _build_backend_factory(
+    runtime_backend, runtime_files, skill_assets, memory_paths = _build_runtime_backends(
         task_id=task_id,
         topic_identifier=topic_identifier,
         topic_label=topic_label,
@@ -2387,212 +2280,7 @@ def _prepare_runtime(
         "base_context_path": "/workspace/base_context.json",
         "task_contract": base_context.get("task_contract") if isinstance(base_context.get("task_contract"), dict) else {},
     }
-    return common_context, runtime_files, backend_factory, skill_assets, memory_paths
-
-
-def _build_interrupt_config(summary: str, *, allow_edit: bool) -> Dict[str, Any]:
-    config: Dict[str, Any] = {
-        "allowed_decisions": ["approve", "reject"] if not allow_edit else ["approve", "edit", "reject"],
-        "description": summary,
-    }
-    if allow_edit:
-        config["args_schema"] = {
-            "type": "object",
-            "properties": {
-                "markdown": {
-                    "type": "string",
-                    "description": "审核后允许写入的 Markdown 文稿内容。",
-                }
-            },
-            "required": ["markdown"],
-        }
-    return config
-
-
-def _build_subagents(
-    tools: List[Any],
-    *,
-    event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-    tracker: Optional[Dict[str, Any]] = None,
-    max_tool_rounds: Optional[int] = None,
-    skill_assets: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    def _middleware_for(name: str) -> List[Any]:
-        return [
-            _build_lifecycle_middleware(
-                event_callback=event_callback,
-                actor_name=name,
-                default_phase=_phase_for_subagent(name),
-                tracker=tracker,
-                task_tool_mode=False,
-                max_tool_rounds=max_tool_rounds,
-            )
-        ]
-
-    available_skills = skill_assets if isinstance(skill_assets, dict) else {}
-
-    def _skills_for(agent_name: str, toolset: List[Any]) -> List[str]:
-        return select_report_skill_sources(
-            available_skills,
-            available_tool_ids=[tool.name for tool in toolset if str(getattr(tool, "name", "") or "").strip()],
-            runtime_target=RUNTIME_SUBAGENT,
-            agent_name=agent_name,
-        )
-
-    retrieval_tools = select_report_tools(runtime_target="deep_report_subagent", agent_name="retrieval_router")
-    agenda_tools = select_report_tools(runtime_target="deep_report_subagent", agent_name="agenda_frame_builder")
-    evidence_tools = select_report_tools(runtime_target="deep_report_subagent", agent_name="archive_evidence_organizer")
-    timeline_tools = select_report_tools(runtime_target="deep_report_subagent", agent_name="timeline_analyst")
-    stance_tools = select_report_tools(runtime_target="deep_report_subagent", agent_name="stance_conflict")
-    conflict_tools = select_report_tools(runtime_target="deep_report_subagent", agent_name="claim_actor_conflict")
-    propagation_tools = select_report_tools(runtime_target="deep_report_subagent", agent_name="propagation_analyst")
-    bertopic_tools = select_report_tools(runtime_target="deep_report_subagent", agent_name="bertopic_evolution_analyst")
-    utility_tools = select_report_tools(runtime_target="deep_report_subagent", agent_name="decision_utility_judge")
-
-    return [
-        {
-            "name": "retrieval_router",
-            "description": "负责冻结任务边界、生成 task derivation / retrieval plan / dispatch quality，并诊断语料覆盖。task_contract 是唯一执行锚点，normalized_task 只保留为兼容视图。写入 /workspace/state/task_derivation.json、/workspace/state/task_derivation_proposal.json、/workspace/state/normalized_task.json、/workspace/state/retrieval_plan.json、/workspace/state/dispatch_quality.json 和 /workspace/state/corpus_coverage.json。",
-            "system_prompt": (
-                "你是任务规范化与覆盖诊断代理。先读取 /workspace/base_context.json，"
-                "必须严格沿用其中 task_contract.topic_identifier / start / end / mode，禁止自行改写专题标识、时间窗或模式。"
-                "调用 normalize_task 生成 task_derivation，只补充 topic / entities / keywords / platform_scope / mandatory_sections 等语义字段，"
-                "再基于 analysis_question_set、coverage_expectation 与 inference_policy 归纳 retrieval plan，"
-                "最后从 /workspace/state/task_contract.json 读取 contract_id，并调用 get_corpus_coverage(contract_id=..., retrieval_scope_json=..., filters_json=...) 区分'没有数据'与'没有发现'。"
-                "把结果分别写入 /workspace/state/task_derivation.json、/workspace/state/task_derivation_proposal.json、/workspace/state/normalized_task.json、/workspace/state/retrieval_plan.json、/workspace/state/dispatch_quality.json 和 /workspace/state/corpus_coverage.json，"
-                "并返回简短总结。默认策略是少调用、重研判。"
-                "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-            ),
-            "tools": retrieval_tools,
-            "middleware": _middleware_for("retrieval_router"),
-            "skills": _skills_for("retrieval_router", retrieval_tools),
-        },
-        {
-            "name": "archive_evidence_organizer",
-            "description": "负责按任务意图召回证据卡，并写入 /workspace/state/evidence_cards.json。",
-            "system_prompt": (
-                "你是证据卡整理代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json 和 /workspace/state/corpus_coverage.json。"
-                "其中 task_contract 是唯一执行 authority，normalized_task 只用于调试和兼容展示。"
-                "从 /workspace/state/task_contract.json 提取 contract_id，只使用 retrieve_evidence_cards(contract_id=..., retrieval_scope_json=..., filters_json=..., intent=...) 产出分页证据卡与反证卡。"
-                "如果 corpus_coverage.coverage.readiness_flags 包含 no_records_in_scope，"
-                "只允许生成一次空 evidence_cards.json，随后立即结束，不要继续换 intent 重试。"
-                "把聚合后的结果写入 /workspace/state/evidence_cards.json，并返回摘要。"
-                "不要回写长段原文，不要把数据库字段直接搬进文稿。"
-                "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-            ),
-            "tools": evidence_tools,
-            "middleware": _middleware_for("archive_evidence_organizer"),
-            "skills": _skills_for("archive_evidence_organizer", evidence_tools),
-        },
-        {
-            "name": "agenda_frame_builder",
-            "description": "负责构建议题-属性-框架图，写入 /workspace/state/agenda_frame_map.json。",
-            "system_prompt": (
-                "你是议题与框架构建代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json、/workspace/state/evidence_cards.json、"
-                "/workspace/state/actor_positions.json、/workspace/state/conflict_map.json 与 /workspace/state/timeline_nodes.json，"
-                "使用 build_agenda_frame_map 生成 issue nodes、attribute nodes、frame records、frame shifts 与 counter-frames。"
-                "把结果写入 /workspace/state/agenda_frame_map.json，并返回简短总结。"
-                "不要输出 prose 结论，不要把框架写成普通摘要。"
-                "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-            ),
-            "tools": agenda_tools,
-            "middleware": _middleware_for("agenda_frame_builder"),
-            "skills": _skills_for("agenda_frame_builder", agenda_tools),
-        },
-        {
-            "name": "timeline_analyst",
-            "description": "负责构建时间线节点和图表就绪指标，写入 /workspace/state/timeline_nodes.json 与 /workspace/state/metrics_bundle.json。",
-            "system_prompt": (
-                "你是时间线分析代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json 与 /workspace/state/evidence_cards.json，"
-                "如果 evidence_cards.coverage.readiness_flags 包含 no_cards，则只生成结构化空结果并附带跳过原因，不要继续尝试深描。"
-                "使用 build_event_timeline 生成带 support_evidence_ids 的时间线节点，"
-                "再用 compute_report_metrics 输出 chart-ready 指标。"
-                "结果写入 /workspace/state/timeline_nodes.json 和 /workspace/state/metrics_bundle.json，并返回简短总结。"
-                "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-            ),
-            "tools": timeline_tools,
-            "middleware": _middleware_for("timeline_analyst"),
-            "skills": _skills_for("timeline_analyst", timeline_tools),
-        },
-        {
-            "name": "stance_conflict",
-            "description": "负责识别主体与立场关系，写入 /workspace/state/actor_positions.json。",
-            "system_prompt": (
-                "你是主体立场代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json 与 /workspace/state/evidence_cards.json，"
-                "只使用 extract_actor_positions 输出主体、立场变化、冲突关系。"
-                "把结果写入 /workspace/state/actor_positions.json，并返回简短总结。"
-                "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-            ),
-            "tools": stance_tools,
-            "middleware": _middleware_for("stance_conflict"),
-            "skills": _skills_for("stance_conflict", stance_tools),
-        },
-        {
-            "name": "claim_actor_conflict",
-            "description": "负责构建断言-主体冲突图，写入 /workspace/state/conflict_map.json。",
-            "system_prompt": (
-                "你是断言冲突构建代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json、/workspace/state/evidence_cards.json、"
-                "/workspace/state/actor_positions.json 和 /workspace/state/timeline_nodes.json，"
-                "如果 evidence_cards.coverage.readiness_flags 包含 no_cards，或 actor_positions / timeline_nodes 明显为空，"
-                "只生成结构化空图谱并说明 skip reason，不要反复重试。"
-                "使用 build_claim_actor_conflict 生成 claim graph、actor positions、conflict edges 与 resolution states。"
-                "把结果写入 /workspace/state/conflict_map.json，并返回简短总结。"
-                "不要输出 prose 结论，不要默认把冲突写成已收敛。"
-                "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-            ),
-            "tools": conflict_tools,
-            "middleware": _middleware_for("claim_actor_conflict"),
-            "skills": _skills_for("claim_actor_conflict", conflict_tools),
-        },
-        {
-            "name": "propagation_analyst",
-            "description": "负责解释传播指标、机制摘要与风险信号，写入 /workspace/state/mechanism_summary.json 与 /workspace/state/risk_signals.json。",
-            "system_prompt": (
-                "你是传播与风险代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json、/workspace/state/evidence_cards.json、"
-                "/workspace/state/metrics_bundle.json、/workspace/state/timeline_nodes.json 与 /workspace/state/conflict_map.json，"
-                "如果 evidence_cards.coverage.readiness_flags 包含 no_cards，或 conflict_map / timeline_nodes 为空，"
-                "只生成结构化空机制与空风险对象，并明确写出 skip reason。"
-                "必要时补做 compute_report_metrics，使用 build_mechanism_summary 生成传播机制对象，再使用 detect_risk_signals 输出风险对象。"
-                "把结果写入 /workspace/state/mechanism_summary.json 与 /workspace/state/risk_signals.json，并返回简短总结。"
-                "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-            ),
-            "tools": propagation_tools,
-            "middleware": _middleware_for("propagation_analyst"),
-            "skills": _skills_for("propagation_analyst", propagation_tools),
-        },
-        {
-            "name": "bertopic_evolution_analyst",
-            "description": "负责读取 BERTopic 快照并生成主题演化洞察，写入 /workspace/state/bertopic_insight.json。",
-            "system_prompt": (
-                "你是 BERTopic 主题演化代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json 与 /workspace/state/normalized_task.json，"
-                "先使用 get_bertopic_snapshot 读取当前专题在本地归档中的 BERTopic 结果，再使用 build_bertopic_insight 输出主题演化章节洞察。"
-                "若快照不存在或可用主题为空，写出结构化空洞察并注明 skip reason，不要伪造演化趋势。"
-                "把结果写入 /workspace/state/bertopic_insight.json，并返回简短总结。"
-                "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-            ),
-            "tools": bertopic_tools,
-            "middleware": _middleware_for("bertopic_evolution_analyst"),
-            "skills": _skills_for("bertopic_evolution_analyst", bertopic_tools),
-        },
-        {
-            "name": "decision_utility_judge",
-            "description": "负责裁决当前判断对象是否具备进入正式文稿的决策可用性，写入 /workspace/state/utility_assessment.json。",
-            "system_prompt": (
-                "你是决策可用性裁决代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json、/workspace/state/corpus_coverage.json、"
-                "/workspace/state/evidence_cards.json、/workspace/state/conflict_map.json、/workspace/state/mechanism_summary.json、"
-                "/workspace/state/agenda_frame_map.json、/workspace/state/risk_signals.json 与 /workspace/state/actor_positions.json，"
-                "如果上游已经进入 empty_corpus / empty_evidence / insufficient_structure，"
-                "必须把这些原因写入 utility assessment 的 missing_dimensions 或 fallback reason，不要假装仍可正常放行。"
-                "使用 judge_decision_utility 产出 typed utility assessment。"
-                "把结果写入 /workspace/state/utility_assessment.json，并返回简短总结。"
-                "不要直接写正文，不要用 prose 代替结构化裁决。"
-                "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-            ),
-            "tools": utility_tools,
-            "middleware": _middleware_for("decision_utility_judge"),
-            "skills": _skills_for("decision_utility_judge", utility_tools),
-        },
-    ]
+    return common_context, runtime_files, runtime_backend, skill_assets, memory_paths
 
 
 def _migrate_graph_state(raw: dict) -> dict:
@@ -2631,7 +2319,7 @@ def _run_deep_report_exploration_task(
     full_cache_path = cache_dir / AI_FULL_REPORT_CACHE_FILENAME
     review_path = _semantic_review_path(cache_dir)
     runtime_artifact_path = build_artifacts_root(runtime_task_id, get_data_root()) / "report.md"
-    common_context, runtime_files, backend_factory, skill_assets, memory_paths = _prepare_runtime(
+    common_context, runtime_files, runtime_backend, skill_assets, memory_paths = _prepare_runtime(
         topic_identifier,
         start_text,
         end_text,
@@ -2640,7 +2328,6 @@ def _run_deep_report_exploration_task(
         thread_id=active_thread_id,
         task_id=runtime_task_id,
     )
-    core_tools = select_report_tools(runtime_target="deep_report_coordinator")
     llm, _client_cfg = build_langchain_chat_model(task="report", model_role="report", temperature=0.15, max_tokens=4200)
     if llm is None:
         raise ValueError("未找到可用的 LangChain 模型配置")
@@ -2886,7 +2573,9 @@ def _run_deep_report_exploration_task(
         )
         return str(full_cache_path)
 
-    agent_tools = [*core_tools, save_structured_report]
+    tool_round_limits = _resolve_report_tool_round_limits()
+    coordinator_tool_round_limit = tool_round_limits["coordinator"]
+    subagent_tool_round_limit = tool_round_limits["subagent"]
     lifecycle_tracker: Dict[str, Any] = {
         "tool_calls": [],
         "subagents_started": [],
@@ -2904,83 +2593,41 @@ def _run_deep_report_exploration_task(
             "thread_id": active_thread_id,
         },
     }
-    tool_round_limits = _resolve_report_tool_round_limits()
-    coordinator_tool_round_limit = tool_round_limits["coordinator"]
-    subagent_tool_round_limit = tool_round_limits["subagent"]
-    coordinator_limit_text = (
-        f"本次总控允许的最大工具回合为 {int(coordinator_tool_round_limit)}，请把调用压缩在这个范围内。"
-        if coordinator_tool_round_limit is not None
-        else "本次总控默认不限制工具回合，但仍应尽量减少无效调用。"
-    )
-    subagent_limit_text = (
-        f"各子代理默认工具回合上限为 {int(subagent_tool_round_limit)}。"
-        if subagent_tool_round_limit is not None
-        else "各子代理默认不限制工具回合，但仍应优先少调用、深研判。"
-    )
-    coordinator_checkpointer, coordinator_runtime_profile = get_shared_report_checkpointer(purpose="deep-report-coordinator")
-    agent = create_deep_agent(
-        model=llm,
-        tools=agent_tools,
-        system_prompt=(
-            "你是舆情报告总控代理。你的职责是规划任务、调用合适的子代理，并整理出完整结构化结果。"
-            "你不能跳过证据回链，也不能在没有结构化对象的情况下声称任务完成。"
-            "你必须优先使用 task 工具委派给专业子代理，而不是自己直接完成所有分析。"
-            "默认策略是少调用、重研判：不必节省 token，但要控制调用次数，优先在单次回复里完成更深、更完整的归纳和判断。"
-            "完成必要取证后，尽量减少碎片化 read_file / 重复小调用，优先一次性收口成完整结构化对象。"
-            "调用 save_structured_report 前，先在单次回复里把对象整理完整；不要连续提交多个试探版本。"
-            "本轮职责止于保存结构化对象。正式文稿编译、trace 校验、repair loop、语义审批和缓存写入由外层确定性图负责。"
-            f"{coordinator_limit_text}"
-            f"{subagent_limit_text}"
-            "完成结构化保存后即可结束本轮，不要再额外调用最终写入类工具。"
-        ),
-        middleware=[
+
+    def _coordinator_middleware_factory(agent_name: str) -> List[Any]:
+        is_coordinator = agent_name == "report_coordinator"
+        return [
             _build_lifecycle_middleware(
                 event_callback=event_callback,
-                actor_name="report_coordinator",
-                default_phase="interpret",
+                actor_name=agent_name,
+                default_phase="interpret" if is_coordinator else _phase_for_subagent(agent_name),
                 tracker=lifecycle_tracker,
-                task_tool_mode=True,
-                max_tool_rounds=coordinator_tool_round_limit,
+                task_tool_mode=is_coordinator,
+                max_tool_rounds=coordinator_tool_round_limit if is_coordinator else subagent_tool_round_limit,
             )
-        ],
-        subagents=_build_subagents(
-            core_tools,
-            event_callback=event_callback,
-            tracker=lifecycle_tracker,
-            max_tool_rounds=subagent_tool_round_limit,
-            skill_assets=skill_assets,
-        ),
-        skills=select_report_skill_sources(
-            skill_assets,
-            available_tool_ids=[tool.name for tool in core_tools],
-            runtime_target=RUNTIME_COORDINATOR,
-        )
-        or None,
-        memory=memory_paths or None,
-        context_schema=dict,
-        checkpointer=coordinator_checkpointer,
-        store=RUNTIME_STORE,
-        backend=backend_factory,
-        interrupt_on=_interrupt_on_for_tools(agent_tools),
-        debug=False,
-        name="deep-report-coordinator",
-    )
+        ]
 
-    prompt = (
-        "请先使用 write_todos 建立总计划，再严格按以下流程执行，不要跳步，也不要在未调用工具的情况下直接结束：\n"
-        "1. 使用 task 工具依次委派 retrieval_router、archive_evidence_organizer、timeline_analyst、stance_conflict、claim_actor_conflict、propagation_analyst、bertopic_evolution_analyst、decision_utility_judge。\n"
-        "2. 确认 /workspace/state/ 下至少生成 task_contract、task_derivation、task_derivation_proposal、normalized_task、retrieval_plan、dispatch_quality、corpus_coverage、evidence_cards、timeline_nodes、metrics_bundle、actor_positions、conflict_map、mechanism_summary、risk_signals、bertopic_insight、utility_assessment。\n"
-        "3. 先调用 build_section_packet 生成至少 overview、timeline、risk 三个章节材料包，并写入 /workspace/state/section_packets/*.json。\n"
-        "4. 读取这些中间对象，汇总成完整结构化报告对象。\n"
-        "5. 调用 save_structured_report 保存结构化对象。优先直接传 payload 对象，不要把整个结构化 JSON 再包成字符串。先整理好完整对象，再一次性提交，不要连续试探多个版本。对象必须包含：task、conclusion、timeline、subjects、stance_matrix、"
-        "key_evidence、conflict_points、conflict_map、propagation_features、mechanism_summary、risk_judgement、unverified_points、suggested_actions、utility_assessment、citations、validation_notes。\n"
-        "6. 保存成功后立即结束本轮。不要再生成 /workspace/state/report_draft.md、/workspace/state/claim_checks.json 或 /workspace/state/validation_notes.md；这些旧中间态已经被外层 graph compile 路径替代。\n"
-        "默认风格：单次回复尽量研判深刻，不必节省 token，但要尽量减少调用次数。"
-        f"本次总控最大工具回合：{int(coordinator_tool_round_limit) if coordinator_tool_round_limit is not None else '不限制'}；"
-        f"子代理最大工具回合：{int(subagent_tool_round_limit) if subagent_tool_round_limit is not None else '不限制'}。"
-        "完成必要读取后，优先一次性输出更完整的分析和结构，不要拆成很多次浅层补充。"
-        "所有关键判断都要尽量带 citation_ids；如果证据不足，请进入 unverified_points。"
+    agent_bundle = build_report_deep_agent(
+        llm=llm,
+        topic_identifier=topic_identifier,
+        topic_label=display_name,
+        start_text=start_text,
+        end_text=end_text,
+        mode=mode,
+        thread_id=active_thread_id,
+        task_id=runtime_task_id,
+        skill_assets=skill_assets,
+        memory_paths=memory_paths or None,
+        runtime_backend=runtime_backend,
+        extra_coordinator_tools=[save_structured_report],
+        middleware_factory=_coordinator_middleware_factory,
+        coordinator_tool_round_limit=coordinator_tool_round_limit,
+        subagent_tool_round_limit=subagent_tool_round_limit,
+        lifecycle_tracker=lifecycle_tracker,
     )
+    agent = agent_bundle["agent"]
+    coordinator_runtime_profile = agent_bundle["coordinator_runtime_profile"]
+    prompt = agent_bundle["prompt"]
     _emit(
         event_callback,
         {
@@ -3024,8 +2671,8 @@ def _run_deep_report_exploration_task(
             version="v2",
         )
 
-    def _build_interrupt_response(result: Dict[str, Any]) -> Dict[str, Any]:
-        interrupts = result.get("__interrupt__") if isinstance(result, dict) else None
+    def _build_interrupt_response(result: Any) -> Dict[str, Any]:
+        interrupts = _result_interrupts(result)
         approvals: List[Dict[str, Any]] = []
         for interrupt in interrupts or []:
             interrupt_id = str(getattr(interrupt, "id", "") or "").strip() or uuid.uuid4().hex
@@ -3080,7 +2727,7 @@ def _run_deep_report_exploration_task(
                 fallback_attempted=fallback_attempted,
             )
             raise ReportRuntimeFailure(str(exc or "深度代理执行失败。").strip() or "深度代理执行失败。", last_diagnostic) from exc
-        result_payload = result if isinstance(result, dict) else getattr(result, "value", result)
+        result_payload = _result_payload(result)
         runtime_result_files = result_payload.get("files") if isinstance(result_payload, dict) and isinstance(result_payload.get("files"), dict) else {}
         if runtime_result_files:
             latest_runtime_files = runtime_result_files
@@ -3090,7 +2737,7 @@ def _run_deep_report_exploration_task(
             files=latest_runtime_files,
             fallback_attempted=fallback_attempted,
         )
-        interrupts = result.get("__interrupt__") if isinstance(result, dict) else None
+        interrupts = _result_interrupts(result)
         if interrupts:
             return _build_interrupt_response(result)
 
@@ -3359,7 +3006,18 @@ def run_or_resume_deep_report_task(
         payload = _load_json(structured_cache_path)
         return payload if _matches_current_run(payload, runtime_task_id=runtime_task_id, thread_id=active_thread_id) else {}
 
-    def _run_exploration() -> Dict[str, Any]:
+    def _run_exploration(request: Dict[str, Any]) -> Dict[str, Any]:
+        # Derive config params from the explicit request dict rather than closure vars.
+        # `resume_payload` and `event_callback` remain closure-bound: they are workflow
+        # state / runtime callbacks, not request-level config.
+        req_topic_id = str(request.get("topic_identifier") or "").strip() or topic_identifier
+        req_start = str(request.get("start") or "").strip() or start_text
+        req_end = str(request.get("end") or "").strip() or req_start
+        req_label = str(request.get("topic_label") or "").strip() or display_name
+        req_mode = str(request.get("mode") or "").strip() or mode
+        req_thread_id = str(request.get("thread_id") or "").strip() or active_thread_id
+        req_task_id = str(request.get("task_id") or "").strip() or runtime_task_id
+
         if resume_payload is not None:
             structured_payload = _resume_structured_payload()
             if not structured_payload:
@@ -3386,13 +3044,13 @@ def run_or_resume_deep_report_task(
             }
 
         result = _run_deep_report_exploration_task(
-            topic_identifier,
-            start_text,
-            end_text,
-            topic_label=display_name,
-            mode=mode,
-            thread_id=active_thread_id,
-            task_id=runtime_task_id,
+            req_topic_id,
+            req_start,
+            req_end,
+            topic_label=req_label,
+            mode=req_mode,
+            thread_id=req_thread_id,
+            task_id=req_task_id,
             resume_payload=None,
             event_callback=lambda event: _emit_runtime_event(event_callback, event, normalize_exploration=True),
         )
@@ -3449,6 +3107,9 @@ def run_or_resume_deep_report_task(
             )
         return payload
 
+    def _invoke_deep_agent(request: Dict[str, Any]) -> Dict[str, Any]:
+        return _run_exploration(request)
+
     return run_report_orchestrator_graph(
         request={
             "task_id": runtime_task_id,
@@ -3463,7 +3124,7 @@ def run_or_resume_deep_report_task(
             "compile_thread_id": compile_thread_id,
         },
         root_thread_id=root_thread_id,
-        run_exploration=_run_exploration,
+        invoke_deep_agent=_invoke_deep_agent,
         run_compile=_run_compile,
         event_callback=event_callback,
     )
@@ -3522,7 +3183,7 @@ def generate_report_payload(
 
     active_thread_id = str(thread_id or _default_thread_id(topic_identifier, start_text, end_text)).strip()
     runtime_task_id = str(task_id or f"rp-runtime-{uuid.uuid4().hex[:8]}").strip()
-    common_context, runtime_files, backend_factory, skill_assets, memory_paths = _prepare_runtime(
+    common_context, runtime_files, runtime_backend, skill_assets, memory_paths = _prepare_runtime(
         topic_identifier,
         start_text,
         end_text,

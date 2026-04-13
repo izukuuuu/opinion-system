@@ -10,7 +10,6 @@ from ..capability_manifest import (
     RUNTIME_COORDINATOR,
     RUNTIME_MANUAL_ONLY,
     RUNTIME_SUBAGENT,
-    select_runtime_tool_ids,
 )
 from ..deep_report.agent_tools import (
     build_agenda_frame_map,
@@ -442,23 +441,52 @@ SECTION_TOOL_NAME_MAP: Mapping[Tuple[str, str], Sequence[str]] = {
     ],
 }
 
-DEEP_REPORT_COORDINATOR_TOOL_IDS: Sequence[str] = select_runtime_tool_ids(runtime_target=RUNTIME_COORDINATOR)
+# Explicit static tool ID lists — derived from capability_manifest entrypoint_tool_ids projection.
+# These replace the former module-load-time select_runtime_tool_ids() calls so that
+# capability_manifest is not invoked on the runtime hot path.
+DEEP_REPORT_COORDINATOR_TOOL_IDS: Sequence[str] = (
+    "normalize_task",
+    "get_corpus_coverage",
+    "retrieve_evidence_cards",
+    "verify_claim_v2",
+    "get_basic_analysis_snapshot",
+    "build_agenda_frame_map",
+    "extract_actor_positions",
+    "build_claim_actor_conflict",
+    "build_event_timeline",
+    "compute_report_metrics",
+    "build_mechanism_summary",
+    "detect_risk_signals",
+    "build_basic_analysis_insight",
+    "judge_decision_utility",
+    "get_bertopic_snapshot",
+    "build_bertopic_insight",
+    "build_section_packet",
+    "get_sentiment_analysis_framework",
+    "get_sentiment_theories",
+    "get_sentiment_case_template",
+    "get_youth_sentiment_insight",
+    "search_reference_insights",
+    "build_event_reference_links",
+)
 
 SUBAGENT_TOOL_ID_MAP: Mapping[str, Sequence[str]] = {
-    agent_name: select_runtime_tool_ids(runtime_target=RUNTIME_SUBAGENT, agent_name=agent_name)
-    for agent_name in (
-        "retrieval_router",
-        "archive_evidence_organizer",
-        "timeline_analyst",
-        "stance_conflict",
-        "agenda_frame_builder",
-        "claim_actor_conflict",
-        "propagation_analyst",
-        "bertopic_evolution_analyst",
-        "decision_utility_judge",
-        "validator",
-        "writer",
-    )
+    "retrieval_router": ("normalize_task", "get_corpus_coverage"),
+    "archive_evidence_organizer": ("retrieve_evidence_cards", "get_basic_analysis_snapshot"),
+    "timeline_analyst": ("build_event_timeline", "compute_report_metrics"),
+    "stance_conflict": ("extract_actor_positions",),
+    "agenda_frame_builder": ("build_agenda_frame_map",),
+    "claim_actor_conflict": ("extract_actor_positions", "build_claim_actor_conflict"),
+    "propagation_analyst": (
+        "compute_report_metrics",
+        "build_mechanism_summary",
+        "detect_risk_signals",
+        "build_basic_analysis_insight",
+    ),
+    "bertopic_evolution_analyst": ("get_bertopic_snapshot", "build_bertopic_insight"),
+    "decision_utility_judge": ("judge_decision_utility",),
+    "validator": ("verify_claim_v2",),
+    "writer": (),
 }
 
 ANALYSIS_AGENT_TOOL_ID_MAP: Mapping[Tuple[str, str], Sequence[str]] = {
@@ -576,14 +604,13 @@ def select_report_tools(
         pair = (str(scene_id or "").strip(), str(agent_name or "").strip())
         return _resolve_tools(ANALYSIS_AGENT_TOOL_ID_MAP.get(pair, ()), include_manual=include_manual)
     if target == RUNTIME_COORDINATOR:
-        return _resolve_tools(select_runtime_tool_ids(runtime_target=RUNTIME_COORDINATOR), include_manual=include_manual)
+        return _resolve_tools(DEEP_REPORT_COORDINATOR_TOOL_IDS, include_manual=include_manual)
     if target == RUNTIME_SUBAGENT:
-        return _resolve_tools(
-            select_runtime_tool_ids(runtime_target=RUNTIME_SUBAGENT, agent_name=str(agent_name or "").strip()),
-            include_manual=include_manual,
-        )
+        agent_key = str(agent_name or "").strip()
+        return _resolve_tools(SUBAGENT_TOOL_ID_MAP.get(agent_key, ()), include_manual=include_manual)
     if target == RUNTIME_AGENT:
-        return _resolve_tools(select_runtime_tool_ids(runtime_target=RUNTIME_AGENT), include_manual=include_manual)
+        agent_tool_ids = [s.tool_id for s in _TOOL_SPECS if RUNTIME_AGENT in s.runtime_tags]
+        return _resolve_tools(agent_tool_ids, include_manual=include_manual)
     raise ValueError(f"Unsupported report runtime target: {runtime_target}")
 
 
