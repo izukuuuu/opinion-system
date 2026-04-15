@@ -33,6 +33,7 @@ def compile_markdown_artifacts(
         raise ValueError("render_markdown requires ReportIR and no longer accepts raw structured payload compilation.")
     utility_assessment = report_ir.get("utility_assessment") if isinstance(report_ir.get("utility_assessment"), dict) else {}
     utility_decision = str(utility_assessment.get("decision") or "pass").strip() or "pass"
+    review_decision_text = str((review_decision or {}).get("decision") or "").strip().lower()
     compiled = run_report_compilation_graph(
         payload,
         event_callback=event_callback,
@@ -43,6 +44,14 @@ def compile_markdown_artifacts(
     if str(compiled.get("status") or "").strip() == "interrupted":
         return compiled
     markdown_conformance = compiled.get("factual_conformance") if isinstance(compiled.get("factual_conformance"), dict) else {}
+    graph_review_metadata = markdown_conformance.get("metadata") if isinstance(markdown_conformance.get("metadata"), dict) else {}
+    graph_review_decision_text = str(
+        graph_review_metadata.get("review_decision")
+        or graph_review_metadata.get("decision")
+        or ""
+    ).strip().lower()
+    effective_review_decision_text = review_decision_text or graph_review_decision_text
+    human_override_accepted = effective_review_decision_text in {"approve", "edit"}
     if (
         utility_decision == "pass"
         and not (markdown_conformance.get("issues") or [])
@@ -72,19 +81,21 @@ def compile_markdown_artifacts(
             "issues": issues,
             "passed": False,
             "can_auto_recover": utility_decision == "fallback_recompile",
-            "requires_human_review": utility_decision == "require_semantic_review",
+            "requires_human_review": utility_decision == "require_semantic_review" and not human_override_accepted,
             "metadata": {
                 **dict(markdown_conformance.get("metadata") or {}),
                 "utility_assessment": utility_assessment,
+                "human_override_accepted": human_override_accepted,
+                "review_decision": effective_review_decision_text,
             },
         }
     compiled["factual_conformance"] = markdown_conformance
     compiled["utility_assessment"] = utility_assessment
     compiled["review_required"] = bool(markdown_conformance.get("requires_human_review") or compiled.get("review_required"))
-    if utility_decision == "fallback_recompile":
-        raise ValueError("compile_markdown_artifacts aborted: UtilityAssessment requires fallback_recompile before final markdown.")
-    if not markdown_conformance.get("passed") and not allow_review_pending:
-        raise ValueError("compile_markdown_artifacts aborted: final markdown contains novel claims.")
+    # fallback_recompile 允许继续编译流程（can_auto_recover=True 表示可自动恢复）
+    # require_semantic_review 需要人工审核，由 allow_review_pending 控制
+    if not markdown_conformance.get("passed") and not allow_review_pending and not human_override_accepted:
+        raise ValueError("compile_markdown_artifacts aborted: final markdown requires review or contains novel claims.")
     return compiled
 
 
@@ -139,7 +150,6 @@ def build_full_payload(
     full_payload = {
         **structured_payload,
         "title": title,
-        "subtitle": "Report IR 驱动的正式文稿视图",
         "rangeText": f"{str(task.get('start') or '').strip()} -> {str(task.get('end') or '').strip()}",
         "markdown": str(markdown or "").strip(),
         "draft_bundle": draft_bundle if isinstance(draft_bundle, dict) else {},

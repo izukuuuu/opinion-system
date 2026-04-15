@@ -1,0 +1,103 @@
+coordinator:
+  skill_keys:
+  - basic-analysis-framework
+  - sentiment-analysis-methodology
+subagents:
+  retrieval_router:
+    name: retrieval_router
+    description: 负责冻结任务边界、生成 task derivation / retrieval plan / dispatch quality，并诊断语料覆盖。
+    skill_keys:
+    - retrieval-router-rules
+    output_files:
+    - /workspace/state/task_derivation.json
+    - /workspace/state/task_derivation_proposal.json
+    - /workspace/state/normalized_task.json
+    - /workspace/state/retrieval_plan.json
+    - /workspace/state/dispatch_quality.json
+    - /workspace/state/corpus_coverage.json
+    tier: 0
+  archive_evidence_organizer:
+    name: archive_evidence_organizer
+    description: 负责按任务意图召回证据卡，并写入 /workspace/state/evidence_cards.json。
+    skill_keys:
+    - evidence-source-credibility
+    output_files:
+    - /workspace/state/evidence_cards.json
+    tier: 1
+  bertopic_evolution_analyst:
+    name: bertopic_evolution_analyst
+    description: 负责读取 BERTopic 快照并生成主题演化洞察。
+    skill_keys:
+    - bertopic-evolution-framework
+    output_files:
+    - /workspace/state/bertopic_insight.json
+    tier: 1
+  timeline_analyst:
+    name: timeline_analyst
+    description: 负责构建时间线节点和图表就绪指标。
+    skill_keys:
+    - timeline-alignment-slicing
+    output_files:
+    - /workspace/state/timeline_nodes.json
+    - /workspace/state/metrics_bundle.json
+    tier: 2
+  stance_conflict:
+    name: stance_conflict
+    description: 负责识别主体与立场关系。
+    skill_keys:
+    - subject-stance-merging
+    output_files:
+    - /workspace/state/actor_positions.json
+    tier: 2
+  event_analyst:
+    name: event_analyst
+    description: 负责通用事件分析，拆解引发点、讨论演化等。
+    skill_keys:
+    - sentiment-analysis-methodology
+    - propagation-explanation-framework
+    output_files:
+    - /workspace/state/event_analysis.json
+    tier: 3
+  claim_actor_conflict:
+    name: claim_actor_conflict
+    description: 负责构建断言-主体冲突图。
+    skill_keys:
+    - subject-stance-merging
+    output_files:
+    - /workspace/state/conflict_map.json
+    tier: 3
+  agenda_frame_builder:
+    name: agenda_frame_builder
+    description: 负责构建议题-属性-框架图。
+    skill_keys: []
+    output_files:
+    - /workspace/state/agenda_frame_map.json
+    tier: 4
+  propagation_analyst:
+    name: propagation_analyst
+    description: 负责解释传播指标、机制摘要与风险信号。
+    skill_keys:
+    - propagation-explanation-framework
+    - chart-interpretation-guidelines
+    output_files:
+    - /workspace/state/mechanism_summary.json
+    - /workspace/state/risk_signals.json
+    tier: 4
+  decision_utility_judge:
+    name: decision_utility_judge
+    description: 负责裁决当前判断对象是否具备进入正式文稿的决策可用性。
+    skill_keys:
+    - quality-validation-backlink
+    output_files:
+    - /workspace/state/utility_assessment.json
+    tier: 5
+  writer:
+    name: writer
+    description: 负责按模板章节进行深度舆情报告写作。
+    skill_keys:
+    - report-writing-framework
+    - sentiment-analysis-methodology
+    - chart-interpretation-guidelines
+    - propagation-explanation-framework
+    output_files: []
+    tier: 6

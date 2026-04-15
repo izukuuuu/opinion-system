@@ -7,7 +7,7 @@ const PLAN_STEP_DESCRIPTIONS = {
   persist: '处理人工确认，并写入最终结果。'
 }
 
-export const RESEARCH_SUBAGENT_IDS = ['retrieval_router', 'evidence_organizer', 'timeline_analyst', 'stance_conflict', 'propagation_analyst']
+export const RESEARCH_SUBAGENT_IDS = ['retrieval_router', 'archive_evidence_organizer', 'evidence_organizer', 'timeline_analyst', 'stance_conflict', 'propagation_analyst']
 export const SUBAGENT_DISPLAY_ORDER = ['report_coordinator', ...RESEARCH_SUBAGENT_IDS, 'writer', 'validator']
 
 const TODO_PROGRESS_WEIGHT = {
@@ -90,6 +90,7 @@ export function todoStatusLabel(status) {
 export function subagentLabel(id) {
   const mapping = {
     retrieval_router: '检索路由',
+    archive_evidence_organizer: '证据整理',
     agenda_frame_builder: '议题框架',
     evidence_organizer: '证据整理',
     timeline_analyst: '时间线与因果',
@@ -152,12 +153,12 @@ function shortLocatorLabel(value) {
 
 function runtimeModeLabel(mode) {
   const mapping = {
-    'deep-report-coordinator': 'Deep Coordinator',
-    'deep-report-subagent': 'Deep Subagent',
-    'deep-report-root-graph': 'LangGraph 主图',
-    'deep-report-compile': 'LangGraph 编译图',
-    'report-agent-deep': 'Deep Agent',
-    'report-agent-plain': 'LangGraph 兼容代理',
+    'deep-report-coordinator': '深度分析主控',
+    'deep-report-subagent': '深度分析子任务',
+    'deep-report-root-graph': '分析主流程',
+    'deep-report-compile': '报告编译',
+    'report-agent-deep': '深度代理',
+    'report-agent-plain': '兼容代理',
     'report-api': 'API 入口'
   }
   return mapping[String(mode || '').trim()] || String(mode || '').trim() || '未标注'
@@ -200,7 +201,7 @@ function resolveRuntimeDiagnostics(taskState = {}, approvals = []) {
     runtimeModeLabel: runtimeModeLabel(runtimeMode),
     langsmithEnabled,
     langsmithProject,
-    tracingLabel: langsmithEnabled ? `LangSmith · ${langsmithProject || 'default'}` : 'Tracing 未开启',
+    tracingLabel: langsmithEnabled ? `已开启 (${langsmithProject || '默认'})` : '未开启',
     environment: environment || '--'
   }
 }
@@ -214,16 +215,18 @@ function utilityDecisionLabel(decision, approvals = []) {
   return '处理中'
 }
 
-function approvalDecisionLabel(decision) {
+function approvalDecisionLabel(decision, reviewPayload = null) {
   const normalized = String(decision || '').trim()
-  if (normalized === 'approve') return '已确认'
-  if (normalized === 'edit') return '已修改'
+  if (normalized === 'approve') {
+    const hasComment = reviewPayload?.comment || reviewPayload?.annotations?.length
+    return hasComment ? '已批注通过' : '已通过'
+  }
   if (normalized === 'reject') return '已拒绝'
   return '待处理'
 }
 
 function buildRouteSummary(routerFacets = [], dispatchTargets = []) {
-  if (!routerFacets.length && !dispatchTargets.length) return '当前还没有可展示的分派计划。'
+  if (!routerFacets.length && !dispatchTargets.length) return '当前还没有分派计划。'
   const dimensions = []
   if (routerFacets.some((item) => String(item?.platform || '').trim())) dimensions.push('平台')
   if (routerFacets.some((item) => String(item?.event_stage || '').trim())) dimensions.push('事件阶段')
@@ -231,8 +234,8 @@ function buildRouteSummary(routerFacets = [], dispatchTargets = []) {
   if (routerFacets.some((item) => String(item?.time_start || item?.time_end || item?.date_window || '').trim())) dimensions.push('时间窗')
   if (routerFacets.some((item) => String(item?.risk_sensitivity || '').trim())) dimensions.push('风险等级')
   if (dimensions.length) return `已按${dimensions.join('、')}生成分派计划。`
-  if (dispatchTargets.length) return '已生成当前轮次的 specialist 分派计划。'
-  return '当前还没有可展示的分派计划。'
+  if (dispatchTargets.length) return '已生成当前轮次的分派计划。'
+  return '当前还没有分派计划。'
 }
 
 function normalizeArtifactKey(key) {
@@ -243,18 +246,18 @@ function normalizeArtifactKey(key) {
 function artifactDisplayMeta(key) {
   const normalized = normalizeArtifactKey(key)
   const mapping = {
-    structured_projection: { label: '语义报告', description: '当前结构化结果视图。' },
-    ir: { label: 'Report IR', description: '本轮语义中枢与证据编译结果。' },
-    conflict_map: { label: '冲突图谱', description: '梳理主体冲突和主张关系。' },
-    mechanism_summary: { label: '机制分析', description: '归纳传播路径和触发机制。' },
-    utility_assessment: { label: '裁决依据', description: '确认是否具备进入正式文稿的条件。' },
-    draft_bundle: { label: '受约束草稿', description: '按 section 编译的草稿单元。' },
-    draft_bundle_v2: { label: '受约束草稿 V2', description: 'IR-first 的 DraftUnitV2 结构化草稿。' },
-    validation_result: { label: '验证结果', description: '记录失败单元、gate 和 repair 状态。' },
-    repair_plan: { label: '修复计划', description: '记录 patchable failures 的定点修复计划。' },
-    graph_state: { label: '图运行快照', description: '记录当前 graph node、repair 次数和最终 gate。' },
-    approval_records: { label: '审批记录', description: '记录语义审查和人工确认。' },
-    full_markdown: { label: '正式文稿', description: '最终 Markdown 输出。' }
+    structured_projection: { label: '语义报告', description: '结构化的分析结果。' },
+    ir: { label: '分析中枢', description: '核心证据与结论的汇总。' },
+    conflict_map: { label: '争议图谱', description: '各方的立场和争议点。' },
+    mechanism_summary: { label: '传播分析', description: '舆情传播路径和触发因素。' },
+    utility_assessment: { label: '质量评估', description: '判断是否满足生成报告的条件。' },
+    draft_bundle: { label: '草稿素材', description: '按章节整理的草稿内容。' },
+    draft_bundle_v2: { label: '草稿素材', description: '结构化的章节草稿。' },
+    validation_result: { label: '校验结果', description: '内容检查和问题记录。' },
+    repair_plan: { label: '修复计划', description: '针对问题内容的修复方案。' },
+    graph_state: { label: '运行记录', description: '当前进度和调整次数。' },
+    approval_records: { label: '确认记录', description: '人工审核的确认情况。' },
+    full_markdown: { label: '正式报告', description: '最终的分析报告文稿。' }
   }
   return mapping[normalized] || { label: normalized || '产物', description: '当前产物。' }
 }
@@ -318,6 +321,167 @@ function sanitizeEventPreview(value) {
   if (/^\s*[\[{]/.test(text)) return ''
   if (text.includes('diagnostic=')) return ''
   return text.replace(/\s+/g, ' ').trim().slice(0, 180)
+}
+
+function parseArgsPreview(value) {
+  const text = String(value || '').trim()
+  if (!text) return {}
+  try {
+    const parsed = JSON.parse(text)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function parseMaybeJsonString(value) {
+  if (value && typeof value === 'object') return value
+  const text = String(value || '').trim()
+  if (!text) return {}
+  try {
+    const parsed = JSON.parse(text)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function toStringList(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+}
+
+function compactRequestTerms(values = []) {
+  const ordered = [...new Set((Array.isArray(values) ? values : []).map((item) => String(item || '').trim()).filter(Boolean))]
+  return ordered.filter((item, index) => {
+    const normalized = item.replace(/\s+/g, '')
+    return !ordered.some((other, otherIndex) => {
+      if (index === otherIndex) return false
+      const otherNormalized = String(other || '').replace(/\s+/g, '')
+      return otherNormalized.length > normalized.length && otherNormalized.includes(normalized)
+    })
+  })
+}
+
+function extractRequestTerms(args = {}) {
+  const filters = parseMaybeJsonString(args.filters_json)
+  const scope = parseMaybeJsonString(args.retrieval_scope_json)
+  const normalizedTask = parseMaybeJsonString(args.normalized_task_json)
+  const candidates = []
+
+  const explicitQuery = String(filters.query || filters.keyword || filters.search || '').trim()
+  if (explicitQuery) candidates.push(explicitQuery)
+
+  candidates.push(...toStringList(filters.keywords))
+  candidates.push(...toStringList(scope.keywords))
+  candidates.push(...toStringList(scope.entities))
+  candidates.push(...toStringList(normalizedTask.keywords))
+  candidates.push(...toStringList(normalizedTask.entities))
+
+  const topic = String(
+    normalizedTask.topic_label
+    || normalizedTask.topic
+    || normalizedTask.topic_name
+    || scope.topic
+    || ''
+  ).trim()
+  if (topic) candidates.push(topic)
+
+  return compactRequestTerms(candidates).slice(0, 4)
+}
+
+function extractRequestPlatforms(args = {}) {
+  const filters = parseMaybeJsonString(args.filters_json)
+  const scope = parseMaybeJsonString(args.retrieval_scope_json)
+  const normalizedTask = parseMaybeJsonString(args.normalized_task_json)
+  return [...new Set([
+    ...toStringList(filters.platforms),
+    ...toStringList(scope.platforms),
+    ...toStringList(normalizedTask.platform_scope)
+  ])].slice(0, 4)
+}
+
+function extractRequestEntities(args = {}) {
+  const filters = parseMaybeJsonString(args.filters_json)
+  const scope = parseMaybeJsonString(args.retrieval_scope_json)
+  const normalizedTask = parseMaybeJsonString(args.normalized_task_json)
+  return [...new Set([
+    ...toStringList(filters.entities),
+    ...toStringList(scope.entities),
+    ...toStringList(normalizedTask.entities)
+  ])].slice(0, 4)
+}
+
+function extractRequestTimeRange(args = {}) {
+  const filters = parseMaybeJsonString(args.filters_json)
+  const scope = parseMaybeJsonString(args.retrieval_scope_json)
+  const normalizedTask = parseMaybeJsonString(args.normalized_task_json)
+  const start = String(filters.time_start || scope.start || normalizedTask?.time_range?.start || '').trim()
+  const end = String(filters.time_end || scope.end || normalizedTask?.time_range?.end || start || '').trim()
+  return formatRangeLabel({ start, end })
+}
+
+function summarizeToolCallIntent(args = {}) {
+  const intent = String(args.intent || '').trim()
+  const mapping = {
+    overview: '总览',
+    timeline: '时间线',
+    actors: '主体立场',
+    risk: '风险信号',
+    claim_support: '支持性主张',
+    claim_counter: '反向主张'
+  }
+  return mapping[intent] || intent
+}
+
+function summarizeToolCallArgs(toolName, argsPreview) {
+  const args = parseArgsPreview(argsPreview)
+  const lines = []
+  const normalizedTool = String(toolName || '').trim()
+
+  if (normalizedTool === 'retrieve_evidence_cards') {
+    const intentLabel = summarizeToolCallIntent(args)
+    if (intentLabel) lines.push(`本次目标：整理${intentLabel}相关证据卡`)
+    const requestTerms = extractRequestTerms(args)
+    if (requestTerms.length) lines.push(`请求词：${requestTerms.join('、')}`)
+    const platforms = extractRequestPlatforms(args)
+    if (platforms.length) lines.push(`平台范围：${platforms.join('、')}`)
+    const entities = extractRequestEntities(args)
+    if (entities.length) lines.push(`关注主体：${entities.join('、')}`)
+    const timeRange = extractRequestTimeRange(args)
+    if (timeRange) lines.push(`时间窗：${timeRange}`)
+    const sortBy = String(args.sort_by || '').trim()
+    if (sortBy) lines.push(`排序方式：${sortBy}`)
+    const limit = Number(args.limit || 0)
+    if (Number.isFinite(limit) && limit > 0) lines.push(`数量上限：${limit}`)
+  } else if (normalizedTool === 'get_corpus_coverage') {
+    lines.push('本次目标：确认当前范围内是否存在可用语料')
+    const requestTerms = extractRequestTerms(args)
+    if (requestTerms.length) lines.push(`请求词：${requestTerms.join('、')}`)
+    const platforms = extractRequestPlatforms(args)
+    if (platforms.length) lines.push(`平台范围：${platforms.join('、')}`)
+    const entities = extractRequestEntities(args)
+    if (entities.length) lines.push(`关注主体：${entities.join('、')}`)
+    const timeRange = extractRequestTimeRange(args)
+    if (timeRange) lines.push(`时间窗：${timeRange}`)
+  } else if (normalizedTool === 'normalize_task') {
+    lines.push('本次目标：冻结专题、时间范围和执行模式')
+  } else if (normalizedTool === 'build_event_timeline') {
+    lines.push('本次目标：把已命中的证据整理成可回链时间线')
+  } else if (normalizedTool === 'extract_actor_positions') {
+    lines.push('本次目标：识别主体与立场关系')
+  } else if (normalizedTool === 'build_claim_actor_conflict') {
+    lines.push('本次目标：整理主体主张和冲突关系')
+  } else if (normalizedTool === 'build_mechanism_summary') {
+    lines.push('本次目标：归纳传播路径和放大机制')
+  } else if (normalizedTool === 'detect_risk_signals') {
+    lines.push('本次目标：识别当前轮次的风险信号')
+  } else if (normalizedTool === 'judge_decision_utility') {
+    lines.push('本次目标：判断当前结果能否进入写稿')
+  }
+
+  return lines
 }
 
 function formatReceiptCounts(counts) {
@@ -826,7 +990,7 @@ function buildArtifactObservability(taskState) {
     })
   return {
     items,
-    upcomingLine: items.some((item) => item.ready) ? '' : '后续将生成：Report IR → 受约束草稿 → 正式文稿'
+    upcomingLine: items.some((item) => item.ready) ? '' : '后续将生成：分析中枢 → 草稿素材 → 正式报告'
   }
 }
 
@@ -842,14 +1006,14 @@ function buildDecisionObservability(taskState, approvals) {
   const rawDecision = String(utility.decision || '').trim() || (taskState.status === 'completed' ? 'pass' : 'pending')
   const hasPendingApproval = approvals.some((item) => String(item?.status || '').trim() !== 'resolved')
   let finalReason = ''
-  if (hasPendingApproval) finalReason = summarizeApprovalReason(latestApproval) || '正式文稿触发语义边界审查，等待人工确认。'
-  else if (rawDecision === 'fallback_recompile' && fallbackTrace.length) finalReason = String(fallbackTrace[0]?.reason || '').trim() || '当前判断还不够完整，暂时不能进入正式文稿。'
+  if (hasPendingApproval) finalReason = summarizeApprovalReason(latestApproval) || '正式报告触发审核，等待人工确认。'
+  else if (rawDecision === 'fallback_recompile' && fallbackTrace.length) finalReason = String(fallbackTrace[0]?.reason || '').trim() || '当前判断还不够完整，暂时不能生成报告。'
   else if (missingDimensions.length) finalReason = `当前还缺少 ${missingDimensions.slice(0, 3).join('、')}。`
-  else if (rawDecision === 'pass') finalReason = taskState.status === 'completed' ? '当前结果已满足正式输出条件。' : '当前判断已满足进入下一步的条件。'
-  else finalReason = sanitizeRuntimeMessage(taskState.currentOperation || taskState.message) || '当前还没有决策说明。'
+  else if (rawDecision === 'pass') finalReason = taskState.status === 'completed' ? '当前结果已满足输出条件。' : '当前判断已满足进入下一步的条件。'
+  else finalReason = sanitizeRuntimeMessage(taskState.currentOperation || taskState.message) || '当前还没有状态说明。'
   let nextAction = String(utility.next_action || '').trim()
-  if (hasPendingApproval) nextAction = '等待人工处理后恢复正式写入。'
-  else if (!nextAction && rawDecision === 'pass') nextAction = taskState.status === 'completed' ? '可直接查看最终结果。' : '继续进入正式文稿编译。'
+  if (hasPendingApproval) nextAction = '等待人工处理后继续。'
+  else if (!nextAction && rawDecision === 'pass') nextAction = taskState.status === 'completed' ? '可直接查看最终结果。' : '继续生成正式报告。'
   else if (!nextAction) nextAction = '等待下一步调度。'
   return {
     utilityDecision: rawDecision,
@@ -858,9 +1022,9 @@ function buildDecisionObservability(taskState, approvals) {
     fallbackTrace,
     fallbackSummary: fallbackTrace.length
       ? fallbackTrace.map((item) => String(item?.reason || item?.suggested_pass || item?.dimension || '').trim()).filter(Boolean).slice(0, 2).join('；')
-      : '未触发回退重编译',
-    reviewReason: hasPendingApproval ? '已触发审批' : (latestApproval ? approvalDecisionLabel(latestApproval.decision) : '未触发审批'),
-    approvalDecision: latestApproval?.decision ? approvalDecisionLabel(latestApproval.decision) : '未发生人工裁决',
+      : '暂无调整记录',
+    reviewReason: hasPendingApproval ? '需审核' : (latestApproval ? approvalDecisionLabel(latestApproval.decision) : '未触发审核'),
+    approvalDecision: latestApproval?.decision ? approvalDecisionLabel(latestApproval.decision) : '暂未审核',
     finalReason,
     nextAction,
     hasPendingApproval
@@ -880,11 +1044,11 @@ function buildApprovalObservability(taskState, approvals) {
     ? (summarizeApprovalReason(latestApproval) || sanitizeRuntimeMessage(interruptEvent?.message) || '任务正在等待人工确认。')
     : (resumeEvent?.payload?.resume_from
         ? `已从 ${String(resumeEvent.payload.resume_from || '').trim()} 恢复执行。`
-        : (latestApproval ? `${approvalDecisionLabel(latestApproval.decision)}，后续会沿同一条主线继续推进。` : '未触发审批，任务会在必要时暂停等待确认。'))
+        : (latestApproval ? `${approvalDecisionLabel(latestApproval.decision)}，后续会继续推进。` : '必要时会暂停等待确认。'))
   return {
     compactStatus: hasPending
       ? '等待处理'
-      : (latestApproval ? approvalDecisionLabel(latestApproval.decision) : '未触发审批'),
+      : (latestApproval ? approvalDecisionLabel(latestApproval.decision) : '暂未触发'),
     reason,
     affectedLabel: String(latestApproval?.title || '').trim() || (hasPending ? '正式文稿' : ''),
     resumeLabel: resumeEvent?.payload?.resume_from ? String(resumeEvent.payload.resume_from || '').trim() : '',
@@ -1068,7 +1232,14 @@ export function buildDebugEvent(event = {}) {
 
   if (type === 'tool.called') {
     model.title = `正在${toolName}`
-    model.message = actor ? `${actor} 正在执行动作。` : '正在执行动作。'
+    model.message = actor ? `${actor} 已发起 ${toolName}。` : `已发起 ${toolName}。`
+    model.detailLines.push(...summarizeToolCallArgs(payload.tool_name, payload.args_preview))
+    if (Number.isFinite(Number(payload.tool_round_count))) {
+      const round = Number(payload.tool_round_count)
+      const limit = Number(payload.tool_round_limit || 0)
+      if (Number.isFinite(limit) && limit > 0) model.detailLines.push(`调用轮次：第 ${round} / ${limit} 轮`)
+      else model.detailLines.push(`调用轮次：第 ${round} 轮`)
+    }
     return model
   }
 

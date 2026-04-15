@@ -34,9 +34,9 @@ langchain:
   report:
     runtime:
       model:
-        provider: openai
+        provider: anthropic
         model: glm-5
-        base_url: https://coding.dashscope.aliyuncs.com/v1
+        base_url: https://coding.dashscope.aliyuncs.com/apps/anthropic
         temperature: 0.2
         max_tokens: 18000
         timeout: 420.0
@@ -53,7 +53,6 @@ langchain:
           enabled: true
           project: Opinion System
           endpoint: ''
-          api_key: ''
     skills:
       runtime: deepagents
       default: sona_feature_analysis
@@ -62,7 +61,4 @@ langchain:
         extra_dirs: []
 presets: []
 credentials:
-  openai_api_key: ''
-  openai_base_url: ''
-  qwen_api_key: ''
-  report_api_key: ''
+  openai_base_url: https://api.siliconflow.cn/v1

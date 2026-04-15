@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 V2_SCHEMA_VERSION = "2.2"
@@ -30,6 +30,9 @@ class CitationRecord(BaseModel):
     platform: str = Field(default="", description="平台")
     snippet: str = Field(default="", description="摘要片段")
     source_type: str = Field(default="document", description="来源类型")
+    author: str = Field(default="", description="发布者/作者")
+    sentiment_label: str = Field(default="", description="情感标签(正面/负面/中性)")
+    raw_content: str = Field(default="", description="完整原文(≤300字)")
 
 
 class EvidenceBlock(BaseModel):
@@ -420,6 +423,10 @@ class StructuredReport(BaseModel):
     figures: List["FigureBlock"] = Field(default_factory=list, description="图表语义真相")
     figure_artifacts: List["FigureArtifactRecord"] = Field(default_factory=list, description="图表 artifact 列表")
     placement_plan: "PlacementPlan" = Field(default_factory=lambda: PlacementPlan(entries=[]), description="图表位点规划")
+    event_analysis: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="事件分析结果（来自 event_analyst 子代理，含 platform_analysis/sentiment_summary/actor_distribution）",
+    )
 
 
 class StructuredReportSeed(StructuredReport):
@@ -621,6 +628,12 @@ class ReportIREvidenceEntry(BaseModel):
     url: str = Field(default="", description="来源链接")
     entities: List[str] = Field(default_factory=list, description="主体标签")
     confidence: str = Field(default="medium", description="证据强度")
+    # BettaFish 深度引证字段（向后兼容，均有默认值）
+    author: str = Field(default="", description="发布者")
+    sentiment_label: str = Field(default="", description="情感标签(正面/负面/中性)")
+    raw_quote: str = Field(default="", description="可引用金句(≤150字)")
+    emotion_signals: List[str] = Field(default_factory=list, description="情绪关键词")
+    engagement_views: int = Field(default=0, description="阅读量(若可获取)")
 
 
 class ReportIREvidenceLedger(BaseModel):
@@ -932,7 +945,7 @@ class UtilityFailure(BaseModel):
 
 
 class UtilityImprovementStep(BaseModel):
-    step_id: str = Field(..., description="改进步骤唯一键")
+    step_id: str = Field(default="", description="改进步骤唯一键")
     triggered_by: str = Field(default="", description="触发维度")
     recompiled_pass: str = Field(default="", description="回退 pass")
     before_score: float = Field(default=0.0, description="前置评分")
@@ -963,6 +976,38 @@ class UtilityAssessment(BaseModel):
     utility_confidence: float = Field(default=0.0, description="效用置信度")
     confidence: float = Field(default=0.0, description="决策可用性置信度")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _backfill_improvement_trace_step_ids(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        trace = data.get("improvement_trace")
+        if not isinstance(trace, list):
+            return data
+        normalized_trace: List[Any] = []
+        changed = False
+        for index, item in enumerate(trace, start=1):
+            if not isinstance(item, dict):
+                normalized_trace.append(item)
+                continue
+            step_id = str(item.get("step_id") or "").strip()
+            if step_id:
+                normalized_trace.append(item)
+                continue
+            changed = True
+            triggered_by = str(item.get("triggered_by") or "").strip()
+            recompiled_pass = str(item.get("recompiled_pass") or "").strip()
+            fallback_slug = "-".join(part for part in (triggered_by, recompiled_pass) if part) or "autofill"
+            normalized_trace.append(
+                {
+                    **item,
+                    "step_id": f"improve-{index}-{fallback_slug}",
+                }
+            )
+        if not changed:
+            return data
+        return {**data, "improvement_trace": normalized_trace}
+
 
 class ReportIRNarrativeViews(BaseModel):
     executive_summary: str = Field(default="", description="执行摘要")
@@ -974,6 +1019,66 @@ class ReportIRValidation(BaseModel):
     notes: List[ValidationNote] = Field(default_factory=list, description="校验记录")
     claim_coverage: Dict[str, int] = Field(default_factory=dict, description="断言覆盖统计")
     traceability_stats: Dict[str, int] = Field(default_factory=dict, description="可追溯统计")
+
+
+# ---------------------------------------------------------------------------
+# BettaFish 质量数据结构（深度引证用，均向后兼容）
+# ---------------------------------------------------------------------------
+
+class PlatformEmotionProfile(BaseModel):
+    """各平台情绪雷达数据"""
+    platform: str = Field(..., description="平台名称")
+    dominant_emotion: str = Field(default="", description="主导情绪关键词")
+    emotion_distribution: Dict[str, float] = Field(
+        default_factory=dict,
+        description="情绪分布 {'正面': 0.3, '负面': 0.5, '中性': 0.2}",
+    )
+    representative_quotes: List[str] = Field(
+        default_factory=list,
+        description="代表性评论/弹幕原文(每平台≤5条)",
+    )
+    discussion_style: str = Field(default="", description="讨论风格特征")
+    evidence_ids: List[str] = Field(default_factory=list, description="支撑证据ID")
+
+
+class EventFlashpoint(BaseModel):
+    """事件全景速览爆点"""
+    flashpoint_id: str = Field(..., description="爆点唯一键")
+    time_label: str = Field(default="", description="时间标签")
+    event_title: str = Field(default="", description="爆点事件标题")
+    peak_readership: str = Field(
+        default="",
+        description="传播量级(字符串，如'120万'，不可用时为空)",
+    )
+    core_emotion_keywords: List[str] = Field(
+        default_factory=list,
+        description="核心情绪关键词",
+    )
+    support_evidence_ids: List[str] = Field(default_factory=list, description="支撑证据")
+
+
+class GroupDemand(BaseModel):
+    """多元群体诉求清单条目"""
+    group_id: str = Field(..., description="群体唯一键")
+    group_name: str = Field(default="", description="群体名称")
+    high_freq_demands: List[str] = Field(default_factory=list, description="高频诉求列表")
+    golden_quotes: List[str] = Field(
+        default_factory=list,
+        description="金句原文(来自 evidence 的原始引用)",
+    )
+    evidence_ids: List[str] = Field(default_factory=list, description="支撑证据")
+
+
+class RiskTrafficLight(BaseModel):
+    """高风险三色灯"""
+    risk_id: str = Field(..., description="风险关联ID")
+    light_color: Literal["red", "yellow", "green"] = Field(
+        default="yellow", description="红/黄/绿灯"
+    )
+    flashpoint_prediction: str = Field(default="", description="爆点预测描述")
+    trigger_threshold: str = Field(default="", description="触发阈值条件")
+    preemptive_action: str = Field(default="", description="提前干预建议")
+    support_evidence_ids: List[str] = Field(default_factory=list, description="支撑证据")
 
 
 class ReportIR(BaseModel):
@@ -995,6 +1100,25 @@ class ReportIR(BaseModel):
     figures: List[FigureBlock] = Field(default_factory=list, description="图表语义真相")
     placement_plan: PlacementPlan = Field(default_factory=PlacementPlan, description="图表位点规划")
     validation: ReportIRValidation = Field(default_factory=ReportIRValidation)
+    # BettaFish 质量字段（向后兼容，均有默认值）
+    platform_emotion_profiles: List[PlatformEmotionProfile] = Field(
+        default_factory=list, description="各平台情绪雷达数据"
+    )
+    event_flashpoints: List[EventFlashpoint] = Field(
+        default_factory=list, description="事件全景速览爆点列表"
+    )
+    group_demands: List[GroupDemand] = Field(
+        default_factory=list, description="多元群体诉求清单"
+    )
+    risk_traffic_lights: List[RiskTrafficLight] = Field(
+        default_factory=list, description="高风险三色灯"
+    )
+    emotion_conduction_formula: str = Field(
+        default="", description="情绪传导公式(如'A → B → C → 标签化')"
+    )
+    netizen_quotes: List[str] = Field(
+        default_factory=list, description="精选网民金句(跨章节可复用)"
+    )
 
 
 class CompilerSceneProfile(BaseModel):
@@ -1003,6 +1127,8 @@ class CompilerSceneProfile(BaseModel):
     focus: str = Field(default="timeline")
     guardrail_mode: str = Field(default="strict")
     render_mode: str = Field(default="claim_anchored")
+    template_sections: List[Dict[str, str]] = Field(default_factory=list, description="模板章节列表")
+    template_markdown: str = Field(default="", description="完整模板内容")
 
 
 class CompilerStyleProfile(BaseModel):
@@ -1298,7 +1424,7 @@ class GraphApprovalRecord(BaseModel):
     title: str = Field(default="")
     summary: str = Field(default="")
     status: Literal["pending", "resolved"] = Field(default="pending")
-    allowed_decisions: List[str] = Field(default_factory=lambda: ["approve", "edit", "reject"])
+    allowed_decisions: List[str] = Field(default_factory=lambda: ["approve", "reject"])
     action: Dict[str, Any] = Field(default_factory=dict)
     requested_at: str = Field(default_factory=_utc_now)
 
@@ -1490,40 +1616,243 @@ class TaskContract(BaseModel):
     thread_id: str = Field(default="", description="线程唯一键")
 
 
+# ========== Semantic Constraint Types for Task Derivation ==========
+
+class SemanticEntity(BaseModel):
+    """领域实体 - 必须是名词短语，非句子片段"""
+    name: str = Field(
+        ...,
+        min_length=2,
+        max_length=20,
+        description="实体名称，必须是简短的名词短语（如政策、组织、事件）",
+        examples=["控烟政策", "电子烟监管", "青少年控烟", "无烟环境"]
+    )
+    category: Literal["policy", "organization", "event", "concept", "location", "person", "other"] = Field(
+        default="other",
+        description="实体类别"
+    )
+
+
+class SemanticKeyword(BaseModel):
+    """检索关键词 - 必须是单个词汇，不含标点和空格"""
+    term: str = Field(
+        ...,
+        min_length=1,
+        max_length=10,
+        description="检索关键词，必须是单个词汇或短语，不含标点和空格",
+        examples=["控烟", "禁烟", "二手烟", "戒烟"]
+    )
+    relevance: Literal["primary", "secondary", "contextual"] = Field(
+        default="primary",
+        description="关键词相关性级别"
+    )
+
+
+class TopicLabel(BaseModel):
+    """专题标签 - 简短展示名称"""
+    label: str = Field(
+        ...,
+        min_length=2,
+        max_length=30,
+        description="专题简短标签，用于展示和引用，不超过30字符",
+        examples=["2025控烟舆情", "食品安全事件", "教育政策分析"]
+    )
+    full_description: str = Field(
+        default="",
+        max_length=200,
+        description="完整描述，包含分析目标和维度说明"
+    )
+
+
 class TaskDerivation(BaseModel):
     derivation_id: str = Field(..., description="语义派生对象唯一键")
-    topic: str = Field(default="", description="任务主题")
-    topic_aliases: List[str] = Field(default_factory=list, description="语义别名")
-    entities: List[str] = Field(default_factory=list, description="主体或实体列表")
-    keywords: List[str] = Field(default_factory=list, description="关键词列表")
-    platform_scope: List[str] = Field(default_factory=list, description="平台范围")
-    report_type: str = Field(default="analysis", description="报告类型")
-    mandatory_sections: List[str] = Field(default_factory=list, description="必备章节")
-    risk_policy: List[str] = Field(default_factory=list, description="风险表述策略")
-    analysis_question_set: List[str] = Field(default_factory=list, description="固定分析问题集")
-    coverage_expectation: List[str] = Field(default_factory=list, description="理论上应覆盖的数据维度")
-    inference_policy: List[str] = Field(default_factory=list, description="推断与证据约束")
+    topic: str = Field(
+        default="",
+        max_length=200,
+        description="任务主题完整描述",
+        examples=["2025控烟舆情分析：监测和分析2025年度控烟相关舆情动态"]
+    )
+    topic_identifier: str = Field(
+        default="",
+        min_length=4,
+        max_length=40,
+        description="专题唯一标识符，格式为时间戳+主题缩写",
+        examples=["20260304-091855-2025控烟舆情"]
+    )
+    topic_label: TopicLabel = Field(
+        default_factory=lambda: TopicLabel(label="待确定"),
+        description="专题展示标签（结构化）"
+    )
+    topic_aliases: List[str] = Field(
+        default_factory=list,
+        max_length=5,
+        description="语义别名列表，不超过5个",
+        examples=[["控烟舆情", "烟草控制分析"]]
+    )
+    entities: List[SemanticEntity] = Field(
+        default_factory=list,
+        max_length=20,
+        description="领域实体列表（结构化），每个实体必须是名词短语而非句子片段",
+        json_schema_extra={
+            "constraint_note": "禁止将句子片段作为实体，如'监测和分析2025年度控烟舆情'是错误示例",
+            "expected_format": "简短名词短语，如'控烟政策'、'电子烟监管'"
+        }
+    )
+    keywords: List[SemanticKeyword] = Field(
+        default_factory=list,
+        max_length=30,
+        description="检索关键词列表（结构化），每个关键词必须是单个词汇",
+        json_schema_extra={
+            "constraint_note": "禁止句子片段作为关键词，必须是可用于检索的单一词汇",
+            "expected_format": "如'控烟'、'禁烟'、'二手烟'"
+        }
+    )
+    platform_scope: List[str] = Field(
+        default_factory=list,
+        description="平台范围",
+        examples=[["微博", "自媒体号", "视频", "论坛"]]
+    )
+    report_type: Literal["propagation", "analysis", "risk", "comprehensive"] = Field(
+        default="analysis",
+        description="报告类型：propagation(传播分析)、analysis(综合分析)、risk(风险评估)、comprehensive(全维度)"
+    )
+    mandatory_sections: List[str] = Field(
+        default_factory=list,
+        description="必备章节列表",
+        examples=[["overview", "timeline", "actors", "propagation", "risk"]]
+    )
+    risk_policy: List[str] = Field(
+        default_factory=list,
+        description="风险表述策略",
+        examples=[["evidence_first", "prefer_counterevidence", "keep_uncertainty_visible"]]
+    )
+    analysis_question_set: List[str] = Field(
+        default_factory=list,
+        description="固定分析问题集",
+        examples=[["传播演化", "主体立场", "争议焦点", "风险信号"]]
+    )
+    coverage_expectation: List[str] = Field(
+        default_factory=list,
+        description="理论上应覆盖的数据维度",
+        examples=[["raw_posts", "media_reports", "platform_distribution"]]
+    )
+    inference_policy: List[str] = Field(
+        default_factory=list,
+        description="推断与证据约束",
+        examples=[["risk_trend_can_be_weak_inference", "actor_shift_requires_multi_period_evidence"]]
+    )
     attempted_overrides: Dict[str, str] = Field(default_factory=dict, description="agent 试图写入但无权生效的执行字段")
     contract_overrides_applied: List[str] = Field(default_factory=list, description="被运行时忽略或覆盖的执行字段")
 
+    @model_validator(mode="after")
+    def validate_semantic_quality(self) -> "TaskDerivation":
+        """校验语义质量：确保 entities 和 keywords 不是句子片段"""
+        # 检查 entities
+        for entity in self.entities:
+            name = entity.name
+            # 禁止包含动词短语特征
+            if any(marker in name for marker in ["监测", "分析", "包括", "维度", "动态", "解读"]):
+                if len(name) > 15:  # 允许复合名词，但禁止句子片段
+                    raise ValueError(
+                        f"entity '{name}' 看起来像句子片段而非领域实体。"
+                        f"实体应该是简短名词短语，如'控烟政策'、'电子烟监管'"
+                    )
+        # 检查 keywords
+        for kw in self.keywords:
+            term = kw.term
+            if len(term) > 10:
+                raise ValueError(
+                    f"keyword '{term}' 过长。关键词应该是单一词汇，如'控烟'、'禁烟'"
+                )
+        return self
+
 
 class NormalizedTask(BaseModel):
+    """规范化任务 - 最终执行定义"""
     task_id: str = Field(..., description="任务唯一键")
-    topic: str = Field(default="", description="任务主题")
-    topic_identifier: str = Field(default="", description="专题唯一标识")
+    contract_id: str = Field(default="", description="合约唯一键")
+    topic: str = Field(
+        default="",
+        max_length=200,
+        description="任务主题完整描述",
+        examples=["2025控烟舆情分析：监测和分析2025年度控烟相关舆情动态"]
+    )
+    topic_identifier: str = Field(
+        default="",
+        min_length=4,
+        max_length=40,
+        description="专题唯一标识符",
+        examples=["20260304-091855-2025控烟舆情"]
+    )
+    topic_label: str = Field(
+        default="",
+        max_length=30,
+        description="专题简短展示标签",
+        examples=["2025控烟舆情"]
+    )
+    topic_aliases: List[str] = Field(
+        default_factory=list,
+        max_length=5,
+        description="语义别名列表"
+    )
     task_contract: Dict[str, str] = Field(default_factory=dict, description="运行时冻结的任务边界")
-    entities: List[str] = Field(default_factory=list, description="主体或实体列表")
-    keywords: List[str] = Field(default_factory=list, description="关键词列表")
+    entities: List[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description="领域实体列表（简短名词短语）",
+        examples=["控烟政策", "电子烟监管", "青少年控烟"],
+        json_schema_extra={
+            "constraint_note": "必须是简短名词短语，禁止句子片段如'监测和分析2025年度控烟舆情'"
+        }
+    )
+    keywords: List[str] = Field(
+        default_factory=list,
+        max_length=30,
+        description="检索关键词列表（单一词汇）",
+        examples=["控烟", "禁烟", "二手烟", "戒烟"],
+        json_schema_extra={
+            "constraint_note": "必须是单一词汇，禁止句子片段"
+        }
+    )
     time_range: ScopeTimeRange = Field(default_factory=ScopeTimeRange, description="时间范围")
-    platform_scope: List[str] = Field(default_factory=list, description="平台范围")
-    report_type: str = Field(default="analysis", description="报告类型")
-    mandatory_sections: List[str] = Field(default_factory=list, description="必备章节")
-    risk_policy: List[str] = Field(default_factory=list, description="风险表述策略")
-    mode: str = Field(default="fast", description="运行模式")
-    analysis_question_set: List[str] = Field(default_factory=list, description="固定分析问题集")
-    coverage_expectation: List[str] = Field(default_factory=list, description="理论上应覆盖的数据维度")
-    inference_policy: List[str] = Field(default_factory=list, description="推断与证据约束")
+    platform_scope: List[str] = Field(
+        default_factory=list,
+        description="平台范围",
+        examples=[["微博", "自媒体号", "视频", "论坛"]]
+    )
+    report_type: Literal["propagation", "analysis", "risk", "comprehensive"] = Field(
+        default="analysis",
+        description="报告类型"
+    )
+    mandatory_sections: List[str] = Field(
+        default_factory=list,
+        description="必备章节列表",
+        examples=[["overview", "timeline", "actors", "propagation", "risk"]]
+    )
+    risk_policy: List[str] = Field(
+        default_factory=list,
+        description="风险表述策略",
+        examples=[["evidence_first", "prefer_counterevidence", "keep_uncertainty_visible"]]
+    )
+    mode: Literal["fast", "research"] = Field(default="fast", description="运行模式")
+    analysis_question_set: List[str] = Field(
+        default_factory=list,
+        description="固定分析问题集",
+        examples=[["传播演化", "主体立场", "争议焦点", "风险信号"]]
+    )
+    coverage_expectation: List[str] = Field(
+        default_factory=list,
+        description="理论上应覆盖的数据维度",
+        examples=[["raw_posts", "media_reports", "platform_distribution"]]
+    )
+    inference_policy: List[str] = Field(
+        default_factory=list,
+        description="推断与证据约束",
+        examples=[["risk_trend_can_be_weak_inference", "actor_shift_requires_multi_period_evidence"]]
+    )
     contract_overrides_applied: List[str] = Field(default_factory=list, description="由运行时合同强制纠正的字段")
+    schema_version: str = Field(default=V2_SCHEMA_VERSION, description="schema版本")
+    generated_at: str = Field(default_factory=_utc_now, description="生成时间")
 
 
 class EvidenceCard(BaseModel):
@@ -1531,11 +1860,15 @@ class EvidenceCard(BaseModel):
     source_id: str = Field(default="", description="来源唯一键")
     platform: str = Field(default="", description="平台")
     published_at: str = Field(default="", description="发布时间")
+    author: str = Field(default="", description="发布者名称")
     author_type: str = Field(default="", description="作者类型")
     entity_tags: List[str] = Field(default_factory=list, description="主体标签")
     topic_cluster: str = Field(default="", description="主题簇")
     title: str = Field(default="", description="标题")
     snippet: str = Field(default="", description="片段摘要")
+    content: str = Field(default="", description="原文完整内容（用于引证）")
+    sentiment_label: str = Field(default="", description="情感标签")
+    keywords: List[str] = Field(default_factory=list, description="关键词列表")
     engagement: Dict[str, Any] = Field(default_factory=dict, description="互动指标")
     relevance: float = Field(default=0.0, description="相关度")
     confidence: float = Field(default=0.0, description="证据置信度")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import uuid
 from datetime import datetime
@@ -203,7 +204,7 @@ def _build_semantic_review_payload(
     suggested_actions = [
         "回退到 DraftBundle 降低表述强度。",
         "保留 trace 绑定，不要新增主体、风险或建议。",
-        "如需继续写入，请在审批中确认或编辑正式文稿。",
+        "如需继续写入，请在审批中确认或提交人工批注，不直接改写正式文稿。",
     ]
     return SemanticInterruptPayload(
         thread_id=str(thread_id or "").strip(),
@@ -540,6 +541,15 @@ def _matches_current_run(payload: Dict[str, Any], *, runtime_task_id: str, threa
     return payload_task_id == runtime_task_id and payload_thread_id == thread_id
 
 
+def _matches_resume_source(payload: Dict[str, Any], *, source_task_id: str, thread_id: str) -> bool:
+    metadata = _payload_meta(payload)
+    if not metadata:
+        return False
+    payload_task_id = str(metadata.get("runtime_task_id") or metadata.get("task_id") or "").strip()
+    payload_thread_id = str(metadata.get("thread_id") or "").strip()
+    return payload_task_id == source_task_id and payload_thread_id == thread_id
+
+
 def _required_exploration_artifacts(mode: str) -> List[str]:
     return list(RESEARCH_EXPLORATION_ARTIFACTS if str(mode or "").strip().lower() == "research" else FAST_EXPLORATION_ARTIFACTS)
 
@@ -696,6 +706,14 @@ def _normalize_citation_ids(value: Any) -> List[str]:
 
 
 def _normalize_object_list(value: Any) -> List[Dict[str, Any]]:
+    if isinstance(value, dict):
+        for key in ("result", "items", "nodes", "records", "rows", "entries", "list"):
+            nested = value.get(key)
+            if isinstance(nested, list):
+                value = nested
+                break
+        else:
+            value = [value]
     output: List[Dict[str, Any]] = []
     for item in _as_list(value):
         if isinstance(item, dict):
@@ -713,12 +731,41 @@ def _unwrap_structured_payload(raw_payload: Any) -> Dict[str, Any]:
     return raw_payload
 
 
+def _runtime_thread_id(*, task_id: str, role: str) -> str:
+    safe_task = str(task_id or "").strip() or f"rp-runtime-{uuid.uuid4().hex[:8]}"
+    safe_role = str(role or "").strip() or "runtime"
+    return f"{safe_task}:{safe_role}"
+
+
 def _normalize_structured_report_payload(raw_payload: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(_unwrap_structured_payload(raw_payload) or {})
     task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
-    conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
-    if not conclusion and isinstance(payload.get("summary"), dict):
+    conclusion = dict(payload.get("conclusion") or {}) if isinstance(payload.get("conclusion"), dict) else {}
+    has_conclusion_content = any(
+        [
+            str(conclusion.get("executive_summary") or "").strip(),
+            str(conclusion.get("summary") or "").strip(),
+            str(conclusion.get("overview") or "").strip(),
+            bool(_as_list(conclusion.get("key_findings"))),
+            bool(_as_list(conclusion.get("key_risks"))),
+        ]
+    )
+    if not has_conclusion_content and isinstance(payload.get("summary"), dict):
         conclusion = dict(payload.get("summary") or {})
+        has_conclusion_content = True
+    if not has_conclusion_content:
+        summary_text = ""
+        for key in ("conclusion", "summary", "overview", "executive_summary"):
+            raw_summary = payload.get(key)
+            if isinstance(raw_summary, str) and raw_summary.strip():
+                summary_text = raw_summary.strip()
+                break
+        if summary_text:
+            conclusion = {"executive_summary": summary_text}
+
+    timeline_source = payload.get("timeline")
+    if timeline_source in (None, "", []):
+        timeline_source = payload.get("timeline_nodes")
 
     normalized: Dict[str, Any] = {
         "task": {
@@ -747,14 +794,26 @@ def _normalize_structured_report_payload(raw_payload: Dict[str, Any]) -> Dict[st
         "suggested_actions": [],
         "citations": [],
         "validation_notes": [],
+        "agenda_frame_map": payload.get("agenda_frame_map") if isinstance(payload.get("agenda_frame_map"), dict) else None,
+        "conflict_map": payload.get("conflict_map") if isinstance(payload.get("conflict_map"), dict) else None,
+        "mechanism_summary": payload.get("mechanism_summary") if isinstance(payload.get("mechanism_summary"), dict) else None,
+        "utility_assessment": payload.get("utility_assessment") if isinstance(payload.get("utility_assessment"), dict) else None,
+        "metric_bundle": payload.get("metric_bundle") if isinstance(payload.get("metric_bundle"), dict) else None,
+        "report_data": payload.get("report_data") if isinstance(payload.get("report_data"), dict) else None,
+        "report_document": payload.get("report_document") if isinstance(payload.get("report_document"), dict) else {},
+        "report_ir": payload.get("report_ir") if isinstance(payload.get("report_ir"), dict) else None,
+        "artifact_manifest": payload.get("artifact_manifest") if isinstance(payload.get("artifact_manifest"), dict) else None,
         "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
         "basic_analysis_snapshot": payload.get("basic_analysis_snapshot") if isinstance(payload.get("basic_analysis_snapshot"), dict) else {},
         "basic_analysis_insight": payload.get("basic_analysis_insight") if isinstance(payload.get("basic_analysis_insight"), dict) else {},
         "bertopic_snapshot": payload.get("bertopic_snapshot") if isinstance(payload.get("bertopic_snapshot"), dict) else {},
         "bertopic_insight": payload.get("bertopic_insight") if isinstance(payload.get("bertopic_insight"), dict) else {},
+        "figures": _normalize_object_list(payload.get("figures")),
+        "figure_artifacts": _normalize_object_list(payload.get("figure_artifacts")),
+        "placement_plan": payload.get("placement_plan") if isinstance(payload.get("placement_plan"), dict) else {"entries": []},
     }
 
-    for index, item in enumerate(_normalize_object_list(payload.get("timeline"))):
+    for index, item in enumerate(_normalize_object_list(timeline_source)):
         normalized["timeline"].append(
             {
                 "event_id": str(_pick_first(item, "event_id", "id", default=f"event-{index + 1}")).strip() or f"event-{index + 1}",
@@ -1105,6 +1164,48 @@ def _summarize_validation_error(exc: Exception) -> str:
     return text or exc.__class__.__name__
 
 
+def _repair_payload_from_validation_error(
+    payload: Dict[str, Any],
+    fallback_payload: Dict[str, Any],
+    exc: Exception,
+) -> Tuple[Dict[str, Any], List[str]]:
+    if not isinstance(exc, ValidationError) or not isinstance(payload, dict) or not isinstance(fallback_payload, dict):
+        return payload, []
+    repaired = dict(payload)
+    repaired_keys: List[str] = []
+    seen: set[str] = set()
+    optional_block_keys = {
+        "agenda_frame_map",
+        "conflict_map",
+        "mechanism_summary",
+        "utility_assessment",
+        "report_data",
+        "report_ir",
+        "artifact_manifest",
+        "basic_analysis_snapshot",
+        "basic_analysis_insight",
+        "bertopic_snapshot",
+        "bertopic_insight",
+        "metric_bundle",
+    }
+    for error in exc.errors():
+        loc = error.get("loc") or []
+        if not loc:
+            continue
+        top_key = str(loc[0] or "").strip()
+        if not top_key or top_key in seen:
+            continue
+        seen.add(top_key)
+        if top_key in fallback_payload:
+            repaired[top_key] = fallback_payload[top_key]
+            repaired_keys.append(top_key)
+            continue
+        if top_key in optional_block_keys and top_key in repaired:
+            repaired[top_key] = None
+            repaired_keys.append(top_key)
+    return repaired, repaired_keys
+
+
 def _upsert_runtime_json_file(files: Optional[Dict[str, Dict[str, Any]]], path: str, payload: Dict[str, Any]) -> None:
     if not isinstance(files, dict) or not path:
         return
@@ -1335,7 +1436,10 @@ def _normalized_task_contract_violation(payload: Dict[str, Any], tracker: Option
             requested[field] = str(detail.get("actual") or "").strip()
         payload["proposal_snapshot"] = {
             **proposal_snapshot,
+            # requested_execution_fields 仅用于审计追踪，记录 AI 提议值（可能已被纠正）
+            "_audit_note": "requested_execution_fields 仅用于审计追踪，实际执行请使用 effective_contract",
             "requested_execution_fields": requested,
+            # effective_contract 是权威契约值，所有下游执行必须使用此契约
             "effective_contract": {
                 "contract_id": str((payload.get("task_contract") or {}).get("contract_id") or f"{contract['topic_identifier']}:{contract['start']}:{contract['end']}").strip(),
                 "topic_identifier": contract["topic_identifier"],
@@ -2092,7 +2196,6 @@ def _state_file_diagnostics(files: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         "/workspace/state/mechanism_summary.json",
         "/workspace/state/risk_signals.json",
         "/workspace/state/utility_assessment.json",
-        "/workspace/state/claim_checks.json",
         "/workspace/base_context.json",
     )
     output: Dict[str, Dict[str, Any]] = {}
@@ -2210,7 +2313,6 @@ def _synthesize_structured_report_from_files(
         "/workspace/state/mechanism_summary.json",
         "/workspace/state/risk_signals.json",
         "/workspace/state/utility_assessment.json",
-        "/workspace/state/claim_checks.json",
         "/workspace/state/discourse_conflict_map.json",
         "/workspace/state/section_packets/overview.json",
         "/workspace/state/section_packets/timeline.json",
@@ -2229,6 +2331,7 @@ def _synthesize_structured_report_from_files(
                     "content": (
                         "你负责生成结构化舆情报告 JSON。"
                         "输出必须是单个 JSON 对象，字段必须匹配 StructuredReport。"
+                        "conclusion 必须是对象；timeline 必须是数组，不能返回 {nodes:[...]} 之外的包裹结构。"
                         "不需要节省 token，优先一次性补齐完整字段，减少反复试探。"
                     ),
                 },
@@ -2314,6 +2417,7 @@ def _run_deep_report_exploration_task(
     display_name = str(topic_label or topic_identifier).strip() or topic_identifier
     active_thread_id = str(thread_id or _default_thread_id(topic_identifier, start_text, end_text)).strip()
     runtime_task_id = str(task_id or f"rp-runtime-{uuid.uuid4().hex[:8]}").strip()
+    coordinator_runtime_thread_id = _runtime_thread_id(task_id=runtime_task_id, role="coordinator")
     cache_dir = ensure_cache_dir(topic_identifier, start_text, end_text)
     cache_path = cache_dir / REPORT_CACHE_FILENAME
     full_cache_path = cache_dir / AI_FULL_REPORT_CACHE_FILENAME
@@ -2332,8 +2436,20 @@ def _run_deep_report_exploration_task(
     if llm is None:
         raise ValueError("未找到可用的 LangChain 模型配置")
 
-    def _persist_structured_report(payload: dict[str, Any], *, source: str) -> Dict[str, Any]:
-        report_data = dict(payload or {})
+    def _materialize_structured_report(payload: dict[str, Any], *, source: str, persist_cache: bool = True) -> Dict[str, Any]:
+        report_data = _finalize_structured_payload(
+            _merge_structured_payload(
+                _build_structured_seed_payload(
+                    topic_identifier=topic_identifier,
+                    topic_label=display_name,
+                    start_text=start_text,
+                    end_text=end_text,
+                    mode=mode,
+                    thread_id=active_thread_id,
+                ),
+                dict(payload or {}),
+            )
+        )
         task_payload = report_data.get("task") if isinstance(report_data.get("task"), dict) else {}
         report_data["task"] = {
             **task_payload,
@@ -2344,8 +2460,7 @@ def _run_deep_report_exploration_task(
             "mode": mode,
             "thread_id": active_thread_id,
         }
-        validated = StructuredReport.model_validate(report_data)
-        output = validated.model_dump()
+        output = dict(report_data)
         output["metadata"] = dict(output.get("metadata") or {})
         output["metadata"].update(
             {
@@ -2371,7 +2486,8 @@ def _run_deep_report_exploration_task(
             full_cache_exists=full_cache_path.exists(),
             runtime_path=str(runtime_artifact_path),
         )
-        _write_json(cache_path, output)
+        if persist_cache:
+            _write_json(cache_path, output)
         _upsert_runtime_json_file(runtime_files, "/workspace/state/structured_report.json", output)
         _emit(
             event_callback,
@@ -2379,11 +2495,88 @@ def _run_deep_report_exploration_task(
                 "type": "artifact.updated",
                 "phase": "write",
                 "title": "结构化结果已保存",
-                "message": f"结构化结果已写入当前任务缓存（来源：{source}）。",
-                "payload": {"report_cache_path": str(cache_path), "runtime_task_id": runtime_task_id},
+                "message": (
+                    f"结构化结果已写入当前任务缓存（来源：{source}）。"
+                    if persist_cache
+                    else f"结构化结果已生成并注入当前运行态（来源：{source}）。"
+                ),
+                "payload": {
+                    "report_cache_path": str(cache_path),
+                    "runtime_task_id": runtime_task_id,
+                    "persist_cache": persist_cache,
+                },
             },
         )
         return output
+
+    def _persist_structured_report(payload: dict[str, Any], *, source: str) -> Dict[str, Any]:
+        return _materialize_structured_report(payload, source=source, persist_cache=True)
+
+    def _force_compile_ready_structured_payload(
+        *,
+        files: Dict[str, Dict[str, Any]],
+        preferred_payload: Optional[Dict[str, Any]] = None,
+        source: str,
+    ) -> Dict[str, Any]:
+        seed_payload = _build_structured_seed_payload(
+            topic_identifier=topic_identifier,
+            topic_label=display_name,
+            start_text=start_text,
+            end_text=end_text,
+            mode=mode,
+            thread_id=active_thread_id,
+        )
+        synthesized_payload: Dict[str, Any] = {}
+        try:
+            synthesized = _synthesize_structured_report_from_files(
+                files=files,
+                topic_identifier=topic_identifier,
+                topic_label=display_name,
+                start_text=start_text,
+                end_text=end_text,
+                mode=mode,
+                thread_id=active_thread_id,
+            )
+            synthesized_payload = synthesized if isinstance(synthesized, dict) else {}
+        except Exception:
+            synthesized_payload = {}
+
+        fallback_payload = _finalize_structured_payload(
+            _merge_structured_payload(seed_payload, synthesized_payload)
+        )
+        candidates: List[Tuple[str, Dict[str, Any]]] = []
+        if isinstance(preferred_payload, dict) and preferred_payload:
+            candidates.append(
+                (
+                    source,
+                    _finalize_structured_payload(
+                        _merge_structured_payload(fallback_payload, preferred_payload)
+                    ),
+                )
+            )
+        if synthesized_payload:
+            candidates.append((f"{source}_synthesized", fallback_payload))
+        candidates.append((f"{source}_seed", _finalize_structured_payload(seed_payload)))
+
+        for candidate_source, candidate_payload in candidates:
+            working_payload = candidate_payload
+            for _ in range(3):
+                try:
+                    return _materialize_structured_report(
+                        working_payload,
+                        source=candidate_source,
+                        persist_cache=False,
+                    )
+                except Exception as exc:
+                    repaired_payload, repaired_keys = _repair_payload_from_validation_error(
+                        working_payload,
+                        fallback_payload,
+                        exc,
+                    )
+                    if not repaired_keys:
+                        break
+                    working_payload = _finalize_structured_payload(repaired_payload)
+        return {}
 
     def _load_current_structured_payload() -> Dict[str, Any]:
         payload = _load_json(cache_path)
@@ -2396,7 +2589,7 @@ def _run_deep_report_exploration_task(
     @tool
     def save_structured_report(payload: Optional[Dict[str, Any]] = None, payload_json: str = "") -> str:
         """验证并写入结构化报告对象。优先直接传 payload 对象；payload_json 仅兼容旧调用。"""
-        raw_payload = payload if isinstance(payload, dict) else _parse_json_object(payload_json)
+        raw_payload = payload if isinstance(payload, dict) else _parse_json_object(payload) or _parse_json_object(payload_json)
         if not raw_payload:
             raise ValueError("结构化结果不是有效 JSON 对象。优先直接传 payload 对象，不要把整个 JSON 再包成字符串。")
         seed_payload = _build_structured_seed_payload(
@@ -2427,13 +2620,32 @@ def _run_deep_report_exploration_task(
                     mode=mode,
                     thread_id=active_thread_id,
                 )
-                repaired_payload = _finalize_structured_payload(
-                    _merge_structured_payload(
-                        _merge_structured_payload(seed_payload, synthesized_payload),
-                        raw_payload,
-                    )
+                synthesized_base_payload = _finalize_structured_payload(
+                    _merge_structured_payload(seed_payload, synthesized_payload)
                 )
-                _persist_structured_report(repaired_payload, source="tool_autofix")
+                repaired_payload = _finalize_structured_payload(
+                    _merge_structured_payload(synthesized_base_payload, raw_payload)
+                )
+                repaired_keys: List[str] = []
+                last_repair_error: Exception | None = None
+                for _ in range(3):
+                    try:
+                        _persist_structured_report(repaired_payload, source="tool_autofix")
+                        break
+                    except Exception as repair_exc:
+                        last_repair_error = repair_exc
+                        repaired_candidate, candidate_keys = _repair_payload_from_validation_error(
+                            repaired_payload,
+                            synthesized_base_payload,
+                            repair_exc,
+                        )
+                        new_keys = [item for item in candidate_keys if item not in repaired_keys]
+                        if not new_keys:
+                            raise
+                        repaired_keys.extend(new_keys)
+                        repaired_payload = _finalize_structured_payload(repaired_candidate)
+                else:
+                    raise last_repair_error or exc
                 _emit(
                     event_callback,
                     {
@@ -2441,8 +2653,12 @@ def _run_deep_report_exploration_task(
                         "phase": "interpret",
                         "agent": "report_coordinator",
                         "title": "结构化结果已自动补齐",
-                        "message": "这次提交不够完整，系统已结合中间结果补齐后保存。",
-                        "payload": {"agent_name": "report_coordinator"},
+                        "message": (
+                            "这次提交不够完整，系统已结合中间结果补齐后保存。"
+                            if not repaired_keys
+                            else f"这次提交有结构错误，系统已自动修正 {', '.join(repaired_keys)} 后保存。"
+                        ),
+                        "payload": {"agent_name": "report_coordinator", "repaired_keys": repaired_keys},
                     },
                 )
             except Exception:
@@ -2653,14 +2869,14 @@ def _run_deep_report_exploration_task(
         return agent.invoke(
             agent_input,
             config=build_report_runnable_config(
-                thread_id=active_thread_id,
+                thread_id=coordinator_runtime_thread_id,
                 purpose="deep-report-coordinator",
                 task_id=runtime_task_id,
                 tags=["report_coordinator", mode],
                 metadata={
                     "runtime_diagnostics": build_runtime_diagnostics(
                         purpose="deep-report-coordinator",
-                        thread_id=active_thread_id,
+                        thread_id=coordinator_runtime_thread_id,
                         task_id=runtime_task_id,
                         locator_hint=coordinator_runtime_profile.checkpoint_locator,
                     )
@@ -2901,6 +3117,40 @@ def _run_deep_report_exploration_task(
             thread_id=active_thread_id,
         )
 
+    if not structured_payload:
+        emergency_structured = _force_compile_ready_structured_payload(
+            files=latest_runtime_files,
+            preferred_payload=_extract_structured_response(result) if "result" in locals() else {},
+            source="emergency_compile_ready",
+        )
+        if emergency_structured:
+            last_diagnostic = _extend_closure_diagnostic(
+                last_diagnostic,
+                files=latest_runtime_files,
+                closure_stage="emergency_compile_ready",
+                fallback_attempted=True,
+            )
+            _emit(
+                event_callback,
+                {
+                    "type": "agent.memo",
+                    "phase": "write",
+                    "agent": "report_coordinator",
+                    "title": "启用强制续跑兜底",
+                    "message": "结构化结果未能正常落盘，系统已生成可编译兜底结构并继续后续流程。",
+                    "payload": last_diagnostic,
+                },
+            )
+            return ExplorationTaskResult(
+                status="completed",
+                message="结构化结果已降级补齐，后续将继续进入编译阶段。",
+                structured_payload=emergency_structured,
+                full_payload=full_payload or {},
+                runtime_files=latest_runtime_files,
+                thread_id=active_thread_id,
+                diagnostic=last_diagnostic,
+            )
+
     _emit(
         event_callback,
         {
@@ -2938,6 +3188,9 @@ def run_or_resume_deep_report_task(
     thread_id: Optional[str] = None,
     task_id: str = "",
     resume_payload: Optional[Any] = None,
+    failure_resume_context: Optional[Dict[str, Any]] = None,
+    checkpoint_resume: bool = False,
+    skip_validation: bool = False,
     event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     start_text = str(start or "").strip()
@@ -2953,6 +3206,7 @@ def run_or_resume_deep_report_task(
     compile_thread_id = f"{runtime_task_id}:compile"
     cache_dir = ensure_cache_dir(topic_identifier, start_text, end_text)
     structured_cache_path = cache_dir / REPORT_CACHE_FILENAME
+    failure_resume = failure_resume_context if isinstance(failure_resume_context, dict) else {}
 
     def _attach_exploration_bundle(
         structured_payload: Dict[str, Any],
@@ -3006,6 +3260,21 @@ def run_or_resume_deep_report_task(
         payload = _load_json(structured_cache_path)
         return payload if _matches_current_run(payload, runtime_task_id=runtime_task_id, thread_id=active_thread_id) else {}
 
+    def _load_failure_resume_structured_payload() -> Dict[str, Any]:
+        source_task_id = str(failure_resume.get("source_task_id") or "").strip()
+        source_thread_id = str(failure_resume.get("source_thread_id") or active_thread_id).strip()
+        source_cache_path = str(failure_resume.get("structured_cache_path") or "").strip()
+        if not source_task_id or not source_cache_path:
+            return {}
+        if source_thread_id != active_thread_id:
+            return {}
+        payload = _load_json(Path(source_cache_path))
+        if not isinstance(payload, dict) or not isinstance(payload.get("report_ir"), dict):
+            return {}
+        if not _matches_resume_source(payload, source_task_id=source_task_id, thread_id=source_thread_id):
+            return {}
+        return payload
+
     def _run_exploration(request: Dict[str, Any]) -> Dict[str, Any]:
         # Derive config params from the explicit request dict rather than closure vars.
         # `resume_payload` and `event_callback` remain closure-bound: they are workflow
@@ -3017,6 +3286,31 @@ def run_or_resume_deep_report_task(
         req_mode = str(request.get("mode") or "").strip() or mode
         req_thread_id = str(request.get("thread_id") or "").strip() or active_thread_id
         req_task_id = str(request.get("task_id") or "").strip() or runtime_task_id
+
+        if failure_resume:
+            structured_payload = _load_failure_resume_structured_payload()
+            if not structured_payload:
+                return {
+                    "status": "failed",
+                    "message": "恢复编译时未找到与源任务匹配的结构化缓存。",
+                    "approvals": [],
+                    "structured_payload": {},
+                    "full_payload": {},
+                    "exploration_bundle": {},
+                }
+            structured_payload, exploration_bundle = _attach_exploration_bundle(
+                structured_payload,
+                {},
+                message="已从源任务结构化缓存恢复探索结果。",
+            )
+            return {
+                "status": "completed",
+                "message": "已从源任务结构化缓存恢复探索结果。",
+                "approvals": [],
+                "structured_payload": structured_payload,
+                "full_payload": {},
+                "exploration_bundle": exploration_bundle,
+            }
 
         if resume_payload is not None:
             structured_payload = _resume_structured_payload()
@@ -3043,6 +3337,105 @@ def run_or_resume_deep_report_task(
                 "exploration_bundle": exploration_bundle,
             }
 
+        # Checkpoint-resume (requeue): if the coordinator already completed and wrote the
+        # structured-payload cache on a prior run, skip re-running it entirely and go
+        # straight to compile.  If no cache is found the coordinator failed before
+        # completing, so fall through to a normal re-run.
+        if checkpoint_resume and not failure_resume:
+            structured_payload = _resume_structured_payload()
+            if structured_payload:
+                structured_payload, exploration_bundle = _attach_exploration_bundle(
+                    structured_payload,
+                    {},
+                    message="已从结构化缓存恢复探索阶段（checkpoint 续跑）。",
+                )
+                return {
+                    "status": "completed",
+                    "message": "已从结构化缓存恢复探索阶段（checkpoint 续跑）。",
+                    "approvals": [],
+                    "structured_payload": structured_payload,
+                    "full_payload": {},
+                    "exploration_bundle": exploration_bundle,
+                }
+            # No cache: coordinator itself did not complete; fall through to re-run.
+
+        # 检查是否使用确定性调度图
+        use_deterministic = os.environ.get("REPORT_USE_DETERMINISTIC_GRAPH", "false").lower() in ("true", "1", "yes")
+
+        if use_deterministic:
+            # 使用确定性调度图模式
+            from .exploration_deterministic_graph import run_exploration_deterministic_graph
+
+            # 准备运行时资产
+            common_context, runtime_files, runtime_backend, skill_assets, memory_paths = _prepare_runtime(
+                req_topic_id,
+                req_start,
+                req_end,
+                topic_label=req_label,
+                mode=req_mode,
+                thread_id=req_thread_id,
+                task_id=req_task_id,
+            )
+            llm, _client_cfg = build_langchain_chat_model(task="report", model_role="report", temperature=0.15, max_tokens=4200)
+            if llm is None:
+                raise ValueError("未找到可用的 LangChain 模型配置")
+
+            def _coordinator_middleware_factory(agent_name: str) -> List[Any]:
+                return [
+                    _build_lifecycle_middleware(
+                        event_callback=event_callback,
+                        actor_name=agent_name,
+                        default_phase=_phase_for_subagent(agent_name),
+                        tracker={
+                            "tool_calls": [],
+                            "subagents_started": [],
+                            "subagents_completed": [],
+                            "topic_label": req_label,
+                        },
+                        task_tool_mode=False,
+                    )
+                ]
+
+            deterministic_result = run_exploration_deterministic_graph(
+                request={
+                    "task_id": req_task_id,
+                    "thread_id": req_thread_id,
+                    "topic_identifier": req_topic_id,
+                    "topic_label": req_label,
+                    "start": req_start,
+                    "end": req_end,
+                    "mode": req_mode,
+                },
+                skill_assets=skill_assets,
+                middleware_factory=_coordinator_middleware_factory,
+                event_callback=lambda event: _emit_runtime_event(event_callback, event, normalize_exploration=True),
+                llm=llm,
+                initial_files=runtime_files,
+            )
+
+            structured_payload = deterministic_result.get("structured_payload") if isinstance(deterministic_result.get("structured_payload"), dict) else {}
+            runtime_files_from_graph = deterministic_result.get("files") if isinstance(deterministic_result.get("files"), dict) else {}
+            gaps = deterministic_result.get("gaps") if isinstance(deterministic_result.get("gaps"), list) else []
+
+            exploration_bundle: Dict[str, Any] = {}
+            if structured_payload:
+                structured_payload, exploration_bundle = _attach_exploration_bundle(
+                    structured_payload,
+                    runtime_files_from_graph,
+                    message=str(deterministic_result.get("message") or "确定性调度完成。").strip(),
+                )
+            exploration_bundle["gap_summary"] = gaps
+
+            return {
+                "status": str(deterministic_result.get("status") or "").strip() or "completed",
+                "message": str(deterministic_result.get("message") or "").strip(),
+                "approvals": [],
+                "structured_payload": structured_payload,
+                "full_payload": {},
+                "exploration_bundle": exploration_bundle,
+            }
+
+        # 使用旧的 Deep Agents coordinator 模式
         result = _run_deep_report_exploration_task(
             req_topic_id,
             req_start,
@@ -3064,11 +3457,15 @@ def run_or_resume_deep_report_task(
                 message=str(result.message or "探索阶段完成。").strip(),
             )
         output = result.model_dump()
+        if structured_payload and str(output.get("status") or "").strip() == "failed":
+            output["status"] = "completed"
+            output["message"] = str(output.get("message") or "").strip() or "探索阶段已生成可编译结构化结果。"
         output["structured_payload"] = structured_payload
         output["exploration_bundle"] = exploration_bundle
         return output
 
     def _run_compile(structured_payload: Dict[str, Any], exploration_bundle: Dict[str, Any]) -> Dict[str, Any]:
+        _semantic_review = {"decision": "approve"} if skip_validation else (resume_payload if isinstance(resume_payload, dict) else None)
         compile_result = generate_full_report_payload(
             topic_identifier,
             start_text,
@@ -3079,7 +3476,7 @@ def run_or_resume_deep_report_task(
             mode=mode,
             thread_id=active_thread_id,
             task_id=runtime_task_id,
-            semantic_review_decision=resume_payload if isinstance(resume_payload, dict) else None,
+            semantic_review_decision=_semantic_review,
             event_callback=event_callback,
         )
         payload = dict(compile_result or {})
@@ -3362,31 +3759,36 @@ def generate_report_payload(
     _upsert_runtime_json_file(runtime_files, "/workspace/state/mechanism_summary.json", mechanism_result.model_dump())
     _upsert_runtime_json_file(runtime_files, "/workspace/state/risk_signals.json", risk_result.model_dump())
 
+    # 提前序列化一次，三个 packet 共享，避免重复 model_dump() 和 json.dumps()
+    _normalized_task_json = json.dumps(normalized_result.normalized_task.model_dump(), ensure_ascii=False)
+    _evidence_ids_json = json.dumps([item.model_dump() for item in evidence_result.result], ensure_ascii=False)
+    _metric_refs_json = json.dumps([item.model_dump() for item in metric_result.result], ensure_ascii=False)
+
     overview_packet = SectionPacketResult.model_validate(
         build_section_packet_payload(
-            normalized_task_json=json.dumps(normalized_result.normalized_task.model_dump(), ensure_ascii=False),
+            normalized_task_json=_normalized_task_json,
             section_id="overview",
             section_goal="概览当前专题的核心证据与主要判断。",
-            evidence_ids_json=json.dumps([item.model_dump() for item in evidence_result.result], ensure_ascii=False),
-            metric_refs_json=json.dumps([item.model_dump() for item in metric_result.result], ensure_ascii=False),
+            evidence_ids_json=_evidence_ids_json,
+            metric_refs_json=_metric_refs_json,
         )
     )
     timeline_packet = SectionPacketResult.model_validate(
         build_section_packet_payload(
-            normalized_task_json=json.dumps(normalized_result.normalized_task.model_dump(), ensure_ascii=False),
+            normalized_task_json=_normalized_task_json,
             section_id="timeline",
             section_goal="梳理事件演化和关键节点。",
-            evidence_ids_json=json.dumps([item.model_dump() for item in evidence_result.result], ensure_ascii=False),
-            metric_refs_json=json.dumps([item.model_dump() for item in metric_result.result], ensure_ascii=False),
+            evidence_ids_json=_evidence_ids_json,
+            metric_refs_json=_metric_refs_json,
         )
     )
     risk_packet = SectionPacketResult.model_validate(
         build_section_packet_payload(
-            normalized_task_json=json.dumps(normalized_result.normalized_task.model_dump(), ensure_ascii=False),
+            normalized_task_json=_normalized_task_json,
             section_id="risk",
             section_goal="汇总风险信号和触发条件。",
-            evidence_ids_json=json.dumps([item.model_dump() for item in evidence_result.result], ensure_ascii=False),
-            metric_refs_json=json.dumps([item.model_dump() for item in metric_result.result], ensure_ascii=False),
+            evidence_ids_json=_evidence_ids_json,
+            metric_refs_json=_metric_refs_json,
             claim_ids_json=json.dumps([risk.risk_type for risk in risk_result.result], ensure_ascii=False),
         )
     )
@@ -3394,12 +3796,13 @@ def generate_report_payload(
     _upsert_runtime_json_file(runtime_files, "/workspace/state/section_packets/timeline.json", timeline_packet.model_dump())
     _upsert_runtime_json_file(runtime_files, "/workspace/state/section_packets/risk.json", risk_packet.model_dump())
 
-    claim_checks = ClaimVerificationPage.model_validate(
-        verify_claim_payload(
-            normalized_task_json=json.dumps(normalized_result.normalized_task.model_dump(), ensure_ascii=False),
-            claims_json=json.dumps(overview_packet.section_packet.claim_candidates[:4], ensure_ascii=False),
-            evidence_ids_json=json.dumps([item.model_dump() for item in evidence_result.result], ensure_ascii=False),
-        )
+    # 复用 overview packet 内部已完成的 claim 核验结果，构造 ClaimVerificationPage 对象
+    # 避免重复触发向量检索（build_section_packet_payload 内部已调用 verify_claim_payload）
+    _verified = overview_packet.section_packet.verified_claims
+    claim_checks = ClaimVerificationPage(
+        claims=_verified,
+        result=_verified,
+        counterevidence=overview_packet.section_packet.counterevidence,
     )
     utility_result = UtilityAssessmentResult.model_validate(
         judge_decision_utility_payload(
@@ -3701,7 +4104,6 @@ def generate_report_payload(
                 "/workspace/state/basic_analysis_insight.json",
                 "/workspace/state/bertopic_snapshot.json",
                 "/workspace/state/bertopic_insight.json",
-                "/workspace/state/claim_checks.json",
                 "/workspace/state/discourse_conflict_map.json",
                 "/workspace/state/section_packets/overview.json",
                 "/workspace/state/section_packets/timeline.json",
@@ -3876,12 +4278,14 @@ def generate_full_report_payload(
                     decision_index=0,
                     title=str(interrupt_value.get("title") or "语义边界确认").strip(),
                     summary=str(interrupt_value.get("summary") or "正式文稿包含需要人工确认的语义越界，确认后才能写入正式缓存。").strip(),
-                    allowed_decisions=list(interrupt_value.get("allowed_decisions") or ["approve", "edit", "reject"]),
+                    allowed_decisions=list(interrupt_value.get("allowed_decisions") or ["approve", "reject"]),
                     action={
                         "markdown_preview": markdown_preview[:1600],
                         "artifact_path": str(review_path),
+                        "review_mode": "annotation",
+                        "review_prompt": "文稿预览保持只读。如需继续写入，请补充人工审核批注，说明边界判断或后续写作调整要求。",
+                        "review_placeholder": "请输入审核批注、边界说明或需保留的写作调整意见",
                         "tool_args": {
-                            "markdown": markdown_preview,
                             "policy_version": str(factual_conformance.get("policy_version") or "policy.v2").strip() or "policy.v2",
                             "graph_thread_id": compile_graph_thread_id,
                             "checkpoint_backend": checkpoint_backend,
@@ -3902,12 +4306,14 @@ def generate_full_report_payload(
                     decision_index=0,
                     title="语义边界确认",
                     summary="正式文稿包含需要人工确认的语义越界，确认后才能写入正式缓存。",
-                    allowed_decisions=["approve", "edit", "reject"],
+                    allowed_decisions=["approve", "reject"],
                     action={
                         "markdown_preview": str(compiled.get("markdown") or "").strip()[:1600],
                         "artifact_path": str(review_path),
+                        "review_mode": "annotation",
+                        "review_prompt": "文稿预览保持只读。如需继续写入，请补充人工审核批注，说明边界判断或后续写作调整要求。",
+                        "review_placeholder": "请输入审核批注、边界说明或需保留的写作调整意见",
                         "tool_args": {
-                            "markdown": str(compiled.get("markdown") or "").strip(),
                             "policy_version": str(factual_conformance.get("policy_version") or "policy.v2").strip() or "policy.v2",
                             "graph_thread_id": compile_graph_thread_id,
                             "checkpoint_backend": checkpoint_backend,
@@ -3950,17 +4356,19 @@ def generate_full_report_payload(
             "semantic_interrupt": interrupt_payload.model_dump(),
             "graph_interrupts": graph_interrupts,
             "approval_records": approval_records,
+            "review_mode": "annotation",
         }
         _write_json(review_path, review_record)
         return {
             **review_record,
             "approvals": approvals,
         }
-    review_record = _load_json(review_path, {}) if review_path.exists() else {}
+    review_record = _load_json(review_path) if review_path.exists() else {}
     approved_markdown = str(compiled.get("markdown") or "").strip()
+    review_payload = semantic_review.get("review_payload") if isinstance(semantic_review.get("review_payload"), dict) else {}
+    review_comment = str(review_payload.get("comment") or "").strip()
     if semantic_review:
-        edited_action = semantic_review.get("edited_action") if isinstance(semantic_review.get("edited_action"), dict) else {}
-        approved_markdown = str(edited_action.get("markdown") or review_record.get("markdown") or approved_markdown).strip()
+        approved_markdown = str(review_record.get("markdown") or approved_markdown).strip() or approved_markdown
     markdown = approved_markdown
     full_payload = build_full_payload(
         structured,
@@ -3985,6 +4393,9 @@ def generate_full_report_payload(
                         "decision": str(semantic_review.get("decision") or "").strip(),
                         "policy_version": str(factual_conformance.get("policy_version") or "policy.v2").strip() or "policy.v2",
                         "approved_at": _utc_now(),
+                        "review_mode": "annotation",
+                        "review_payload": review_payload,
+                        "comment": review_comment,
                     }
                 }
                 if semantic_review
@@ -4037,12 +4448,13 @@ def generate_full_report_payload(
                 )
                 if str(item or "").strip()
             ],
-            reason="semantic review resolved",
+            reason=review_comment or "semantic review resolved",
         )
         review_record = {
             **review_record,
             "status": "resolved",
             "approved_markdown": approved_markdown,
+            "review_payload": review_payload,
             "approval_records": approval_records,
         }
         _write_json(review_path, review_record)

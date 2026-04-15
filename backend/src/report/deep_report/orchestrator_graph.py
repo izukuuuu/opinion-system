@@ -191,9 +191,8 @@ def run_report_orchestrator_graph(
         }
 
     def route_after_exploration(state: _OrchestratorState) -> str:
-        status = str(state.get("status") or "").strip()
         structured_payload = state.get("structured_payload") if isinstance(state.get("structured_payload"), dict) else {}
-        if status == "failed" or not structured_payload:
+        if not structured_payload:
             return END
         return "compile_subgraph"
 

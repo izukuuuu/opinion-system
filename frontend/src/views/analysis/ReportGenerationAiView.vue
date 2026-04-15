@@ -108,20 +108,6 @@
 
         <section class="card-surface space-y-4 p-5">
           <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">运行来源</p>
-            <p class="mt-2 text-sm text-secondary">这里显示这份文稿对应的任务线索，方便你确认是否经过人工介入或回退重写。</p>
-          </div>
-          <div class="space-y-2 text-sm text-secondary">
-            <p>线程：{{ provenance.threadId }}</p>
-            <p>正式文稿：{{ provenance.fullMarkdownStatus }}</p>
-            <p>介入记录：{{ provenance.approvalStatus }}</p>
-            <p>回退重写：{{ provenance.fallbackText }}</p>
-            <p>放行判断：{{ provenance.utilityDecision }}</p>
-          </div>
-        </section>
-
-        <section class="card-surface space-y-4 p-5">
-          <div>
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">章节导航</p>
           </div>
           <nav class="space-y-1.5">
@@ -137,10 +123,9 @@
       <article class="card-surface overflow-hidden p-6">
         <div class="border-b border-soft pb-5">
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">正式文稿</p>
-          <p class="mt-2 text-sm text-secondary">当前页面和导出 HTML 使用同一份 Markdown 成品渲染，结构化底稿不在这里展开。</p>
         </div>
 
-        <div v-if="reportHtml" ref="markdownRoot" class="ai-report-markdown mt-6" v-html="reportHtml" />
+        <div v-if="reportHtml" class="ai-report-markdown mt-6" v-html="reportHtml" />
         <div v-else class="mt-6 rounded-3xl bg-base-soft px-4 py-6 text-sm text-secondary">当前没有可展示的正式文稿。</div>
       </article>
     </section>
@@ -152,7 +137,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowDownTrayIcon,
@@ -166,7 +151,6 @@ import AppSelect from '../../components/AppSelect.vue'
 import { useReportGeneration } from '../../composables/useReportGeneration'
 import { buildStandaloneAiReportHtml } from '../../utils/aiReportHtml'
 import { exportableAiMarkdown, extractMarkdownToc, renderAiReportMarkdown } from '../../utils/aiReportMarkdown'
-import { buildFigureContractMap, destroyFigurePlaceholders, hydrateFigurePlaceholders } from '../../utils/reportFigures'
 
 const router = useRouter()
 
@@ -180,7 +164,6 @@ const {
   selectedHistoryId,
   fullReportState,
   fullReportData,
-  taskState,
   loadTopics,
   loadHistory,
   loadFullReport,
@@ -205,22 +188,6 @@ const reportHtml = computed(() => renderAiReportMarkdown(markdown.value, {
   artifactManifest: artifactManifest.value
 }))
 const tocItems = computed(() => extractMarkdownToc(markdown.value))
-const figureContracts = computed(() => buildFigureContractMap(reportIr.value, artifactManifest.value))
-const markdownRoot = ref(null)
-const provenance = computed(() => {
-  const manifest = taskState.artifactManifest && typeof taskState.artifactManifest === 'object' ? taskState.artifactManifest : {}
-  const approvalStatus = manifest.approval_records?.status === 'ready'
-    ? '已记录'
-    : (Array.isArray(taskState.approvals) && taskState.approvals.some((item) => String(item?.status || '').trim() !== 'resolved') ? '待处理' : '未触发')
-  const fallbackCount = Number(taskState.reportIrSummary?.fallback_trace_count || taskState.structuredResultDigest?.fallback_trace_count || 0)
-  return {
-    threadId: taskState.threadId || '未绑定',
-    fullMarkdownStatus: manifest.full_markdown?.status === 'ready' ? '已生成' : '未就绪',
-    approvalStatus,
-    fallbackText: fallbackCount > 0 ? `已回退 ${fallbackCount} 次` : '未触发',
-    utilityDecision: String(taskState.reportIrSummary?.utility_assessment?.decision || taskState.structuredResultDigest?.utility_assessment?.decision || 'pending').trim() || 'pending'
-  }
-})
 
 const topicSelectOptions = computed(() => topicOptions.value.map((option) => ({ value: option, label: option })))
 const historySelectOptions = computed(() =>
@@ -264,20 +231,6 @@ const exportHtml = () => {
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   downloadBlob(blob, `${reportTitle.value || 'ai-report'}.html`)
 }
-
-async function hydrateMarkdownFigures() {
-  await nextTick()
-  destroyFigurePlaceholders(markdownRoot.value)
-  await hydrateFigurePlaceholders(markdownRoot.value, figureContracts.value)
-}
-
-watch([reportHtml, figureContracts], () => {
-  hydrateMarkdownFigures()
-}, { flush: 'post', immediate: true })
-
-onBeforeUnmount(() => {
-  destroyFigurePlaceholders(markdownRoot.value)
-})
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob)

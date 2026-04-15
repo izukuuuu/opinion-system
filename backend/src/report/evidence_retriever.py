@@ -736,6 +736,14 @@ def _retrieve_candidates(
         date_text = _extract_date_text(row.get("published_at") or row.get("publish_time") or row.get("date")) or "未知"
         url = str(row.get("url") or "").strip()
         dedupe_key = url.lower() if url else _normalise_title(title)
+        # Extract engagement and sentiment data from raw row (for downstream evidence cards)
+        engagement_likes = row.get("点赞数") or row.get("like_count") or row.get("likes")
+        engagement_comments = row.get("评论数") or row.get("comment_count") or row.get("comments")
+        engagement_shares = row.get("转发数") or row.get("share_count") or row.get("shares") or row.get("转发")
+        engagement_views = row.get("播放量") or row.get("view_count") or row.get("views") or row.get("阅读量")
+        sentiment_raw = row.get("情感") or row.get("sentiment") or row.get("sentiment_label") or row.get("polarity")
+        hotness_raw = row.get("热度") or row.get("hotness_score") or row.get("hotness")
+
         candidates.append(
             {
                 "title": title,
@@ -758,6 +766,13 @@ def _retrieve_candidates(
                 "date_text": date_text,
                 "dedupe_key": dedupe_key or f"{source_file}:{row_index}",
                 "row_text": text,
+                # Engagement data for evidence cards (NetInsight sources have these)
+                "engagement_likes": engagement_likes,
+                "engagement_comments": engagement_comments,
+                "engagement_shares": engagement_shares,
+                "engagement_views": engagement_views,
+                "sentiment_raw": sentiment_raw,
+                "hotness_raw": hotness_raw,
             }
         )
 

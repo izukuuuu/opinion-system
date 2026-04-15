@@ -218,7 +218,7 @@ def _bertopic_temporal_rows(temporal_payload: Any) -> List[Dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         label = str(item.get("label") or item.get("date") or "").strip()
-        rows.append({"label": label, "value": _safe_int(item.get("count") or item.get("value"))})
+        rows.append({"label": label, "value": _safe_int(item.get("total") or item.get("count") or item.get("value"))})
     if rows:
         return rows
     series = ((temporal_payload.get("llm_clusters") or {}) if isinstance(temporal_payload.get("llm_clusters"), dict) else temporal_payload.get("raw_topics")) or {}

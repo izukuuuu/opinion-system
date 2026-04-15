@@ -318,15 +318,42 @@ def _section(section_id: str, title: str, goal: str, target_words: int) -> Compi
 
 
 def select_scene_profile(ir: ReportIR | Dict[str, Any]) -> CompilerSceneProfile:
+    """根据报告内容选择场景配置，并加载对应的报告模板."""
     payload = _ensure_ir(ir)
     risk_count = len(payload.risk_register.risks)
     unresolved_count = len(payload.unresolved_points.items)
+
+    # 根据风险数量选择场景类型
+    if risk_count > 3:
+        scene_id = "crisis_response"
+        scene_label = "突发危机舆情分析"
+    elif risk_count or unresolved_count:
+        scene_id = "risk_brief"
+        scene_label = "风险研判"
+    else:
+        scene_id = "public_hotspot"
+        scene_label = "公共热点舆情分析"
+
+    # 加载对应的报告模板
+    from ..full_report_templates import attach_full_report_template
+    template_data = attach_full_report_template({"scene_id": scene_id})
+
+    # 根据内容特征决定渲染模式
+    if unresolved_count:
+        render_mode = "claim_anchored"
+    elif risk_count > 3:
+        render_mode = "template_driven"
+    else:
+        render_mode = "claim_anchored"
+
     return CompilerSceneProfile(
-        scene_id="risk_brief" if risk_count or unresolved_count else "overview_brief",
-        scene_label="风险研判" if risk_count or unresolved_count else "综合概览",
+        scene_id=scene_id,
+        scene_label=scene_label,
         focus="risk" if risk_count else "timeline",
         guardrail_mode="bounded_claims" if unresolved_count else "strict",
-        render_mode="claim_anchored",
+        render_mode=render_mode,
+        template_sections=template_data.get("template_sections", []),
+        template_markdown=template_data.get("template_markdown", ""),
     )
 
 
@@ -441,17 +468,78 @@ def assemble_writer_context(
     )
 
 
+# BettaFish 质量写作目标 —— 强制表格结构和原文引用
+_BETTAFISH_SECTION_GOALS: Dict[str, str] = {
+    "监测口径与样本说明": (
+        "必须输出表格：平台 | 样本量 | 时间范围 | 覆盖局限。"
+        "交代结论适用范围，注明未覆盖的平台或场景。"
+    ),
+    "摘要": (
+        "先概括态势，再指出分歧，再给出趋势判断。"
+        "禁止口号式结论。必须包含：事件当前阶段、核心争议点、舆论走向。"
+    ),
+    "事件演变": (
+        "必须输出事件全景速览表格：时间 | 爆点事件 | 传播量级 | 核心情绪关键词。"
+        "围绕'节点—转折—再定义'展开，每个节点：发生了什么 / 为什么改变讨论结构 / 由谁推动。"
+        "必须嵌入具体网民金句作为情绪锚点（使用 > '原文' —— 来源 格式）。"
+    ),
+    "传播路径": (
+        "必须输出平台情绪雷达表格：平台 | 主导情绪 | 代表性评论（引用原文） | 传播角色。"
+        "区分首发源/搬运节点/情绪放大节点/权威纠偏节点，写出接力关系而非并列。"
+        "必须输出情绪传导公式：A → B → C → 标签化。"
+    ),
+    "舆论立场与结构": (
+        "必须输出多元群体诉求清单表格：群体 | 高频诉求 | 金句（引用原文）。"
+        "至少区分：当事方/官方机构/传统媒体/垂类博主/普通用户/利益相关群体。"
+        "每类主体：核心立场 + 表达强度 + 影响范围 + 互动关系。"
+    ),
+    "核心焦点与情绪": (
+        "情绪必须附着在具体议题上，不能单独列'愤怒/质疑'标签。"
+        "每个焦点簇：核心问题 / 主导情绪 / 典型观点 / 聚集原因。"
+        "必须引用具体网民原文（使用 > '原文' —— 平台/作者 格式）。"
+    ),
+    "深层动因": (
+        "从四层展开：现实结构利益冲突 / 认知信息不对称 / 平台推荐机制 / 价值符号冲突。"
+        "说明本次事件哪层起主导作用，以及各层如何叠加。"
+        "禁止'社会关注度高''平台传播快'等表层描述。"
+    ),
+    "影响与动作": (
+        "必须输出高风险三色灯表格：🔴/🟡/🟢 | 风险描述 | 爆点预测 | 触发阈值 | 提前干预动作。"
+        "先写影响传导（舆情→组织/政策/行业层面），再写动作建议。"
+        "建议必须与风险和传播机制一一对应，禁止空泛建议。"
+    ),
+    "附录": (
+        "输出证据台账表格：来源 | 平台 | 发布时间 | 可信度 | 内容摘要。"
+        "列出代表性信息源与高传播表达，为报告关键判断提供锚点。"
+    ),
+}
+
+
 def build_section_plan(
     ir: ReportIR | Dict[str, Any],
     layout_plan: CompilerLayoutPlan | Dict[str, Any],
     section_budget: CompilerSectionBudget | Dict[str, Any],
+    scene_profile: CompilerSceneProfile | Dict[str, Any] | None = None,
 ) -> SectionPlan:
+    """构建章节规划，优先使用模板章节，fallback 到布局规划章节."""
     _ = _ensure_ir(ir)
     layout = layout_plan if isinstance(layout_plan, CompilerLayoutPlan) else CompilerLayoutPlan.model_validate(layout_plan or {})
     budget = section_budget if isinstance(section_budget, CompilerSectionBudget) else CompilerSectionBudget.model_validate(section_budget or {})
     budget_map = {item.section_id: item.target_words for item in budget.sections}
+
+    # 章节与数据源的映射
     group_map = {
         "executive_summary": ["narrative_views", "claim_set", "risk_register", "unresolved_points"],
+        "监测口径与样本说明": ["meta", "evidence_ledger"],
+        "摘要": ["narrative_views", "claim_set", "risk_register"],
+        "事件演变": ["timeline", "evidence_ledger", "claim_set"],
+        "传播路径": ["mechanism_summary", "timeline", "evidence_ledger"],
+        "舆论立场与结构": ["stance_matrix", "actor_registry", "conflict_map", "evidence_ledger"],
+        "核心焦点与情绪": ["agenda_frame_map", "claim_set", "evidence_ledger"],
+        "深层动因": ["mechanism_summary", "agenda_frame_map", "conflict_map"],
+        "影响与动作": ["risk_register", "recommendation_candidates", "utility_assessment"],
+        "附录": ["evidence_ledger", "citations"],
+        # fallback IDs
         "claims": ["claim_set", "evidence_ledger"],
         "agenda": ["agenda_frame_map", "evidence_ledger", "actor_registry"],
         "timeline": ["timeline", "evidence_ledger"],
@@ -463,8 +551,43 @@ def build_section_plan(
         "unresolved": ["unresolved_points", "claim_set"],
         "ledger": ["evidence_ledger"],
     }
-    return SectionPlan(
-        sections=[
+
+    # 章节ID标准化函数
+    def _section_id_from_title(title: str) -> str:
+        normalized = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "_", str(title or "").strip().lower()).strip("_")
+        return normalized or "section"
+
+    # 优先使用模板章节
+    scene = scene_profile if isinstance(scene_profile, CompilerSceneProfile) else None
+    template_sections = scene.template_sections if scene and scene.template_sections else []
+
+    if template_sections:
+        # 使用模板章节构建规划，合并 BettaFish 强制结构要求
+        sections_list = []
+        for s in template_sections:
+            title_key = str(s.get("title", "")).strip()
+            if not title_key:
+                continue
+            base_goal = str(s.get("summary", "")).strip()
+            bettafish_goal = _BETTAFISH_SECTION_GOALS.get(title_key, "")
+            # BettaFish 结构要求在前，模板指导在后
+            merged_goal = f"{bettafish_goal}\n\n{base_goal}".strip() if bettafish_goal else base_goal
+            # BettaFish 章节字数更高（表格+叙事）
+            base_words = int(budget_map.get(_section_id_from_title(title_key), 280))
+            target_words = max(base_words, 400) if bettafish_goal else base_words
+            sections_list.append(
+                CompilerSectionPlanItem(
+                    section_id=_section_id_from_title(title_key),
+                    title=title_key,
+                    goal=merged_goal,
+                    target_words=target_words,
+                    source_groups=group_map.get(_section_id_from_title(title_key), []),
+                )
+            )
+        sections = sections_list
+    else:
+        # fallback 到布局规划章节
+        sections = [
             CompilerSectionPlanItem(
                 section_id=section.section_id,
                 title=section.title,
@@ -474,7 +597,8 @@ def build_section_plan(
             )
             for section in layout.sections
         ]
-    )
+
+    return SectionPlan(sections=sections)
 
 
 def _bounded(items: Sequence[Any], limit: int) -> List[Any]:

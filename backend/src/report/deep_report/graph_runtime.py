@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import operator
 import re
-from typing import Annotated, Any, Callable, Dict, List, TypedDict
+from typing import Annotated, Any, Callable, Dict, List, Optional, TypedDict
 
 from langgraph.errors import GraphInterrupt
 from langgraph.graph import END, START, StateGraph
@@ -40,6 +40,17 @@ from .schemas import (
 )
 
 
+def _accumulate_or_reset(existing: List, update: Optional[List]) -> List:
+    """LangGraph 自定义 reducer：update=None 时重置为空列表，否则追加。
+
+    标准 operator.add 无法将列表清空（existing + [] == existing），
+    finalize 节点需要通过返回 None 而非 [] 来触发重置。
+    """
+    if update is None:
+        return []
+    return (existing or []) + update
+
+
 class _GraphState(TypedDict, total=False):
     payload: Dict[str, Any]
     report_ir: Dict[str, Any]
@@ -64,13 +75,25 @@ class _GraphState(TypedDict, total=False):
     current_node: str
     planner_slots: List[Dict[str, Any]]
     planner_slot: Dict[str, Any]
-    section_batches: Annotated[List[Dict[str, Any]], operator.add]
+    section_batches: Annotated[List[Dict[str, Any]], _accumulate_or_reset]
     repair_patch: Dict[str, Any]
-    repair_batches: Annotated[List[Dict[str, Any]], operator.add]
+    repair_batches: Annotated[List[Dict[str, Any]], _accumulate_or_reset]
     final_output: Dict[str, Any]
 
 
 _TRACEABLE_UNIT_TYPES = {"observation", "finding", "mechanism", "risk", "recommendation", "unresolved"}
+
+
+def _payload_from_state(state: _GraphState) -> Dict[str, Any]:
+    payload = state.get("payload") if isinstance(state.get("payload"), dict) else {}
+    if payload:
+        return payload
+    report_ir = state.get("report_ir") if isinstance(state.get("report_ir"), dict) else {}
+    task = state.get("task") if isinstance(state.get("task"), dict) else {}
+    return {
+        "report_ir": report_ir,
+        "task": task,
+    }
 
 
 def _emit(event_callback: Callable[[Dict[str, Any]], None] | None, event: Dict[str, Any]) -> None:
@@ -149,6 +172,60 @@ def _support_level_for_unit(unit_type: str) -> str:
     if unit_type in {"mechanism", "risk", "recommendation"}:
         return "derived"
     return "aggregated"
+
+
+def _dedupe_texts(items: List[str]) -> List[str]:
+    deduped: List[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if text and text not in deduped:
+            deduped.append(text)
+    return deduped
+
+
+def _section_context_ref(section_id: str, *, support_level: str) -> TraceRef:
+    return TraceRef(
+        trace_id=str(section_id or "").strip() or "claims",
+        trace_kind="section_context",
+        support_level=support_level,  # type: ignore[arg-type]
+    )
+
+
+def _repair_candidate_derived_from(unit: DraftUnitV2, failure: ValidationFailure) -> List[str]:
+    metadata = unit.metadata if isinstance(unit.metadata, dict) else {}
+    candidate_ids: List[str] = []
+    candidate_ids.extend([str(item).strip() for item in failure.candidate_derived_from if str(item or "").strip()])
+    candidate_ids.extend([str(item).strip() for item in unit.derived_from if str(item or "").strip()])
+    candidate_ids.extend([str(item).strip() for item in metadata.get("legacy_claim_ids") or [] if str(item or "").strip()])
+    candidate_ids.extend([str(item).strip() for item in metadata.get("legacy_evidence_ids") or [] if str(item or "").strip()])
+    candidate_ids.extend([str(item).strip() for item in metadata.get("legacy_risk_ids") or [] if str(item or "").strip()])
+    candidate_ids.extend([str(item).strip() for item in metadata.get("legacy_unresolved_ids") or [] if str(item or "").strip()])
+    if not candidate_ids:
+        candidate_ids.extend(
+            [
+                str(item.trace_id).strip()
+                for item in failure.candidate_trace_refs
+                if str(item.trace_id or "").strip() and item.trace_kind != "section_context"
+            ]
+        )
+    return _dedupe_texts(candidate_ids)
+
+
+def _repair_candidate_evidence_refs(unit: DraftUnitV2, failure: ValidationFailure) -> List[TraceRef]:
+    metadata = unit.metadata if isinstance(unit.metadata, dict) else {}
+    evidence_ids: List[str] = []
+    evidence_ids.extend(
+        [
+            str(item.trace_id).strip()
+            for item in failure.candidate_trace_refs
+            if str(item.trace_id or "").strip() and item.trace_kind == "evidence"
+        ]
+    )
+    evidence_ids.extend([str(item).strip() for item in metadata.get("legacy_evidence_ids") or [] if str(item or "").strip()])
+    return [
+        TraceRef(trace_id=trace_id, trace_kind="evidence", support_level="direct")
+        for trace_id in _dedupe_texts(evidence_ids)
+    ]
 
 
 def _infer_unit_type(unit: DraftUnit) -> str:
@@ -290,6 +367,7 @@ def validate_draft_bundle_v2(
     bundle = draft_bundle_v2 if isinstance(draft_bundle_v2, DraftBundleV2) else DraftBundleV2.model_validate(draft_bundle_v2 or {})
     buckets = _known_id_buckets(report_ir)
     known_ids = set().union(*buckets.values()) if buckets else set()
+    prior_patch_count = int((bundle.metadata or {}).get("repair_patch_count") or 0)
     failures: List[ValidationFailure] = []
     for index, unit in enumerate(bundle.units, start=1):
         if not str(unit.text or "").strip():
@@ -396,6 +474,9 @@ def validate_draft_bundle_v2(
     if not failures:
         gate = "pass"
         next_node = "markdown_compiler"
+    elif repair_count > 0 and prior_patch_count <= 0:
+        gate = "human_review"
+        next_node = "compile_blocked"
     elif patchable and repair_count < max(int(max_repairs or 0), 0):
         gate = "repair"
         next_node = "repair_patch_planner"
@@ -450,14 +531,34 @@ def build_repair_plan_v2(report_ir: Dict[str, Any], draft_bundle_v2: DraftBundle
                 )
             replacement.trace_refs = candidate_refs
         elif failure.failure_type == "unsupported_inference":
-            replacement.support_level = _support_level_for_unit(replacement.unit_type)  # type: ignore[assignment]
-            if replacement.unit_type == "finding" and not replacement.derived_from:
-                replacement.derived_from = list(replacement.metadata.get("legacy_claim_ids") or [])
-            operation = "downgrade_support"
+            if replacement.unit_type == "observation":
+                evidence_refs = _repair_candidate_evidence_refs(replacement, failure)
+                if evidence_refs:
+                    replacement.trace_refs = evidence_refs
+                    replacement.support_level = "direct"
+                    operation = "attach_trace"
+                else:
+                    replacement.unit_type = "transition"
+                    replacement.support_level = "structural"
+                    replacement.trace_refs = [
+                        ref.model_copy(update={"support_level": "structural"})
+                        for ref in (replacement.trace_refs or failure.candidate_trace_refs)
+                    ] or [_section_context_ref(replacement.section_id, support_level="structural")]
+                    replacement.derived_from = []
+                    replacement.render_template_id = f"{replacement.section_id}:transition"
+                    operation = "replace_unit"
+            else:
+                replacement.support_level = _support_level_for_unit(replacement.unit_type)  # type: ignore[assignment]
+                if replacement.unit_type == "finding" and not replacement.derived_from:
+                    replacement.derived_from = _repair_candidate_derived_from(replacement, failure)
+                operation = "downgrade_support"
         elif failure.failure_type in {"dangling_derived_from", "text_outside_ir"}:
-            replacement.derived_from = list(replacement.derived_from or replacement.metadata.get("legacy_claim_ids") or replacement.metadata.get("legacy_evidence_ids") or [])
+            replacement.derived_from = _repair_candidate_derived_from(replacement, failure)
             operation = "replace_unit"
         replacement.validation_status = "repaired"
+        if replacement.model_dump() == unit.model_dump():
+            blocked.append(failure.model_copy(update={"patch_status": "blocked"}))
+            continue
         patches.append(
             RepairPatch(
                 patch_id=f"patch-{index}",
@@ -725,8 +826,9 @@ def run_report_compilation_graph(
         return _wrapped
 
     def load_context(state: _GraphState) -> Dict[str, Any]:
-        report_ir = state["payload"].get("report_ir") if isinstance(state["payload"].get("report_ir"), dict) else {}
-        task = state["payload"].get("task") if isinstance(state["payload"].get("task"), dict) else {}
+        payload = _payload_from_state(state)
+        report_ir = payload.get("report_ir") if isinstance(payload.get("report_ir"), dict) else {}
+        task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
         utility = report_ir.get("utility_assessment") if isinstance(report_ir.get("utility_assessment"), dict) else {}
         policy_registry = build_conformance_policy_registry()
         scene_profile = select_scene_profile(report_ir)
@@ -734,8 +836,9 @@ def run_report_compilation_graph(
         layout_plan = build_layout_plan(report_ir, scene_profile, style_profile)
         section_budget = build_section_budget(report_ir, scene_profile, layout_plan)
         writer_context = assemble_writer_context(report_ir, scene_profile, style_profile, layout_plan, section_budget)
-        section_plan = build_section_plan(report_ir, layout_plan, section_budget)
+        section_plan = build_section_plan(report_ir, layout_plan, section_budget, scene_profile)
         return {
+            "payload": payload,
             "report_ir": report_ir,
             "task": task,
             "utility_assessment": utility,
@@ -776,12 +879,34 @@ def run_report_compilation_graph(
         return {"report_ir": state.get("report_ir") or {}}
 
     def trace_binder(state: _GraphState) -> Dict[str, Any]:
-        draft_bundle = compile_draft_units(state["report_ir"], state["section_plan"])
-        draft_bundle_v2 = upgrade_draft_bundle_to_v2(state["report_ir"], draft_bundle)
-        return {
-            "draft_bundle": draft_bundle.model_dump(),
-            "draft_bundle_v2": draft_bundle_v2.model_dump(),
-        }
+        # 根据render_mode选择编译方式
+        scene_profile = state.get("scene_profile") or {}
+        render_mode = str(scene_profile.get("render_mode", "") or "").strip()
+
+        if render_mode == "template_driven":
+            # 使用LLM深度写作（复刻BettaFish能力）
+            from .deep_writer import compile_draft_units_with_llm
+            from .schemas import CompilerSceneProfile
+            scene = CompilerSceneProfile.model_validate(scene_profile)
+            draft_bundle_v2 = compile_draft_units_with_llm(
+                state["report_ir"],
+                state["section_plan"],
+                scene,
+            )
+            # 同时生成legacy draft_bundle用于兼容
+            draft_bundle = compile_draft_units(state["report_ir"], state["section_plan"])
+            return {
+                "draft_bundle": draft_bundle.model_dump(),
+                "draft_bundle_v2": draft_bundle_v2.model_dump(),
+            }
+        else:
+            # 使用确定性拼接（claim_anchored模式）
+            draft_bundle = compile_draft_units(state["report_ir"], state["section_plan"])
+            draft_bundle_v2 = upgrade_draft_bundle_to_v2(state["report_ir"], draft_bundle)
+            return {
+                "draft_bundle": draft_bundle.model_dump(),
+                "draft_bundle_v2": draft_bundle_v2.model_dump(),
+            }
 
     def section_realizer_worker(state: _GraphState) -> Dict[str, Any]:
         bundle = DraftBundleV2.model_validate(state.get("draft_bundle_v2") or {})
@@ -823,7 +948,7 @@ def run_report_compilation_graph(
             else:
                 realized_units.append(unit.model_copy(update={"validation_status": "pending"}))
         realized = bundle.model_copy(update={"units": realized_units})
-        return {"draft_bundle_v2": realized.model_dump(), "section_batches": []}
+        return {"draft_bundle_v2": realized.model_dump(), "section_batches": None}
 
     def unit_validator(state: _GraphState) -> Dict[str, Any]:
         validation = validate_draft_bundle_v2(
@@ -889,7 +1014,7 @@ def run_report_compilation_graph(
         return {
             "draft_bundle_v2": repaired.model_dump(),
             "repair_plan_v2": applied_plan.model_dump(),
-            "repair_batches": [],
+            "repair_batches": None,
             "repair_count": repair_count,
         }
 
@@ -903,8 +1028,11 @@ def run_report_compilation_graph(
             "review_kind": "compile_blocked",
             "title": "语义边界确认",
             "summary": f"验证仍未通过，当前停在人工复核前置门禁。失败单元 {len(validation.failures)} 个。",
-            "allowed_decisions": ["approve", "edit", "reject"],
+            "allowed_decisions": ["approve", "reject"],
             "event_key": interrupt_event_key,
+            "review_mode": "annotation",
+            "review_prompt": "文稿预览保持只读。如需继续写入，请补充人工审核批注，说明边界判断或后续写作调整要求。",
+            "review_placeholder": "请输入审核批注、边界说明或需保留的写作调整意见",
             "markdown_preview": markdown_preview,
             "validation_result_v2": validation.model_dump(),
             "repair_plan_v2": state.get("repair_plan_v2") or {},
@@ -932,14 +1060,15 @@ def run_report_compilation_graph(
         decision = interrupt(interrupt_payload)
         resolved = decision if isinstance(decision, dict) else {"decision": "approve" if decision else "reject"}
         decision_text = str(resolved.get("decision") or "").strip().lower() or "approve"
-        edited_action = resolved.get("edited_action") if isinstance(resolved.get("edited_action"), dict) else {}
-        approved_markdown = str(edited_action.get("markdown") or markdown_preview).strip() or markdown_preview
+        review_payload = resolved.get("review_payload") if isinstance(resolved.get("review_payload"), dict) else {}
+        review_comment = str(review_payload.get("comment") or "").strip()
+        approved_markdown = markdown_preview
         factual = FactualConformanceResult(
             passed=False,
             policy_version="policy.v2",
             stage="final_markdown",
             can_auto_recover=False,
-            requires_human_review=decision_text not in {"approve", "edit"},
+            requires_human_review=decision_text != "approve",
             issues=[
                 FactualConformanceIssue(
                     issue_id="human-review-gate",
@@ -951,12 +1080,19 @@ def run_report_compilation_graph(
                     suggested_action=decision_text,
                 )
             ],
-            metadata={"decision": decision_text, "repair_count": int(state.get("repair_count") or 0)},
+            metadata={
+                "decision": decision_text,
+                "review_decision": decision_text,
+                "review_mode": "annotation",
+                "review_payload": review_payload,
+                "review_comment": review_comment,
+                "repair_count": int(state.get("repair_count") or 0),
+            },
         )
         return {
             "markdown": approved_markdown,
-            "review_required": decision_text not in {"approve", "edit"},
-            "blocked_reason": "" if decision_text in {"approve", "edit"} else "rejected_by_human_review",
+            "review_required": decision_text != "approve",
+            "blocked_reason": "" if decision_text == "approve" else "rejected_by_human_review",
             "factual_conformance": factual.model_dump(),
         }
 

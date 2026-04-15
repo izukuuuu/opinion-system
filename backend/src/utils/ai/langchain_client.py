@@ -14,6 +14,7 @@ from ..setting.settings import settings
 
 
 QWEN_COMPAT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+ANTHROPIC_COMPAT_BASE_URL = "https://coding.dashscope.aliyuncs.com/apps/anthropic"
 
 
 def _as_float(value: Any, default: float) -> float:
@@ -88,7 +89,7 @@ def _resolve_client_config(
     override_model = str(report_runtime_model.get("model") or runtime_override.get("model") or "").strip()
     resolved_model = (override_model or model or role_model or task_model or default_model).strip()
     if not resolved_model:
-        resolved_model = "qwen-plus" if provider == "qwen" else "gpt-4o-mini"
+        resolved_model = "qwen-plus" if provider == "qwen" else ("claude-3-5-sonnet-20241022" if provider == "anthropic" else "gpt-4o-mini")
 
     if provider == "openai":
         api_key = str(credentials.get("report_api_key") or "").strip() if task == "report" else ""
@@ -99,6 +100,11 @@ def _resolve_client_config(
             or get_openai_base_url()
             or "https://api.openai.com/v1"
         )
+    elif provider == "anthropic":
+        api_key = str(credentials.get("report_api_key") or "").strip() if task == "report" else ""
+        if not api_key:
+            api_key = get_api_key()
+        base_url = str(report_runtime_model.get("base_url") or runtime_override.get("base_url") or cfg.get("base_url") or "").strip() or ANTHROPIC_COMPAT_BASE_URL
     else:
         provider = "qwen"
         api_key = str(credentials.get("report_api_key") or "").strip() if task == "report" else ""
@@ -291,6 +297,24 @@ def _build_lc_messages(messages: List[Dict[str, str]]) -> Optional[List[Any]]:
 
 
 def _build_chat_model(client_cfg: Dict[str, Any]) -> Optional[Any]:
+    provider = client_cfg.get("provider", "qwen")
+    if provider == "anthropic":
+        try:
+            from langchain_anthropic import ChatAnthropic
+        except Exception:
+            return None
+        try:
+            return ChatAnthropic(
+                model=client_cfg["model"],
+                api_key=client_cfg["api_key"],
+                base_url=client_cfg["base_url"],
+                temperature=client_cfg["temperature"],
+                max_tokens=client_cfg["max_tokens"],
+                timeout=client_cfg["timeout"],
+                max_retries=client_cfg["max_retries"],
+            )
+        except Exception:
+            return None
     try:
         from langchain_openai import ChatOpenAI
     except Exception:

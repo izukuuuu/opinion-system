@@ -10,8 +10,14 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.report.deep_report.graph_runtime import _stream_graph_events, run_report_compilation_graph
-from src.report.deep_report.schemas import DraftBundle, DraftUnit
+from src.report.deep_report.graph_runtime import (
+    _payload_from_state,
+    _stream_graph_events,
+    build_repair_plan_v2,
+    run_report_compilation_graph,
+    validate_draft_bundle_v2,
+)
+from src.report.deep_report.schemas import DraftBundle, DraftBundleV2, DraftUnit, DraftUnitV2, TraceRef, ValidationResultV2
 
 
 class _Dumpable(dict):
@@ -96,6 +102,132 @@ def _invalid_draft_bundle(*_args, **_kwargs) -> DraftBundle:
 
 
 class DeepReportGraphRuntimeTests(unittest.TestCase):
+    def test_payload_from_state_recovers_minimal_payload_when_missing(self) -> None:
+        state = {
+            "report_ir": _minimal_payload()["report_ir"],
+            "task": _minimal_payload()["task"],
+        }
+
+        payload = _payload_from_state(state)
+
+        self.assertIn("report_ir", payload)
+        self.assertIn("task", payload)
+        self.assertEqual(payload["task"]["topic_label"], "示例专题")
+
+    def test_build_repair_plan_v2_recovers_missing_derived_from_from_candidate_trace_refs(self) -> None:
+        bundle = DraftBundleV2(
+            units=[
+                DraftUnitV2(
+                    unit_id="unit:recommendations:action-001",
+                    section_id="recommendations",
+                    unit_type="recommendation",
+                    text="[action-001] 建议动作 1",
+                    trace_refs=[TraceRef(trace_id="action-001", trace_kind="recommendation", support_level="derived")],
+                    derived_from=[],
+                    support_level="derived",
+                    render_template_id="recommendations:recommendation",
+                    metadata={},
+                )
+            ],
+            section_order=["recommendations"],
+            metadata={},
+        )
+        validation = ValidationResultV2(
+            passed=False,
+            failures=[
+                {
+                    "failure_id": "dangling_derived_from:1",
+                    "target_unit_id": "unit:recommendations:action-001",
+                    "failure_type": "dangling_derived_from",
+                    "message": "分析型单元必须携带 derived_from 追溯链。",
+                    "candidate_trace_refs": [{"trace_id": "action-001", "trace_kind": "recommendation", "support_level": "derived"}],
+                    "candidate_derived_from": [],
+                    "patchable": True,
+                    "patch_status": "pending",
+                    "metadata": {"section_id": "recommendations", "unit_type": "recommendation", "support_level": "derived"},
+                }
+            ],
+            patchable_failures=[],
+            gate="repair",
+            repair_count=0,
+            next_node="repair_patch_planner",
+            metadata={},
+        )
+
+        plan = build_repair_plan_v2(_minimal_payload()["report_ir"], bundle, validation)
+
+        self.assertEqual(len(plan.patches), 1)
+        self.assertEqual(plan.patches[0].replacement_unit.derived_from, ["action-001"])
+
+    def test_build_repair_plan_v2_demotes_unrepairable_observation_placeholder(self) -> None:
+        bundle = DraftBundleV2(
+            units=[
+                DraftUnitV2(
+                    unit_id="unit:timeline:event-1",
+                    section_id="timeline",
+                    unit_type="observation",
+                    text="[event-1] 事件 1（support=none）",
+                    trace_refs=[TraceRef(trace_id="event-1", trace_kind="section_context", support_level="direct")],
+                    derived_from=[],
+                    support_level="direct",
+                    render_template_id="timeline:observation",
+                    metadata={},
+                )
+            ],
+            section_order=["timeline"],
+            metadata={},
+        )
+        validation = ValidationResultV2(
+            passed=False,
+            failures=[
+                {
+                    "failure_id": "unsupported_inference:1",
+                    "target_unit_id": "unit:timeline:event-1",
+                    "failure_type": "unsupported_inference",
+                    "message": "观察句必须直连 evidence 且使用 direct support。",
+                    "candidate_trace_refs": [{"trace_id": "event-1", "trace_kind": "section_context", "support_level": "direct"}],
+                    "candidate_derived_from": [],
+                    "patchable": True,
+                    "patch_status": "pending",
+                    "metadata": {"section_id": "timeline", "unit_type": "observation", "support_level": "direct"},
+                }
+            ],
+            patchable_failures=[],
+            gate="repair",
+            repair_count=0,
+            next_node="repair_patch_planner",
+            metadata={},
+        )
+
+        plan = build_repair_plan_v2(_minimal_payload()["report_ir"], bundle, validation)
+
+        self.assertEqual(plan.patches[0].replacement_unit.unit_type, "transition")
+        self.assertEqual(plan.patches[0].replacement_unit.support_level, "structural")
+
+    def test_validate_draft_bundle_v2_stops_repair_after_zero_effective_patches(self) -> None:
+        bundle = DraftBundleV2(
+            units=[
+                DraftUnitV2(
+                    unit_id="unit:risks:risk-1",
+                    section_id="risks",
+                    unit_type="risk",
+                    text="[risk-1] 风险 1",
+                    trace_refs=[TraceRef(trace_id="risk-1", trace_kind="risk", support_level="derived")],
+                    derived_from=[],
+                    support_level="derived",
+                    render_template_id="risks:risk",
+                    metadata={},
+                )
+            ],
+            section_order=["risks"],
+            metadata={"repair_patch_count": 0},
+        )
+
+        result = validate_draft_bundle_v2(_minimal_payload()["report_ir"], bundle, repair_count=1, max_repairs=2)
+
+        self.assertEqual(result.gate, "human_review")
+        self.assertEqual(result.next_node, "compile_blocked")
+
     def test_stream_graph_events_supports_v2_updates_shape(self) -> None:
         events: list[dict] = []
 
@@ -153,7 +285,7 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
         stack.enter_context(patch("src.report.deep_report.graph_runtime.compile_draft_units", side_effect=_invalid_draft_bundle))
         return stack
 
-    def test_graph_interrupt_resume_with_sqlite_checkpoint_and_edit(self) -> None:
+    def test_graph_interrupt_resume_with_sqlite_checkpoint_and_annotation(self) -> None:
         events: list[dict] = []
         base_dir = Path(__file__).resolve().parents[1] / "data" / "_tmp"
         base_dir.mkdir(parents=True, exist_ok=True)
@@ -171,6 +303,7 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
                 self.assertEqual(first["status"], "interrupted")
                 self.assertTrue(Path(checkpoint_path).exists())
                 self.assertTrue(first["interrupts"])
+                preview_markdown = str(first["markdown"] or "").strip()
                 self.assertEqual(first["graph_thread_id"], "graph-thread-1")
                 self.assertEqual(first["checkpoint_backend"], "sqlite")
                 self.assertEqual(first["checkpoint_locator"], checkpoint_path)
@@ -186,8 +319,11 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
                     checkpointer_path=checkpoint_path,
                     graph_thread_id="graph-thread-1",
                     review_decision={
-                        "decision": "edit",
-                        "edited_action": {"markdown": "# 人工修订后的正式文稿"},
+                        "decision": "approve",
+                        "review_payload": {
+                            "review_mode": "annotation",
+                            "comment": "保留原文稿，只记录人工边界批注。",
+                        },
                     },
                 )
         finally:
@@ -196,12 +332,14 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
             except OSError:
                 pass
 
-        self.assertEqual(resumed["markdown"], "# 人工修订后的正式文稿")
+        self.assertEqual(resumed["markdown"], preview_markdown)
         self.assertFalse(resumed["review_required"])
         self.assertEqual(resumed["graph_state_v2"]["metadata"]["graph_thread_id"], "graph-thread-1")
         self.assertEqual(resumed["graph_state_v2"]["metadata"]["checkpoint_path"], checkpoint_path)
         self.assertEqual(resumed["checkpoint_backend"], "sqlite")
         self.assertEqual(resumed["checkpoint_locator"], checkpoint_path)
+        self.assertEqual(first["interrupts"][0]["value"]["review_mode"], "annotation")
+        self.assertIn("人工审核批注", first["interrupts"][0]["value"]["review_prompt"])
 
     def test_graph_interrupt_resume_with_approve_uses_preview(self) -> None:
         events: list[dict] = []

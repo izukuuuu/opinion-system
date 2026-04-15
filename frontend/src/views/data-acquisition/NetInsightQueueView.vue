@@ -572,7 +572,20 @@ import AppSelect from '../../components/AppSelect.vue'
 import { useActiveProject } from '../../composables/useActiveProject'
 import { useApiBase } from '../../composables/useApiBase'
 
-const platformOptions = ['微博', '微信', '新闻网站', '新闻APP', '论坛', '视频', '自媒体号', '全部']
+const platformOptions = [
+  '全部',
+  '新闻网站',
+  '新闻APP',
+  '视频',
+  '微博',
+  '微信',
+  '自媒体号',
+  '论坛',
+  '电子报',
+  '境外新闻',
+  'Twitter',
+  'Facebook',
+]
 
 // Select options
 const sortOptions = [

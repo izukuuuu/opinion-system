@@ -98,7 +98,7 @@ class ReportCapabilityAdaptersTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.topic_root / BERTOPIC_FILE_MAP["temporal"]).write_text(
-            json.dumps({"time_nodes": [{"date": "2025-01-01", "label": "01-01", "count": 4}, {"date": "2025-01-07", "label": "01-07", "count": 8}]}, ensure_ascii=False, indent=2),
+            json.dumps({"time_nodes": [{"date": "2025-01-01", "label": "01-01", "total": 4}, {"date": "2025-01-07", "label": "01-07", "total": 8}]}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 

@@ -6,6 +6,7 @@ import sys
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -29,6 +30,7 @@ from src.report.deep_report.payloads import (
     build_mechanism_summary_payload,
     build_retrieval_plan_payload,
     build_section_packet_payload,
+    extract_actor_positions_payload,
     get_corpus_coverage_payload,
     judge_decision_utility_payload,
     normalize_task_payload,
@@ -633,6 +635,37 @@ class DeepReportToolsTests(unittest.TestCase):
         self.assertTrue(utility.result.next_action)
         self.assertTrue(any(item.dimension in {"empty_evidence", "insufficient_structure"} for item in utility.result.fallback_trace))
 
+    def test_decision_utility_accepts_wrapped_objects(self) -> None:
+        normalized = normalize_task_payload(
+            task_text="控烟政策建议",
+            topic_identifier=self.topic_identifier,
+            start="2025-08-01",
+            end="2025-08-31",
+            mode="fast",
+        )
+        utility = UtilityAssessmentResult.model_validate(
+            judge_decision_utility_payload(
+                normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+                risk_signals_json=json.dumps(
+                    {"result": [{"risk_id": "risk-1", "spread_condition": "争议扩散", "severity": "high"}]},
+                    ensure_ascii=False,
+                ),
+                recommendation_candidates_json=json.dumps(
+                    [{"action": "补充回应", "rationale": "降低扩散", "target": "公众", "preconditions": "统一口径", "side_effects": "可能引发二次讨论"}],
+                    ensure_ascii=False,
+                ),
+                unresolved_points_json=json.dumps([{"item_id": "uv-1", "statement": "截图待核验", "reason": "链路不完整"}], ensure_ascii=False),
+                agenda_frame_map_json=json.dumps({"result": {"issues": [{"issue_id": "issue-1", "label": "控烟争议"}], "frames": [{"frame_id": "frame-1", "issue_id": "issue-1", "problem_definition": "公共场所禁烟"}]}}, ensure_ascii=False),
+                conflict_map_json=json.dumps({"result": {"claims": [{"claim_id": "claim-1", "proposition": "应全面禁烟", "source_ids": ["新闻"], "verification_status": "sustained_conflict", "evidence_density": 0.8}], "actor_positions": [{"actor_id": "actor-1", "name": "市卫健委"}], "edges": [{"edge_id": "edge-1", "claim_a_id": "claim-1", "claim_b_id": "claim-1", "conflict_type": "direct_contradiction", "actor_scope": ["actor-1"], "time_scope": ["2025-08-20"], "evidence_refs": ["ev-1"], "evidence_density": 0.8, "confidence": 0.9}], "resolution_summary": [{"claim_id": "claim-1", "status": "sustained_conflict"}]}}, ensure_ascii=False),
+                mechanism_summary_json=json.dumps({"result": {"trigger_events": [{"event_id": "event-1", "label": "政策发布"}], "amplification_paths": [{"path_id": "path-1", "path_label": "媒体扩散"}], "cause_candidates": [{"cause_id": "cause-1", "label": "解释分歧"}]}}, ensure_ascii=False),
+                actor_positions_json=json.dumps({"result": [{"actor_id": "actor-1", "name": "市卫健委"}]}, ensure_ascii=False),
+            )
+        )
+
+        self.assertTrue(utility.result.has_key_actors)
+        self.assertTrue(utility.result.has_primary_contradiction)
+        self.assertTrue(utility.result.has_mechanism_explanation)
+
     def test_empty_conflict_and_mechanism_surfaces_are_explanatory(self) -> None:
         normalized = normalize_task_payload(
             task_text="控烟政策建议",
@@ -660,6 +693,45 @@ class DeepReportToolsTests(unittest.TestCase):
 
         self.assertEqual(empty_conflict.result.summary, "当前未形成可回链争议轴。")
         self.assertEqual(empty_mechanism.result.confidence_summary, "机制判断因证据不足跳过。")
+
+    def test_extract_actor_positions_fallback_uses_overview_intent(self) -> None:
+        normalized = normalize_task_payload(
+            task_text="控烟政策建议",
+            topic_identifier=self.topic_identifier,
+            start="2025-08-01",
+            end="2025-08-31",
+            mode="fast",
+        )
+
+        with patch("src.report.deep_report.payloads.retrieve_evidence_cards_payload") as mocked_retrieve:
+            mocked_retrieve.return_value = {"result": []}
+            extract_actor_positions_payload(
+                normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+                evidence_ids_json="[]",
+                actor_limit=6,
+            )
+
+        self.assertEqual(mocked_retrieve.call_args.kwargs["intent"], "overview")
+
+    def test_claim_actor_conflict_fallback_uses_overview_intent(self) -> None:
+        normalized = normalize_task_payload(
+            task_text="控烟政策建议",
+            topic_identifier=self.topic_identifier,
+            start="2025-08-01",
+            end="2025-08-31",
+            mode="fast",
+        )
+
+        with patch("src.report.deep_report.payloads.retrieve_evidence_cards_payload") as mocked_retrieve:
+            mocked_retrieve.return_value = {"result": []}
+            build_claim_actor_conflict_payload(
+                normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+                evidence_ids_json="[]",
+                actor_positions_json=json.dumps([], ensure_ascii=False),
+                timeline_nodes_json=json.dumps([], ensure_ascii=False),
+            )
+
+        self.assertEqual(mocked_retrieve.call_args.kwargs["intent"], "overview")
 
 
 if __name__ == "__main__":

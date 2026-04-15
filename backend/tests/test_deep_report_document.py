@@ -1025,6 +1025,7 @@ class DeepReportDocumentTests(unittest.TestCase):
         self.assertTrue(payload.offending_unit_ids)
         self.assertTrue(payload.semantic_deltas)
         self.assertEqual(payload.allowed_rewrite_ops, ["compress", "lexical_soften"])
+        self.assertIn("人工批注", payload.suggested_actions[-1])
 
     def test_generate_full_report_payload_returns_waiting_approval_when_semantic_review_is_required(self):
         structured = sample_structured_payload()
@@ -1057,6 +1058,8 @@ class DeepReportDocumentTests(unittest.TestCase):
             )
         self.assertEqual(payload["status"], "waiting_approval")
         self.assertEqual(payload["approvals"][0]["tool_name"], "graph_interrupt")
+        self.assertEqual(payload["approvals"][0]["action"]["review_mode"], "annotation")
+        self.assertIn("只读", payload["approvals"][0]["action"]["review_prompt"])
         self.assertEqual(payload["artifact_manifest"]["approval_records"]["status"], "ready")
         self.assertTrue(payload["semantic_interrupt"]["semantic_deltas"])
         self.assertTrue(payload["approval_records"])

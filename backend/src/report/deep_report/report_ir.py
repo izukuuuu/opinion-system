@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Type, get_origin
+
+from pydantic import BaseModel
 
 from .schemas import (
     AgendaFrameMap,
     ArtifactManifest,
     ArtifactRecord,
     ConflictMap,
+    EventFlashpoint,
     FigureArtifactRecord,
     FigureBlock,
+    GroupDemand,
     MechanismSummary,
     PlacementPlan,
+    PlatformEmotionProfile,
     ReportIR,
     ReportIRActor,
     ReportIRClaim,
@@ -21,6 +26,7 @@ from .schemas import (
     ReportIRRisk,
     ReportIRStanceRow,
     ReportIRUnresolvedPoint,
+    RiskTrafficLight,
     StructuredReport,
     UtilityAssessment,
 )
@@ -28,6 +34,21 @@ from .schemas import (
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+_T = Type[BaseModel]
+
+
+def _coerce_validate(model_cls: _T, data: Dict[str, Any]) -> Any:
+    """model_validate 的防御性包装：把 LLM 可能输出的 null 在 List 字段上强制转成 []，
+    避免 Pydantic v2 抛出 'Input should be a valid list'。不修改任何模型定义。"""
+    if not isinstance(data, dict):
+        return model_cls.model_validate(data)
+    coerced = dict(data)
+    for field_name, field_info in model_cls.model_fields.items():
+        if get_origin(field_info.annotation) is list and coerced.get(field_name) is None:
+            coerced[field_name] = []
+    return model_cls.model_validate(coerced)
 
 
 def _source_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -102,6 +123,10 @@ def _build_evidence_ledger(source: Dict[str, Any]) -> Tuple[List[Dict[str, Any]]
             if str(citation_id or "").strip()
         ]
         citation = citations.get(citation_ids[0], {}) if citation_ids else {}
+        # 优先取 raw_content 作为可引用金句，其次用 snippet
+        raw_quote_src = str(
+            citation.get("raw_content") or citation.get("snippet") or item.get("source_summary") or ""
+        ).strip()
         entries.append(
             ReportIREvidenceEntry(
                 evidence_id=evidence_id,
@@ -113,6 +138,12 @@ def _build_evidence_ledger(source: Dict[str, Any]) -> Tuple[List[Dict[str, Any]]
                 url=str(citation.get("url") or "").strip(),
                 entities=[str(item.get("subject") or "").strip()] if str(item.get("subject") or "").strip() else [],
                 confidence=str(item.get("confidence") or "medium").strip() or "medium",
+                # BettaFish 深度引证字段
+                author=str(citation.get("author") or "").strip(),
+                sentiment_label=str(citation.get("sentiment_label") or "").strip(),
+                raw_quote=raw_quote_src[:150],
+                emotion_signals=[],  # 由 _build_platform_emotion_profiles 按平台填充
+                engagement_views=int((citation.get("engagement") or {}).get("views") or 0),
             ).model_dump()
         )
         for citation_id in citation_ids:
@@ -418,7 +449,7 @@ def summarize_report_ir(report_ir: ReportIR | Dict[str, Any]) -> Dict[str, Any]:
 def _build_agenda_frame_map(source: Dict[str, Any], actor_name_to_id: Dict[str, str]) -> Dict[str, Any]:
     existing = source.get("agenda_frame_map")
     if isinstance(existing, dict) and existing:
-        return AgendaFrameMap.model_validate(existing).model_dump()
+        return _coerce_validate(AgendaFrameMap, existing).model_dump()
     keywords = [str(item).strip() for item in (_collect_keywords(source) or []) if str(item or "").strip()]
     timeline = source.get("timeline") if isinstance(source.get("timeline"), list) else []
     issues = [
@@ -512,7 +543,7 @@ def _build_agenda_frame_map(source: Dict[str, Any], actor_name_to_id: Dict[str, 
 def _build_conflict_map(source: Dict[str, Any], actor_name_to_id: Dict[str, str]) -> Dict[str, Any]:
     existing = source.get("conflict_map")
     if isinstance(existing, dict) and existing:
-        return ConflictMap.model_validate(existing).model_dump()
+        return _coerce_validate(ConflictMap, existing).model_dump()
     conflict_points = source.get("conflict_points") if isinstance(source.get("conflict_points"), list) else []
     claims = []
     edges = []
@@ -607,7 +638,7 @@ def _build_conflict_map(source: Dict[str, Any], actor_name_to_id: Dict[str, str]
 def _build_mechanism_summary(source: Dict[str, Any]) -> Dict[str, Any]:
     existing = source.get("mechanism_summary")
     if isinstance(existing, dict) and existing:
-        return MechanismSummary.model_validate(existing).model_dump()
+        return _coerce_validate(MechanismSummary, existing).model_dump()
     propagation = source.get("propagation_features") if isinstance(source.get("propagation_features"), list) else []
     timeline = source.get("timeline") if isinstance(source.get("timeline"), list) else []
     trigger_events = [
@@ -657,7 +688,7 @@ def _build_mechanism_summary(source: Dict[str, Any]) -> Dict[str, Any]:
 def _build_utility_assessment(source: Dict[str, Any]) -> Dict[str, Any]:
     existing = source.get("utility_assessment")
     if isinstance(existing, dict) and existing:
-        return UtilityAssessment.model_validate(existing).model_dump()
+        return _coerce_validate(UtilityAssessment, existing).model_dump()
     suggestions = source.get("suggested_actions") if isinstance(source.get("suggested_actions"), list) else []
     unresolved = source.get("unverified_points") if isinstance(source.get("unverified_points"), list) else []
     risks = source.get("risk_judgement") if isinstance(source.get("risk_judgement"), list) else []
@@ -706,6 +737,261 @@ def _build_utility_assessment(source: Dict[str, Any]) -> Dict[str, Any]:
     ).model_dump()
 
 
+# ---------------------------------------------------------------------------
+# BettaFish 质量数据结构 builders
+# ---------------------------------------------------------------------------
+
+def _normalize_key(text: str) -> str:
+    """将任意文本规范化为安全的 key 字符串。"""
+    import re
+    return re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff_-]+", "_", text).strip("_")[:30] or "unknown"
+
+
+def _build_platform_emotion_profiles(
+    event_analysis: Dict[str, Any],
+    citations: Dict[str, Dict[str, Any]],
+) -> List[PlatformEmotionProfile]:
+    """从 event_analysis.platform_analysis 或 citations 分组构建平台情绪档案。"""
+    profiles: List[PlatformEmotionProfile] = []
+
+    # 优先从 event_analyst 的结构化输出读取
+    platform_data = (
+        (event_analysis.get("platform_analysis") or {}).get("platforms") or []
+    )
+    for plat in platform_data:
+        if not isinstance(plat, dict):
+            continue
+        platform_name = str(plat.get("platform") or "").strip()
+        if not platform_name:
+            continue
+        raw_dist = plat.get("emotion_dist") or {}
+        emotion_dist: Dict[str, float] = {}
+        for k, v in raw_dist.items():
+            try:
+                emotion_dist[str(k)] = float(v)
+            except (TypeError, ValueError):
+                pass
+        quotes = [
+            str(q).strip()[:100]
+            for q in (plat.get("representative_quotes") or [])
+            if str(q or "").strip()
+        ][:5]
+        profiles.append(
+            PlatformEmotionProfile(
+                platform=platform_name,
+                dominant_emotion=str(plat.get("dominant_emotion") or "").strip(),
+                emotion_distribution=emotion_dist,
+                representative_quotes=quotes,
+                discussion_style=str(plat.get("discussion_style") or "").strip(),
+                evidence_ids=[
+                    str(eid).strip()
+                    for eid in (plat.get("evidence_ids") or [])
+                    if str(eid or "").strip()
+                ],
+            )
+        )
+
+    # Fallback: 从 citations 按平台分组推断
+    if not profiles:
+        by_platform: Dict[str, List[Dict[str, Any]]] = {}
+        for cit in citations.values():
+            plat = str(cit.get("platform") or "").strip()
+            if plat:
+                by_platform.setdefault(plat, []).append(cit)
+        for plat, cits in by_platform.items():
+            # 统计情感标签分布
+            from collections import Counter
+            sentiment_counts: Counter = Counter()
+            quotes: List[str] = []
+            for cit in cits:
+                sl = str(cit.get("sentiment_label") or "").strip()
+                if sl:
+                    sentiment_counts[sl] += 1
+                q = str(cit.get("snippet") or "").strip()[:80]
+                if q and len(quotes) < 3:
+                    quotes.append(q)
+            total = sum(sentiment_counts.values()) or 1
+            emotion_dist = {k: round(v / total, 2) for k, v in sentiment_counts.most_common(3)}
+            dominant = sentiment_counts.most_common(1)[0][0] if sentiment_counts else ""
+            profiles.append(
+                PlatformEmotionProfile(
+                    platform=plat,
+                    dominant_emotion=dominant,
+                    emotion_distribution=emotion_dist,
+                    representative_quotes=quotes,
+                    evidence_ids=[
+                        str(cit.get("citation_id") or "").strip()
+                        for cit in cits[:5]
+                        if str(cit.get("citation_id") or "").strip()
+                    ],
+                )
+            )
+    return profiles
+
+
+def _build_event_flashpoints(
+    timeline_events: List[Dict[str, Any]],
+    citation_to_evidence: Dict[str, List[str]],
+    ev_by_id: Dict[str, Dict[str, Any]],
+    event_analysis: Dict[str, Any],
+) -> List[EventFlashpoint]:
+    """从时间线节点和 event_analysis 构建事件全景速览爆点。"""
+    flashpoints: List[EventFlashpoint] = []
+    for i, event in enumerate(timeline_events):
+        if not isinstance(event, dict):
+            continue
+        event_id = str(event.get("event_id") or "").strip()
+        if not event_id:
+            continue
+        # 将 citation_ids → evidence_ids（与主流程保持一致）
+        citation_ids = [
+            str(cid).strip()
+            for cid in (event.get("citation_ids") or [])
+            if str(cid or "").strip()
+        ]
+        support_ids = list({
+            eid
+            for cid in citation_ids
+            for eid in citation_to_evidence.get(cid, [])
+        })
+        # 从支撑证据中聚合情绪关键词
+        emotion_keywords: List[str] = []
+        peak_views = 0
+        for ev_id in support_ids[:5]:
+            ev = ev_by_id.get(ev_id) or {}
+            for kw in (ev.get("emotion_signals") or []):
+                kw = str(kw).strip()
+                if kw and kw not in emotion_keywords:
+                    emotion_keywords.append(kw)
+            peak_views = max(peak_views, int(ev.get("engagement_views") or 0))
+        # 如果证据里没有情绪关键词，尝试从 summary 提取
+        if not emotion_keywords:
+            summary = str(event.get("summary") or event.get("title") or "").strip()
+            # 简单地把高频词作为关键词候选
+            if summary:
+                emotion_keywords = []  # 留空，由 deep_writer 从上下文推断
+        peak_readership = f"{peak_views // 10000}万" if peak_views >= 10000 else ""
+        flashpoints.append(
+            EventFlashpoint(
+                flashpoint_id=f"flash-{i + 1}",
+                time_label=str(event.get("time_label") or "").strip(),
+                event_title=str(event.get("summary") or "").strip()[:80],
+                peak_readership=peak_readership,
+                core_emotion_keywords=emotion_keywords[:5],
+                support_evidence_ids=support_ids[:5],
+            )
+        )
+    return flashpoints
+
+
+def _build_group_demands(
+    event_analysis: Dict[str, Any],
+    actors: List[Dict[str, Any]],
+    ev_by_id: Dict[str, Dict[str, Any]],
+) -> List[GroupDemand]:
+    """从 event_analysis.actor_distribution 或主体注册构建群体诉求清单。"""
+    demands: List[GroupDemand] = []
+
+    # 优先从 event_analyst 结构化输出读取
+    actor_list = (event_analysis.get("actor_distribution") or {}).get("actors") or []
+    for actor_data in actor_list:
+        if not isinstance(actor_data, dict):
+            continue
+        name = str(actor_data.get("name") or "").strip()
+        if not name:
+            continue
+        key_statements = [
+            str(stmt).strip()
+            for stmt in (actor_data.get("key_statements") or [])
+            if str(stmt or "").strip()
+        ][:3]
+        stance = str(actor_data.get("stance") or "").strip()
+        evidence_ids = [
+            str(eid).strip()
+            for eid in (actor_data.get("evidence_ids") or [])
+            if str(eid or "").strip()
+        ]
+        demands.append(
+            GroupDemand(
+                group_id=f"group-{_normalize_key(name)}",
+                group_name=name,
+                high_freq_demands=[stance] if stance else [],
+                golden_quotes=key_statements,
+                evidence_ids=evidence_ids,
+            )
+        )
+
+    # Fallback: 从主体注册中提取基础信息
+    if not demands:
+        for item in actors[:8]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            summary = str(item.get("summary") or "").strip()
+            demands.append(
+                GroupDemand(
+                    group_id=f"group-{_normalize_key(name)}",
+                    group_name=name,
+                    high_freq_demands=[summary] if summary else [],
+                    golden_quotes=[],
+                    evidence_ids=[
+                        str(cid).strip()
+                        for cid in (item.get("citation_ids") or [])
+                        if str(cid or "").strip()
+                    ][:3],
+                )
+            )
+    return demands
+
+
+def _build_risk_traffic_lights(
+    risk_judgements: List[Dict[str, Any]],
+) -> List[RiskTrafficLight]:
+    """将现有风险判断映射为三色灯结构。"""
+    lights: List[RiskTrafficLight] = []
+    for item in risk_judgements[:5]:
+        if not isinstance(item, dict):
+            continue
+        risk_id = str(item.get("risk_id") or "").strip()
+        if not risk_id:
+            continue
+        level = str(item.get("level") or "medium").strip().lower()
+        color: str = "red" if level == "high" else "green" if level == "low" else "yellow"
+        summary_text = str(item.get("summary") or item.get("label") or "").strip()
+        lights.append(
+            RiskTrafficLight(
+                risk_id=risk_id,
+                light_color=color,  # type: ignore[arg-type]
+                flashpoint_prediction=summary_text[:100],
+                trigger_threshold="",  # 由 deep_writer 结合上下文补充
+                preemptive_action="",  # 由 deep_writer 结合上下文补充
+                support_evidence_ids=[
+                    str(cid).strip()
+                    for cid in (item.get("citation_ids") or [])
+                    if str(cid or "").strip()
+                ][:3],
+            )
+        )
+    return lights
+
+
+def _extract_netizen_quotes(evidence_entries: List[Dict[str, Any]]) -> List[str]:
+    """从证据账本中提取最佳原文金句（有内容、长度适中）。"""
+    quotes: List[str] = []
+    seen: set = set()
+    for entry in evidence_entries:
+        # 优先用 raw_quote，其次用 snippet
+        quote = str(entry.get("raw_quote") or entry.get("snippet") or "").strip()
+        if len(quote) >= 20 and quote not in seen:
+            seen.add(quote)
+            quotes.append(quote[:120])
+        if len(quotes) >= 15:
+            break
+    return quotes
+
+
 def build_report_ir(
     payload: StructuredReport | Dict[str, Any],
     *,
@@ -716,6 +1002,8 @@ def build_report_ir(
     structured = payload if isinstance(payload, StructuredReport) else StructuredReport.model_validate(payload if isinstance(payload, dict) else {})
     manifest = _ensure_manifest(artifact_manifest)
     source = _source_payload(structured.model_dump())
+    # 提取 event_analysis（来自 event_analyst 子代理，保留在 StructuredReport.event_analysis 字段）
+    event_analysis: Dict[str, Any] = structured.event_analysis or {}
     figure_blocks = source.get("figures") if isinstance(source.get("figures"), list) else structured.model_dump().get("figures") if isinstance(structured.model_dump().get("figures"), list) else []
     placement_payload = source.get("placement_plan") if isinstance(source.get("placement_plan"), dict) else structured.model_dump().get("placement_plan") if isinstance(structured.model_dump().get("placement_plan"), dict) else {}
     task = source.get("task") if isinstance(source.get("task"), dict) else {}
@@ -723,6 +1011,12 @@ def build_report_ir(
     citations = _citation_index(source)
     evidence_entries, citation_to_evidence, _finding_to_claim = _build_evidence_ledger(source)
     evidence_entries = _append_missing_evidence_entries(evidence_entries, source)
+    # 构建证据ID索引，供 BettaFish builders 使用
+    ev_by_id: Dict[str, Dict[str, Any]] = {
+        str(e.get("evidence_id") or "").strip(): e
+        for e in evidence_entries
+        if isinstance(e, dict) and str(e.get("evidence_id") or "").strip()
+    }
     actors = source.get("subjects") if isinstance(source.get("subjects"), list) else []
     actor_name_to_id = {
         str(item.get("name") or "").strip(): str(item.get("subject_id") or "").strip()
@@ -972,6 +1266,22 @@ def build_report_ir(
             "claim_coverage": coverage,
             "traceability_stats": traceability,
         },
+        # BettaFish 质量字段
+        platform_emotion_profiles=_build_platform_emotion_profiles(event_analysis, citations),
+        event_flashpoints=_build_event_flashpoints(
+            source.get("timeline") or [],
+            citation_to_evidence,
+            ev_by_id,
+            event_analysis,
+        ),
+        group_demands=_build_group_demands(event_analysis, actors, ev_by_id),
+        risk_traffic_lights=_build_risk_traffic_lights(
+            source.get("risk_judgement") or []
+        ),
+        emotion_conduction_formula=str(
+            (event_analysis.get("sentiment_summary") or {}).get("overall_emotion") or ""
+        ).strip(),
+        netizen_quotes=_extract_netizen_quotes(evidence_entries),
     )
 
 

@@ -16,8 +16,10 @@ dependencies = [
     "langchain>=1.2.15",
     "langchain-core>=1.2.26",
     "langchain-openai>=1.1.8",
+    "langchain-anthropic>=1.1.5",
     "langgraph>=1.1.6",
     "langgraph-checkpoint-postgres>=2.1.0",
+    "psycopg-binary>=3.2.0",
     "langgraph-checkpoint-sqlite>=2.0.11",
     "deepagents>=0.5.2",
     "langsmith>=0.4.0",
@@ -56,3 +58,14 @@ dependencies = [
 # Note: PyTorch with CUDA 11.8 must be installed manually after uv sync.
 # Run: uv pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 # See .agent/workflows/setup-cuda.md for details
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "backend"}
+packages = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.json", "*.md"]

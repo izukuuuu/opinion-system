@@ -153,6 +153,8 @@ def main() -> None:
 def _run_task(task_id: str) -> None:
     task = get_task(task_id)
     request = dict(task.get("request") or {})
+    resume_context = request.get("resume_context") if isinstance(request.get("resume_context"), dict) else {}
+    failure_resume_context = resume_context if str(resume_context.get("kind") or "").strip() == "resume_before_failure" else {}
     task_runtime_version = str(
         request.get("runtime_contract_version")
         or task.get("runtime_contract_version")
@@ -164,6 +166,7 @@ def _run_task(task_id: str) -> None:
     start = str(request.get("start") or task.get("start") or "").strip()
     end = str(request.get("end") or task.get("end") or start).strip() or start
     mode = str(request.get("mode") or task.get("mode") or "fast").strip().lower() or "fast"
+    skip_validation = bool(request.get("skip_validation"))
     aliases = [
         str(item).strip()
         for item in (request.get("aliases") or [])
@@ -191,87 +194,110 @@ def _run_task(task_id: str) -> None:
     heartbeat.start()
     try:
         _raise_if_cancelled(task_id)
-        mark_agent_started(
-            task_id,
-            agent="researcher",
-            phase="prepare",
-            message="Researcher 正在检查专题数据和历史产物。",
-        )
-        mark_task_progress(task_id, phase="prepare", percentage=PHASE_PERCENTAGE["prepare"], message="正在检查基础数据是否完备。")
-        mark_task_progress(task_id, phase="analyze", percentage=PHASE_PERCENTAGE["analyze"], message="Researcher 正在确认基础分析结果。")
-
-        analyze_prepare = ensure_analyze_results(
-            topic_identifier,
-            start=start,
-            end=end,
-            ctx=ctx,
-        )
-        LOGGER.warning(
-            "report worker | analyze ready | task=%s prepared=%s root=%s",
-            task_id,
-            bool(analyze_prepare.get("prepared")),
-            analyze_prepare.get("analyze_root"),
-        )
-        append_agent_memo(
-            task_id,
-            agent="researcher",
-            phase="analyze",
-            message=analyze_prepare.get("message") or "基础分析结果已就绪。",
-            delta=str(analyze_prepare.get("message") or "基础分析结果已就绪。"),
-            payload=analyze_prepare,
-        )
-        _raise_if_cancelled(task_id)
-
-        mark_task_progress(task_id, phase="explain", percentage=PHASE_PERCENTAGE["explain"], message="Researcher 正在补齐总体文字解读。")
-        explain_prepare = ensure_explain_results(
-            topic_identifier,
-            start=start,
-            end=end,
-            ctx=ctx,
-        )
-        if not bool(explain_prepare.get("ready")):
-            LOGGER.warning(
-                "report worker | explain still incomplete | task=%s source=%s smart_fill=%s available=%s/%s",
+        if failure_resume_context:
+            mark_task_progress(
                 task_id,
-                explain_prepare.get("source"),
-                explain_prepare.get("smart_fill"),
-                explain_prepare.get("available_count"),
-                explain_prepare.get("expected_count"),
+                phase="planning",
+                percentage=PHASE_PERCENTAGE["compile"],
+                message="正在从失败前一步恢复，并重新进入正式编译链。",
             )
+            append_event(
+                task_id,
+                event_type="phase.context",
+                phase="planning",
+                title="任务恢复中",
+                message="系统正在基于上一轮结构化结果，重新进入正式编译链。",
+                payload={
+                    "resume_from": "failure_before_compile",
+                    "source_task_id": str(failure_resume_context.get("source_task_id") or "").strip(),
+                    "source_phase": str(failure_resume_context.get("source_failed_phase") or "").strip(),
+                    "source_actor": str(failure_resume_context.get("source_failed_actor") or "").strip(),
+                },
+            )
+            resume_payload = None
         else:
-            LOGGER.warning(
-                "report worker | explain ready | task=%s source=%s generated=%s",
+            mark_agent_started(
                 task_id,
-                explain_prepare.get("source"),
-                (explain_prepare.get("smart_fill") or {}).get("generated_functions"),
+                agent="researcher",
+                phase="prepare",
+                message="Researcher 正在检查专题数据和历史产物。",
             )
-        append_agent_memo(
-            task_id,
-            agent="researcher",
-            phase="explain",
-            message=explain_prepare.get("message") or "总体文字解读检查完成。",
-            delta=str(explain_prepare.get("message") or "总体文字解读检查完成。"),
-            payload=explain_prepare,
-        )
-        if mode == "research":
+            mark_task_progress(task_id, phase="prepare", percentage=PHASE_PERCENTAGE["prepare"], message="正在检查基础数据是否完备。")
+            mark_task_progress(task_id, phase="analyze", percentage=PHASE_PERCENTAGE["analyze"], message="Researcher 正在确认基础分析结果。")
+
+            analyze_prepare = ensure_analyze_results(
+                topic_identifier,
+                start=start,
+                end=end,
+                ctx=ctx,
+            )
+            LOGGER.warning(
+                "report worker | analyze ready | task=%s prepared=%s root=%s",
+                task_id,
+                bool(analyze_prepare.get("prepared")),
+                analyze_prepare.get("analyze_root"),
+            )
+            append_agent_memo(
+                task_id,
+                agent="researcher",
+                phase="analyze",
+                message=analyze_prepare.get("message") or "基础分析结果已就绪。",
+                delta=str(analyze_prepare.get("message") or "基础分析结果已就绪。"),
+                payload=analyze_prepare,
+            )
+            _raise_if_cancelled(task_id)
+
+            mark_task_progress(task_id, phase="explain", percentage=PHASE_PERCENTAGE["explain"], message="Researcher 正在补齐总体文字解读。")
+            explain_prepare = ensure_explain_results(
+                topic_identifier,
+                start=start,
+                end=end,
+                ctx=ctx,
+            )
+            if not bool(explain_prepare.get("ready")):
+                LOGGER.warning(
+                    "report worker | explain still incomplete | task=%s source=%s smart_fill=%s available=%s/%s",
+                    task_id,
+                    explain_prepare.get("source"),
+                    explain_prepare.get("smart_fill"),
+                    explain_prepare.get("available_count"),
+                    explain_prepare.get("expected_count"),
+                )
+            else:
+                LOGGER.warning(
+                    "report worker | explain ready | task=%s source=%s generated=%s",
+                    task_id,
+                    explain_prepare.get("source"),
+                    (explain_prepare.get("smart_fill") or {}).get("generated_functions"),
+                )
             append_agent_memo(
                 task_id,
                 agent="researcher",
                 phase="explain",
-                message="当前任务使用 research 模式，会加强本地归档与分析结果的研读轨迹。",
-                delta="当前任务使用 research 模式，会加强本地归档与分析结果的研读轨迹。",
+                message=explain_prepare.get("message") or "总体文字解读检查完成。",
+                delta=str(explain_prepare.get("message") or "总体文字解读检查完成。"),
+                payload=explain_prepare,
             )
-        _raise_if_cancelled(task_id)
-        _maybe_update_fallback_todos(
-            task_id,
-            stage="interpret",
-            phase="interpret",
-            message="总控代理开始协调检索、证据整理和结构分析。",
-        )
-        if _has_rejected_approval(task):
-            raise TaskCancelled("审批已拒绝，本次报告未继续写入正式结果。")
+            if mode == "research":
+                append_agent_memo(
+                    task_id,
+                    agent="researcher",
+                    phase="explain",
+                    message="当前任务使用 research 模式，会加强本地归档、基础分析和 BERTopic 结果的交叉研读。",
+                    delta="当前任务使用 research 模式，会加强本地归档、基础分析和 BERTopic 结果的交叉研读。",
+                )
+            _raise_if_cancelled(task_id)
+            _maybe_update_fallback_todos(
+                task_id,
+                stage="interpret",
+                phase="interpret",
+                message="总控代理开始协调检索、证据整理和结构分析。",
+            )
+            if _has_rejected_approval(task):
+                raise TaskCancelled("审批已拒绝，本次报告未继续写入正式结果。")
 
-        resume_payload = _build_resume_payload_from_task(task)
+            resume_payload = _build_resume_payload_from_task(task)
+        is_checkpoint_resume = str(task.get("resume_kind") or "").strip() == "checkpoint_resume"
         if resume_payload is not None and task_runtime_version != RUNTIME_CONTRACT_VERSION:
             diagnostic = {
                 "category": "legacy_runtime_version",
@@ -319,6 +345,9 @@ def _run_task(task_id: str) -> None:
             thread_id=str(task.get("thread_id") or request.get("thread_id") or "").strip(),
             task_id=task_id,
             resume_payload=resume_payload,
+            failure_resume_context=failure_resume_context or None,
+            checkpoint_resume=is_checkpoint_resume,
+            skip_validation=skip_validation,
             event_callback=lambda event: _handle_report_event(task_id, event),
         )
         if str(runtime_result.get("status") or "").strip() == "failed":
@@ -834,17 +863,34 @@ def _resolved_graph_review(task: Dict[str, Any]) -> Dict[str, Any] | None:
         if tool_name != "graph_interrupt" and str(item.get("approval_kind") or "").strip() != "graph_interrupt":
             continue
         decision = str(item.get("decision") or "").strip().lower()
-        if decision not in {"approve", "edit"}:
+        if decision != "approve":
             continue
+        review_payload = item.get("review_payload") if isinstance(item.get("review_payload"), dict) else {}
         return {
             "approval_id": str(item.get("approval_id") or "").strip(),
+            "interrupt_id": str(item.get("interrupt_id") or "").strip(),
             "decision": decision,
-            "edited_action": item.get("edited_action") if isinstance(item.get("edited_action"), dict) else {},
+            "review_payload": review_payload,
         }
     return None
 
 
 def _build_resume_payload_from_task(task: Dict[str, Any]) -> Any:
+    graph_review = _resolved_graph_review(task)
+    if graph_review:
+        resume_value: Dict[str, Any] = {
+            "decision": str(graph_review.get("decision") or "").strip().lower(),
+        }
+        review_payload = graph_review.get("review_payload") if isinstance(graph_review.get("review_payload"), dict) else {}
+        if review_payload:
+            resume_value["review_payload"] = review_payload
+        approval_id = str(graph_review.get("approval_id") or "").strip()
+        if approval_id:
+            resume_value["approval_id"] = approval_id
+        interrupt_id = str(graph_review.get("interrupt_id") or "").strip()
+        if interrupt_id:
+            return {interrupt_id: resume_value}
+        return resume_value
     approvals = task.get("approvals") if isinstance(task.get("approvals"), list) else []
     resolved = [item for item in approvals if isinstance(item, dict) and str(item.get("status") or "").strip() == "resolved"]
     if not resolved:

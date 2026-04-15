@@ -25,6 +25,7 @@ from ..deep_report.agent_tools import (
     get_basic_analysis_snapshot,
     get_bertopic_snapshot,
     get_corpus_coverage,
+    get_report_template,
     judge_decision_utility,
     normalize_task,
     retrieve_evidence_cards,
@@ -247,6 +248,12 @@ _TOOL_SPECS: Tuple[ReportToolSpec, ...] = (
         capability_tags=("analysis", "writer_support"),
         runtime_tags=(RUNTIME_COORDINATOR,),
         tool_class=SYNTHESIS_TOOL,
+    ),
+    _spec(
+        get_report_template,
+        capability_tags=("knowledge", "writer_support"),
+        runtime_tags=(RUNTIME_COORDINATOR, RUNTIME_SUBAGENT),
+        tool_class=READ_TOOL,
     ),
     _spec(
         get_sentiment_analysis_framework,
@@ -475,6 +482,13 @@ SUBAGENT_TOOL_ID_MAP: Mapping[str, Sequence[str]] = {
     "archive_evidence_organizer": ("retrieve_evidence_cards", "get_basic_analysis_snapshot"),
     "timeline_analyst": ("build_event_timeline", "compute_report_metrics"),
     "stance_conflict": ("extract_actor_positions",),
+    "event_analyst": (
+        "retrieve_evidence_cards",
+        "build_event_timeline",
+        "compute_report_metrics",
+        "get_basic_analysis_snapshot",
+        "build_basic_analysis_insight",
+    ),
     "agenda_frame_builder": ("build_agenda_frame_map",),
     "claim_actor_conflict": ("extract_actor_positions", "build_claim_actor_conflict"),
     "propagation_analyst": (
@@ -486,7 +500,17 @@ SUBAGENT_TOOL_ID_MAP: Mapping[str, Sequence[str]] = {
     "bertopic_evolution_analyst": ("get_bertopic_snapshot", "build_bertopic_insight"),
     "decision_utility_judge": ("judge_decision_utility",),
     "validator": ("verify_claim_v2",),
-    "writer": (),
+    "writer": (
+        "get_sentiment_analysis_framework",
+        "get_sentiment_theories",
+        "get_sentiment_case_template",
+        "search_reference_insights",
+        "build_section_packet",
+        "build_basic_analysis_insight",
+        "build_bertopic_insight",
+        "retrieve_evidence_cards",
+        "get_report_template",  # 新增：模板读取工具
+    ),
 }
 
 ANALYSIS_AGENT_TOOL_ID_MAP: Mapping[Tuple[str, str], Sequence[str]] = {

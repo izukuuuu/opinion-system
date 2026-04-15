@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -291,7 +292,100 @@ class ReportRuntimeSmokeTests(unittest.TestCase):
             ]
         )
         payload = _build_resume_payload_from_task(task)
-        self.assertEqual(payload, {"decisions": [{"type": "approve"}]})
+        self.assertEqual(payload, {"decision": "approve", "approval_id": "approval-2"})
+
+    def test_build_resume_payload_uses_direct_graph_review_payload(self) -> None:
+        task = _sample_task(
+            approvals=[
+                {
+                    "approval_id": "approval-1",
+                    "interrupt_id": "interrupt-1",
+                    "decision_index": 0,
+                    "tool_name": "graph_interrupt",
+                    "status": "resolved",
+                    "decision": "approve",
+                    "review_payload": {
+                        "review_mode": "annotation",
+                        "comment": "保留事实边界，只补充审核批注。",
+                    },
+                }
+            ]
+        )
+        payload = _build_resume_payload_from_task(task)
+        self.assertEqual(
+            payload,
+            {
+                "interrupt-1": {
+                    "decision": "approve",
+                    "approval_id": "approval-1",
+                    "review_payload": {
+                        "review_mode": "annotation",
+                        "comment": "保留事实边界，只补充审核批注。",
+                    },
+                }
+            },
+        )
+
+    def test_failure_resume_before_compile_skips_prepare_and_passes_context(self) -> None:
+        task = _sample_task(status="queued")
+        task["request"]["resume_context"] = {
+            "kind": "resume_before_failure",
+            "source_task_id": "rp-source",
+            "source_failed_phase": "compile",
+            "source_failed_actor": "compile_subgraph",
+            "source_thread_id": task["thread_id"],
+            "structured_cache_path": "f:/opinion-system/backend/data/_report/runtime/structured.json",
+        }
+        with ExitStack() as stack:
+            stack.enter_context(patch("src.report.worker.get_task", return_value=task))
+            analyze_mock = stack.enter_context(patch("src.report.worker.ensure_analyze_results"))
+            explain_mock = stack.enter_context(patch("src.report.worker.ensure_explain_results"))
+            runtime_mock = stack.enter_context(
+                patch(
+                    "src.report.worker.run_or_resume_deep_report_task",
+                    return_value={"status": "completed", "structured_payload": _structured_payload(), "full_payload": _full_payload()},
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "src.report.worker._structured_digest_from_payload",
+                    return_value={"report_ir_summary": {"summary": "结构化摘要"}},
+                )
+            )
+            stack.enter_context(patch("src.report.worker._trust_from_payload", return_value={}))
+            stack.enter_context(patch("src.report.worker._raise_if_cancelled", return_value=None))
+            stack.enter_context(patch("src.report.worker._maybe_update_fallback_todos", return_value=None))
+            stack.enter_context(patch("src.report.worker._has_rejected_approval", return_value=False))
+            resume_payload_mock = stack.enter_context(patch("src.report.worker._build_resume_payload_from_task"))
+            stack.enter_context(patch("src.report.worker.threading.Thread", return_value=DummyThread()))
+            stack.enter_context(patch("src.report.worker.set_worker_pid"))
+            stack.enter_context(patch("src.report.worker.mark_agent_started"))
+            stack.enter_context(patch("src.report.worker.mark_task_progress"))
+            stack.enter_context(patch("src.report.worker.append_agent_memo"))
+            stack.enter_context(patch("src.report.worker.set_structured_result_digest"))
+            stack.enter_context(patch("src.report.worker.update_task_trust"))
+            stack.enter_context(patch("src.report.worker.mark_artifact_ready"))
+            stack.enter_context(patch("src.report.worker.mark_task_completed"))
+            stack.enter_context(
+                patch(
+                    "src.report.worker.build_artifacts_root",
+                    return_value=Path("f:/opinion-system/backend/data/_report/runtime"),
+                )
+            )
+            append_event_mock = stack.enter_context(patch("src.report.worker.append_event"))
+            _run_task("rp-smoke")
+
+        self.assertFalse(analyze_mock.called)
+        self.assertFalse(explain_mock.called)
+        self.assertFalse(resume_payload_mock.called)
+        self.assertEqual(runtime_mock.call_args.kwargs["resume_payload"], None)
+        self.assertEqual(runtime_mock.call_args.kwargs["failure_resume_context"]["kind"], "resume_before_failure")
+        self.assertTrue(
+            any(
+                call.kwargs.get("payload", {}).get("resume_from") == "failure_before_compile"
+                for call in append_event_mock.call_args_list
+            )
+        )
 
 
 if __name__ == "__main__":

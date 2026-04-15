@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue'
+import { defineComponent, reactive, ref } from 'vue'
 import { shallowMount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -20,6 +20,12 @@ const mockState = reactive({
   phase: 'interpret',
   percentage: 42,
   message: '正在调研',
+  resumeCapabilities: {},
+  parentTaskId: '',
+  resumeKind: '',
+  resumeSourceTaskId: '',
+  resumeSourcePhase: '',
+  resumeSourceActor: '',
   artifacts: {},
   artifactManifest: {},
   reportIrSummary: {},
@@ -44,6 +50,10 @@ const mockState = reactive({
   ]
 })
 
+const retryReportTask = vi.fn()
+const resumeBeforeFailureReportTask = vi.fn()
+const resolveReportApproval = vi.fn()
+
 vi.mock('../../composables/useReportGeneration', () => ({
   useReportGeneration: () => ({
     topicsState: reactive({ loading: false, error: '', options: ['专题 A'] }),
@@ -61,13 +71,44 @@ vi.mock('../../composables/useReportGeneration', () => ({
     createReportTask: vi.fn(),
     loadReportTask: vi.fn(),
     cancelReportTask: vi.fn(),
-    retryReportTask: vi.fn(),
-    resolveReportApproval: vi.fn(),
+    retryReportTask,
+    resumeBeforeFailureReportTask,
+    resolveReportApproval,
     applyHistorySelection: vi.fn()
   })
 }))
 
 import ReportGenerationRun from './ReportGenerationRun.vue'
+
+const TabSwitchStub = defineComponent({
+  props: {
+    tabs: { type: Array, default: () => [] },
+    active: { type: String, default: '' }
+  },
+  emits: ['change'],
+  template: `
+    <div>
+      <button
+        v-for="tab in tabs"
+        :key="tab.value"
+        type="button"
+        @click="$emit('change', tab.value)"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
+  `
+})
+
+const mountOptions = {
+  global: {
+    stubs: {
+      AppSelect: true,
+      Transition: false,
+      TabSwitch: TabSwitchStub
+    }
+  }
+}
 
 describe('ReportGenerationRun', () => {
   it('keeps result navigation disabled without thread even if artifacts look ready', async () => {
@@ -76,11 +117,7 @@ describe('ReportGenerationRun', () => {
       structured_projection: { status: 'ready' },
       full_markdown: { status: 'ready' }
     }
-    const wrapper = shallowMount(ReportGenerationRun, {
-      global: {
-        stubs: { AppSelect: true, Transition: false }
-      }
-    })
+    const wrapper = shallowMount(ReportGenerationRun, mountOptions)
 
     const buttons = wrapper.findAll('button')
     const resultButton = buttons.find((item) => item.text().includes('语义报告'))
@@ -94,11 +131,7 @@ describe('ReportGenerationRun', () => {
   })
 
   it('renders the narrative sidebar panels in the run console', () => {
-    const wrapper = shallowMount(ReportGenerationRun, {
-      global: {
-        stubs: { AppSelect: true, Transition: false }
-      }
-    })
+    const wrapper = shallowMount(ReportGenerationRun, mountOptions)
 
     expect(wrapper.text()).toContain('阶段进度')
     expect(wrapper.text()).toContain('运行状态')
@@ -114,11 +147,7 @@ describe('ReportGenerationRun', () => {
   it('does not enable result navigation from topic and date alone', () => {
     mockState.threadId = 'thread-1'
     mockState.artifactManifest = {}
-    const wrapper = shallowMount(ReportGenerationRun, {
-      global: {
-        stubs: { AppSelect: true, Transition: false }
-      }
-    })
+    const wrapper = shallowMount(ReportGenerationRun, mountOptions)
 
     const buttons = wrapper.findAll('button')
     const resultButton = buttons.find((item) => item.text().includes('语义报告'))
@@ -130,11 +159,7 @@ describe('ReportGenerationRun', () => {
 
   it('surfaces typed approval requirements in the run header', () => {
     mockState.approvals = [{ approval_id: 'approval-1', status: 'pending', tool_name: 'graph_interrupt' }]
-    const wrapper = shallowMount(ReportGenerationRun, {
-      global: {
-        stubs: { AppSelect: true, Transition: false }
-      }
-    })
+    const wrapper = shallowMount(ReportGenerationRun, mountOptions)
 
     expect(wrapper.text()).toContain('需要介入 (1)')
 
@@ -142,11 +167,7 @@ describe('ReportGenerationRun', () => {
   })
 
   it('shows the checklist tab inside the debug drawer', async () => {
-    const wrapper = shallowMount(ReportGenerationRun, {
-      global: {
-        stubs: { AppSelect: true, Transition: false }
-      }
-    })
+    const wrapper = shallowMount(ReportGenerationRun, mountOptions)
 
     const debugButton = wrapper.findAll('button').find((item) => item.text().includes('调试详情'))
     await debugButton.trigger('click')
@@ -156,5 +177,65 @@ describe('ReportGenerationRun', () => {
     expect(wrapper.text()).toContain('当前任务清单')
     expect(wrapper.text()).toContain('检索路由')
     expect(wrapper.text()).toContain('总控代理更新了任务清单')
+  })
+
+  it('shows and triggers resume-before-failure when capability is enabled', async () => {
+    mockState.status = 'failed'
+    mockState.resumeCapabilities = {
+      resume_before_failure: {
+        enabled: true,
+        restart_phase: 'compile',
+        source_phase: 'compile'
+      }
+    }
+    const wrapper = shallowMount(ReportGenerationRun, mountOptions)
+
+    const resumeButton = wrapper.findAll('button').find((item) => item.text().includes('从失败前继续'))
+    expect(resumeButton).toBeTruthy()
+    await resumeButton.trigger('click')
+    expect(resumeBeforeFailureReportTask).toHaveBeenCalled()
+
+    mockState.status = 'running'
+    mockState.resumeCapabilities = {}
+  })
+
+  it('submits edited markdown when approval supports direct revision', async () => {
+    mockState.approvals = [{
+      approval_id: 'approval-annotation',
+      status: 'pending',
+      tool_name: 'graph_interrupt',
+      action: {
+        markdown_preview: '# 预览文稿',
+        review_mode: 'annotation',
+        review_placeholder: '请输入批注'
+      }
+    }]
+    const wrapper = shallowMount(ReportGenerationRun, mountOptions)
+
+    const debugButton = wrapper.findAll('button').find((item) => item.text().includes('调试详情'))
+    await debugButton.trigger('click')
+    const approvalTab = wrapper.findAll('button').find((item) => item.text() === '审批')
+    await approvalTab.trigger('click')
+
+    expect(wrapper.text()).toContain('文稿预览')
+    expect(wrapper.text()).toContain('如需改写，可在这里直接编辑文稿')
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('这里补充边界说明')
+    const editButton = wrapper.findAll('button').find((item) => item.text().includes('提交修改'))
+    await editButton.trigger('click')
+
+    expect(resolveReportApproval).toHaveBeenCalledWith(
+      'rp-1',
+      'approval-annotation',
+      {
+        decision: 'edit',
+        edited_action: {
+          markdown: '这里补充边界说明'
+        }
+      }
+    )
+
+    mockState.approvals = []
+    resolveReportApproval.mockReset()
   })
 })

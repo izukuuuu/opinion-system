@@ -37,6 +37,12 @@ export function createDefaultReportRunState() {
     currentActor: '',
     currentOperation: '',
     lastDiagnostic: {},
+    resumeCapabilities: {},
+    parentTaskId: '',
+    resumeKind: '',
+    resumeSourceTaskId: '',
+    resumeSourcePhase: '',
+    resumeSourceActor: '',
     structuredResultDigest: {},
     reportIrSummary: {},
     artifactManifest: {},
@@ -49,6 +55,19 @@ export function createDefaultReportRunState() {
 
 function normalizeEventId(item) {
   return Number(item?.event_id || item?.eventId || 0)
+}
+
+function maxEventId(items = []) {
+  let value = 0
+  for (const item of Array.isArray(items) ? items : []) {
+    const eventId = normalizeEventId(item)
+    if (eventId > value) value = eventId
+  }
+  return value
+}
+
+function hasHistoryResetMarker(items = []) {
+  return (Array.isArray(items) ? items : []).some((item) => Boolean(item?.payload?.history_reset))
 }
 
 export const useReportRunStore = defineStore('report-run', {
@@ -94,7 +113,16 @@ export const useReportRunStore = defineStore('report-run', {
     applySnapshot(task, { reused = false } = {}) {
       if (!task || typeof task !== 'object') return
       const nextTaskId = String(task.id || '').trim()
-      if (this.id && nextTaskId && this.id !== nextTaskId) {
+      const incomingEvents = Array.isArray(task.recent_events) ? task.recent_events : []
+      const sameTask = Boolean(this.id && nextTaskId && this.id === nextTaskId)
+      const snapshotEventSeq = Number(task.event_seq || task.event_count || 0)
+      const incomingMaxEventId = maxEventId(incomingEvents)
+      const shouldResetHistory = sameTask && this.lastEventId > 0 && (
+        hasHistoryResetMarker(incomingEvents)
+        || (snapshotEventSeq > 0 && snapshotEventSeq < this.lastEventId)
+        || (incomingMaxEventId > 0 && incomingMaxEventId < this.lastEventId)
+      )
+      if ((this.id && nextTaskId && this.id !== nextTaskId) || shouldResetHistory) {
         this.events = []
         this.lastEventId = 0
       }
@@ -127,6 +155,14 @@ export const useReportRunStore = defineStore('report-run', {
       this.currentActor = String(task.current_actor || '').trim()
       this.currentOperation = String(task.current_operation || '').trim()
       this.lastDiagnostic = task.last_diagnostic && typeof task.last_diagnostic === 'object' ? task.last_diagnostic : {}
+      this.resumeCapabilities = task.resume_capabilities && typeof task.resume_capabilities === 'object'
+        ? task.resume_capabilities
+        : {}
+      this.parentTaskId = String(task.parent_task_id || '').trim()
+      this.resumeKind = String(task.resume_kind || '').trim()
+      this.resumeSourceTaskId = String(task.resume_source_task_id || '').trim()
+      this.resumeSourcePhase = String(task.resume_source_phase || '').trim()
+      this.resumeSourceActor = String(task.resume_source_actor || '').trim()
       this.structuredResultDigest = task.structured_result_digest && typeof task.structured_result_digest === 'object'
         ? task.structured_result_digest
         : {}
@@ -136,7 +172,7 @@ export const useReportRunStore = defineStore('report-run', {
       this.artifactManifest = task.artifact_manifest && typeof task.artifact_manifest === 'object'
         ? task.artifact_manifest
         : {}
-      this.mergeEvents(task.recent_events || [])
+      this.mergeEvents(incomingEvents)
     }
   }
 })

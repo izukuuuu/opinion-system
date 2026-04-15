@@ -1,0 +1,8 @@
+{
+  "dependencies": [".", "langchain", "langgraph", "langchain-anthropic"],
+  "graphs": {
+    "orchestrator": "./src/report/deep_report/studio_adapters.py:build_orchestrator_graph_for_studio",
+    "compilation": "./src/report/deep_report/studio_adapters.py:build_compilation_graph_for_studio"
+  },
+  "env": ".env"
+}

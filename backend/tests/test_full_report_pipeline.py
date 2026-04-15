@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -22,11 +23,16 @@ from src.report.deep_report.service import (
     _extract_structured_response,
     _build_tool_intelligence_receipt,
     _ensure_validation_notes_from_claim_checks,
+    _normalize_structured_report_payload,
+    _repair_payload_from_validation_error,
     _normalized_task_contract_violation,
     _ready_for_deterministic_finalize,
     _result_diagnostic_summary,
+    _run_deep_report_exploration_task,
 )
 from src.report.deep_report.builder import ReportCoordinatorContext, build_report_deep_agent
+from src.report.deep_report.orchestrator_graph import run_report_orchestrator_graph
+from src.report.deep_report.schemas import StructuredReport
 from src.report.worker import _run_task
 
 
@@ -518,6 +524,214 @@ class FullReportPipelineTests(unittest.TestCase):
         notes = raw_notes if isinstance(raw_notes, str) else "\n".join(raw_notes)
         self.assertIn("unsupported：1 条", notes)
         self.assertIn("contradicted：1 条", notes)
+
+    def test_normalize_structured_report_payload_preserves_optional_maps_and_timeline_wrappers(self):
+        normalized = _normalize_structured_report_payload(
+            {
+                "task": {
+                    "topic_identifier": "demo-topic",
+                    "topic_label": "示例专题",
+                    "start": "2025-01-01",
+                    "end": "2025-01-31",
+                    "mode": "fast",
+                    "thread_id": "report::demo-topic::2025-01-01::2025-01-31",
+                },
+                "summary": "自动补写摘要",
+                "timeline": {
+                    "nodes": [
+                        {
+                            "event_id": "event-1",
+                            "date": "2025-01-15",
+                            "title": "关键节点",
+                            "description": "讨论升温。",
+                        }
+                    ]
+                },
+                "agenda_frame_map": {"summary": "议题框架已生成"},
+                "conflict_map": {"summary": "冲突图已生成"},
+                "mechanism_summary": {"summary": "传播机制已生成"},
+                "utility_assessment": {"decision": "usable"},
+                "metric_bundle": {"volume": {"series": []}},
+            }
+        )
+
+        self.assertEqual(normalized["conclusion"]["executive_summary"], "自动补写摘要")
+        self.assertEqual(len(normalized["timeline"]), 1)
+        self.assertEqual(normalized["timeline"][0]["event_id"], "event-1")
+        self.assertEqual(normalized["agenda_frame_map"]["summary"], "议题框架已生成")
+        self.assertEqual(normalized["conflict_map"]["summary"], "冲突图已生成")
+        self.assertEqual(normalized["mechanism_summary"]["summary"], "传播机制已生成")
+        self.assertEqual(normalized["utility_assessment"]["decision"], "usable")
+        self.assertEqual(normalized["metric_bundle"]["volume"]["series"], [])
+
+    def test_structured_report_validation_backfills_missing_utility_improvement_step_ids(self):
+        normalized = _normalize_structured_report_payload(
+            {
+                "task": {
+                    "topic_identifier": "demo-topic",
+                    "topic_label": "示例专题",
+                    "start": "2025-01-01",
+                    "end": "2025-01-31",
+                    "mode": "fast",
+                    "thread_id": "report::demo-topic::2025-01-01::2025-01-31",
+                },
+                "summary": "自动补写摘要",
+                "utility_assessment": {
+                    "decision": "pass",
+                    "improvement_trace": [
+                        {
+                            "triggered_by": "insufficient_structure",
+                            "recompiled_pass": "risk_micro_pass",
+                            "before_score": 0.3,
+                            "after_score": 0.6,
+                        }
+                    ],
+                },
+            }
+        )
+
+        structured = StructuredReport.model_validate(normalized)
+
+        self.assertEqual(len(structured.utility_assessment.improvement_trace), 1)
+        self.assertEqual(
+            structured.utility_assessment.improvement_trace[0].step_id,
+            "improve-1-insufficient_structure-risk_micro_pass",
+        )
+
+    def test_validation_repair_replaces_invalid_optional_block_with_synthesized_version(self):
+        fallback_payload = _normalize_structured_report_payload(
+            {
+                "task": {
+                    "topic_identifier": "demo-topic",
+                    "topic_label": "示例专题",
+                    "start": "2025-01-01",
+                    "end": "2025-01-31",
+                    "mode": "fast",
+                    "thread_id": "report::demo-topic::2025-01-01::2025-01-31",
+                },
+                "summary": "自动补写摘要",
+                "utility_assessment": {"decision": "pass", "improvement_trace": []},
+            }
+        )
+        invalid_payload = _normalize_structured_report_payload(
+            {
+                **fallback_payload,
+                "utility_assessment": {"decision": "usable", "improvement_trace": []},
+            }
+        )
+
+        try:
+            StructuredReport.model_validate(invalid_payload)
+        except Exception as exc:
+            repaired, repaired_keys = _repair_payload_from_validation_error(invalid_payload, fallback_payload, exc)
+        else:
+            self.fail("expected validation to fail for invalid utility_assessment.decision")
+
+        structured = StructuredReport.model_validate(repaired)
+
+        self.assertEqual(repaired_keys, ["utility_assessment"])
+        self.assertEqual(structured.utility_assessment.decision, "pass")
+
+    def test_orchestrator_continues_to_compile_when_exploration_returns_structured_payload(self):
+        with patch(
+            "src.report.deep_report.orchestrator_graph.get_shared_report_checkpointer",
+            return_value=(None, SimpleNamespace(checkpoint_locator="root.sqlite")),
+        ):
+            result = run_report_orchestrator_graph(
+                request={"task_id": "task-123", "thread_id": "report::demo-topic::2025-01-01::2025-01-31"},
+                root_thread_id="task-123:root",
+                invoke_deep_agent=lambda _request: {
+                    "status": "failed",
+                    "message": "结构化结果已降级补齐，后续将继续进入编译阶段。",
+                    "structured_payload": {"task": {"topic_identifier": "demo-topic"}, "report_ir": {}},
+                    "exploration_bundle": {},
+                    "full_payload": {},
+                    "approvals": [],
+                },
+                run_compile=lambda structured_payload, exploration_bundle: {
+                    "status": "completed",
+                    "message": "compiled",
+                    "markdown": "# report",
+                    "structured_payload": structured_payload,
+                    "exploration_bundle": exploration_bundle,
+                },
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["message"], "compiled")
+        self.assertEqual(result["full_payload"]["markdown"], "# report")
+
+    def test_exploration_runtime_uses_task_scoped_coordinator_thread_and_fallback_normalizes_payload(self):
+        agent = DummyAgent({"messages": [], "files": {"/workspace/state/timeline_nodes.json": {"content": ["{}"]}}})
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_dir = Path(temp_dir)
+            artifacts_dir = cache_dir / "artifacts"
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+            with patch("src.report.deep_report.service.ensure_cache_dir", return_value=cache_dir), patch(
+                "src.report.deep_report.service.build_artifacts_root",
+                return_value=artifacts_dir,
+            ), patch(
+                "src.report.deep_report.service._prepare_runtime",
+                return_value=(
+                    {"thread_id": "report::demo-topic::2025-01-01::2025-01-31", "task_id": "task-123"},
+                    {"/workspace/state/.keep": {"content": [""]}},
+                    object(),
+                    {},
+                    [],
+                ),
+            ), patch(
+                "src.report.deep_report.service.build_langchain_chat_model",
+                return_value=(object(), {}),
+            ), patch(
+                "src.report.deep_report.service.build_report_deep_agent",
+                return_value={
+                    "agent": agent,
+                    "coordinator_runtime_profile": SimpleNamespace(checkpoint_locator="coordinator.sqlite"),
+                    "prompt": "prompt",
+                },
+            ), patch(
+                "src.report.deep_report.service._hydrate_render_layers",
+                side_effect=lambda payload, **_: payload,
+            ), patch(
+                "src.report.deep_report.service._attach_ir_layers",
+                side_effect=lambda payload, **_: payload,
+            ), patch(
+                "src.report.deep_report.service._synthesize_structured_report_from_files",
+                return_value={
+                    "task": {"topic_identifier": "demo-topic"},
+                    "summary": "fallback summary",
+                    "timeline": {
+                        "nodes": [
+                            {
+                                "event_id": "event-1",
+                                "date": "2025-01-15",
+                                "title": "关键节点",
+                                "description": "讨论升温。",
+                            }
+                        ]
+                    },
+                    "agenda_frame_map": {"summary": "议题框架已生成"},
+                },
+            ):
+                result = _run_deep_report_exploration_task(
+                    "demo-topic",
+                    "2025-01-01",
+                    "2025-01-31",
+                    topic_label="示例专题",
+                    mode="fast",
+                    thread_id="report::demo-topic::2025-01-01::2025-01-31",
+                    task_id="task-123",
+                )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(
+            agent.calls[0][1]["config"]["configurable"]["thread_id"],
+            "task-123:coordinator",
+        )
+        self.assertEqual(result.structured_payload["conclusion"]["executive_summary"], "fallback summary")
+        self.assertEqual(len(result.structured_payload["timeline"]), 1)
+        self.assertEqual(result.structured_payload["agenda_frame_map"]["summary"], "议题框架已生成")
 
     def test_tool_policy_snapshot_keeps_only_serializable_fields(self):
         class FakeStructuredTool:

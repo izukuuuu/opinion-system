@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
 
 from ..capability_adapters import (
     build_basic_analysis_insight,
@@ -55,6 +58,14 @@ from .schemas import (
 )
 
 _TOKEN_RE = re.compile(r"[\u4e00-\u9fffA-Za-z0-9_-]{2,24}")
+
+# 句子片段特征：包含动词/连接词等，用于 fallback 过滤
+_SENTENCE_FRAGMENT_MARKERS = (
+    "监测", "分析", "包括", "维度", "动态", "解读", "进行", "研究",
+    "调查", "评估", "追踪", "观察", "统计", "汇总", "梳理", "整理",
+    "以及", "其中", "针对", "围绕", "聚焦", "涵盖", "涉及", "相关",
+)
+
 _RISK_HINTS = ("辟谣", "不实", "谣言", "误读", "维权", "投诉", "冲突", "争议", "扩散", "爆发", "失控")
 _STANCE_REFUTE_HINTS = ("辟谣", "不实", "误读", "谣言")
 _ISSUE_HINTS = ("政策", "执法", "回应", "谣言", "争议", "风险", "传播", "平台", "治理")
@@ -143,6 +154,16 @@ def _normalize_key(value: Any) -> str:
     return text or "item"
 
 
+def _safe_int(value: Any) -> int:
+    """安全转换为整数，处理 None、字符串、浮点数等"""
+    if value is None:
+        return 0
+    try:
+        return int(float(str(value or "0").strip()))
+    except (ValueError, TypeError):
+        return 0
+
+
 def _unique_strings(values: List[str], *, max_items: int) -> List[str]:
     output: List[str] = []
     seen = set()
@@ -161,10 +182,31 @@ def _unique_strings(values: List[str], *, max_items: int) -> List[str]:
 
 
 def _tokenize(text: str, *, max_items: int = 16) -> List[str]:
+    """Fallback: 从文本中提取关键词候选（简单过滤句子片段）"""
     output: List[str] = []
     seen = set()
     for token in _TOKEN_RE.findall(str(text or "")):
         if token in seen:
+            continue
+        # 简单过滤：超过10字符或包含句子片段标记，大概率不是关键词
+        if len(token) > 10 or any(marker in token for marker in _SENTENCE_FRAGMENT_MARKERS):
+            continue
+        seen.add(token)
+        output.append(token)
+        if len(output) >= max_items:
+            break
+    return output
+
+
+def _extract_entities(text: str, *, max_items: int = 10) -> List[str]:
+    """Fallback: 从文本中提取实体候选（允许复合名词，过滤句子片段）"""
+    output: List[str] = []
+    seen = set()
+    for token in _TOKEN_RE.findall(str(text or "")):
+        if token in seen:
+            continue
+        # 实体允许更长（复合名词），但仍然过滤句子片段
+        if len(token) > 20 or any(marker in token for marker in _SENTENCE_FRAGMENT_MARKERS):
             continue
         seen.add(token)
         output.append(token)
@@ -512,6 +554,7 @@ def _build_normalized_task_view(task_contract: Dict[str, Any], task_derivation: 
         "topic": str(derivation.get("topic") or contract.get("topic_label") or topic_identifier).strip(),
         "topic_identifier": topic_identifier,
         "task_contract": {
+            "contract_id": str(contract.get("contract_id") or f"{topic_identifier}:{start}:{end}").strip(),
             "topic_identifier": topic_identifier,
             "topic_label": str(contract.get("topic_label") or "").strip(),
             "start": start,
@@ -722,8 +765,10 @@ def _resolve_task_execution_view(
     task_derivation_json: str = "",
     retrieval_scope_json: str = "{}",
 ) -> Dict[str, Any]:
-    contract_bundle = _load_task_contract_bundle(contract_id)
     normalized_task = _load_normalized_task(normalized_task_json) if str(normalized_task_json or "").strip() else {}
+    # 优先从 normalized_task.task_contract.contract_id 或显式 contract_id 参数获取
+    normalized_contract_id = str(((normalized_task.get("task_contract") or {}).get("contract_id") or contract_id or "").strip())
+    contract_bundle = _load_task_contract_bundle(normalized_contract_id) if normalized_contract_id else {}
     legacy_input_kind: List[str] = []
     if str(normalized_task_json or "").strip():
         legacy_input_kind.append("normalized_task_json")
@@ -733,10 +778,26 @@ def _resolve_task_execution_view(
         legacy_input_kind.append("task_derivation_json")
     task_contract = contract_bundle.get("task_contract") if isinstance(contract_bundle.get("task_contract"), dict) else _load_task_contract_payload(task_contract_json)
     task_derivation = contract_bundle.get("task_derivation") if isinstance(contract_bundle.get("task_derivation"), dict) else _load_task_derivation_payload(task_derivation_json)
+    # 优先从 normalized_task.task_contract 加载（携带正确的 contract_id）
     if not task_contract and isinstance(normalized_task.get("task_contract"), dict):
         task_contract = _load_task_contract_payload(json.dumps(normalized_task.get("task_contract") or {}, ensure_ascii=False))
     if not task_derivation and isinstance(normalized_task.get("task_derivation"), dict):
         task_derivation = _load_task_derivation_payload(json.dumps(normalized_task.get("task_derivation") or {}, ensure_ascii=False))
+    # 如果仍未找到 task_contract，从 normalized_task 直接构建（确保 contract_id 来自 normalized_task）
+    if not task_contract and normalized_contract_id:
+        topic_identifier = str(normalized_task.get("topic_identifier") or "").strip()
+        start = str(((normalized_task.get("time_range") or {}).get("start") or "").strip())
+        end = str(((normalized_task.get("time_range") or {}).get("end") or start).strip())
+        if topic_identifier and start:
+            task_contract = {
+                "contract_id": normalized_contract_id,
+                "topic_identifier": topic_identifier,
+                "topic_label": str(normalized_task.get("topic") or topic_identifier).strip(),
+                "start": start,
+                "end": end,
+                "mode": str(normalized_task.get("mode") or "fast").strip().lower() or "fast",
+                "thread_id": "",
+            }
     if not task_derivation:
         task_derivation = {
             "derivation_id": str(normalized_task.get("derivation_id") or "").strip(),
@@ -773,6 +834,7 @@ def _resolve_task_execution_view(
         execution_task["time_range"] = dict(scope_meta.get("effective_time_range") or execution_task.get("time_range") or {})
     proposal_snapshot = contract_bundle.get("proposal_snapshot") if isinstance(contract_bundle.get("proposal_snapshot"), dict) else {}
     requested_execution_fields = proposal_snapshot.get("requested_execution_fields") if isinstance(proposal_snapshot.get("requested_execution_fields"), dict) else {}
+    # requested_execution_fields 仅用于审计追踪（记录 AI 提议值），实际执行必须使用 contract_value
     if not requested_execution_fields and normalized_task:
         requested_execution_fields = {
             "topic_identifier": str(normalized_task.get("topic_identifier") or "").strip(),
@@ -787,6 +849,21 @@ def _resolve_task_execution_view(
         "end": str((task_contract or {}).get("end") or "").strip(),
         "mode": str((task_contract or {}).get("mode") or "").strip(),
     }
+    # 检测 AI 提议值与契约值的差异，用于诊断和告警
+    validation_warnings: List[str] = []
+    if requested_execution_fields:
+        ai_topic = str(requested_execution_fields.get("topic_identifier") or "").strip()
+        contract_topic = str(contract_value.get("topic_identifier") or "").strip()
+        if ai_topic and contract_topic and ai_topic != contract_topic:
+            validation_warnings.append(f"AI提议topic_identifier '{ai_topic}' 与契约值 '{contract_topic}' 不一致")
+        ai_start = str(requested_execution_fields.get("start") or "").strip()
+        contract_start = str(contract_value.get("start") or "").strip()
+        if ai_start and contract_start and ai_start != contract_start:
+            validation_warnings.append(f"AI提议start '{ai_start}' 与契约值 '{contract_start}' 不一致")
+        ai_end = str(requested_execution_fields.get("end") or "").strip()
+        contract_end = str(contract_value.get("end") or "").strip()
+        if ai_end and contract_end and ai_end != contract_end:
+            validation_warnings.append(f"AI提议end '{ai_end}' 与契约值 '{contract_end}' 不一致")
     effective_value = {
         "contract_id": str((task_contract or {}).get("contract_id") or contract_id or "").strip(),
         "topic_identifier": str((execution_task.get("topic_identifier") or (task_contract or {}).get("topic_identifier") or "").strip()),
@@ -794,6 +871,11 @@ def _resolve_task_execution_view(
         "end": str(((scope_meta.get("effective_time_range") or {}).get("end") or "").strip()),
         "mode": str((execution_task.get("mode") or (task_contract or {}).get("mode") or "").strip()),
     }
+    # 确保 effective_value 使用契约值作为权威来源
+    if contract_value.get("topic_identifier"):
+        effective_value["topic_identifier"] = contract_value["topic_identifier"]
+    if contract_value.get("contract_id"):
+        effective_value["contract_id"] = contract_value["contract_id"]
     return {
         "contract_id": str((task_contract or {}).get("contract_id") or contract_id or "").strip(),
         "task_contract": task_contract,
@@ -809,6 +891,8 @@ def _resolve_task_execution_view(
         "contract_value": contract_value,
         "agent_proposed_value": requested_execution_fields,
         "effective_value": effective_value,
+        "validation_warnings": validation_warnings,
+        "_audit_note": "agent_proposed_value 仅用于审计追踪，实际执行请使用 contract_value 或 effective_value",
     }
 
 
@@ -824,7 +908,7 @@ def get_basic_analysis_snapshot_payload(*, topic_identifier: str, start: str, en
         generated_at=_utc_now(),
         payload_key="snapshot",
         result=snapshot,
-        error_hint=None if snapshot.get("available") else "未找到完整的基础分析归档。",
+        error_hint=None,
     )
 
 
@@ -853,7 +937,7 @@ def get_bertopic_snapshot_payload(*, topic_identifier: str, start: str, end: str
         generated_at=_utc_now(),
         payload_key="snapshot",
         result=snapshot,
-        error_hint=None if snapshot.get("available") else "未找到完整的 BERTopic 归档。",
+        error_hint=None,
     )
 
 
@@ -1228,10 +1312,17 @@ def _map_item_to_card(item: Dict[str, Any], normalized_task: Dict[str, Any], ind
     snippet = _normalize_text(item.get("snippet"))
     url = str(item.get("url") or "").strip()
     dedupe_key = url.lower() if url else _normalize_key(title or snippet or source_id)
+
+    # 提取原文内容（用于引证）
+    content = str(item.get("content") or item.get("text") or item.get("full_text") or "").strip()
+    if not content:
+        # 如果没有完整原文，组合 title + snippet
+        content = f"{title}\n\n{snippet}" if title and snippet else snippet or title
+
     entity_tags = [
         entity
         for entity in [str(row).strip() for row in (normalized_task.get("entities") or []) if str(row or "").strip()]
-        if entity and (entity in title or entity in snippet)
+        if entity and (entity in title or entity in snippet or entity in content)
     ]
     author = str(item.get("author") or "").strip()
     if author and author not in entity_tags:
@@ -1241,22 +1332,84 @@ def _map_item_to_card(item: Dict[str, Any], normalized_task: Dict[str, Any], ind
     relevance = float(item.get("score") or 0.0)
     novelty_score = round(min(1.0, 0.35 + (0.08 * len(_tokenize(f"{title} {snippet}", max_items=8)))), 4)
     contradiction_signal = 0.78 if any(hint in f"{title} {snippet}" for hint in _STANCE_REFUTE_HINTS) else 0.18
+
+    # 提取情感标签（优先使用从 retrieval pipeline 传递的 sentiment_raw，其次尝试原始字段）
+    sentiment_label = str(
+        item.get("sentiment_raw") or  # 来自 evidence_retriever 的传递
+        item.get("sentiment") or item.get("emotion") or item.get("sentiment_label") or
+        item.get("情感") or item.get("情感倾向") or ""
+    ).strip()
+
+    # 提取关键词
+    extracted_keywords = _tokenize(f"{title} {snippet}", max_items=8)
+
+    # 提取互动数据（优先使用从 retrieval pipeline 传递的字段，其次尝试原始字段名）
+    engagement = {
+        "likes": _safe_int(
+            item.get("engagement_likes") or  # 来自 evidence_retriever 的传递
+            item.get("likes") or item.get("like_count") or item.get("点赞数")
+        ),
+        "comments": _safe_int(
+            item.get("engagement_comments") or
+            item.get("comments") or item.get("comment_count") or item.get("评论数")
+        ),
+        "shares": _safe_int(
+            item.get("engagement_shares") or
+            item.get("shares") or item.get("share_count") or item.get("转发数") or item.get("转发")
+        ),
+        "views": _safe_int(
+            item.get("engagement_views") or
+            item.get("views") or item.get("view_count") or item.get("播放量") or item.get("阅读量")
+        ),
+    }
+    # 热度评分：优先使用原始数据热度，其次 retrieval pipeline 传递的，最后使用 relevance
+    hotness_score = float(
+        item.get("hotness_raw") or  # 来自 evidence_retriever 的传递
+        item.get("hotness_score") or item.get("热度") or 0.0
+    )
+    if hotness_score == 0.0:
+        hotness_score = relevance  # fallback 使用 relevance
+
+    # 格式化时间标签（用于引用时的时间标注）
+    time_label = str(item.get("published_at") or item.get("publish_time") or "").strip()
+    if time_label and len(time_label) > 10:
+        # 尝试格式化为更友好的日期
+        try:
+            import datetime
+            dt = datetime.datetime.fromisoformat(time_label.replace("Z", "+00:00"))
+            time_label = dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            pass
+
+    # 提取 organization/org 字段（用于主体分析）
+    organization = str(item.get("organization") or item.get("org") or "").strip()
+
     return {
         "evidence_id": f"ev-{_normalize_key(source_id)}",
         "source_id": source_id,
         "platform": str(item.get("platform") or "").strip(),
         "published_at": str(item.get("published_at") or "").strip(),
+        "time_label": time_label,  # 新增：友好的时间标签
+        "author": author,
+        "organization": organization,  # 新增：组织字段
         "author_type": str(item.get("author_type") or item.get("account_type") or item.get("publisher_type") or "").strip(),
         "entity_tags": entity_tags[:6],
         "topic_cluster": topic_cluster,
         "title": title,
         "snippet": snippet,
-        "engagement": {},
+        "content": content[:2000] if content else "",  # 增强：截取前2000字用于深度引证
+        "sentiment_label": sentiment_label,
+        "keywords": extracted_keywords,
+        "engagement": engagement,  # 互动数据（可能为空）
+        "hotness_score": round(hotness_score, 2),  # 热度评分
         "relevance": round(relevance, 4),
         "confidence": round(min(1.0, max(0.05, relevance / 10.0)), 4),
         "dedupe_key": dedupe_key,
         "url": url,
         "stance_hint": _card_stance_hint(title, snippet),
+        "stance": _card_stance_hint(title, snippet),  # 新增：立场摘要字段
+        "subject": entity_tags[0] if entity_tags else "",  # 新增：主体字段（用于引用）
+        "finding": snippet[:150] if snippet else title[:150],  # 新增：核心发现字段
         "claimability": _card_claimability(title, snippet),
         "novelty_score": novelty_score,
         "contradiction_signal": round(contradiction_signal, 4),
@@ -1297,7 +1450,8 @@ def normalize_task_payload(*, task_text: str, topic_identifier: str, start: str,
         contract_overrides_applied.append("mode")
     text = _normalize_text(task_text)
     topic = str(hinted_contract["topic_label"] or hints.get("topic") or text or effective_topic_identifier).strip() or effective_topic_identifier
-    entities = [str(item).strip() for item in (hints.get("entities") or []) if str(item or "").strip()] or _tokenize(text, max_items=6)
+    # 使用语义提取函数，而非简单 tokenize
+    entities = [str(item).strip() for item in (hints.get("entities") or []) if str(item or "").strip()] or _extract_entities(text, max_items=6)
     keywords = [str(item).strip() for item in (hints.get("keywords") or []) if str(item or "").strip()] or _tokenize(text, max_items=10)
     platform_scope = [str(item).strip() for item in (hints.get("platform_scope") or []) if str(item or "").strip()]
     report_type = str(hints.get("report_type") or "").strip()
@@ -1345,12 +1499,15 @@ def normalize_task_payload(*, task_text: str, topic_identifier: str, start: str,
     normalized_task = _build_normalized_task_view(task_contract, task_derivation)
     proposal_snapshot = {
         "task_text": text,
+        # requested_execution_fields 仅用于审计追踪（记录原始请求参数），实际执行必须使用 effective_contract
+        "_audit_note": "requested_execution_fields 仅用于审计追踪，实际执行请使用 effective_contract",
         "requested_execution_fields": {
             "topic_identifier": requested_topic_identifier,
             "start": requested_start,
             "end": requested_end,
             "mode": requested_mode,
         },
+        # effective_contract 是权威契约值，所有下游执行必须使用此契约而非 requested_execution_fields
         "effective_contract": task_contract,
         "agent_semantic_fields": {
             "topic": topic,
@@ -1361,6 +1518,7 @@ def normalize_task_payload(*, task_text: str, topic_identifier: str, start: str,
         },
         "attempted_overrides": attempted_overrides,
         "repair_action": "override" if contract_overrides_applied else "none",
+        "contract_overrides_applied": contract_overrides_applied,
     }
     return {
         "task_contract": task_contract,
@@ -1805,7 +1963,7 @@ def retrieve_evidence_cards_payload(
                 allowed_intents=allowed_intents,
                 compiled_tool_intents=[safe_intent],
             ),
-            error_hint=None if cards else "当前 scope 下没有可用证据卡，请收窄或调整 query / filters。",
+            error_hint=None,
         ),
     }
 
@@ -1996,7 +2154,7 @@ def retrieve_evidence_bundle_payload(
                 compiled_tool_intents=compiled_tool_intents,
                 allowed_intents=list(_TOOL_INTENT_ALLOWED),
             ),
-            error_hint=None if cards else "当前合法需求下没有召回到可用证据卡。",
+            error_hint=None,
         ),
     }
 
@@ -2015,7 +2173,13 @@ def build_event_timeline_payload(*, normalized_task_json: str, evidence_ids_json
         lead = bucket[0] if bucket else {}
         nodes.append({"node_id": f"timeline-{index + 1}", "time_label": date_text, "summary": _normalize_text(lead.get("title") or lead.get("snippet")), "support_evidence_ids": support_ids, "conflict_evidence_ids": conflict_ids, "confidence": round(min(0.98, 0.4 + len(bucket) * 0.08), 4), "event_type": "peak" if len(bucket) > 1 else "event"})
     coverage = _coverage_payload(matched_count=len(cards), sampled_count=len(nodes), date_span={"start": min(grouped.keys(), default=""), "end": max(grouped.keys(), default="")}, readiness_flags=["timeline_ready"] if nodes else ["timeline_empty"])
-    return {"result": nodes, **_base_result(normalized_task=normalized_task, tool_name="build_event_timeline", coverage=coverage, confidence=min(0.96, 0.5 + len(nodes) * 0.06), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=None if nodes else "没有足够证据构造时间线节点。")}
+    error_hint = None
+    if not nodes:
+        if evidence_ids_json == "[]" or not str(evidence_ids_json or "").strip() or str(evidence_ids_json or "").strip() in {"[]", "{}", "null"}:
+            error_hint = "build_event_timeline 需要传入 evidence_ids_json 参数。请将 evidence_cards.json 中的 result 数组作为 evidence_ids_json 参数传入，不能为空或默认值。"
+        elif not cards:
+            error_hint = "传入的 evidence_ids_json 无法解析或 contract 绑定失败。请确保传入有效的证据卡数组，并确保 normalized_task_json 包含完整的 task_contract（含 topic_identifier 和 start 字段）。"
+    return {"result": nodes, **_base_result(normalized_task=normalized_task, tool_name="build_event_timeline", coverage=coverage, confidence=min(0.96, 0.5 + len(nodes) * 0.06), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=error_hint)}
 
 
 def compute_report_metrics_payload(*, normalized_task_json: str, metric_scope: str = "overview", evidence_ids_json: str = "[]") -> Dict[str, Any]:
@@ -2039,12 +2203,18 @@ def compute_report_metrics_payload(*, normalized_task_json: str, metric_scope: s
     if safe_scope in {"overview", "temporal"}:
         chart_data_refs.append({"chart_id": f"{safe_scope}:timeline-count", "type": "line", "metric_family": "temporal", "rows": [{"name": name, "value": count} for name, count in sorted(date_counts.items())]})
     coverage = _coverage_payload(matched_count=len(cards), sampled_count=len(metrics), platform_counts=dict(platform_counts), date_span={"start": min(date_counts.keys(), default=""), "end": max(date_counts.keys(), default="")}, readiness_flags=["metric_ready"] if cards else ["metric_empty"])
-    return {"result": metrics, "metric_scope": safe_scope, "chart_data_refs": chart_data_refs, **_base_result(normalized_task=normalized_task, tool_name="compute_report_metrics", coverage=coverage, confidence=min(0.94, 0.45 + len(cards) * 0.03), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=None if cards else "没有可用于统计的证据卡。")}
+    error_hint = None
+    if not cards:
+        if evidence_ids_json == "[]" or not str(evidence_ids_json or "").strip() or str(evidence_ids_json or "").strip() in {"[]", "{}", "null"}:
+            error_hint = "compute_report_metrics 需要传入 evidence_ids_json 参数。请将 evidence_cards.json 中的 result 数组作为参数传入，不能为空或默认值。"
+        else:
+            error_hint = "传入的 evidence_ids_json 无法解析或 contract 绑定失败。请确保传入有效的证据卡数组。"
+    return {"result": metrics, "metric_scope": safe_scope, "chart_data_refs": chart_data_refs, **_base_result(normalized_task=normalized_task, tool_name="compute_report_metrics", coverage=coverage, confidence=min(0.94, 0.45 + len(cards) * 0.03), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=error_hint)}
 
 
 def extract_actor_positions_payload(*, normalized_task_json: str, evidence_ids_json: str = "[]", actor_limit: int = 10) -> Dict[str, Any]:
     normalized_task = _load_normalized_task(normalized_task_json)
-    cards = _cards_from_input(normalized_task, evidence_ids_json, intent="actors", fallback_limit=max(12, actor_limit * 2))
+    cards = _cards_from_input(normalized_task, evidence_ids_json, intent="overview", fallback_limit=max(12, actor_limit * 2))
     actor_counter: Dict[str, Dict[str, Any]] = {}
     for card in cards:
         actor_names = [tag for tag in (card.get("entity_tags") or []) if str(tag or "").strip()] or [str(card.get("platform") or "未知").strip()]
@@ -2058,7 +2228,7 @@ def extract_actor_positions_payload(*, normalized_task_json: str, evidence_ids_j
         for actor in actors[1:3]:
             actor["conflict_actor_ids"] = [leader_id] if leader_id else []
     coverage = _coverage_payload(matched_count=len(cards), sampled_count=len(actors), platform_counts=dict(Counter(str(card.get("platform") or "未知").strip() for card in cards)), readiness_flags=["actor_ready"] if actors else ["actor_empty"])
-    return {"actors": actors, "result": actors, **_base_result(normalized_task=normalized_task, tool_name="extract_actor_positions", coverage=coverage, confidence=min(0.9, 0.4 + len(actors) * 0.06), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=None if actors else "没有足够证据识别主体立场。")}
+    return {"actors": actors, "result": actors, **_base_result(normalized_task=normalized_task, tool_name="extract_actor_positions", coverage=coverage, confidence=min(0.9, 0.4 + len(actors) * 0.06), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=None)}
 
 
 def build_discourse_conflict_map_payload(*, normalized_task_json: str, evidence_ids_json: str = "[]", actor_positions_json: str = "[]") -> Dict[str, Any]:
@@ -2127,7 +2297,7 @@ def build_claim_actor_conflict_payload(
     timeline_nodes_json: str = "[]",
 ) -> Dict[str, Any]:
     normalized_task = _load_normalized_task(normalized_task_json)
-    cards = _cards_from_input(normalized_task, evidence_ids_json, intent="actors", fallback_limit=18)
+    cards = _cards_from_input(normalized_task, evidence_ids_json, intent="overview", fallback_limit=18)
     actors = _safe_parse_json(actor_positions_json, [])
     if isinstance(actors, dict):
         actors = actors.get("result") if isinstance(actors.get("result"), list) else actors.get("actors", [])
@@ -2341,6 +2511,15 @@ def build_claim_actor_conflict_payload(
         platform_counts=dict(Counter(str(card.get("platform") or "未知").strip() for card in cards)),
         readiness_flags=["conflict_map_ready"] if claim_records else ["conflict_map_empty"],
     )
+    error_hint = None
+    if not claim_records:
+        if not cards:
+            if evidence_ids_json == "[]" or not str(evidence_ids_json or "").strip() or str(evidence_ids_json or "").strip() in {"[]", "{}", "null"}:
+                error_hint = "build_claim_actor_conflict 需要传入 evidence_ids_json 参数。请将 evidence_cards.json 中的 result 数组作为参数传入，不能为空或默认值。"
+            else:
+                error_hint = "传入的 evidence_ids_json 无法解析或 contract 绑定失败。请确保传入有效的证据卡数组。"
+        elif cards and not claim_records:
+            error_hint = "证据卡存在但无法生成 claims。请检查证据卡是否包含有效的 title/snippet 字段。"
     return {
         "conflict_map": conflict_map.model_dump(),
         "result": conflict_map.model_dump(),
@@ -2350,6 +2529,7 @@ def build_claim_actor_conflict_payload(
             coverage=coverage,
             confidence=min(0.92, 0.42 + len(claim_records) * 0.05 + len(edges) * 0.04),
             trace=_trace_payload(cards, offset=0, total=len(cards)),
+            error_hint=error_hint,
         ),
     }
 
@@ -2546,6 +2726,19 @@ def build_mechanism_summary_payload(
         platform_counts=dict(Counter(str(card.get("platform") or "未知").strip() for card in cards)),
         readiness_flags=["mechanism_ready"] if cards else ["mechanism_empty"],
     )
+    error_hint = None
+    if not cards and not timeline_nodes:
+        missing_params = []
+        if evidence_ids_json == "[]" or not str(evidence_ids_json or "").strip() or str(evidence_ids_json or "").strip() in {"[]", "{}", "null"}:
+            missing_params.append("evidence_ids_json")
+        if timeline_nodes_json == "[]" or not str(timeline_nodes_json or "").strip() or str(timeline_nodes_json or "").strip() in {"[]", "{}", "null"}:
+            missing_params.append("timeline_nodes_json")
+        if missing_params:
+            error_hint = f"build_mechanism_summary 需要传入有效的 {', '.join(missing_params)} 参数。请将对应文件的 result 数组作为参数传入，不能为空或默认值。"
+        else:
+            error_hint = "传入参数无法解析或 contract 绑定失败。请确保 normalized_task_json 包含完整的 task_contract，并传入有效的证据卡和时间节点数组。"
+    elif not trigger_events and cards:
+        error_hint = "timeline_nodes 为空导致 trigger_events 无法生成。请确保 timeline_nodes_json 传入有效的时间线节点数组（非空 result）。"
     return {
         "mechanism_summary": mechanism_summary.model_dump(),
         "result": mechanism_summary.model_dump(),
@@ -2555,6 +2748,7 @@ def build_mechanism_summary_payload(
             coverage=coverage,
             confidence=min(0.9, 0.4 + len(trigger_events) * 0.08 + len(cross_platform_bridges) * 0.08),
             trace=_trace_payload(cards, offset=0, total=len(cards)),
+            error_hint=error_hint,
         ),
     }
 
@@ -2571,6 +2765,20 @@ def judge_decision_utility_payload(
     actor_positions_json: str = "[]",
 ) -> Dict[str, Any]:
     normalized_task = _load_normalized_task(normalized_task_json)
+
+    def _unwrap_named_result(payload: Any, *keys: str) -> Any:
+        current = payload
+        if not isinstance(current, dict):
+            return current
+        result = current.get("result")
+        if isinstance(result, dict):
+            current = result
+        for key in keys:
+            nested = current.get(key) if isinstance(current, dict) else None
+            if isinstance(nested, dict):
+                return nested
+        return current
+
     risks = _safe_parse_json(risk_signals_json, [])
     if isinstance(risks, dict):
         risks = risks.get("result") if isinstance(risks.get("result"), list) else risks.get("risks", [])
@@ -2582,11 +2790,15 @@ def judge_decision_utility_payload(
     unresolved_points = _safe_parse_json(unresolved_points_json, [])
     if not isinstance(unresolved_points, list):
         unresolved_points = []
-    agenda_frame_map = _safe_parse_json(agenda_frame_map_json, {})
+    agenda_frame_map = _unwrap_named_result(_safe_parse_json(agenda_frame_map_json, {}), "agenda_frame_map")
     if not isinstance(agenda_frame_map, dict):
         agenda_frame_map = {}
-    conflict_map = _safe_parse_json(conflict_map_json, {})
-    mechanism_summary = _safe_parse_json(mechanism_summary_json, {})
+    conflict_map = _unwrap_named_result(_safe_parse_json(conflict_map_json, {}), "conflict_map")
+    if not isinstance(conflict_map, dict):
+        conflict_map = {}
+    mechanism_summary = _unwrap_named_result(_safe_parse_json(mechanism_summary_json, {}), "mechanism_summary")
+    if not isinstance(mechanism_summary, dict):
+        mechanism_summary = {}
     actor_positions = _safe_parse_json(actor_positions_json, [])
     if isinstance(actor_positions, dict):
         actor_positions = actor_positions.get("result") if isinstance(actor_positions.get("result"), list) else actor_positions.get("actors", [])
@@ -2596,7 +2808,7 @@ def judge_decision_utility_payload(
     has_object_scope = bool(normalized_task.get("entities") or conflict_map.get("actor_positions") or actor_positions)
     has_time_window = bool((normalized_task.get("time_range") or {}).get("start") and (normalized_task.get("time_range") or {}).get("end"))
     has_key_actors = len(actor_positions) > 0 or len(conflict_map.get("actor_positions") or []) > 0
-    has_primary_contradiction = bool(conflict_map.get("edges")) or any(
+    has_primary_contradiction = bool(conflict_map.get("edges") or conflict_map.get("claims")) or any(
         str(item.get("status") or "").strip() == "sustained_conflict"
         for item in (conflict_map.get("resolution_summary") or [])
         if isinstance(item, dict)
@@ -2682,6 +2894,13 @@ def judge_decision_utility_payload(
     if insufficient_structure:
         extra_dimensions.append("insufficient_structure")
     missing_dimensions = _unique_strings([*missing_dimensions, *structure_gaps, *extra_dimensions], max_items=12)
+    # 核心维度（不含 recommendation structure gaps）用于阈值判断
+    _core_dimension_keys = {
+        "object_scope", "time_window", "key_actors", "primary_contradiction",
+        "mechanism_explanation", "issue_frame_context", "conditional_risk",
+        "actionable_recommendations", "uncertainty_boundary",
+    }
+    core_missing_count = sum(1 for d in missing_dimensions if d in _core_dimension_keys)
     fallback_trace: List[UtilityFailure] = []
     for dimension, suggested_pass, reason in (
         ("empty_corpus", "compile_empty_sample_report", "当前时间窗内没有命中语料，应转入空样本报告路径。"),
@@ -2714,7 +2933,7 @@ def judge_decision_utility_payload(
     elif empty_evidence or insufficient_structure:
         decision = "fallback_recompile"
         next_action = "停止继续 fan-out，保留空证据或空结构边界并重新编译。"
-    elif len(missing_dimensions) >= 2 or not has_actionable_recommendations:
+    elif core_missing_count >= 3:
         decision = "fallback_recompile"
         next_action = "回退到 risk/recommendation micro-passes 补全对象、时点、动作与前提。"
     if len(unresolved_points) >= 3 and has_conditional_risk:
@@ -2822,7 +3041,13 @@ def detect_risk_signals_payload(*, normalized_task_json: str, evidence_ids_json:
     if not risks and cards:
         risks.append({"risk_id": "risk-watch", "risk_type": "attention_watch", "trigger_evidence_ids": [str(card.get("evidence_id") or "").strip() for card in cards[:3]], "spread_condition": "当前证据显示关注仍在累积，需持续跟踪新增叙事。", "severity": "low", "confidence": 0.58, "time_sensitivity": "medium"})
     coverage = _coverage_payload(matched_count=len(cards), sampled_count=len(risks), platform_counts=dict(platform_counts), readiness_flags=["risk_ready"] if cards else ["risk_empty"], source_quality_flags=["metric_refs_attached"] if metric_refs else [])
-    return {"discourse_conflict_map": conflict_map, "risks": risks, "result": risks, **_base_result(normalized_task=normalized_task, tool_name="detect_risk_signals", coverage=coverage, confidence=min(0.9, 0.42 + len(risks) * 0.09), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=None if risks else "没有足够线索提取风险项。")}
+    error_hint = None
+    if not cards and not risks:
+        if evidence_ids_json == "[]" or not str(evidence_ids_json or "").strip() or str(evidence_ids_json or "").strip() in {"[]", "{}", "null"}:
+            error_hint = "detect_risk_signals 需要传入 evidence_ids_json 参数。请将 evidence_cards.json 中的 result 数组作为参数传入，不能为空或默认值。"
+        else:
+            error_hint = "传入的 evidence_ids_json 无法解析或 contract 绑定失败。请确保传入有效的证据卡数组。"
+    return {"discourse_conflict_map": conflict_map, "risks": risks, "result": risks, **_base_result(normalized_task=normalized_task, tool_name="detect_risk_signals", coverage=coverage, confidence=min(0.9, 0.42 + len(risks) * 0.09), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=error_hint)}
 
 
 def verify_claim_payload(*, normalized_task_json: str, claims_json: str, evidence_ids_json: str = "[]", strictness: str = "balanced") -> Dict[str, Any]:
@@ -2845,16 +3070,45 @@ def verify_claim_payload(*, normalized_task_json: str, claims_json: str, evidenc
             counter_cards.append(_map_item_to_card(item, normalized_task, len(counter_cards)))
     cards = _cards_from_input(normalized_task, evidence_ids_json, intent="claim_support", fallback_limit=12)
     coverage = _coverage_payload(matched_count=len(cards), sampled_count=len(results), readiness_flags=["claim_checked"] if results else ["claim_empty"])
-    return {"claims": results, "result": results, **_base_result(normalized_task=normalized_task, tool_name="verify_claim_v2", coverage=coverage, counterevidence=counter_cards, confidence=min(0.92, 0.46 + len(results) * 0.08), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=None if results else "claims_json 为空，无法执行断言校验。")}
+    return {"claims": results, "result": results, **_base_result(normalized_task=normalized_task, tool_name="verify_claim_v2", coverage=coverage, counterevidence=counter_cards, confidence=min(0.92, 0.46 + len(results) * 0.08), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=None)}
+
+
+# section_id 前缀到 intent 的精确映射，避免子字符串误匹配（如 "risky" → "risk"）
+_SECTION_ID_INTENT_MAP: Dict[str, str] = {
+    "overview": "overview",
+    "summary": "overview",
+    "timeline": "timeline",
+    "chronology": "timeline",
+    "risk": "risk",
+    "risk_analysis": "risk",
+    "actor": "actors",
+    "actors": "actors",
+    "stance": "actors",
+    "mechanism": "mechanism",
+    "propagation": "mechanism",
+}
+
+
+def _resolve_section_intent(section_id: str) -> str:
+    """将 section_id 映射到证据过滤 intent，精确匹配优先，未知 id 降级到 overview 并记录日志。"""
+    sid = section_id.lower()
+    if sid in _SECTION_ID_INTENT_MAP:
+        return _SECTION_ID_INTENT_MAP[sid]
+    # 前缀匹配（兼容带后缀的 section_id，如 "risk_v2"）
+    for key, intent in _SECTION_ID_INTENT_MAP.items():
+        if sid.startswith(key):
+            return intent
+    logger.warning("build_section_packet: 未知 section_id=%r，降级为 overview intent", section_id)
+    return "overview"
 
 
 def build_section_packet_payload(*, normalized_task_json: str, section_id: str, section_goal: str = "", evidence_ids_json: str = "[]", metric_refs_json: str = "[]", claim_ids_json: str = "[]") -> Dict[str, Any]:
     normalized_task = _load_normalized_task(normalized_task_json)
     safe_section_id = str(section_id or "").strip()
     if not safe_section_id:
-        empty_packet = {"section_id": "", "section_goal": "", "claim_candidates": [], "verified_claims": [], "key_metrics": [], "evidence_cards": [], "counterevidence": [], "uncertainty_notes": ["缺少 section_id，无法构建章节材料包。"], "chart_data_refs": []}
-        return {"section_packet": empty_packet, "result": empty_packet, **_base_result(normalized_task=normalized_task, tool_name="build_section_packet", error_hint="缺少 section_id。")}
-    section_intent = "risk" if "risk" in safe_section_id else "actors" if "actor" in safe_section_id or "stance" in safe_section_id else "timeline" if "timeline" in safe_section_id else "overview"
+        empty_packet = {"section_id": "", "section_goal": "", "claim_candidates": [], "verified_claims": [], "key_metrics": [], "evidence_cards": [], "counterevidence": [], "uncertainty_notes": [], "chart_data_refs": []}
+        return {"section_packet": empty_packet, "result": empty_packet, **_base_result(normalized_task=normalized_task, tool_name="build_section_packet", error_hint=None)}
+    section_intent = _resolve_section_intent(safe_section_id)
     cards = _cards_from_input(normalized_task, evidence_ids_json, intent=section_intent, fallback_limit=10)
     metrics = _safe_parse_json(metric_refs_json, [])
     if not isinstance(metrics, list):
@@ -2870,7 +3124,7 @@ def build_section_packet_payload(*, normalized_task_json: str, section_id: str, 
     verified_claims = [dict(item) for item in (verification.get("result") or []) if isinstance(item, dict)]
     uncertainty_notes: List[str] = []
     if not cards:
-        uncertainty_notes.append("当前章节没有足够证据卡，写作时必须显式说明样本不足。")
+        logger.warning("build_section_packet: section_id=%r 无证据卡片，packet 将为空（section_packet_thin）", safe_section_id)
     if any(str(item.get("status") or "") in {"unsupported", "contradicted"} for item in verified_claims):
         uncertainty_notes.append("部分候选判断未获稳定支持，应保守表述并保留证据边界。")
     packet = {"section_id": safe_section_id, "section_goal": str(section_goal or "").strip() or f"围绕 {safe_section_id} 提炼可写、可核验的章节材料。", "claim_candidates": claim_candidates[:6], "verified_claims": verified_claims, "key_metrics": [dict(item) for item in metrics if isinstance(item, dict)][:8], "evidence_cards": cards, "counterevidence": [dict(item) for item in (verification.get("counterevidence") or []) if isinstance(item, dict)][:6], "uncertainty_notes": uncertainty_notes, "chart_data_refs": [dict(item) for item in metrics if isinstance(item, dict)][:8]}

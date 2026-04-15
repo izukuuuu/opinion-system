@@ -1,0 +1,7 @@
+README.md
+pyproject.toml
+backend/opinion_system.egg-info/PKG-INFO
+backend/opinion_system.egg-info/SOURCES.txt
+backend/opinion_system.egg-info/dependency_links.txt
+backend/opinion_system.egg-info/requires.txt
+backend/opinion_system.egg-info/top_level.txt

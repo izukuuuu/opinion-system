@@ -4,6 +4,14 @@ trigger: always_on
 
 Use `uv` syntax for all Python operations in this project (Python 3.11).
 
+## Virtual Environment Location
+
+**CRITICAL**: The project's virtual environment (`.venv`) is located in the **PROJECT ROOT DIRECTORY** (`f:\opinion-system\.venv`), NOT in the `backend` folder.
+
+- **DO NOT** move `.venv` to `backend/` or any other subdirectory
+- **DO NOT** create a separate venv in `backend/`
+- All Python operations must use the root `.venv`
+
 ## Python/Dependency Command Rules
 
 - Sync lockfile dependencies:

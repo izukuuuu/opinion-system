@@ -12,7 +12,7 @@ const TASK_POLL_INTERVAL = 2000
 const { callApi, ensureApiBase } = useApiBase()
 
 const topicsState = reactive({ loading: false, error: '', options: [] })
-const reportForm = reactive({ topic: '', start: '', end: '', mode: 'fast' })
+const reportForm = reactive({ topic: '', start: '', end: '', mode: 'fast', skipValidation: false })
 const availableRange = reactive({
   loading: false,
   error: '',
@@ -80,6 +80,12 @@ const activeTask = computed(() => (taskState?.id ? {
   currentActor: taskState.currentActor,
   currentOperation: taskState.currentOperation,
   lastDiagnostic: taskState.lastDiagnostic,
+  resumeCapabilities: taskState.resumeCapabilities,
+  parentTaskId: taskState.parentTaskId,
+  resumeKind: taskState.resumeKind,
+  resumeSourceTaskId: taskState.resumeSourceTaskId,
+  resumeSourcePhase: taskState.resumeSourcePhase,
+  resumeSourceActor: taskState.resumeSourceActor,
   structuredResultDigest: taskState.structuredResultDigest,
   reportIrSummary: taskState.reportIrSummary,
   artifactManifest: taskState.artifactManifest,
@@ -312,6 +318,8 @@ export const useReportGeneration = () => {
     closeReportTaskStream,
     cancelReportTask,
     retryReportTask,
+    requeueReportTask,
+    resumeBeforeFailureReportTask,
     resolveReportApproval,
     resumeLastReportTask,
     applyHistorySelection
@@ -814,6 +822,19 @@ function mergeTaskEvents(incoming = []) {
   taskState.mergeEvents(incoming)
 }
 
+function findSuccessorTaskId(task) {
+  const events = Array.isArray(task?.recent_events) ? task.recent_events : []
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const payload = events[index]?.payload
+    if (!payload || typeof payload !== 'object') continue
+    const resumeTaskId = String(payload.resume_task_id || '').trim()
+    if (resumeTaskId) return resumeTaskId
+    const retryTaskId = String(payload.retry_task_id || '').trim()
+    if (retryTaskId) return retryTaskId
+  }
+  return ''
+}
+
 function applyTaskSnapshot(task, { reused = false } = {}) {
   if (!task || typeof task !== 'object') return
   taskState.applySnapshot(task, { reused })
@@ -850,7 +871,7 @@ function buildTaskStreamEndpoint(taskId = taskState?.id) {
   const resolvedTaskId = String(taskId || '').trim()
   if (!resolvedTaskId) return ''
   const since = taskState?.lastEventId ? `?since_id=${encodeURIComponent(String(taskState.lastEventId))}` : ''
-  return `/api/report/tasks/${encodeURIComponent(resolvedTaskId)}/stream${since}`
+  return `/report/tasks/${encodeURIComponent(resolvedTaskId)}/stream${since}`
 }
 
 function closeReportTaskStream() {
@@ -890,7 +911,7 @@ async function openReportTaskStream(taskId = taskState.id, { force = false } = {
   taskStreamController.open(endpoint)
 }
 
-async function loadReportTask(taskId = taskState.id, { silent = false, reused = false } = {}) {
+async function loadReportTask(taskId = taskState.id, { silent = false, reused = false, followSuccessor = true } = {}) {
   const resolvedTaskId = String(taskId || '').trim()
   if (!resolvedTaskId) return null
   if (!silent) taskState.setLoading(true)
@@ -898,6 +919,11 @@ async function loadReportTask(taskId = taskState.id, { silent = false, reused = 
   try {
     const response = await callApi(`/api/report/tasks/${encodeURIComponent(resolvedTaskId)}`, { method: 'GET' })
     const task = response?.task || null
+    const successorTaskId = followSuccessor ? findSuccessorTaskId(task) : ''
+    const terminal = ['completed', 'failed', 'cancelled'].includes(String(task?.status || '').trim())
+    if (terminal && successorTaskId && successorTaskId !== resolvedTaskId) {
+      return await loadReportTask(successorTaskId, { silent, reused: true, followSuccessor: false })
+    }
     if (task && typeof task === 'object') {
       applyTaskSnapshot(task, { reused })
       if (taskState.status === 'completed' && hasCompleteRange(taskState)) {
@@ -927,7 +953,7 @@ async function createReportTask(rangeOverride = null) {
   try {
     const response = await callApi('/api/report/tasks', {
       method: 'POST',
-      body: JSON.stringify(resolvedRange)
+      body: JSON.stringify({ ...resolvedRange, skip_validation: reportForm.skipValidation })
     })
     const task = response?.task || null
     if (!task || typeof task !== 'object') throw new Error('任务创建接口返回为空')
@@ -966,6 +992,40 @@ async function retryReportTask(taskId = taskState.id) {
   if (!resolvedTaskId) return null
   try {
     const response = await callApi(`/api/report/tasks/${encodeURIComponent(resolvedTaskId)}/retry`, { method: 'POST' })
+    const task = response?.task || null
+    if (task) {
+      applyTaskSnapshot(task)
+      await openReportTaskStream(task.id, { force: true })
+    }
+    return task
+  } catch (error) {
+    taskState.setError(error instanceof Error ? error.message : String(error))
+    return null
+  }
+}
+
+async function requeueReportTask(taskId = taskState.id) {
+  const resolvedTaskId = String(taskId || '').trim()
+  if (!resolvedTaskId) return null
+  try {
+    const response = await callApi(`/api/report/tasks/${encodeURIComponent(resolvedTaskId)}/requeue`, { method: 'POST' })
+    const task = response?.task || null
+    if (task) {
+      applyTaskSnapshot(task)
+      await openReportTaskStream(task.id, { force: true })
+    }
+    return task
+  } catch (error) {
+    taskState.setError(error instanceof Error ? error.message : String(error))
+    return null
+  }
+}
+
+async function resumeBeforeFailureReportTask(taskId = taskState.id) {
+  const resolvedTaskId = String(taskId || '').trim()
+  if (!resolvedTaskId) return null
+  try {
+    const response = await callApi(`/api/report/tasks/${encodeURIComponent(resolvedTaskId)}/resume-before-failure`, { method: 'POST' })
     const task = response?.task || null
     if (task) {
       applyTaskSnapshot(task)

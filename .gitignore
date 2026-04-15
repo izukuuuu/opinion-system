@@ -30,6 +30,9 @@ backend/logs/*
 !backend/store/.gitkeep
 backend/src/filter/cache/
 
+# LangGraph API
+backend/.langgraph_api/
+
 .idea
 
 # OS

@@ -744,17 +744,20 @@ const buildApiUrl = async (path) => {
 
 const providerOptions = [
   { label: '阿里通义千问（DashScope）', value: 'qwen' },
-  { label: 'OpenAI / 兼容 API', value: 'openai' }
+  { label: 'OpenAI / 兼容 API', value: 'openai' },
+  { label: 'Anthropic 兼容', value: 'anthropic' }
 ]
 
 const langchainBaseUrlOptions = [
   { value: 'dashscope', label: '阿里云 DashScope' },
   { value: 'openai', label: 'OpenAI 官方' },
+  { value: 'anthropic', label: 'Anthropic 兼容' },
   { value: 'custom', label: '自定义兼容接口' }
 ]
 
 const LANGCHAIN_DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 const LANGCHAIN_OPENAI_BASE_URL = 'https://api.openai.com/v1'
+const LANGCHAIN_ANTHROPIC_BASE_URL = 'https://coding.dashscope.aliyuncs.com/apps/anthropic'
 const langchainBaseUrlMode = ref('dashscope')
 
 const llmState = reactive({
@@ -864,7 +867,8 @@ const embeddingModelPlaceholder = computed(() =>
   llmState.embedding.provider === 'openai' ? '如：text-embedding-3-small' : '如：text-embedding-v4'
 )
 const featureModelPlaceholder = computed(() =>
-  llmState.langchain.provider === 'openai' ? '如：gpt-4o-mini' : '如：qwen-plus'
+  llmState.langchain.provider === 'openai' ? '如：gpt-4o-mini' :
+  llmState.langchain.provider === 'anthropic' ? '如：claude-3-5-sonnet-20241022' : '如：qwen-plus'
 )
 const reportRuntimeModelPlaceholder = computed(() =>
   reportRuntime.provider === 'openai' ? '如：gpt-4.1 或 gpt-4o-mini' : '如：qwen3.5-plus'
@@ -877,6 +881,9 @@ const effectiveLangchainBaseUrl = computed(() => {
   if (langchainBaseUrlMode.value === 'openai') {
     return raw || LANGCHAIN_OPENAI_BASE_URL
   }
+  if (langchainBaseUrlMode.value === 'anthropic') {
+    return raw || LANGCHAIN_ANTHROPIC_BASE_URL
+  }
   return raw
 })
 
@@ -885,8 +892,14 @@ const syncLangchainBaseUrlModeFromState = () => {
   const baseUrl = String(llmState.langchain.base_url || '').trim()
 
   if (!baseUrl) {
-    langchainBaseUrlMode.value = provider === 'openai' ? 'openai' : 'dashscope'
-    llmState.langchain.provider = langchainBaseUrlMode.value === 'openai' ? 'openai' : 'qwen'
+    if (provider === 'openai') {
+      langchainBaseUrlMode.value = 'openai'
+    } else if (provider === 'anthropic') {
+      langchainBaseUrlMode.value = 'anthropic'
+    } else {
+      langchainBaseUrlMode.value = 'dashscope'
+      llmState.langchain.provider = 'qwen'
+    }
     return
   }
 
@@ -902,8 +915,13 @@ const syncLangchainBaseUrlModeFromState = () => {
     return
   }
 
+  if (baseUrl === LANGCHAIN_ANTHROPIC_BASE_URL) {
+    langchainBaseUrlMode.value = 'anthropic'
+    llmState.langchain.provider = 'anthropic'
+    return
+  }
+
   langchainBaseUrlMode.value = 'custom'
-  llmState.langchain.provider = 'openai'
 }
 
 watch(
@@ -946,7 +964,12 @@ watch(
       llmState.langchain.base_url = LANGCHAIN_OPENAI_BASE_URL
       return
     }
-    llmState.langchain.provider = 'openai'
+    if (mode === 'anthropic') {
+      llmState.langchain.provider = 'anthropic'
+      llmState.langchain.base_url = LANGCHAIN_ANTHROPIC_BASE_URL
+      return
+    }
+    // custom mode - keep provider as-is, user will set manually
   }
 )
 

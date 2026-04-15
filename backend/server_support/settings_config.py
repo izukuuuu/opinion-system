@@ -20,6 +20,7 @@ from server_support import (
 from src.netinsight import load_netinsight_config  # type: ignore
 from src.netinsight import persist_netinsight_config  # type: ignore
 from src.netinsight import summarise_netinsight_credentials  # type: ignore
+from src.netinsight.planner import PLATFORM_OPTIONS  # type: ignore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -644,6 +645,7 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
                     "credentials": summarise_netinsight_credentials(),
                     "runtime": runtime,
                     "planner": planner,
+                    "platform_options": PLATFORM_OPTIONS,
                 }
             }
         )

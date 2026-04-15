@@ -215,14 +215,20 @@
             class="input"
           />
         </label>
-        <label class="space-y-1.5 text-sm">
+        <label class="space-y-2 text-sm">
           <span class="font-medium text-secondary">默认平台</span>
-          <input
-            v-model.trim="form.defaultPlatformsText"
-            type="text"
-            placeholder="例如：微博,新闻网站"
-            class="input"
-          />
+          <p class="text-xs text-muted">勾选新建任务时默认使用的平台</p>
+          <div class="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+            <AppCheckbox
+              v-for="platform in platformOptions"
+              :key="platform"
+              v-model="form.defaultPlatforms"
+              :value="platform"
+              :label="platform"
+              class="w-full"
+              label-class="w-full gap-2 rounded-xl border border-soft bg-base-soft px-3 py-2 text-xs text-secondary cursor-pointer select-none"
+            />
+          </div>
         </label>
       </div>
     </section>
@@ -244,7 +250,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { KeyIcon, Cog6ToothIcon as CogIcon, CalendarDaysIcon } from '@heroicons/vue/24/outline'
 
 import AppSelect from '../../components/AppSelect.vue'
@@ -264,6 +270,21 @@ const infoTypeOptions = [
   { value: '1', label: '全部' },
   { value: '3', label: '评论' }
 ]
+
+const platformOptions = ref([
+  '全部',
+  '新闻网站',
+  '新闻APP',
+  '视频',
+  '微博',
+  '微信',
+  '自媒体号',
+  '论坛',
+  '电子报',
+  '境外新闻',
+  'Twitter',
+  'Facebook',
+])
 
 const loading = ref(false)
 const credentialsSummary = reactive({
@@ -292,15 +313,8 @@ const form = reactive({
   browserChannel: '',
   defaultDays: 30,
   defaultTotalLimit: 500,
-  defaultPlatformsText: '微博',
+  defaultPlatforms: ['微博'],
 })
-
-const defaultPlatforms = computed(() =>
-  String(form.defaultPlatformsText || '')
-    .split(/[\n,，;；、]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-)
 
 async function fetchSettings() {
   try {
@@ -309,6 +323,10 @@ async function fetchSettings() {
     Object.assign(credentialsSummary, payload.credentials || {})
     const runtime = payload.runtime || {}
     const planner = payload.planner || {}
+
+    if (Array.isArray(payload.platform_options)) {
+      platformOptions.value = payload.platform_options
+    }
 
     form.user = String(payload.credentials?.user || '')
     form.password = ''
@@ -323,9 +341,9 @@ async function fetchSettings() {
     form.browserChannel = String(runtime.browser_channel || '')
     form.defaultDays = Number(planner.default_days || 30)
     form.defaultTotalLimit = Number(planner.default_total_limit || 500)
-    form.defaultPlatformsText = Array.isArray(planner.default_platforms)
-      ? planner.default_platforms.join(', ')
-      : '微博'
+    form.defaultPlatforms = Array.isArray(planner.default_platforms)
+      ? planner.default_platforms.filter((p) => platformOptions.value.includes(p))
+      : ['微博']
   } catch (err) {
     feedback.type = 'error'
     feedback.message = err instanceof Error ? err.message : '读取 NetInsight 配置失败'
@@ -366,7 +384,7 @@ async function submit() {
         browser_channel: form.browserChannel,
         default_days: Number(form.defaultDays || 30),
         default_total_limit: Number(form.defaultTotalLimit || 500),
-        default_platforms: defaultPlatforms.value,
+        default_platforms: form.defaultPlatforms,
       }),
     })
     Object.assign(credentialsSummary, response?.data?.credentials || {})

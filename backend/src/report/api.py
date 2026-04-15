@@ -27,7 +27,9 @@ from .task_queue import (
     get_task,
     list_tasks,
     load_events_since,
+    requeue_task,
     resolve_approval,
+    resume_before_failure_task,
     retry_task,
 )
 
@@ -394,6 +396,7 @@ def _create_or_reuse_task(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], bool
     start = str(payload.get("start") or "").strip()
     end = str(payload.get("end") or "").strip() or start
     mode = str(payload.get("mode") or "fast").strip().lower() or "fast"
+    skip_validation = bool(payload.get("skip_validation"))
     if not start:
         raise ValueError("Missing required field(s): start")
     resolve_runtime_profile(purpose="report-api")
@@ -417,6 +420,7 @@ def _create_or_reuse_task(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], bool
             "project": project_param,
             "dataset_id": dataset_id,
             "aliases": ctx.aliases or [],
+            "skip_validation": skip_validation,
         }
     )
     return created, False
@@ -635,6 +639,30 @@ def retry_report_task(task_id: str):
     return success({"task": task, "worker": worker})
 
 
+@report_bp.post("/tasks/<task_id>/resume-before-failure")
+def resume_report_task_before_failure(task_id: str):
+    try:
+        task = resume_before_failure_task(task_id)
+        worker = ensure_worker_running()
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except ValueError as exc:
+        return error(str(exc), 400)
+    return success({"task": task, "worker": worker})
+
+
+@report_bp.post("/tasks/<task_id>/requeue")
+def requeue_report_task(task_id: str):
+    try:
+        task = requeue_task(task_id)
+        worker = ensure_worker_running()
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except ValueError as exc:
+        return error(str(exc), 400)
+    return success({"task": task, "worker": worker})
+
+
 @report_bp.post("/tasks/<task_id>/approvals/<approval_id>")
 def resolve_report_approval(task_id: str, approval_id: str):
     payload = request.get_json(silent=True) or {}
@@ -643,7 +671,7 @@ def resolve_report_approval(task_id: str, approval_id: str):
             task_id,
             approval_id=approval_id,
             decision=str(payload.get("decision") or "").strip(),
-            edited_action=payload.get("edited_action") if isinstance(payload.get("edited_action"), dict) else None,
+            review_payload=payload.get("review_payload") if isinstance(payload.get("review_payload"), dict) else None,
         )
         worker = ensure_worker_running()
     except LookupError as exc:

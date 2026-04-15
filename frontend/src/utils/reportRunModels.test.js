@@ -118,6 +118,45 @@ describe('reportRunModels', () => {
     expect(vm.timelineEvents[0].title).toContain('整理证据卡')
   })
 
+  it('renders tool call events with tool name, actor alias and request summary', () => {
+    const model = buildDebugEvent({
+      event_id: 21,
+      type: 'tool.called',
+      ts: '2026-04-14T14:21:00Z',
+      agent: 'archive_evidence_organizer',
+      payload: {
+        tool_name: 'retrieve_evidence_cards',
+        args_preview: JSON.stringify({
+          intent: 'overview',
+          limit: 12,
+          sort_by: 'relevance',
+          retrieval_scope_json: JSON.stringify({ start: '2025-01-15', end: '2025-12-31' }),
+          filters_json: JSON.stringify({ query: '控烟 高铁站台' }),
+          normalized_task_json: JSON.stringify({
+            topic_label: '2025控烟舆情',
+            keywords: ['站台禁烟'],
+            entities: ['高铁站台'],
+            platform_scope: ['微博', '视频']
+          })
+        }),
+        tool_round_count: 1,
+        tool_round_limit: 3
+      }
+    })
+
+    expect(model.title).toContain('整理证据卡')
+    expect(model.message).toContain('证据整理')
+    expect(model.message).toContain('整理证据卡')
+    expect(model.detailLines).toContain('本次目标：整理总览相关证据卡')
+    expect(model.detailLines).toContain('请求词：控烟 高铁站台、站台禁烟、2025控烟舆情')
+    expect(model.detailLines).toContain('平台范围：微博、视频')
+    expect(model.detailLines).toContain('关注主体：高铁站台')
+    expect(model.detailLines).toContain('时间窗：2025-01-15 至 2025-12-31')
+    expect(model.detailLines).toContain('排序方式：relevance')
+    expect(model.detailLines).toContain('数量上限：12')
+    expect(model.detailLines).toContain('调用轮次：第 1 / 3 轮')
+  })
+
   it('prefers intelligence receipts over paired raw tool results', () => {
     const vm = buildRunConsoleViewModel({
       id: 'rp-3',
