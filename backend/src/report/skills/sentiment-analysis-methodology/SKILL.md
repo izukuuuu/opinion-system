@@ -4,13 +4,9 @@ title: 舆情分析方法论
 description: 用于舆情专题报告、阶段研判、传播结构解释和风险边界控制的分析型写作 skill。适合需要先组织证据、再解释机制、最后输出克制判断的报告任务。
 allowed_tools: get_sentiment_analysis_framework get_sentiment_theories get_sentiment_case_template get_youth_sentiment_insight search_reference_insights build_event_reference_links
 metadata:
-  openclaw:
-    skillKey: sentiment_analysis_methodology
   report:
-    documentType: analysis_report
-    aliases:
-      - sentiment_analysis_methodology
-      - sentiment-analysis-methodology
+    skillKey: sentiment_analysis_methodology
+    goal: 把报告生成从结果罗列切换成证据组织 + 机制解释 + 边界控制的分析写作模式。
 ---
 
 # 舆情分析方法论

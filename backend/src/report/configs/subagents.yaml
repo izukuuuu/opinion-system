@@ -69,7 +69,8 @@ subagents:
   agenda_frame_builder:
     name: agenda_frame_builder
     description: 负责构建议题-属性-框架图。
-    skill_keys: []
+    skill_keys:
+    - agenda-frame-builder
     output_files:
     - /workspace/state/agenda_frame_map.json
     tier: 4

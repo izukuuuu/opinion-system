@@ -1,14 +1,15 @@
 ---
 name: report-writing-framework
 description: 将结构化舆情分析结果转写为正式的公共意见分析报告。当用户提供了事件信息、传播数据、主体表态等素材并要求生成舆情报告、舆论分析、传播研判或公共意见文稿时触发。也适用于用户要求对已有舆情草稿进行改写、深化或结构重组的场景。
-capability_ids:
-  - compiler.full_markdown_compile
-  - compiler.scene_layout_critic_graph
-runtime_surfaces:
-  - plain_compat
-agent_families:
-  - document_composer
-guidance_only: true
+allowed_tools: retrieve_evidence_cards build_section_packet get_report_template
+metadata:
+  report:
+    skillKey: report_writing_framework
+    goal: 按模板章节产出有传播结构分析、因果解释、证据回链的正式舆情报告正文。
+
+## Applies To
+agent_families: document_composer
+runtime_surfaces: deep_report_subagent, plain_compat
 ---
 
 # 舆情报告写作技能
@@ -24,6 +25,35 @@ guidance_only: true
 本技能的核心价值是第三点：注入传播结构的分析视角——这不是模型默认会做的事。
 
 ---
+
+## Current Backend Contract
+
+**读取（必须按顺序）：**
+- `/workspace/state/task_contract.json` → 取 `.mode` 用于 `get_report_template` 的 mode 参数
+- `/workspace/state/utility_assessment.json` → 确认 `.result.decision` 为 `'pass'` 或 `'fallback_recompile'` 后才开始写作
+- `/workspace/state/event_analysis.json` → 直接引用 `.result.actor_distribution.actors[*].key_statements` 作为原文引用
+- `/workspace/state/evidence_cards.json` → 完整证据卡（含 snippet/content），用于补充引用
+- `/workspace/state/timeline_nodes.json` / `actor_positions.json` / `conflict_map.json` / `mechanism_summary.json` / `risk_signals.json` / `bertopic_insight.json` → 各章节内容来源
+
+**写入：**
+- `/workspace/state/section_drafts/{section_id}.json`，格式：
+  ```json
+  { "section_id": "...", "title": "...", "content": "完整 Markdown 段落", "evidence_refs": [], "claim_refs": [] }
+  ```
+
+**工具调用规范：**
+- `get_report_template(mode=...)` — mode 为 `'public_hotspot'`/`'crisis_response'`/`'policy_dynamics'` 之一
+- `retrieve_evidence_cards(contract_id=..., intent=..., ...)` — 每章至少 1 次，证据不足可追加 1 次分页调用
+- `build_section_packet(normalized_task_json=..., section_id=..., evidence_ids_json=...)` — evidence_ids_json 传 ID 字符串列表
+
+**内容密度要求：**
+- 每章节 ≥ 800 字
+- 每 100 字至少 1-2 个具体数据点或原文引用
+- 每章节至少 8-12 条用户评论引用
+
+**禁止：**
+- `utility_assessment.decision='block'` 时禁止写作
+- 禁止重新从 evidence_cards 手动拼装已在 event_analysis 中存在的 key_statements
 
 ## 一、传播视角：具体怎么"看"
 

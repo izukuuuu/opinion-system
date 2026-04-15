@@ -1,16 +1,11 @@
 ---
 name: basic-analysis-framework
-title: 基础分析章节框架
 description: 约束报告中的基础分析章节写法，聚焦量、质、人、场、效的综合判断，不把统计结果写成分散清单。
 allowed_tools: get_basic_analysis_snapshot build_basic_analysis_insight
 metadata:
-  openclaw:
-    skillKey: basic_analysis_framework
   report:
-    documentType: analysis_report
-    aliases:
-      - basic_analysis_framework
-      - basic-analysis-framework
+    skillKey: basic_analysis_framework
+    goal: 把基础分析统计结果组织成综合判断章节，优先解释整体态势、结构重点和统计边界。
 ---
 
 # 基础分析章节框架
@@ -42,8 +37,23 @@ metadata:
 }
 ```
 
+## Current Backend Contract
+
+**读取（只读）：**
+- `/workspace/state/task_contract.json` → 提取 `.topic_identifier / .start / .end / .topic_label`，传给 `get_basic_analysis_snapshot`
+
+**工具调用规范（coordinator 和 archive_evidence_organizer 使用）：**
+- `get_basic_analysis_snapshot(topic_identifier=..., start=..., end=..., topic_label=...)` — 参数严格取自 task_contract
+- `build_basic_analysis_insight(snapshot_json=...)` — snapshot_json 传 get_basic_analysis_snapshot 的完整返回值 JSON 字符串
+
+**空结果格式：**
+```json
+{ "status": "empty", "reason": "基础分析快照不存在", "result": {}, "skipped_due_to": ["tool_returned_empty"] }
+```
+
 ## Constraints
 
 - 不要按 `volume/attitude/trends/...` 逐项机械展开。
 - 不要把单个统计项拔高为传播机制或治理建议。
 - 如果缺少部分模块，只能写成当前覆盖有限、判断需保留边界。
+- 快照不存在时生成标准化空结构，禁止伪造基础分析数据。

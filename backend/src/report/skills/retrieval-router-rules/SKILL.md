@@ -34,6 +34,23 @@ metadata:
 - 不要让 writer 直接接触原始检索命中；writer 只应消费 `/workspace/state/section_packets/*.json`。
 - 不要让 router 用 prose token fallback 决定 specialist；派工依据必须能回放为 typed facets 与 dispatch reason。
 
+## Current Backend Contract
+
+**读取（只读，禁止改写）：**
+- `/workspace/base_context.json` → 提取 `task_contract.topic_identifier / start / end / contract_id / mode`（这 5 个字段只读不写）
+
+**写入（6 个文件，若已存在先 read 再 edit，禁止 write 覆盖）：**
+- `/workspace/state/task_derivation.json`
+- `/workspace/state/task_derivation_proposal.json`
+- `/workspace/state/normalized_task.json` — normalize_task 工具返回值
+- `/workspace/state/retrieval_plan.json` — 含 router_facets / dispatch_plan / dispatch_quality_ledger
+- `/workspace/state/dispatch_quality.json`
+- `/workspace/state/corpus_coverage.json` — get_corpus_coverage 工具返回值
+
+**空结果/降级：**
+- 若 `coverage.readiness_flags` 含 `no_records_in_scope`，在 corpus_coverage.json 记录此状态，dispatch_quality.json 标注 `status='no_data'`，结束，禁止继续扩检。
+- 若 `coverage.readiness_flags` 含 `partial_coverage`，扩大 `retrieval_scope_json` 时间窗后重试一次（最多扩展一次）。
+
 ## Expected Output
 
 - 一个简短总结，说明：

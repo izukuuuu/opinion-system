@@ -1,16 +1,11 @@
 ---
 name: bertopic-evolution-framework
-title: BERTopic 主题演化框架
 description: 约束报告中的 BERTopic 主题演化章节写法，聚焦主题簇、主题迁移、阶段切换和覆盖率边界。
 allowed_tools: get_bertopic_snapshot build_bertopic_insight
 metadata:
-  openclaw:
-    skillKey: bertopic_evolution_framework
   report:
-    documentType: analysis_report
-    aliases:
-      - bertopic_evolution_framework
-      - bertopic-evolution-framework
+    skillKey: bertopic_evolution_framework
+    goal: 把 BERTopic 结果组织成可读的主题演化章节，区分背景常量主题、爆发变量主题和阶段性切换主题。
 ---
 
 # BERTopic 主题演化框架
@@ -42,8 +37,25 @@ metadata:
 }
 ```
 
+## Current Backend Contract
+
+**读取（只读）：**
+- `/workspace/state/task_contract.json` → 提取 `.topic_identifier / .start / .end / .topic_label`，传给 `get_bertopic_snapshot`
+
+**写入（bertopic_evolution_analyst 代理）：**
+- `/workspace/state/bertopic_insight.json`，格式：
+  ```json
+  { "status": "ok", "result": { "topic_clusters": [], "evolution_phases": [], "background_constants": [], "burst_variables": [] } }
+  ```
+
+**空结果格式：**
+```json
+{ "status": "empty", "reason": "BERTopic 快照不存在或主题为空", "result": {}, "skipped_due_to": ["tool_returned_empty"] }
+```
+
 ## Constraints
 
 - 不要把主题簇描述写成抽象空话，必须回到现有主题名称和时序事实。
 - 不要在缺 temporal 结果时强行解释主题迁移。
 - 不要把 BERTopic 主题章节直接写成风险建议章节。
+- 若 `get_bertopic_snapshot` 返回 `status='empty'`，生成标准化空结构后立即结束，禁止伪造演化趋势。

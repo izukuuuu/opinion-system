@@ -123,6 +123,27 @@ metadata:
 
 ---
 
+## Current Backend Contract
+
+**读取（只读）：**
+- `/workspace/state/normalized_task.json` → 提取顶层对象，传给 `normalized_task_json`
+- `/workspace/state/evidence_cards.json` → 提取 `.result[*].evidence_id` 字符串列表，传给 `evidence_ids_json`
+
+**写入：**
+- `stance_conflict` 代理写入：`/workspace/state/actor_positions.json`
+  ```json
+  { "status": "ok", "result": [...actor 对象列表...] }
+  ```
+- `claim_actor_conflict` 代理写入：`/workspace/state/conflict_map.json`
+  ```json
+  { "status": "ok", "result": { "claim_nodes": [], "actor_positions": [], "conflict_edges": [], "resolution_states": [] } }
+  ```
+
+**空结果格式：**
+```json
+{ "status": "empty", "reason": "上游证据为空", "result": [], "skipped_due_to": ["upstream_empty"] }
+```
+
 ## 约束与质量检查
 
 完成输出后，逐项自检：
