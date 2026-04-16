@@ -135,11 +135,11 @@ describe('ReportGenerationRun', () => {
 
     expect(wrapper.text()).toContain('阶段进度')
     expect(wrapper.text()).toContain('运行状态')
-    expect(wrapper.text()).toContain('裁决摘要')
-    expect(wrapper.text()).toContain('当前产物')
-    expect(wrapper.text()).toContain('审批与恢复')
-    expect(wrapper.text()).toContain('运行诊断')
-    expect(wrapper.text()).toContain('Deep Coordinator')
+    expect(wrapper.text()).toContain('进展判断')
+    expect(wrapper.text()).toContain('生成结果')
+    expect(wrapper.text()).toContain('人工确认')
+    expect(wrapper.text()).toContain('运行详情')
+    expect(wrapper.text()).toContain('深度分析主控')
     expect(wrapper.text()).toContain('SQLITE')
     expect(wrapper.text()).not.toContain('执行节点明细')
   })
@@ -199,7 +199,7 @@ describe('ReportGenerationRun', () => {
     mockState.resumeCapabilities = {}
   })
 
-  it('submits edited markdown when approval supports direct revision', async () => {
+  it('submits structured rewrite feedback when approval requests revision', async () => {
     mockState.approvals = [{
       approval_id: 'approval-annotation',
       status: 'pending',
@@ -207,7 +207,12 @@ describe('ReportGenerationRun', () => {
       action: {
         markdown_preview: '# 预览文稿',
         review_mode: 'annotation',
-        review_placeholder: '请输入批注'
+        review_placeholder: '请输入批注',
+        semantic_interrupt: {
+          rewrite_round: 1,
+          allowed_rewrite_ops: ['delete_untraced', 'rephrase'],
+          offending_unit_ids: ['unit-1']
+        }
       }
     }]
     const wrapper = shallowMount(ReportGenerationRun, mountOptions)
@@ -218,19 +223,23 @@ describe('ReportGenerationRun', () => {
     await approvalTab.trigger('click')
 
     expect(wrapper.text()).toContain('文稿预览')
-    expect(wrapper.text()).toContain('如需改写，可在这里直接编辑文稿')
+    expect(wrapper.text()).toContain('重写批注')
     const textarea = wrapper.find('textarea')
     await textarea.setValue('这里补充边界说明')
-    const editButton = wrapper.findAll('button').find((item) => item.text().includes('提交修改'))
-    await editButton.trigger('click')
+    const rewriteButton = wrapper.findAll('button').find((item) => item.text().includes('要求重写'))
+    await rewriteButton.trigger('click')
 
     expect(resolveReportApproval).toHaveBeenCalledWith(
       'rp-1',
       'approval-annotation',
       {
-        decision: 'edit',
-        edited_action: {
-          markdown: '这里补充边界说明'
+        decision: 'rewrite',
+        review_payload: {
+          comment: '这里补充边界说明',
+          rewrite_focus: [],
+          must_keep: [],
+          must_remove: [],
+          tone_target: ''
         }
       }
     )

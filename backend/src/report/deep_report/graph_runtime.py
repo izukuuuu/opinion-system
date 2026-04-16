@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import operator
 import re
+import uuid
+from pathlib import Path
 from typing import Annotated, Any, Callable, Dict, List, Optional, TypedDict
 
 from langgraph.errors import GraphInterrupt
@@ -18,13 +20,13 @@ from .compiler import (
     build_layout_plan,
     build_section_budget,
     build_section_plan,
-    compile_draft_units,
     run_factual_conformance,
     sanitize_public_markdown,
     select_scene_profile,
     resolve_style_profile,
 )
 from .schemas import (
+    CommitArtifactRecord,
     DeepReportGraphState,
     DraftBundle,
     DraftBundleV2,
@@ -34,6 +36,8 @@ from .schemas import (
     FactualConformanceResult,
     RepairPatch,
     RepairPlanV2,
+    ReviewFeedbackContract,
+    RewriteContract,
     TraceRef,
     ValidationFailure,
     ValidationResultV2,
@@ -67,10 +71,37 @@ class _GraphState(TypedDict, total=False):
     draft_bundle_v2: Dict[str, Any]
     validation_result_v2: Dict[str, Any]
     repair_plan_v2: Dict[str, Any]
+    graph_state_v2: Dict[str, Any]
     markdown: str
+    execution_phase: str
+    rewrite_round: int
+    rewrite_budget: int
+    rewrite_issue_count: int
+    approval_required: bool
+    approval_status: str
+    finalization_mode: str
+    commit_pending: bool
+    commit_idempotency_key: str
     review_required: bool
     blocked_reason: str
     repair_count: int
+    structured_report_current: Dict[str, Any]
+    draft_bundle_current: Dict[str, Any]
+    final_markdown_current: str
+    rewrite_contract: Dict[str, Any]
+    review_feedback_contract: Dict[str, Any]
+    source_checkpoint_id: str
+    parent_artifact_id: str
+    repaired_unit_ids: List[str]
+    dropped_unit_ids: List[str]
+    unchanged_unit_ids: List[str]
+    review_feedback_rounds: Annotated[List[Dict[str, Any]], operator.add]
+    validation_issues: Annotated[List[Dict[str, Any]], operator.add]
+    repair_history: Annotated[List[Dict[str, Any]], operator.add]
+    semantic_review_records: Annotated[List[Dict[str, Any]], operator.add]
+    progress_events: Annotated[List[Dict[str, Any]], operator.add]
+    rewrite_lineage: Annotated[List[Dict[str, Any]], operator.add]
+    commit_artifacts: Annotated[List[Dict[str, Any]], operator.add]
     visited_nodes: List[str]
     current_node: str
     planner_slots: List[Dict[str, Any]]
@@ -82,6 +113,20 @@ class _GraphState(TypedDict, total=False):
 
 
 _TRACEABLE_UNIT_TYPES = {"observation", "finding", "mechanism", "risk", "recommendation", "unresolved"}
+
+_DEFAULT_ALLOWED_REWRITE_OPS = ["downtone", "delete_untraced", "move_to_unverified", "rephrase"]
+_DEFAULT_FORBIDDEN_REWRITE_OPS = ["add_fact", "add_actor", "add_risk", "add_recommendation", "expand_scope"]
+
+
+def compile_draft_units(report_ir: Dict[str, Any], section_plan: Dict[str, Any], scene_profile: Any) -> DraftBundleV2:
+    from .deep_writer import compile_draft_units_with_llm
+
+    result = compile_draft_units_with_llm(report_ir, section_plan, scene_profile)
+    if isinstance(result, DraftBundle):
+        return upgrade_draft_bundle_to_v2(report_ir, result)
+    if isinstance(result, dict) and result.get("units") is not None and result.get("schema_version") != "draft-bundle.v2":
+        return upgrade_draft_bundle_to_v2(report_ir, result)
+    return result if isinstance(result, DraftBundleV2) else DraftBundleV2.model_validate(result)
 
 
 def _payload_from_state(state: _GraphState) -> Dict[str, Any]:
@@ -124,6 +169,54 @@ def _emit_graph_event(
     )
 
 
+def _state_progress_event(*, event_type: str, node_name: str, phase: str, message: str, payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    return {
+        "event_type": event_type,
+        "node_name": node_name,
+        "phase": phase,
+        "message": message,
+        "payload": payload or {},
+    }
+
+
+def _json_dumpable(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    return value
+
+
+def _safe_sentence_limit(text: str, *, limit: int) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+    sentences = re.split(r"(?<=[。！？!?])\s*", cleaned)
+    return " ".join([item for item in sentences if item][:limit]).strip() or cleaned
+
+
+def _build_commit_idempotency_key(*, task_id: str, artifact_type: str, rewrite_round: int, schema_version: str) -> str:
+    return "::".join(
+        [
+            str(task_id or "").strip() or "missing-task",
+            str(artifact_type or "").strip() or "artifact",
+            str(int(rewrite_round or 0)),
+            str(schema_version or "").strip() or "schema",
+        ]
+    )
+
+
+def _upsert_json_artifact(path_text: str, payload: Dict[str, Any]) -> None:
+    path = Path(str(path_text or "").strip())
+    if not str(path):
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(__import__("json").dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _artifact_paths_from_task(task: Dict[str, Any]) -> Dict[str, str]:
+    raw = task.get("artifact_paths") if isinstance(task.get("artifact_paths"), dict) else {}
+    return {str(key).strip(): str(value).strip() for key, value in raw.items() if str(key).strip() and str(value).strip()}
+
+
 def _node_phase(node_name: str) -> str:
     if node_name in {
         "unit_validator",
@@ -131,12 +224,15 @@ def _node_phase(node_name: str) -> str:
         "repair_worker",
         "repair_finalize",
         "repairer_agent",
-        "compile_blocked",
+        "semantic_gate_router",
+        "rewrite_contract_builder",
+        "auto_rewrite_agent",
+        "semantic_review_interrupt",
     }:
         return "review"
     if node_name == "markdown_compiler":
         return "write"
-    if node_name in {"artifact_renderer"}:
+    if node_name in {"finalize_artifacts", "commit_artifacts", "artifact_renderer"}:
         return "persist"
     if node_name in {"section_realizer_agent", "section_realizer_worker", "section_realizer_finalize"}:
         return "write"
@@ -582,6 +678,17 @@ def build_repair_plan_v2(report_ir: Dict[str, Any], draft_bundle_v2: DraftBundle
     )
 
 
+def _draft_bundle_v2_from_any(report_ir: Dict[str, Any], draft_bundle: DraftBundleV2 | DraftBundle | Dict[str, Any]) -> DraftBundleV2:
+    if isinstance(draft_bundle, DraftBundleV2):
+        return draft_bundle
+    if isinstance(draft_bundle, DraftBundle):
+        return upgrade_draft_bundle_to_v2(report_ir, draft_bundle)
+    candidate = draft_bundle if isinstance(draft_bundle, dict) else {}
+    if candidate.get("units") and candidate.get("schema_version") != "draft-bundle.v2":
+        return upgrade_draft_bundle_to_v2(report_ir, candidate)
+    return DraftBundleV2.model_validate(candidate or {})
+
+
 def apply_repair_plan_v2(draft_bundle_v2: DraftBundleV2 | Dict[str, Any], repair_plan_v2: RepairPlanV2 | Dict[str, Any]) -> DraftBundleV2:
     bundle = draft_bundle_v2 if isinstance(draft_bundle_v2, DraftBundleV2) else DraftBundleV2.model_validate(draft_bundle_v2 or {})
     plan = repair_plan_v2 if isinstance(repair_plan_v2, RepairPlanV2) else RepairPlanV2.model_validate(repair_plan_v2 or {})
@@ -604,6 +711,8 @@ def apply_repair_plan_v2(draft_bundle_v2: DraftBundleV2 | Dict[str, Any], repair
 
 
 def _legacy_draft_bundle_from_v2(draft_bundle_v2: DraftBundleV2 | Dict[str, Any]) -> DraftBundle:
+    if isinstance(draft_bundle_v2, DraftBundle):
+        return draft_bundle_v2
     bundle = draft_bundle_v2 if isinstance(draft_bundle_v2, DraftBundleV2) else DraftBundleV2.model_validate(draft_bundle_v2 or {})
     legacy_units: List[DraftUnit] = []
     for unit in bundle.units:
@@ -830,6 +939,13 @@ def run_report_compilation_graph(
         report_ir = payload.get("report_ir") if isinstance(payload.get("report_ir"), dict) else {}
         task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
         utility = report_ir.get("utility_assessment") if isinstance(report_ir.get("utility_assessment"), dict) else {}
+        skip_validation = bool(task.get("skip_validation"))
+        configured_budget = task.get("rewrite_budget")
+        default_rewrite_budget = 0 if skip_validation else 1
+        try:
+            rewrite_budget = max(0, int(configured_budget if configured_budget is not None else default_rewrite_budget))
+        except (TypeError, ValueError):
+            rewrite_budget = default_rewrite_budget
         policy_registry = build_conformance_policy_registry()
         scene_profile = select_scene_profile(report_ir)
         style_profile = resolve_style_profile(report_ir, scene_profile)
@@ -849,6 +965,37 @@ def run_report_compilation_graph(
             "section_budget": section_budget.model_dump(),
             "writer_context": writer_context.model_dump(),
             "section_plan": section_plan.model_dump(),
+            "execution_phase": "prepare",
+            "rewrite_round": 0,
+            "rewrite_budget": rewrite_budget,
+            "rewrite_issue_count": 0,
+            "approval_required": False,
+            "approval_status": "approved" if skip_validation else "none",
+            "finalization_mode": "",
+            "commit_pending": False,
+            "commit_idempotency_key": "",
+            "structured_report_current": payload,
+            "draft_bundle_current": {},
+            "final_markdown_current": "",
+            "rewrite_contract": {},
+            "source_checkpoint_id": "",
+            "parent_artifact_id": "structured_projection",
+            "repaired_unit_ids": [],
+            "dropped_unit_ids": [],
+            "unchanged_unit_ids": [],
+            "validation_issues": [],
+            "repair_history": [],
+            "semantic_review_records": [],
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.prepare.started",
+                    node_name="load_context",
+                    phase="prepare",
+                    message="编译图已初始化。",
+                    payload={"rewrite_budget": rewrite_budget, "skip_validation": skip_validation},
+                )
+            ],
+            "commit_artifacts": [],
         }
 
     def planner_agent(state: _GraphState) -> Dict[str, Any]:
@@ -879,37 +1026,24 @@ def run_report_compilation_graph(
         return {"report_ir": state.get("report_ir") or {}}
 
     def trace_binder(state: _GraphState) -> Dict[str, Any]:
-        # 根据render_mode选择编译方式
+        # 正式文稿统一走模板驱动写作，确定性拼接仅保留历史兼容函数。
         scene_profile = state.get("scene_profile") or {}
-        render_mode = str(scene_profile.get("render_mode", "") or "").strip()
+        from .schemas import CompilerSceneProfile
 
-        if render_mode == "template_driven":
-            # 使用LLM深度写作（复刻BettaFish能力）
-            from .deep_writer import compile_draft_units_with_llm
-            from .schemas import CompilerSceneProfile
-            scene = CompilerSceneProfile.model_validate(scene_profile)
-            draft_bundle_v2 = compile_draft_units_with_llm(
-                state["report_ir"],
-                state["section_plan"],
-                scene,
-            )
-            # 同时生成legacy draft_bundle用于兼容
-            draft_bundle = compile_draft_units(state["report_ir"], state["section_plan"])
-            return {
-                "draft_bundle": draft_bundle.model_dump(),
-                "draft_bundle_v2": draft_bundle_v2.model_dump(),
-            }
-        else:
-            # 使用确定性拼接（claim_anchored模式）
-            draft_bundle = compile_draft_units(state["report_ir"], state["section_plan"])
-            draft_bundle_v2 = upgrade_draft_bundle_to_v2(state["report_ir"], draft_bundle)
-            return {
-                "draft_bundle": draft_bundle.model_dump(),
-                "draft_bundle_v2": draft_bundle_v2.model_dump(),
-            }
+        scene = CompilerSceneProfile.model_validate(scene_profile)
+        draft_bundle_v2 = compile_draft_units(
+            state["report_ir"],
+            state["section_plan"],
+            scene,
+        )
+        draft_bundle = _legacy_draft_bundle_from_v2(draft_bundle_v2)
+        return {
+            "draft_bundle": draft_bundle.model_dump(),
+            "draft_bundle_v2": draft_bundle_v2.model_dump(),
+        }
 
     def section_realizer_worker(state: _GraphState) -> Dict[str, Any]:
-        bundle = DraftBundleV2.model_validate(state.get("draft_bundle_v2") or {})
+        bundle = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state.get("draft_bundle_v2") or {})
         slot = state.get("planner_slot") if isinstance(state.get("planner_slot"), dict) else {}
         section_id = str(slot.get("section_id") or "").strip()
         units = [
@@ -928,7 +1062,7 @@ def run_report_compilation_graph(
         return {"section_batches": [{"section_id": section_id, "units": units}]}
 
     def section_realizer_finalize(state: _GraphState) -> Dict[str, Any]:
-        bundle = DraftBundleV2.model_validate(state.get("draft_bundle_v2") or {})
+        bundle = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state.get("draft_bundle_v2") or {})
         section_batches = state.get("section_batches") if isinstance(state.get("section_batches"), list) else []
         realized_by_section = {
             str(item.get("section_id") or "").strip(): [
@@ -967,7 +1101,28 @@ def run_report_compilation_graph(
                 message=f"验证失败：{len(validation.failures)} 个单元需要修复或人工复核。",
                 payload={"validation_result_v2": validation.model_dump(), "failure_count": len(validation.failures), "repair_count": int(state.get("repair_count") or 0)},
             )
-        return {"validation_result_v2": validation.model_dump()}
+        return {
+            "validation_result_v2": validation.model_dump(),
+            "validation_issues": [
+                {
+                    "stage": "unit_validation",
+                    "repair_count": int(state.get("repair_count") or 0),
+                    "failures": [item.model_dump() for item in validation.failures],
+                    "gate": validation.gate,
+                }
+            ],
+            "execution_phase": "review" if not validation.passed else "compile",
+            "draft_bundle_current": state.get("draft_bundle_v2") or {},
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.validation.completed",
+                    node_name="unit_validator",
+                    phase="review" if not validation.passed else "compile",
+                    message="结构验证已完成。",
+                    payload={"passed": validation.passed, "gate": validation.gate, "failure_count": len(validation.failures)},
+                )
+            ],
+        }
 
     def repair_patch_planner(state: _GraphState) -> Dict[str, Any]:
         plan = build_repair_plan_v2(state["report_ir"], state["draft_bundle_v2"], state["validation_result_v2"])
@@ -980,7 +1135,26 @@ def run_report_compilation_graph(
             message=f"准备执行第 {int(state.get('repair_count') or 0) + 1} 轮修复。",
             payload={"repair_count": int(state.get('repair_count') or 0) + 1, "repair_plan_v2": plan.model_dump()},
         )
-        return {"repair_plan_v2": plan.model_dump()}
+        return {
+            "repair_plan_v2": plan.model_dump(),
+            "repair_history": [
+                {
+                    "kind": "draft_repair_plan",
+                    "repair_round": int(state.get("repair_count") or 0) + 1,
+                    "patch_count": len(plan.patches),
+                    "blocked_failure_count": len(plan.blocked_failures),
+                }
+            ],
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.repair.plan",
+                    node_name="repair_patch_planner",
+                    phase="review",
+                    message="结构修复计划已生成。",
+                    payload={"repair_round": int(state.get("repair_count") or 0) + 1, "patch_count": len(plan.patches)},
+                )
+            ],
+        }
 
     def repair_worker(state: _GraphState) -> Dict[str, Any]:
         patch = state.get("repair_patch") if isinstance(state.get("repair_patch"), dict) else {}
@@ -1016,88 +1190,28 @@ def run_report_compilation_graph(
             "repair_plan_v2": applied_plan.model_dump(),
             "repair_batches": None,
             "repair_count": repair_count,
-        }
-
-    def compile_blocked(state: _GraphState) -> Dict[str, Any]:
-        validation = ValidationResultV2.model_validate(state.get("validation_result_v2") or {})
-        bundle_v2 = DraftBundleV2.model_validate(state.get("draft_bundle_v2") or {})
-        title = str(((state.get("task") or {}).get("topic_label")) or "").strip()
-        markdown_preview = render_markdown_from_v2(state["report_ir"], bundle_v2, title=title)
-        interrupt_event_key = f"{compile_thread_id}:compile_blocked:{int(state.get('repair_count') or 0)}"
-        interrupt_payload = {
-            "review_kind": "compile_blocked",
-            "title": "语义边界确认",
-            "summary": f"验证仍未通过，当前停在人工复核前置门禁。失败单元 {len(validation.failures)} 个。",
-            "allowed_decisions": ["approve", "reject"],
-            "event_key": interrupt_event_key,
-            "review_mode": "annotation",
-            "review_prompt": "文稿预览保持只读。如需继续写入，请补充人工审核批注，说明边界判断或后续写作调整要求。",
-            "review_placeholder": "请输入审核批注、边界说明或需保留的写作调整意见",
-            "markdown_preview": markdown_preview,
-            "validation_result_v2": validation.model_dump(),
-            "repair_plan_v2": state.get("repair_plan_v2") or {},
-            "repair_count": int(state.get("repair_count") or 0),
-        }
-        if not is_resume_invocation:
-            _emit_graph_event(
-                event_callback,
-                event_type="compile.blocked",
-                node_name="compile_blocked",
-                phase="review",
-                title="正式编译已阻止",
-                message=interrupt_payload["summary"],
-                payload={**interrupt_payload, "event_key": f"{interrupt_event_key}:compile.blocked"},
-            )
-            _emit_graph_event(
-                event_callback,
-                event_type="interrupt.human_review",
-                node_name="compile_blocked",
-                phase="review",
-                title="等待人工复核",
-                message="修复回路未能自动闭合，当前需要人工复核。",
-                payload={**interrupt_payload, "event_key": f"{interrupt_event_key}:interrupt.human_review"},
-            )
-        decision = interrupt(interrupt_payload)
-        resolved = decision if isinstance(decision, dict) else {"decision": "approve" if decision else "reject"}
-        decision_text = str(resolved.get("decision") or "").strip().lower() or "approve"
-        review_payload = resolved.get("review_payload") if isinstance(resolved.get("review_payload"), dict) else {}
-        review_comment = str(review_payload.get("comment") or "").strip()
-        approved_markdown = markdown_preview
-        factual = FactualConformanceResult(
-            passed=False,
-            policy_version="policy.v2",
-            stage="final_markdown",
-            can_auto_recover=False,
-            requires_human_review=decision_text != "approve",
-            issues=[
-                FactualConformanceIssue(
-                    issue_id="human-review-gate",
-                    issue_type="human_review_required",
-                    message="该文稿在自动 repair 后仍需人工确认。",
-                    section_role="review",
-                    sentence=validation.failures[0].target_unit_id if validation.failures else "",
-                    trace_ids=[],
-                    suggested_action=decision_text,
+            "draft_bundle_current": repaired.model_dump(),
+            "repair_history": [
+                {
+                    "kind": "draft_repair_applied",
+                    "repair_round": repair_count,
+                    "patch_count": len(applied_plan.patches),
+                    "patched_unit_ids": [str(item.target_unit_id or "").strip() for item in applied_plan.patches if str(item.target_unit_id or "").strip()],
+                }
+            ],
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.repair.completed",
+                    node_name="repair_finalize",
+                    phase="review",
+                    message="结构修复已应用。",
+                    payload={"repair_round": repair_count, "patch_count": len(applied_plan.patches)},
                 )
             ],
-            metadata={
-                "decision": decision_text,
-                "review_decision": decision_text,
-                "review_mode": "annotation",
-                "review_payload": review_payload,
-                "review_comment": review_comment,
-                "repair_count": int(state.get("repair_count") or 0),
-            },
-        )
-        return {
-            "markdown": approved_markdown,
-            "review_required": decision_text != "approve",
-            "blocked_reason": "" if decision_text == "approve" else "rejected_by_human_review",
-            "factual_conformance": factual.model_dump(),
         }
 
     def markdown_compiler(state: _GraphState) -> Dict[str, Any]:
-        bundle_v2 = DraftBundleV2.model_validate(state["draft_bundle_v2"])
+        bundle_v2 = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state["draft_bundle_v2"])
         validation = ValidationResultV2.model_validate(state["validation_result_v2"])
         if not validation.passed:
             raise ValueError("markdown_compiler requires a validated DraftBundleV2.")
@@ -1122,11 +1236,326 @@ def run_report_compilation_graph(
             message="validated bundle 已成功编译为正式 Markdown。",
             payload={"unit_count": len(bundle_v2.units), "markdown_issue_count": len(factual.issues)},
         )
-        return {"markdown": markdown, "factual_conformance": factual.model_dump(), "review_required": bool(factual.requires_human_review)}
+        return {
+            "markdown": markdown,
+            "final_markdown_current": markdown,
+            "factual_conformance": factual.model_dump(),
+            "review_required": bool(factual.requires_human_review),
+            "rewrite_issue_count": len(factual.issues),
+            "draft_bundle_current": bundle_v2.model_dump(),
+            "execution_phase": "compile",
+            "validation_issues": [
+                {
+                    "stage": "semantic_conformance",
+                    "repair_count": int(state.get("repair_count") or 0),
+                    "rewrite_round": int(state.get("rewrite_round") or 0),
+                    "issues": [item.model_dump() for item in factual.issues],
+                    "requires_human_review": bool(factual.requires_human_review),
+                }
+            ],
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.markdown.completed",
+                    node_name="markdown_compiler",
+                    phase="write",
+                    message="正式文稿已完成一次编译。",
+                    payload={"issue_count": len(factual.issues), "requires_human_review": bool(factual.requires_human_review)},
+                )
+            ],
+        }
 
-    def artifact_renderer(state: _GraphState) -> Dict[str, Any]:
+    def semantic_gate_router(state: _GraphState) -> Dict[str, Any]:
+        factual = FactualConformanceResult.model_validate(state.get("factual_conformance") or {})
+        utility = state.get("utility_assessment") if isinstance(state.get("utility_assessment"), dict) else {}
+        utility_decision = str(utility.get("decision") or "pass").strip() or "pass"
+        rewrite_round = int(state.get("rewrite_round") or 0)
+        rewrite_budget = int(state.get("rewrite_budget") or 0)
+        skip_validation = bool(((state.get("task") or {}).get("skip_validation")))
+        issue_count = len(factual.issues)
+        can_rewrite = (not skip_validation) and rewrite_round < rewrite_budget and bool(issue_count)
+        requires_review = (not skip_validation) and (bool(factual.requires_human_review) or utility_decision == "require_semantic_review")
+        if factual.passed and issue_count == 0 and utility_decision == "pass":
+            next_phase = "finalize"
+            finalization_mode = "direct"
+        elif can_rewrite:
+            next_phase = "auto_rewrite"
+            finalization_mode = "auto_rewritten"
+        elif requires_review or issue_count:
+            next_phase = "human_review"
+            finalization_mode = "approval_required"
+        else:
+            next_phase = "finalize"
+            finalization_mode = "direct"
+        return {
+            "execution_phase": next_phase,
+            "approval_required": next_phase == "human_review",
+            "review_required": next_phase == "human_review",
+            "finalization_mode": finalization_mode,
+            "rewrite_issue_count": issue_count,
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.semantic_gate.routed",
+                    node_name="semantic_gate_router",
+                    phase="review" if next_phase in {"auto_rewrite", "human_review"} else "persist",
+                    message="语义门禁已完成路由。",
+                    payload={"next_phase": next_phase, "issue_count": issue_count, "rewrite_round": rewrite_round, "rewrite_budget": rewrite_budget},
+                )
+            ],
+        }
+
+    def rewrite_contract_builder(state: _GraphState) -> Dict[str, Any]:
+        factual = FactualConformanceResult.model_validate(state.get("factual_conformance") or {})
+        bundle_v2 = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state.get("draft_bundle_v2") or {})
+        feedback = ReviewFeedbackContract.model_validate(state.get("review_feedback_contract") or {})
+        issue_targets = [str(item.sentence or "").strip() for item in factual.issues if str(item.sentence or "").strip()]
+        offending_unit_ids: List[str] = []
+        dropped_unit_ids: List[str] = []
+        for unit in bundle_v2.units:
+            if unit.text and any(target in unit.text for target in issue_targets):
+                offending_unit_ids.append(str(unit.unit_id or "").strip())
+        for issue in factual.issues:
+            if str(issue.issue_id or "").startswith("markdown_untraceable:") and issue.sentence:
+                dropped_unit_ids.extend([str(unit.unit_id or "").strip() for unit in bundle_v2.units if unit.text == issue.sentence])
+        traceable_unit_ids = [str(unit.unit_id or "").strip() for unit in bundle_v2.units if str(unit.unit_id or "").strip()]
+        contract = RewriteContract(
+            allowed_ops=list(_DEFAULT_ALLOWED_REWRITE_OPS),
+            forbidden_ops=list(_DEFAULT_FORBIDDEN_REWRITE_OPS),
+            offending_unit_ids=list(dict.fromkeys(offending_unit_ids)),
+            traceable_unit_ids=traceable_unit_ids,
+            max_sentence_delta=max(1, len(factual.issues)),
+            max_unit_delta=max(1, len(offending_unit_ids) or len(factual.issues)),
+            must_preserve_sections=list(bundle_v2.section_order),
+            must_preserve_trace_bindings=True,
+            human_feedback=feedback.model_dump(exclude_none=True),
+            metadata={
+                "issue_count": len(factual.issues),
+                "semantic_delta_count": len(factual.semantic_deltas),
+                "feedback_round": int(feedback.feedback_round or 0),
+            },
+        )
+        forbidden_ops = list(contract.forbidden_ops)
+        if feedback.must_keep:
+            forbidden_ops.append("remove_must_keep")
+        if feedback.must_remove:
+            contract.allowed_ops = list(dict.fromkeys(list(contract.allowed_ops) + ["delete_untraced"]))
+        contract.forbidden_ops = list(dict.fromkeys(forbidden_ops))
+        return {
+            "rewrite_contract": contract.model_dump(),
+            "dropped_unit_ids": list(dict.fromkeys(dropped_unit_ids)),
+            "unchanged_unit_ids": [item for item in traceable_unit_ids if item not in offending_unit_ids],
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.auto_rewrite.contract_ready",
+                    node_name="rewrite_contract_builder",
+                    phase="review",
+                    message="自动重写契约已生成。",
+                    payload={
+                        "offending_unit_count": len(contract.offending_unit_ids),
+                        "max_sentence_delta": contract.max_sentence_delta,
+                        "feedback_round": int(feedback.feedback_round or 0),
+                    },
+                )
+            ],
+        }
+
+    def auto_rewrite_agent(state: _GraphState) -> Dict[str, Any]:
+        markdown = str(state.get("final_markdown_current") or state.get("markdown") or "").strip()
+        factual = FactualConformanceResult.model_validate(state.get("factual_conformance") or {})
+        contract = RewriteContract.model_validate(state.get("rewrite_contract") or {})
+        if not markdown:
+            return {"execution_phase": "human_review", "finalization_mode": "approval_required"}
+        rewritten = markdown
+        removed_lines: List[str] = []
+        feedback = contract.human_feedback if isinstance(contract.human_feedback, dict) else {}
+        must_keep = [str(item).strip() for item in (feedback.get("must_keep") or []) if str(item or "").strip()]
+        must_remove = [str(item).strip() for item in (feedback.get("must_remove") or []) if str(item or "").strip()]
+        rewrite_focus = [str(item).strip() for item in (feedback.get("rewrite_focus") or []) if str(item or "").strip()]
+        tone_target = str(feedback.get("tone_target") or "").strip().lower()
+        for issue in factual.issues:
+            sentence = str(issue.sentence or "").strip()
+            if sentence and sentence in rewritten and sentence not in must_keep and "delete_untraced" in contract.allowed_ops:
+                rewritten = "\n".join(line for line in rewritten.splitlines() if line.strip() != sentence.strip())
+                removed_lines.append(sentence)
+        for sentence in must_remove:
+            if sentence and sentence in rewritten and sentence not in must_keep:
+                rewritten = "\n".join(line for line in rewritten.splitlines() if sentence not in line)
+                removed_lines.append(sentence)
+        for before, after in [
+            ("已经证实", "现有材料显示"),
+            ("必然", "可能"),
+            ("全面", "较广范围"),
+            ("必须", "建议优先"),
+            ("紧急", "应尽快"),
+            ("公众一致", "部分公众观点"),
+        ]:
+            rewritten = rewritten.replace(before, after)
+        if tone_target in {"conservative", "cautious", "审慎"}:
+            for before, after in [("判断为", "倾向于认为"), ("说明了", "可能说明"), ("导致", "可能带来")]:
+                rewritten = rewritten.replace(before, after)
+        if rewrite_focus:
+            for focus in rewrite_focus:
+                if focus in {"delete_untraced", "remove_unverified"}:
+                    rewritten = "\n".join(
+                        line for line in rewritten.splitlines() if "未经证实" not in line and "无法回溯" not in line
+                    )
+        rewritten = sanitize_public_markdown(rewritten)
+        rewritten = _safe_sentence_limit(rewritten, limit=max(3, 24 + int(contract.max_sentence_delta or 0)))
+        rewritten_factual = run_factual_conformance(state["report_ir"], rewritten)
+        rewrite_round = int(state.get("rewrite_round") or 0) + 1
+        review_feedback_rounds = list(state.get("review_feedback_rounds") or [])
+        rewrite_lineage_entry = {
+            "rewrite_round": rewrite_round,
+            "source_checkpoint_id": str(state.get("source_checkpoint_id") or ""),
+            "parent_artifact_id": str(state.get("parent_artifact_id") or ""),
+            "repaired_unit_ids": list(contract.offending_unit_ids or []),
+            "dropped_unit_ids": list(dict.fromkeys(list(state.get("dropped_unit_ids") or []) + removed_lines)),
+            "unchanged_unit_ids": list(state.get("unchanged_unit_ids") or []),
+            "human_feedback": feedback,
+        }
+        return {
+            "markdown": rewritten,
+            "final_markdown_current": rewritten,
+            "factual_conformance": rewritten_factual.model_dump(),
+            "review_required": bool(rewritten_factual.requires_human_review),
+            "rewrite_round": rewrite_round,
+            "rewrite_issue_count": len(rewritten_factual.issues),
+            "repaired_unit_ids": list(dict.fromkeys(list(state.get("repaired_unit_ids") or []) + list(contract.offending_unit_ids or []))),
+            "dropped_unit_ids": list(dict.fromkeys(list(state.get("dropped_unit_ids") or []) + removed_lines)),
+            "execution_phase": "review",
+            "approval_status": "rewritten" if feedback else str(state.get("approval_status") or "none"),
+            "review_feedback_rounds": review_feedback_rounds if not feedback else review_feedback_rounds,
+            "repair_history": [
+                {
+                    "kind": "auto_rewrite",
+                    "rewrite_round": rewrite_round,
+                    "allowed_ops": list(contract.allowed_ops),
+                    "removed_sentence_count": len(removed_lines),
+                    "remaining_issue_count": len(rewritten_factual.issues),
+                    "feedback_round": int(feedback.get("feedback_round") or 0) if feedback else 0,
+                }
+            ],
+            "rewrite_lineage": [rewrite_lineage_entry],
+            "review_feedback_contract": {},
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.auto_rewrite.completed",
+                    node_name="auto_rewrite_agent",
+                    phase="review",
+                    message="自动重写已完成，并重新执行语义校验。",
+                    payload={
+                        "rewrite_round": rewrite_round,
+                        "remaining_issue_count": len(rewritten_factual.issues),
+                        "feedback_round": int(feedback.get("feedback_round") or 0) if feedback else 0,
+                    },
+                )
+            ],
+        }
+
+    def semantic_review_interrupt(state: _GraphState) -> Dict[str, Any]:
+        factual = FactualConformanceResult.model_validate(state.get("factual_conformance") or {})
         validation = ValidationResultV2.model_validate(state.get("validation_result_v2") or {})
-        draft_bundle_v2 = DraftBundleV2.model_validate(state.get("draft_bundle_v2") or {})
+        markdown_preview = str(state.get("final_markdown_current") or state.get("markdown") or "").strip()
+        if not markdown_preview and state.get("draft_bundle_v2"):
+            title = str(((state.get("task") or {}).get("topic_label")) or "").strip()
+            markdown_preview = render_markdown_from_v2(
+                state.get("report_ir") or {},
+                _draft_bundle_v2_from_any(state.get("report_ir") or {}, state.get("draft_bundle_v2") or {}),
+                title=title,
+            )
+        interrupt_event_key = f"{compile_thread_id}:semantic_review:{int(state.get('rewrite_round') or 0)}"
+        interrupt_payload = {
+            "protocol_version": "semantic-review.v1",
+            "review_kind": "semantic_review",
+            "title": "语义边界确认",
+            "summary": (
+                f"正式文稿仍有 {len(factual.issues)} 个语义/事实边界问题，"
+                f"rewrite round={int(state.get('rewrite_round') or 0)}，需要人工确认。"
+            ),
+            "allowed_decisions": ["approve", "rewrite", "reject"],
+            "event_key": interrupt_event_key,
+            "review_mode": "annotation",
+            "review_prompt": "文稿预览保持只读。可确认放行、要求最小改写，或拒绝本轮写入；如需重写，请补充人工审核批注与结构化反馈。",
+            "review_placeholder": "请输入审核批注，说明需保留、需移除、语气调整或重写重点",
+            "markdown_preview": markdown_preview,
+            "validation_result_v2": validation.model_dump(),
+            "repair_plan_v2": state.get("repair_plan_v2") or {},
+            "factual_conformance": factual.model_dump(),
+            "rewrite_contract": state.get("rewrite_contract") or {},
+            "rewrite_round": int(state.get("rewrite_round") or 0),
+            "approval_round": len(state.get("semantic_review_records") or []) + 1,
+            "review_payload_schema": {
+                "comment": "string",
+                "rewrite_focus": ["string"],
+                "must_keep": ["string"],
+                "must_remove": ["string"],
+                "tone_target": "string",
+            },
+        }
+        if not is_resume_invocation:
+            _emit_graph_event(
+                event_callback,
+                event_type="compile.human_review.required",
+                node_name="semantic_review_interrupt",
+                phase="review",
+                title="等待人工复核",
+                message=interrupt_payload["summary"],
+                payload=interrupt_payload,
+            )
+        decision = interrupt(interrupt_payload)
+        resolved = decision if isinstance(decision, dict) else {"decision": "approve" if decision else "reject"}
+        decision_text = str(resolved.get("decision") or "").strip().lower() or "approve"
+        review_payload = resolved.get("review_payload") if isinstance(resolved.get("review_payload"), dict) else {}
+        review_comment = str(review_payload.get("comment") or "").strip()
+        feedback_contract = ReviewFeedbackContract(
+            comment=review_comment,
+            rewrite_focus=[str(item).strip() for item in (review_payload.get("rewrite_focus") or []) if str(item or "").strip()],
+            must_keep=[str(item).strip() for item in (review_payload.get("must_keep") or []) if str(item or "").strip()],
+            must_remove=[str(item).strip() for item in (review_payload.get("must_remove") or []) if str(item or "").strip()],
+            tone_target=str(review_payload.get("tone_target") or "").strip(),
+            feedback_round=int(state.get("rewrite_round") or 0) + 1,
+            metadata={"interrupt_id": interrupt_event_key},
+        )
+        review_feedback_rounds = list(state.get("review_feedback_rounds") or [])
+        if decision_text == "rewrite":
+            review_feedback_rounds = review_feedback_rounds + [feedback_contract.model_dump()]
+        return {
+            "markdown": markdown_preview,
+            "final_markdown_current": markdown_preview,
+            "approval_required": False,
+            "approval_status": "approved" if decision_text == "approve" else "rewrite_requested" if decision_text == "rewrite" else "rejected",
+            "review_required": decision_text != "approve",
+            "blocked_reason": "" if decision_text == "approve" else "rewrite_requested" if decision_text == "rewrite" else "rejected_by_human_review",
+            "execution_phase": "finalize" if decision_text == "approve" else "auto_rewrite" if decision_text == "rewrite" else "failed",
+            "finalization_mode": "approved_after_review" if decision_text == "approve" else "rewrite_requested" if decision_text == "rewrite" else "failed",
+            "review_feedback_contract": feedback_contract.model_dump() if decision_text == "rewrite" else {},
+            "review_feedback_rounds": review_feedback_rounds,
+            "semantic_review_records": [
+                {
+                    "interrupt_id": interrupt_event_key,
+                    "decision": decision_text,
+                    "review_payload": review_payload,
+                    "review_comment": review_comment,
+                    "rewrite_round": int(state.get("rewrite_round") or 0),
+                }
+            ],
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.human_review.resolved",
+                    node_name="semantic_review_interrupt",
+                    phase="review",
+                    message="人工复核结果已写回图状态。",
+                    payload={
+                        "decision": decision_text,
+                        "rewrite_round": int(state.get("rewrite_round") or 0),
+                        "feedback_round": feedback_contract.feedback_round if decision_text == "rewrite" else 0,
+                    },
+                )
+            ],
+        }
+
+    def finalize_artifacts(state: _GraphState) -> Dict[str, Any]:
+        validation = ValidationResultV2.model_validate(state.get("validation_result_v2") or {})
+        draft_bundle_v2 = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state.get("draft_bundle_v2") or {})
         legacy_bundle = _legacy_draft_bundle_from_v2(draft_bundle_v2)
         draft_conformance = _translate_validation_to_conformance(validation)
         factual_dump = state.get("factual_conformance") if isinstance(state.get("factual_conformance"), dict) else FactualConformanceResult(
@@ -1148,6 +1577,18 @@ def run_report_compilation_graph(
             section_budget=state.get("section_budget") or {},
             writer_context=state.get("writer_context") or {},
             section_plan=state.get("section_plan") or {},
+            structured_report_current=state.get("structured_report_current") or {},
+            draft_bundle_current=state.get("draft_bundle_current") or draft_bundle_v2.model_dump(),
+            final_markdown_current=str(state.get("final_markdown_current") or state.get("markdown") or "").strip(),
+            execution_phase=str(state.get("execution_phase") or "finalize"),
+            rewrite_round=int(state.get("rewrite_round") or 0),
+            rewrite_budget=int(state.get("rewrite_budget") or 0),
+            rewrite_issue_count=int(state.get("rewrite_issue_count") or 0),
+            approval_required=bool(state.get("approval_required")),
+            approval_status=str(state.get("approval_status") or "none"),
+            finalization_mode=str(state.get("finalization_mode") or ""),
+            commit_pending=bool(state.get("commit_pending")),
+            commit_idempotency_key=str(state.get("commit_idempotency_key") or ""),
             draft_bundle=legacy_bundle.model_dump(),
             draft_bundle_v2=draft_bundle_v2.model_dump(),
             validation_result_v2=validation.model_dump(),
@@ -1157,33 +1598,173 @@ def run_report_compilation_graph(
             review_required=bool(state.get("review_required")),
             blocked_reason=str(state.get("blocked_reason") or "").strip(),
             repair_count=int(state.get("repair_count") or 0),
-            current_node="artifact_renderer",
+            rewrite_contract=state.get("rewrite_contract") or {},
+            review_feedback_contract=state.get("review_feedback_contract") or {},
+            source_checkpoint_id=str(state.get("source_checkpoint_id") or ""),
+            parent_artifact_id=str(state.get("parent_artifact_id") or ""),
+            repaired_unit_ids=list(state.get("repaired_unit_ids") or []),
+            dropped_unit_ids=list(state.get("dropped_unit_ids") or []),
+            unchanged_unit_ids=list(state.get("unchanged_unit_ids") or []),
+            review_feedback_rounds=list(state.get("review_feedback_rounds") or []),
+            validation_issues=list(state.get("validation_issues") or []),
+            repair_history=list(state.get("repair_history") or []),
+            semantic_review_records=list(state.get("semantic_review_records") or []),
+            progress_events=list(state.get("progress_events") or []),
+            rewrite_lineage=list(state.get("rewrite_lineage") or []),
+            commit_artifacts=list(state.get("commit_artifacts") or []),
+            current_node="finalize_artifacts",
             visited_nodes=list(state.get("visited_nodes") or []),
             metadata={"max_repairs": max_repairs},
         )
         return {
-            "final_output": {
-                "policy_registry": state.get("policy_registry") or {},
-                "scene_profile": state.get("scene_profile") or {},
-                "style_profile": state.get("style_profile") or {},
-                "layout_plan": state.get("layout_plan") or {},
-                "section_budget": state.get("section_budget") or {},
-                "writer_context": state.get("writer_context") or {},
-                "section_plan": state.get("section_plan") or {},
-                "draft_bundle": legacy_bundle.model_dump(),
-                "draft_bundle_v2": draft_bundle_v2.model_dump(),
-                "styled_draft_bundle": legacy_bundle.model_dump(),
-                "validation_result_v2": validation.model_dump(),
-                "repair_plan_v2": state.get("repair_plan_v2") or {},
-                "graph_state_v2": graph_state.model_dump(),
-                "factual_conformance": factual_dump,
-                "draft_conformance": draft_conformance.model_dump(),
-                "style_conformance": draft_conformance.model_dump(),
-                "utility_assessment": state.get("utility_assessment") or {},
-                "review_required": bool(state.get("review_required")),
-                "blocked_reason": str(state.get("blocked_reason") or "").strip(),
-                "markdown": str(state.get("markdown") or "").strip(),
-            }
+            "commit_pending": True,
+            "graph_state_v2": graph_state.model_dump(),
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.finalize.ready",
+                    node_name="finalize_artifacts",
+                    phase="persist",
+                    message="最终产物已整理，等待提交。",
+                    payload={"finalization_mode": str(state.get("finalization_mode") or ""), "review_required": bool(state.get("review_required"))},
+                )
+            ],
+        }
+
+    def commit_artifacts(state: _GraphState) -> Dict[str, Any]:
+        validation = ValidationResultV2.model_validate(state.get("validation_result_v2") or {})
+        draft_bundle_v2 = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state.get("draft_bundle_v2") or {})
+        legacy_bundle = _legacy_draft_bundle_from_v2(draft_bundle_v2)
+        draft_conformance = _translate_validation_to_conformance(validation)
+        factual_dump = state.get("factual_conformance") if isinstance(state.get("factual_conformance"), dict) else {}
+        task = state.get("task") if isinstance(state.get("task"), dict) else {}
+        graph_state_v2 = state.get("graph_state_v2") if isinstance(state.get("graph_state_v2"), dict) else {}
+        artifact_paths = _artifact_paths_from_task(task)
+        task_id = str(task.get("runtime_task_id") or task.get("task_id") or compile_thread_id).strip()
+        rewrite_round = int(state.get("rewrite_round") or 0)
+        artifact_payloads = {
+            "draft_bundle": legacy_bundle.model_dump(),
+            "draft_bundle_v2": draft_bundle_v2.model_dump(),
+            "validation_result_v2": validation.model_dump(),
+            "repair_plan_v2": state.get("repair_plan_v2") or {},
+            "graph_state_v2": graph_state_v2,
+            "approval_records": {
+                "semantic_review_records": list(state.get("semantic_review_records") or []),
+                "review_feedback_rounds": list(state.get("review_feedback_rounds") or []),
+                "rewrite_lineage": list(state.get("rewrite_lineage") or []),
+            },
+            "full_markdown": {
+                "markdown": str(state.get("final_markdown_current") or state.get("markdown") or "").strip(),
+                "rewrite_round": rewrite_round,
+                "finalization_mode": str(state.get("finalization_mode") or ""),
+            },
+        }
+        schema_versions = {
+            "draft_bundle": "draft-bundle.v1",
+            "draft_bundle_v2": "draft-bundle.v2",
+            "validation_result_v2": "validation-result.v2",
+            "repair_plan_v2": "repair-plan.v2",
+            "graph_state_v2": str(graph_state_v2.get("schema_version") or "deep-report-graph.v3"),
+            "approval_records": "approval-records.v1",
+            "full_markdown": "full-markdown.v1",
+        }
+        records: List[CommitArtifactRecord] = []
+        for artifact_type, payload_value in artifact_payloads.items():
+            approval_round = len(state.get("semantic_review_records") or []) if artifact_type == "approval_records" else 0
+            record = CommitArtifactRecord(
+                artifact_type=artifact_type,
+                path=artifact_paths.get(artifact_type, ""),
+                idempotency_key=_build_commit_idempotency_key(
+                    task_id=task_id,
+                    artifact_type=artifact_type,
+                    rewrite_round=rewrite_round,
+                    schema_version=schema_versions[artifact_type],
+                ),
+                rewrite_round=rewrite_round,
+                approval_round=approval_round,
+                schema_version=schema_versions[artifact_type],
+                payload=payload_value if isinstance(payload_value, dict) else {},
+            )
+            records.append(record)
+            if record.path and isinstance(record.payload, dict):
+                _upsert_json_artifact(record.path, record.payload)
+        final_output = {
+            "status": "completed" if not state.get("review_required") else "failed",
+            "policy_registry": state.get("policy_registry") or {},
+            "scene_profile": state.get("scene_profile") or {},
+            "style_profile": state.get("style_profile") or {},
+            "layout_plan": state.get("layout_plan") or {},
+            "section_budget": state.get("section_budget") or {},
+            "writer_context": state.get("writer_context") or {},
+            "section_plan": state.get("section_plan") or {},
+            "draft_bundle": legacy_bundle.model_dump(),
+            "draft_bundle_v2": draft_bundle_v2.model_dump(),
+            "styled_draft_bundle": legacy_bundle.model_dump(),
+            "validation_result_v2": validation.model_dump(),
+            "repair_plan_v2": state.get("repair_plan_v2") or {},
+            "graph_state_v2": graph_state_v2,
+            "factual_conformance": factual_dump,
+            "draft_conformance": draft_conformance.model_dump(),
+            "style_conformance": draft_conformance.model_dump(),
+            "utility_assessment": state.get("utility_assessment") or {},
+            "review_required": bool(state.get("review_required")),
+            "approval_required": bool(state.get("approval_required")),
+            "approval_status": str(state.get("approval_status") or "none"),
+            "blocked_reason": str(state.get("blocked_reason") or "").strip(),
+            "markdown": str(state.get("final_markdown_current") or state.get("markdown") or "").strip(),
+            "selected_template": (
+                draft_bundle_v2.metadata.get("selected_template")
+                if isinstance(draft_bundle_v2.metadata, dict)
+                else {}
+            ),
+            "section_generation_receipts": (
+                draft_bundle_v2.metadata.get("section_generation_receipts")
+                if isinstance(draft_bundle_v2.metadata, dict)
+                else []
+            ),
+            "degraded_sections": (
+                draft_bundle_v2.metadata.get("degraded_sections")
+                if isinstance(draft_bundle_v2.metadata, dict)
+                else []
+            ),
+            "execution_phase": str(state.get("execution_phase") or "completed"),
+            "rewrite_round": rewrite_round,
+            "rewrite_budget": int(state.get("rewrite_budget") or 0),
+            "finalization_mode": str(state.get("finalization_mode") or ""),
+            "auto_rewrite_attempted": rewrite_round > 0,
+            "auto_rewrite_succeeded": rewrite_round > 0 and not bool(state.get("review_required")),
+            "rewrite_issue_count": int(state.get("rewrite_issue_count") or 0),
+            "source_checkpoint_id": str(state.get("source_checkpoint_id") or ""),
+            "parent_artifact_id": str(state.get("parent_artifact_id") or ""),
+            "repaired_unit_ids": list(state.get("repaired_unit_ids") or []),
+            "dropped_unit_ids": list(state.get("dropped_unit_ids") or []),
+            "unchanged_unit_ids": list(state.get("unchanged_unit_ids") or []),
+            "review_feedback_rounds": list(state.get("review_feedback_rounds") or []),
+            "rewrite_contract": state.get("rewrite_contract") or {},
+            "repair_history": list(state.get("repair_history") or []),
+            "semantic_review_records": list(state.get("semantic_review_records") or []),
+            "progress_events": list(state.get("progress_events") or []),
+            "rewrite_lineage": list(state.get("rewrite_lineage") or []),
+            "commit_artifacts": [record.model_dump() for record in records],
+        }
+        return {
+            "commit_pending": False,
+            "commit_idempotency_key": _build_commit_idempotency_key(
+                task_id=task_id,
+                artifact_type="graph_commit",
+                rewrite_round=rewrite_round,
+                schema_version="commit.v1",
+            ),
+            "commit_artifacts": [record.model_dump() for record in records],
+            "final_output": final_output,
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.commit.completed",
+                    node_name="commit_artifacts",
+                    phase="persist",
+                    message="编译图提交阶段已完成。",
+                    payload={"artifact_count": len(records), "finalization_mode": str(state.get("finalization_mode") or "")},
+                )
+            ],
         }
 
     def route_after_validation(state: _GraphState) -> str:
@@ -1192,7 +1773,21 @@ def run_report_compilation_graph(
             return "markdown_compiler"
         if validation.gate == "repair":
             return "repair_patch_planner"
-        return "compile_blocked"
+        return "semantic_review_interrupt"
+
+    def route_after_semantic_gate(state: _GraphState) -> str:
+        phase = str(state.get("execution_phase") or "").strip()
+        if phase == "auto_rewrite":
+            return "rewrite_contract_builder"
+        if phase == "human_review":
+            return "semantic_review_interrupt"
+        return "finalize_artifacts"
+
+    def route_after_human_review(state: _GraphState) -> str:
+        phase = str(state.get("execution_phase") or "").strip()
+        if phase == "auto_rewrite":
+            return "rewrite_contract_builder"
+        return "finalize_artifacts"
 
     def route_section_workers(state: _GraphState):
         slots = state.get("planner_slots") if isinstance(state.get("planner_slots"), list) else []
@@ -1220,9 +1815,13 @@ def run_report_compilation_graph(
     builder.add_node("repair_patch_planner", _node("repair_patch_planner", repair_patch_planner))
     builder.add_node("repair_worker", _node("repair_worker", repair_worker, mutate_state=False))
     builder.add_node("repair_finalize", _node("repair_finalize", repair_finalize))
-    builder.add_node("compile_blocked", _node("compile_blocked", compile_blocked))
     builder.add_node("markdown_compiler", _node("markdown_compiler", markdown_compiler))
-    builder.add_node("artifact_renderer", _node("artifact_renderer", artifact_renderer))
+    builder.add_node("semantic_gate_router", _node("semantic_gate_router", semantic_gate_router))
+    builder.add_node("rewrite_contract_builder", _node("rewrite_contract_builder", rewrite_contract_builder))
+    builder.add_node("auto_rewrite_agent", _node("auto_rewrite_agent", auto_rewrite_agent))
+    builder.add_node("semantic_review_interrupt", _node("semantic_review_interrupt", semantic_review_interrupt))
+    builder.add_node("finalize_artifacts", _node("finalize_artifacts", finalize_artifacts))
+    builder.add_node("commit_artifacts", _node("commit_artifacts", commit_artifacts))
     builder.add_edge(START, "load_context")
     builder.add_edge("load_context", "planner_agent")
     builder.add_edge("planner_agent", "existing_analysis_workers_subgraph")
@@ -1244,7 +1843,7 @@ def run_report_compilation_graph(
         {
             "repair_patch_planner": "repair_patch_planner",
             "markdown_compiler": "markdown_compiler",
-            "compile_blocked": "compile_blocked",
+            "semantic_review_interrupt": "semantic_review_interrupt",
         },
     )
     builder.add_conditional_edges(
@@ -1257,19 +1856,54 @@ def run_report_compilation_graph(
     )
     builder.add_edge("repair_worker", "repair_finalize")
     builder.add_edge("repair_finalize", "unit_validator")
-    builder.add_edge("compile_blocked", "artifact_renderer")
-    builder.add_edge("markdown_compiler", "artifact_renderer")
-    builder.add_edge("artifact_renderer", END)
+    builder.add_edge("markdown_compiler", "semantic_gate_router")
+    builder.add_conditional_edges(
+        "semantic_gate_router",
+        route_after_semantic_gate,
+        {
+            "rewrite_contract_builder": "rewrite_contract_builder",
+            "semantic_review_interrupt": "semantic_review_interrupt",
+            "finalize_artifacts": "finalize_artifacts",
+        },
+    )
+    builder.add_edge("rewrite_contract_builder", "auto_rewrite_agent")
+    builder.add_edge("auto_rewrite_agent", "semantic_gate_router")
+    builder.add_conditional_edges(
+        "semantic_review_interrupt",
+        route_after_human_review,
+        {
+            "rewrite_contract_builder": "rewrite_contract_builder",
+            "finalize_artifacts": "finalize_artifacts",
+        },
+    )
+    builder.add_edge("finalize_artifacts", "commit_artifacts")
+    builder.add_edge("commit_artifacts", END)
 
     initial_state = {
         "payload": payload,
         "report_ir": payload.get("report_ir") if isinstance(payload.get("report_ir"), dict) else {},
         "task": payload.get("task") if isinstance(payload.get("task"), dict) else {},
         "repair_count": 0,
+        "rewrite_round": 0,
+        "rewrite_budget": 0,
+        "rewrite_issue_count": 0,
+        "approval_required": False,
+        "approval_status": "none",
+        "finalization_mode": "",
+        "commit_pending": False,
+        "commit_idempotency_key": "",
         "visited_nodes": [],
         "planner_slots": [],
         "section_batches": [],
         "repair_batches": [],
+        "review_feedback_contract": {},
+        "review_feedback_rounds": [],
+        "validation_issues": [],
+        "repair_history": [],
+        "semantic_review_records": [],
+        "progress_events": [],
+        "rewrite_lineage": [],
+        "commit_artifacts": [],
     }
     config = build_report_runnable_config(
         thread_id=compile_thread_id,
@@ -1304,16 +1938,42 @@ def run_report_compilation_graph(
             section_budget=state.get("section_budget") or {},
             writer_context=state.get("writer_context") or {},
             section_plan=state.get("section_plan") or {},
+            structured_report_current=state.get("structured_report_current") or payload,
+            draft_bundle_current=state.get("draft_bundle_current") or state.get("draft_bundle_v2") or {},
+            final_markdown_current=str(primary.get("markdown_preview") or state.get("final_markdown_current") or "").strip(),
+            execution_phase="human_review",
+            rewrite_round=int(primary.get("rewrite_round") or state.get("rewrite_round") or 0),
+            rewrite_budget=int(state.get("rewrite_budget") or 0),
+            rewrite_issue_count=int(state.get("rewrite_issue_count") or 0),
+            approval_required=True,
+            approval_status=str(state.get("approval_status") or "pending"),
+            finalization_mode="approval_required",
+            commit_pending=False,
+            commit_idempotency_key=str(state.get("commit_idempotency_key") or ""),
             draft_bundle=state.get("draft_bundle") or {},
             draft_bundle_v2=state.get("draft_bundle_v2") or {},
             validation_result_v2=primary.get("validation_result_v2") or state.get("validation_result_v2") or {},
             repair_plan_v2=primary.get("repair_plan_v2") or state.get("repair_plan_v2") or {},
             markdown=str(primary.get("markdown_preview") or "").strip(),
-            factual_conformance={},
+            factual_conformance=primary.get("factual_conformance") or state.get("factual_conformance") or {},
             review_required=True,
-            blocked_reason="validation_failed_after_repair",
+            blocked_reason="semantic_review_pending",
             repair_count=int(primary.get("repair_count") or state.get("repair_count") or 0),
-            current_node="compile_blocked",
+            rewrite_contract=primary.get("rewrite_contract") or state.get("rewrite_contract") or {},
+            review_feedback_contract=state.get("review_feedback_contract") or {},
+            source_checkpoint_id=str(runtime_profile.checkpoint_locator or ""),
+            parent_artifact_id=str(state.get("parent_artifact_id") or "structured_projection"),
+            repaired_unit_ids=list(state.get("repaired_unit_ids") or []),
+            dropped_unit_ids=list(state.get("dropped_unit_ids") or []),
+            unchanged_unit_ids=list(state.get("unchanged_unit_ids") or []),
+            review_feedback_rounds=list(state.get("review_feedback_rounds") or []),
+            validation_issues=list(state.get("validation_issues") or []),
+            repair_history=list(state.get("repair_history") or []),
+            semantic_review_records=list(state.get("semantic_review_records") or []),
+            progress_events=list(state.get("progress_events") or []),
+            rewrite_lineage=list(state.get("rewrite_lineage") or []),
+            commit_artifacts=list(state.get("commit_artifacts") or []),
+            current_node="semantic_review_interrupt",
             visited_nodes=list(state.get("visited_nodes") or []),
             metadata={
                 "max_repairs": max_repairs,
@@ -1327,6 +1987,8 @@ def run_report_compilation_graph(
         return {
             "status": "interrupted",
             "review_required": True,
+            "approval_required": True,
+            "approval_status": "pending",
             "interrupts": interrupts,
             "draft_bundle": state.get("draft_bundle") or {},
             "draft_bundle_v2": state.get("draft_bundle_v2") or {},
@@ -1335,7 +1997,7 @@ def run_report_compilation_graph(
             "repair_plan_v2": primary.get("repair_plan_v2") or state.get("repair_plan_v2") or {},
             "graph_state_v2": graph_state.model_dump(),
             "markdown": str(primary.get("markdown_preview") or "").strip(),
-            "factual_conformance": {
+            "factual_conformance": primary.get("factual_conformance") or {
                 "passed": False,
                 "policy_version": "policy.v2",
                 "stage": "final_markdown",
@@ -1353,7 +2015,15 @@ def run_report_compilation_graph(
             "section_budget": state.get("section_budget") or {},
             "writer_context": state.get("writer_context") or {},
             "section_plan": state.get("section_plan") or {},
-            "blocked_reason": "validation_failed_after_repair",
+            "blocked_reason": "semantic_review_pending",
+            "execution_phase": "human_review",
+            "finalization_mode": "approval_required",
+            "rewrite_round": int(primary.get("rewrite_round") or state.get("rewrite_round") or 0),
+            "rewrite_budget": int(state.get("rewrite_budget") or 0),
+            "rewrite_issue_count": int(state.get("rewrite_issue_count") or 0),
+            "rewrite_contract": primary.get("rewrite_contract") or state.get("rewrite_contract") or {},
+            "review_feedback_rounds": list(state.get("review_feedback_rounds") or []),
+            "rewrite_lineage": list(state.get("rewrite_lineage") or []),
             "checkpoint_path": runtime_profile.checkpoint_path,
             "checkpoint_backend": runtime_profile.checkpointer_backend,
             "checkpoint_locator": runtime_profile.checkpoint_locator,

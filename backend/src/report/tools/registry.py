@@ -610,6 +610,45 @@ def _resolve_tools(tool_ids: Sequence[str], *, include_manual: bool = False) -> 
     return selected
 
 
+def _normalize_template_section_scope(scene_id: str, section_id: str) -> str:
+    scene_key = str(scene_id or "").strip()
+    section_key = str(section_id or "").strip().lower()
+    if not section_key:
+        return ""
+    if (scene_key, section_key) in SECTION_TOOL_NAME_MAP:
+        return section_key
+    if scene_key == "policy_dynamics":
+        if any(token in section_key for token in ("演变", "脉络", "timeline", "节点")):
+            return "evolution"
+        if any(token in section_key for token in ("态度", "反应", "焦点", "情绪", "response")):
+            return "response"
+        if any(token in section_key for token in ("影响", "impact")):
+            return "impact"
+        if any(token in section_key for token in ("对照", "benchmark")):
+            return "benchmark"
+        if any(token in section_key for token in ("动作", "应对", "建议", "action")):
+            return "action"
+    if scene_key == "public_hotspot":
+        if any(token in section_key for token in ("传播", "演变", "路径", "脉络", "propagation")):
+            return "propagation"
+        if any(token in section_key for token in ("焦点", "情绪", "立场", "focus")):
+            return "focus"
+        if any(token in section_key for token in ("动因", "机制", "mechanism")):
+            return "mechanism"
+        if any(token in section_key for token in ("动作", "影响", "建议", "action")):
+            return "action"
+    if scene_key == "crisis_response":
+        if any(token in section_key for token in ("事件", "脉络", "timeline", "节点")):
+            return "timeline"
+        if any(token in section_key for token in ("传播", "扩散", "propagation")):
+            return "propagation"
+        if any(token in section_key for token in ("风险", "risk")):
+            return "risk"
+        if any(token in section_key for token in ("响应", "应对", "策略", "action", "response")):
+            return "response"
+    return section_key
+
+
 def select_report_tools(
     *,
     runtime_target: str,
@@ -620,7 +659,7 @@ def select_report_tools(
 ) -> List[BaseTool]:
     target = str(runtime_target or "").strip()
     if target == "agent_runtime_section":
-        section_key = str(section_id or "").strip()
+        section_key = _normalize_template_section_scope(scene_id, section_id)
         scene_key = str(scene_id or "").strip()
         tool_ids = SECTION_TOOL_NAME_MAP.get((scene_key, section_key)) or (DEFAULT_TOOL_NAMES if section_key else [])
         return _resolve_tools(tool_ids, include_manual=include_manual)
@@ -644,7 +683,7 @@ def get_report_tool_bundle(scene_id: str, section_id: str) -> List[BaseTool]:
 
 def get_report_tool_rounds(scene_id: str, section_id: str) -> int:
     scene_key = str(scene_id or "").strip()
-    section_key = str(section_id or "").strip()
+    section_key = _normalize_template_section_scope(scene_id, section_id)
     if (scene_key, section_key) in {
         ("policy_dynamics", "evolution"),
         ("public_hotspot", "propagation"),

@@ -928,6 +928,7 @@ def _enqueue_fetch_refresh_job(
 
 from src.fluid.api import fluid_bp
 from src.analyze.api import analyze_bp
+from src.media_tagging.api import media_tagging_bp
 from src.topic.api import topic_bp
 from src.report.api import report_bp
 import threading as _threading
@@ -949,6 +950,7 @@ from src.netinsight import write_login_state as write_netinsight_login_state
 app = Flask(__name__)
 app.register_blueprint(fluid_bp, url_prefix='/api/fluid')
 app.register_blueprint(analyze_bp, url_prefix='/api/analyze')
+app.register_blueprint(media_tagging_bp, url_prefix='/api/media-tags')
 app.register_blueprint(topic_bp, url_prefix='/api/topic')
 app.register_blueprint(report_bp, url_prefix='/api/report')
 CORS(app)
@@ -3486,6 +3488,7 @@ def root():
         "/api/query",
         "/api/fetch",
         "/api/analyze",
+        "/api/media-tags",
         "/api/analyze/ai-summary/rebuild",
         "/api/report",
         "/api/report/history",

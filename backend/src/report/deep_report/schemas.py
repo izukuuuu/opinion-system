@@ -1127,6 +1127,12 @@ class CompilerSceneProfile(BaseModel):
     focus: str = Field(default="timeline")
     guardrail_mode: str = Field(default="strict")
     render_mode: str = Field(default="claim_anchored")
+    template_id: str = Field(default="", description="已选模板 ID")
+    template_name: str = Field(default="", description="已选模板名称")
+    template_path: str = Field(default="", description="已选模板路径")
+    selection_score: float = Field(default=0.0, description="模板匹配分")
+    matched_reasons: List[str] = Field(default_factory=list, description="模板命中原因")
+    selection_context: Dict[str, Any] = Field(default_factory=dict, description="模板选择上下文")
     template_sections: List[Dict[str, str]] = Field(default_factory=list, description="模板章节列表")
     template_markdown: str = Field(default="", description="完整模板内容")
 
@@ -1184,6 +1190,11 @@ class CompilerSectionPlanItem(BaseModel):
     goal: str = Field(default="")
     target_words: int = Field(default=180)
     source_groups: List[str] = Field(default_factory=list)
+    template_id: str = Field(default="")
+    template_title: str = Field(default="")
+    template_summary: str = Field(default="")
+    writing_instruction: str = Field(default="")
+    selection_context: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SectionPlan(BaseModel):
@@ -1283,6 +1294,41 @@ class ValidationResultV2(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class RewriteContract(BaseModel):
+    schema_version: str = Field(default="rewrite-contract.v1")
+    allowed_ops: List[str] = Field(default_factory=list)
+    forbidden_ops: List[str] = Field(default_factory=list)
+    offending_unit_ids: List[str] = Field(default_factory=list)
+    traceable_unit_ids: List[str] = Field(default_factory=list)
+    max_sentence_delta: int = Field(default=0)
+    max_unit_delta: int = Field(default=0)
+    must_preserve_sections: List[str] = Field(default_factory=list)
+    must_preserve_trace_bindings: bool = Field(default=True)
+    human_feedback: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ReviewFeedbackContract(BaseModel):
+    schema_version: str = Field(default="review-feedback.v1")
+    comment: str = Field(default="")
+    rewrite_focus: List[str] = Field(default_factory=list)
+    must_keep: List[str] = Field(default_factory=list)
+    must_remove: List[str] = Field(default_factory=list)
+    tone_target: str = Field(default="")
+    feedback_round: int = Field(default=0)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CommitArtifactRecord(BaseModel):
+    artifact_type: str = Field(default="")
+    path: str = Field(default="")
+    idempotency_key: str = Field(default="")
+    rewrite_round: int = Field(default=0)
+    approval_round: int = Field(default=0)
+    schema_version: str = Field(default="")
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ExplorationTaskResult(BaseModel):
     """_run_deep_report_exploration_task 的类型化返回值。"""
 
@@ -1298,7 +1344,7 @@ class ExplorationTaskResult(BaseModel):
 
 
 class DeepReportGraphState(BaseModel):
-    schema_version: str = Field(default="deep-report-graph.v2")
+    schema_version: str = Field(default="deep-report-graph.v3")
     run_state_version: str = Field(default="run-state.v1", description="运行状态版本标识")
     payload: Dict[str, Any] = Field(default_factory=dict)
     report_ir: Dict[str, Any] = Field(default_factory=dict)
@@ -1315,9 +1361,35 @@ class DeepReportGraphState(BaseModel):
     repair_plan_v2: Dict[str, Any] = Field(default_factory=dict)
     markdown: str = Field(default="")
     factual_conformance: Dict[str, Any] = Field(default_factory=dict)
+    execution_phase: str = Field(default="prepare")
+    rewrite_round: int = Field(default=0)
+    rewrite_budget: int = Field(default=0)
+    rewrite_issue_count: int = Field(default=0)
+    approval_required: bool = Field(default=False)
+    approval_status: str = Field(default="none")
+    finalization_mode: str = Field(default="")
+    commit_pending: bool = Field(default=False)
+    commit_idempotency_key: str = Field(default="")
     review_required: bool = Field(default=False)
     blocked_reason: str = Field(default="")
     repair_count: int = Field(default=0)
+    structured_report_current: Dict[str, Any] = Field(default_factory=dict)
+    draft_bundle_current: Dict[str, Any] = Field(default_factory=dict)
+    final_markdown_current: str = Field(default="")
+    rewrite_contract: Dict[str, Any] = Field(default_factory=dict)
+    review_feedback_contract: Dict[str, Any] = Field(default_factory=dict)
+    source_checkpoint_id: str = Field(default="")
+    parent_artifact_id: str = Field(default="")
+    repaired_unit_ids: List[str] = Field(default_factory=list)
+    dropped_unit_ids: List[str] = Field(default_factory=list)
+    unchanged_unit_ids: List[str] = Field(default_factory=list)
+    review_feedback_rounds: List[Dict[str, Any]] = Field(default_factory=list)
+    validation_issues: List[Dict[str, Any]] = Field(default_factory=list)
+    repair_history: List[Dict[str, Any]] = Field(default_factory=list)
+    semantic_review_records: List[Dict[str, Any]] = Field(default_factory=list)
+    progress_events: List[Dict[str, Any]] = Field(default_factory=list)
+    rewrite_lineage: List[Dict[str, Any]] = Field(default_factory=list)
+    commit_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
     current_node: str = Field(default="")
     visited_nodes: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -1424,7 +1496,7 @@ class GraphApprovalRecord(BaseModel):
     title: str = Field(default="")
     summary: str = Field(default="")
     status: Literal["pending", "resolved"] = Field(default="pending")
-    allowed_decisions: List[str] = Field(default_factory=lambda: ["approve", "reject"])
+    allowed_decisions: List[str] = Field(default_factory=lambda: ["approve", "rewrite", "reject"])
     action: Dict[str, Any] = Field(default_factory=dict)
     requested_at: str = Field(default_factory=_utc_now)
 
@@ -1512,6 +1584,9 @@ class AppliedScope(BaseModel):
 class CoverageSnapshot(BaseModel):
     matched_count: int = Field(default=0, description="命中记录数")
     sampled_count: int = Field(default=0, description="采样或返回记录数")
+    raw_matched_count: int = Field(default=0, description="原始命中记录数（多轮 query 合并前）")
+    deduped_candidate_count: int = Field(default=0, description="去重后的候选数")
+    returned_card_count: int = Field(default=0, description="最终返回的证据卡数")
     platform_counts: Dict[str, int] = Field(default_factory=dict, description="平台分布")
     date_span: Dict[str, str] = Field(default_factory=dict, description="实际日期覆盖")
     source_resolution: str = Field(default="", description="原始语料命中来源类型")
@@ -1545,6 +1620,8 @@ class ResultTrace(BaseModel):
     compiled_tool_intents: List[str] = Field(default_factory=list, description="编译后的工具 intent 列表")
     requested_intent: str = Field(default="", description="原始工具 intent 输入")
     allowed_intents: List[str] = Field(default_factory=list, description="工具层允许的 intent 枚举")
+    rerank_policy: str = Field(default="", description="最终采用的重排策略")
+    dominant_signals: List[str] = Field(default_factory=list, description="主导当前结果的重排信号")
 
 
 class CapabilityTrace(BaseModel):
@@ -1867,6 +1944,10 @@ class EvidenceCard(BaseModel):
     title: str = Field(default="", description="标题")
     snippet: str = Field(default="", description="片段摘要")
     content: str = Field(default="", description="原文完整内容（用于引证）")
+    raw_contents: str = Field(default="", description="原始 contents 字段")
+    raw_polarity: str = Field(default="", description="原始 polarity 字段")
+    region: str = Field(default="", description="地域字段")
+    matched_terms: List[str] = Field(default_factory=list, description="检索命中的关键词")
     sentiment_label: str = Field(default="", description="情感标签")
     keywords: List[str] = Field(default_factory=list, description="关键词列表")
     engagement: Dict[str, Any] = Field(default_factory=dict, description="互动指标")
@@ -1878,6 +1959,13 @@ class EvidenceCard(BaseModel):
     claimability: List[str] = Field(default_factory=list, description="更适合支撑的断言类型")
     novelty_score: float = Field(default=0.0, description="信息增量分数")
     contradiction_signal: float = Field(default=0.0, description="与主叙事冲突的概率提示")
+    content_quality_hint: str = Field(default="", description="contents 字段质量提示")
+    official_source_hint: str = Field(default="", description="是否像官方/媒体源的轻量提示")
+    source_kind_hint: str = Field(default="", description="来源类型轻量提示")
+    actor_salience_score: float = Field(default=0.0, description="主体显著性分数")
+    eventness_score: float = Field(default=0.0, description="事件性分数")
+    risk_salience_score: float = Field(default=0.0, description="风险显著性分数")
+    risk_facets: List[str] = Field(default_factory=list, description="命中的风险侧面标签")
 
 
 class TimelineNode(BaseModel):

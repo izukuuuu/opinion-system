@@ -472,16 +472,47 @@
                 <pre
                   class="mt-2 whitespace-pre-wrap break-words text-xs leading-6 text-secondary">{{ approval.action.markdown_preview }}</pre>
               </div>
-              <div v-if="canEditApproval(approval)" class="mt-4 space-y-2"><label class="space-y-2 text-secondary"><span
-                    class="text-xs font-semibold text-muted">如需改写，可在这里直接编辑文稿</span><textarea
-                    v-model="approvalEdits[approval.approval_id]" class="input min-h-[140px] resize-y"
-                    :placeholder="approval.action?.markdown_preview || '输入调整后的文稿内容'" /></label></div>
+              <div v-if="canEditApproval(approval)" class="mt-4 space-y-3">
+                <label class="space-y-2 text-secondary">
+                  <span class="text-xs font-semibold text-muted">重写批注</span>
+                  <textarea v-model="approvalEdits[approval.approval_id]" class="input min-h-[120px] resize-y"
+                    :placeholder="approval.action?.review_placeholder || '说明这一轮需要保留、移除或降调的内容'" />
+                </label>
+                <div class="grid gap-3 md:grid-cols-2">
+                  <label class="space-y-2 text-secondary">
+                    <span class="text-xs font-semibold text-muted">重写重点</span>
+                    <input v-model="approvalRewriteFocus[approval.approval_id]" type="text" class="input"
+                      placeholder="逗号分隔，例如：delete_untraced, cautious tone" />
+                  </label>
+                  <label class="space-y-2 text-secondary">
+                    <span class="text-xs font-semibold text-muted">语气目标</span>
+                    <input v-model="approvalToneTarget[approval.approval_id]" type="text" class="input"
+                      placeholder="例如：cautious" />
+                  </label>
+                  <label class="space-y-2 text-secondary">
+                    <span class="text-xs font-semibold text-muted">必须保留</span>
+                    <input v-model="approvalMustKeep[approval.approval_id]" type="text" class="input"
+                      placeholder="逗号分隔，填写关键句或关键点" />
+                  </label>
+                  <label class="space-y-2 text-secondary">
+                    <span class="text-xs font-semibold text-muted">必须移除</span>
+                    <input v-model="approvalMustRemove[approval.approval_id]" type="text" class="input"
+                      placeholder="逗号分隔，填写需要删除的句子或表述" />
+                  </label>
+                </div>
+                <div v-if="approval.action?.semantic_interrupt" class="rounded-3xl bg-surface px-4 py-4 text-xs text-secondary">
+                  <p class="font-semibold text-primary">当前 rewrite 信息</p>
+                  <p class="mt-2">当前回合：{{ approval.action.semantic_interrupt?.rewrite_round || 0 }}</p>
+                  <p class="mt-2">允许操作：{{ (approval.action.semantic_interrupt?.allowed_rewrite_ops || []).join('、') || '未提供' }}</p>
+                  <p class="mt-2">问题单元：{{ (approval.action.semantic_interrupt?.offending_unit_ids || []).join('、') || '未提供' }}</p>
+                </div>
+              </div>
               <div v-if="approval.status !== 'resolved'" class="mt-4 flex flex-wrap gap-2"><button type="button"
                   class="btn-primary" :disabled="processingApprovalId === approval.approval_id"
                   @click="handleApproval(approval, 'approve')">{{ processingApprovalId === approval.approval_id ? '处理中…'
                   : '确认继续' }}</button><button v-if="canEditApproval(approval)" type="button" class="btn-secondary"
                   :disabled="processingApprovalId === approval.approval_id || !approvalEdits[approval.approval_id]?.trim()"
-                  @click="handleApproval(approval, 'edit')">提交修改</button><button type="button" class="btn-secondary"
+                  @click="handleApproval(approval, 'rewrite')">要求重写</button><button type="button" class="btn-secondary"
                   :disabled="processingApprovalId === approval.approval_id"
                   @click="handleApproval(approval, 'reject')">暂不继续</button></div>
             </article>
@@ -520,6 +551,10 @@ import { buildRunConsoleViewModel, formatTimestamp, todoStatusLabel } from '../.
 
 const router = useRouter()
 const approvalEdits = reactive({})
+const approvalRewriteFocus = reactive({})
+const approvalMustKeep = reactive({})
+const approvalMustRemove = reactive({})
+const approvalToneTarget = reactive({})
 const processingApprovalId = ref('')
 const activeMainTab = ref('home')
 const debugTab = ref('events')
@@ -560,15 +595,35 @@ const badgeClass = (status) => ({ completed: 'bg-success-soft text-success', fai
 const dotClass = (status) => ({ completed: 'bg-success-soft', failed: 'bg-danger-soft', running: 'bg-brand-soft', pending: 'bg-base-soft' }[status] || 'bg-base-soft')
 const stageLineClass = (status) => ({ completed: 'bg-success-soft', failed: 'bg-danger-soft', running: 'bg-brand-soft', pending: 'bg-base-soft' }[status] || 'bg-base-soft')
 const stageCardClass = (status) => ({ completed: 'bg-success-soft', failed: 'bg-danger-soft', running: 'bg-brand-soft', pending: 'bg-base-soft' }[status] || 'bg-base-soft')
-const approvalStatusLabel = (status, decision) => (status === 'resolved' && decision === 'approve' ? '已确认' : status === 'resolved' && decision === 'edit' ? '已修改' : status === 'resolved' && decision === 'reject' ? '已拒绝' : '待处理')
-const approvalBadgeClass = (status, decision) => (status === 'resolved' && decision === 'approve' ? 'bg-success-soft text-success' : status === 'resolved' && decision === 'edit' ? 'bg-brand-soft text-brand' : status === 'resolved' && decision === 'reject' ? 'bg-danger-soft text-danger' : 'bg-warning-soft text-warning')
+const approvalStatusLabel = (status, decision) => (status === 'resolved' && decision === 'approve' ? '已确认' : status === 'resolved' && decision === 'rewrite' ? '已要求重写' : status === 'resolved' && decision === 'reject' ? '已拒绝' : '待处理')
+const approvalBadgeClass = (status, decision) => (status === 'resolved' && decision === 'approve' ? 'bg-success-soft text-success' : status === 'resolved' && decision === 'rewrite' ? 'bg-brand-soft text-brand' : status === 'resolved' && decision === 'reject' ? 'bg-danger-soft text-danger' : 'bg-warning-soft text-warning')
 const canEditApproval = (approval) => {
   const toolName = String(approval?.tool_name || '').trim()
   return toolName === 'graph_interrupt'
 }
+const parseApprovalList = (value) => String(value || '').split(/[\n,，]/).map((item) => item.trim()).filter(Boolean)
 const openDebugDrawer = (target = 'events') => { debugTab.value = target; activeMainTab.value = 'debug' }
 
-async function handleApproval(approval, decision) { if (!taskState.id || !approval?.approval_id) return; const payload = { decision }; const edited = String(approvalEdits[approval.approval_id] || '').trim(); if (decision === 'edit' && canEditApproval(approval) && edited) payload.edited_action = { markdown: edited }; processingApprovalId.value = approval.approval_id; try { await resolveReportApproval(taskState.id, approval.approval_id, payload) } finally { processingApprovalId.value = '' } }
+async function handleApproval(approval, decision) {
+  if (!taskState.id || !approval?.approval_id) return
+  const approvalId = approval.approval_id
+  const payload = { decision }
+  if (decision === 'rewrite' && canEditApproval(approval)) {
+    payload.review_payload = {
+      comment: String(approvalEdits[approvalId] || '').trim(),
+      rewrite_focus: parseApprovalList(approvalRewriteFocus[approvalId]),
+      must_keep: parseApprovalList(approvalMustKeep[approvalId]),
+      must_remove: parseApprovalList(approvalMustRemove[approvalId]),
+      tone_target: String(approvalToneTarget[approvalId] || '').trim()
+    }
+  }
+  processingApprovalId.value = approvalId
+  try {
+    await resolveReportApproval(taskState.id, approvalId, payload)
+  } finally {
+    processingApprovalId.value = ''
+  }
+}
 async function handleCreateTask() { await createReportTask() }
 async function handleRefreshHistory() { const topic = String(reportForm.topic || '').trim(); if (topic) await loadHistory(topic) }
 async function handleRefreshTask() { if (taskState.id) await loadReportTask(taskState.id) }

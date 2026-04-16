@@ -6,10 +6,10 @@ metadata:
   report:
     skillKey: report_writing_framework
     goal: 按模板章节产出有传播结构分析、因果解释、证据回链的正式舆情报告正文。
-
-## Applies To
-agent_families: document_composer
-runtime_surfaces: deep_report_subagent, plain_compat
+agent_families:
+  - document_composer
+runtime_surfaces:
+  - plain_compat
 ---
 
 # 舆情报告写作技能

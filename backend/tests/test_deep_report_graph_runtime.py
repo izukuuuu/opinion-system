@@ -376,10 +376,8 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
         self.assertEqual(resumed["graph_state_v2"]["metadata"]["graph_thread_id"], "graph-thread-approve")
         self.assertEqual(resumed["checkpoint_backend"], "sqlite")
         self.assertEqual(resumed["checkpoint_locator"], checkpoint_path)
-        blocked_events = [event for event in events if str(event.get("type") or "") == "compile.blocked"]
-        interrupt_events = [event for event in events if str(event.get("type") or "") == "interrupt.human_review"]
-        self.assertEqual(len(blocked_events), 1)
-        self.assertEqual(len(interrupt_events), 1)
+        review_events = [event for event in events if str(event.get("type") or "") == "compile.human_review.required"]
+        self.assertEqual(len(review_events), 1)
 
     def test_graph_interrupt_resume_reject_keeps_review_required(self) -> None:
         base_dir = Path(__file__).resolve().parents[1] / "data" / "_tmp"
@@ -413,6 +411,46 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
         self.assertEqual(resumed["graph_state_v2"]["metadata"]["graph_thread_id"], "graph-thread-reject")
         self.assertEqual(resumed["checkpoint_backend"], "sqlite")
         self.assertEqual(resumed["checkpoint_locator"], checkpoint_path)
+
+    def test_graph_interrupt_resume_rewrite_loops_on_same_thread(self) -> None:
+        base_dir = Path(__file__).resolve().parents[1] / "data" / "_tmp"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = str(base_dir / f"compile_graph_{uuid.uuid4().hex}.sqlite")
+        try:
+            with self._patched_runtime():
+                first = run_report_compilation_graph(
+                    _minimal_payload(),
+                    max_repairs=1,
+                    checkpointer_path=checkpoint_path,
+                    graph_thread_id="graph-thread-rewrite",
+                )
+
+                resumed = run_report_compilation_graph(
+                    _minimal_payload(),
+                    max_repairs=1,
+                    checkpointer_path=checkpoint_path,
+                    graph_thread_id="graph-thread-rewrite",
+                    review_decision={
+                        "decision": "rewrite",
+                        "review_payload": {
+                            "comment": "删除未回溯表述并整体降调。",
+                            "rewrite_focus": ["delete_untraced"],
+                            "must_remove": ["人工边界确认"],
+                            "tone_target": "cautious",
+                        },
+                    },
+                )
+        finally:
+            try:
+                Path(checkpoint_path).unlink()
+            except OSError:
+                pass
+
+        self.assertEqual(first["status"], "interrupted")
+        self.assertEqual(resumed["graph_state_v2"]["metadata"]["graph_thread_id"], "graph-thread-rewrite")
+        self.assertEqual(resumed["checkpoint_backend"], "sqlite")
+        self.assertEqual(resumed["checkpoint_locator"], checkpoint_path)
+        self.assertIn("review_feedback_rounds", resumed)
 
     def test_graph_send_fanout_emits_section_and_repair_worker_nodes(self) -> None:
         events: list[dict] = []

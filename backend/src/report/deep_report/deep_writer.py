@@ -18,6 +18,17 @@ import logging
 import re
 from typing import Any, Dict, List, Tuple
 
+from .payloads import (
+    build_agenda_frame_map_payload,
+    build_event_timeline_payload,
+    build_mechanism_summary_payload,
+    build_section_packet_payload,
+    compute_report_metrics_payload,
+    detect_risk_signals_payload,
+    extract_actor_positions_payload,
+    normalize_task_payload,
+    retrieve_evidence_cards_payload,
+)
 from .schemas import (
     DraftBundleV2,
     DraftUnitV2,
@@ -32,8 +43,8 @@ logger = logging.getLogger(__name__)
 
 
 # 内容密度阈值（借鉴BettaFish，已增强）
-_MIN_SECTION_BODY_CHARACTERS = 800   # 每章节最少800字（从400提升）
-_MIN_NARRATIVE_CHARACTERS = 400      # 叙事部分最少400字（从200提升）
+_MIN_SECTION_BODY_CHARACTERS = 320
+_MIN_NARRATIVE_CHARACTERS = 180
 _MIN_QUOTE_COUNT = 5                  # 最少5条具体引用
 _MIN_DATA_POINTS = 10                 # 最少10个数据点
 _MAX_RETRY_ATTEMPTS = 3               # 最大重试次数（从2提升到3）
@@ -43,6 +54,223 @@ _REQUIRED_TABLE_SECTIONS = {
     "事件演变", "传播路径", "舆论立场与结构", "影响与动作", "附录",
     "timeline", "mechanism", "actors", "risks", "ledger",
 }
+
+_SECTION_INTENT_KEYWORDS = {
+    "timeline": ["事件", "演变", "时间", "节点", "timeline", "脉络"],
+    "actors": ["主体", "立场", "群体", "actor", "叙事竞争"],
+    "risk": ["风险", "应对", "动作", "影响", "危机", "研判"],
+    "mechanism": ["传播", "扩散", "路径", "放大", "机制", "platform"],
+    "focus": ["焦点", "情绪", "争议", "态度", "议题", "frame"],
+    "appendix": ["附录", "证据", "台账", "来源", "样本"],
+}
+
+_TOOL_RECALL_PLAYBOOK = {
+    "timeline": ["retrieve_evidence_cards(intent=timeline)", "build_event_timeline"],
+    "actors": ["retrieve_evidence_cards(intent=actors)", "extract_actor_positions"],
+    "risk": ["retrieve_evidence_cards(intent=risk)", "detect_risk_signals", "judge_decision_utility"],
+    "mechanism": ["retrieve_evidence_cards(intent=overview)", "build_mechanism_summary", "compute_report_metrics"],
+    "focus": ["retrieve_evidence_cards(intent=overview)", "build_agenda_frame_map"],
+    "appendix": ["retrieve_evidence_cards(intent=overview)", "build_section_packet"],
+}
+
+_WRITER_RETRIEVE_INTENT = {
+    "timeline": "timeline",
+    "actors": "actors",
+    "risk": "risk",
+    "mechanism": "overview",
+    "focus": "overview",
+    "appendix": "overview",
+}
+
+_WRITER_SECTION_PACKET_ID = {
+    "timeline": "timeline",
+    "actors": "actors",
+    "risk": "risk",
+    "mechanism": "mechanism",
+    "focus": "overview",
+    "appendix": "overview",
+}
+
+
+def _tokenize_query(text: str) -> List[str]:
+    parts = re.split(r"[^a-zA-Z0-9\u4e00-\u9fff]+", str(text or "").lower())
+    return [part for part in parts if len(part.strip()) >= 2]
+
+
+def _infer_section_intents(section_title: str, section_goal: str) -> List[str]:
+    query = f"{section_title} {section_goal}".lower()
+    intents: List[str] = []
+    for intent, keywords in _SECTION_INTENT_KEYWORDS.items():
+        if any(keyword in query for keyword in keywords):
+            intents.append(intent)
+    if not intents:
+        intents.append("focus")
+    if "appendix" not in intents and ("附录" in section_title or "appendix" in section_title.lower()):
+        intents.append("appendix")
+    return list(dict.fromkeys(intents))
+
+
+def _score_text_match(query_tokens: List[str], text: str) -> int:
+    haystack = str(text or "").lower()
+    score = 0
+    for token in query_tokens:
+        if token in haystack:
+            score += 2 if len(token) >= 4 else 1
+    return score
+
+
+def _json_dumps(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _to_result_count(payload: Dict[str, Any]) -> int:
+    result = payload.get("result")
+    if isinstance(result, list):
+        return len(result)
+    if isinstance(result, dict):
+        return len(result)
+    return 0
+
+
+def _build_tool_receipt(tool_name: str, payload: Dict[str, Any], *, note: str = "") -> Dict[str, Any]:
+    coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
+    trace = payload.get("trace") if isinstance(payload.get("trace"), dict) else {}
+    return {
+        "tool_name": tool_name,
+        "status": "ok" if _to_result_count(payload) or _to_result_count({"result": payload.get("section_packet")}) else "empty",
+        "result_count": _to_result_count(payload) or _to_result_count({"result": payload.get("section_packet")}),
+        "coverage": coverage,
+        "trace": trace,
+        "confidence": float(payload.get("confidence") or 0.0),
+        "error_hint": str(payload.get("error_hint") or "").strip(),
+        "note": str(note or "").strip(),
+    }
+
+
+def _build_writer_normalized_task(
+    report_ir: ReportIR,
+    section: CompilerSectionPlanItem,
+) -> Dict[str, Any]:
+    payload = report_ir if isinstance(report_ir, ReportIR) else ReportIR.model_validate(report_ir)
+    hints = {
+        "topic": str(payload.meta.topic_label or payload.meta.topic_identifier or "").strip(),
+        "entities": list(payload.topic_scope.entities or []),
+        "keywords": list(payload.topic_scope.keywords or []),
+        "platform_scope": list(payload.topic_scope.platforms or []),
+        "analysis_question_set": list(payload.topic_scope.analysis_question_set or []),
+        "mandatory_sections": [section.section_id],
+    }
+    normalized = normalize_task_payload(
+        task_text=f"{payload.meta.topic_label} {section.title} {section.goal}",
+        topic_identifier=str(payload.meta.topic_identifier or "").strip(),
+        start=str(payload.meta.time_scope.start or "").strip(),
+        end=str(payload.meta.time_scope.end or payload.meta.time_scope.start or "").strip(),
+        mode=str(payload.meta.mode or "fast").strip() or "fast",
+        hints_json=_json_dumps(hints),
+    )
+    result = normalized.get("normalized_task") if isinstance(normalized.get("normalized_task"), dict) else {}
+    return result if isinstance(result, dict) else {}
+
+
+def _collect_section_tool_context(
+    section: CompilerSectionPlanItem,
+    report_ir: ReportIR,
+) -> Dict[str, Any]:
+    payload = report_ir if isinstance(report_ir, ReportIR) else ReportIR.model_validate(report_ir)
+    intents = _infer_section_intents(section.title, section.goal)
+    primary_intent = intents[0] if intents else "focus"
+    normalized_task = _build_writer_normalized_task(payload, section)
+    normalized_task_json = _json_dumps(normalized_task)
+    retrieve_payload = retrieve_evidence_cards_payload(
+        normalized_task_json=normalized_task_json,
+        intent=_WRITER_RETRIEVE_INTENT.get(primary_intent, "overview"),
+        limit=12,
+    )
+    evidence_cards = retrieve_payload.get("result") if isinstance(retrieve_payload.get("result"), list) else []
+    receipts = [_build_tool_receipt("retrieve_evidence_cards", retrieve_payload, note=f"intent={primary_intent}")]
+
+    claim_candidates = _extract_claims_for_section(payload, f"{section.title} {section.goal}")
+    packet_section_id = _WRITER_SECTION_PACKET_ID.get(primary_intent, "overview")
+    section_packet_payload = build_section_packet_payload(
+        normalized_task_json=normalized_task_json,
+        section_id=packet_section_id,
+        section_goal=str(section.goal or "").strip(),
+        evidence_ids_json=_json_dumps(evidence_cards),
+        claim_ids_json=_json_dumps([item.get("claim_id") for item in claim_candidates if isinstance(item, dict) and item.get("claim_id")]),
+    )
+    section_packet = section_packet_payload.get("result") if isinstance(section_packet_payload.get("result"), dict) else {}
+    receipts.append(_build_tool_receipt("build_section_packet", section_packet_payload, note=f"section_id={packet_section_id}"))
+
+    metrics_payload: Dict[str, Any] = {}
+    actor_payload: Dict[str, Any] = {}
+    timeline_payload: Dict[str, Any] = {}
+    mechanism_payload: Dict[str, Any] = {}
+    risk_payload: Dict[str, Any] = {}
+    agenda_payload: Dict[str, Any] = {}
+
+    if any(intent in intents for intent in ("timeline", "mechanism", "risk")):
+        timeline_payload = build_event_timeline_payload(
+            normalized_task_json=normalized_task_json,
+            evidence_ids_json=_json_dumps(evidence_cards),
+            max_nodes=8,
+        )
+        receipts.append(_build_tool_receipt("build_event_timeline", timeline_payload))
+    if any(intent in intents for intent in ("actors", "focus", "risk")):
+        actor_payload = extract_actor_positions_payload(
+            normalized_task_json=normalized_task_json,
+            evidence_ids_json=_json_dumps(evidence_cards),
+            actor_limit=10,
+        )
+        receipts.append(_build_tool_receipt("extract_actor_positions", actor_payload))
+    if any(intent in intents for intent in ("mechanism", "risk")):
+        metrics_payload = compute_report_metrics_payload(
+            normalized_task_json=normalized_task_json,
+            metric_scope="overview",
+            evidence_ids_json=_json_dumps(evidence_cards),
+        )
+        receipts.append(_build_tool_receipt("compute_report_metrics", metrics_payload))
+    if "mechanism" in intents:
+        mechanism_payload = build_mechanism_summary_payload(
+            normalized_task_json=normalized_task_json,
+            evidence_ids_json=_json_dumps(evidence_cards),
+            timeline_nodes_json=_json_dumps(timeline_payload.get("result") if isinstance(timeline_payload.get("result"), list) else []),
+            conflict_map_json=_json_dumps(payload.conflict_map.model_dump()),
+            metric_refs_json=_json_dumps(metrics_payload.get("result") if isinstance(metrics_payload.get("result"), list) else []),
+        )
+        receipts.append(_build_tool_receipt("build_mechanism_summary", mechanism_payload))
+    if "risk" in intents:
+        risk_payload = detect_risk_signals_payload(
+            normalized_task_json=normalized_task_json,
+            evidence_ids_json=_json_dumps(evidence_cards),
+            metric_refs_json=_json_dumps(metrics_payload.get("result") if isinstance(metrics_payload.get("result"), list) else []),
+            discourse_conflict_map_json=_json_dumps(payload.conflict_map.model_dump()),
+            actor_positions_json=_json_dumps(actor_payload.get("result") if isinstance(actor_payload.get("result"), list) else []),
+        )
+        receipts.append(_build_tool_receipt("detect_risk_signals", risk_payload))
+    if "focus" in intents:
+        agenda_payload = build_agenda_frame_map_payload(
+            normalized_task_json=normalized_task_json,
+            evidence_ids_json=_json_dumps(evidence_cards),
+            actor_positions_json=_json_dumps(actor_payload.get("result") if isinstance(actor_payload.get("result"), list) else []),
+            conflict_map_json=_json_dumps(payload.conflict_map.model_dump()),
+            timeline_nodes_json=_json_dumps(timeline_payload.get("result") if isinstance(timeline_payload.get("result"), list) else []),
+        )
+        receipts.append(_build_tool_receipt("build_agenda_frame_map", agenda_payload))
+
+    return {
+        "normalized_task": normalized_task,
+        "primary_intent": primary_intent,
+        "intents": intents,
+        "evidence_cards": evidence_cards,
+        "section_packet": section_packet,
+        "timeline_nodes": timeline_payload.get("result") if isinstance(timeline_payload.get("result"), list) else [],
+        "actor_positions": actor_payload.get("result") if isinstance(actor_payload.get("result"), list) else [],
+        "metrics": metrics_payload.get("result") if isinstance(metrics_payload.get("result"), list) else [],
+        "mechanism_summary": mechanism_payload.get("result") if isinstance(mechanism_payload.get("result"), dict) else {},
+        "risk_signals": risk_payload.get("result") if isinstance(risk_payload.get("result"), list) else [],
+        "agenda_frame_map": agenda_payload.get("result") if isinstance(agenda_payload.get("result"), dict) else {},
+        "receipts": receipts,
+    }
 
 
 class DeepWriterError(Exception):
@@ -102,13 +330,24 @@ def _load_skill_instructions(skill_keys: List[str]) -> str:
 
 def _extract_evidence_for_section(
     report_ir: ReportIR,
-    section_id: str,
+    section_query: str,
 ) -> List[Dict[str, Any]]:
-    """提取章节相关的证据卡（含 BettaFish 深度引证字段）"""
+    """按章节语义自由检索证据卡（非固定 section_id 映射）。"""
     payload = report_ir if isinstance(report_ir, ReportIR) else ReportIR.model_validate(report_ir)
+    query_tokens = _tokenize_query(section_query)
 
     relevant_evidence = []
     for entry in payload.evidence_ledger.entries[:20]:
+        text_blob = " ".join(
+            [
+                str(getattr(entry, "title", "") or ""),
+                str(getattr(entry, "finding", "") or ""),
+                str(getattr(entry, "snippet", "") or ""),
+                str(getattr(entry, "raw_quote", "") or ""),
+                str(getattr(entry, "source_summary", "") or ""),
+                str(getattr(entry, "platform", "") or ""),
+            ]
+        )
         evidence_dict = {
             "evidence_id": entry.evidence_id,
             "finding": getattr(entry, "finding", ""),
@@ -125,30 +364,108 @@ def _extract_evidence_for_section(
             "raw_quote": getattr(entry, "raw_quote", ""),
             "emotion_signals": getattr(entry, "emotion_signals", []),
             "engagement_views": getattr(entry, "engagement_views", 0),
+            "match_score": _score_text_match(query_tokens, text_blob) if query_tokens else 0,
         }
         relevant_evidence.append(evidence_dict)
-
-    return relevant_evidence
+    relevant_evidence.sort(
+        key=lambda item: (
+            int(item.get("match_score") or 0),
+            int(item.get("engagement_views") or 0),
+        ),
+        reverse=True,
+    )
+    return relevant_evidence[:12]
 
 
 def _extract_claims_for_section(
     report_ir: ReportIR,
-    section_id: str,
+    section_query: str,
 ) -> List[Dict[str, Any]]:
-    """提取章节相关的断言"""
+    """按章节语义自由检索断言（非固定 section_id 映射）。"""
     payload = report_ir if isinstance(report_ir, ReportIR) else ReportIR.model_validate(report_ir)
+    query_tokens = _tokenize_query(section_query)
 
     claims = []
     for claim in payload.claim_set.claims[:15]:  # 最多15条
+        proposition = str(
+            getattr(claim, "proposition", "")
+            or getattr(claim, "claim_text", "")
+            or getattr(claim, "text", "")
+            or ""
+        ).strip()
+        verification_status = str(
+            getattr(claim, "verification_status", "")
+            or getattr(claim, "status", "")
+            or "supported"
+        ).strip() or "supported"
+        source_ids = [
+            str(item).strip()
+            for item in (
+                getattr(claim, "source_ids", None)
+                or getattr(claim, "support_evidence_ids", None)
+                or []
+            )
+            if str(item or "").strip()
+        ]
+        text_blob = " ".join(
+            [
+                proposition,
+                str(getattr(claim, "text", "") or ""),
+                " ".join(source_ids),
+            ]
+        )
         claim_dict = {
             "claim_id": claim.claim_id,
-            "proposition": claim.proposition,
-            "verification_status": claim.verification_status,
-            "source_ids": claim.source_ids,
+            "proposition": proposition,
+            "verification_status": verification_status,
+            "source_ids": source_ids,
+            "match_score": _score_text_match(query_tokens, text_blob) if query_tokens else 0,
         }
         claims.append(claim_dict)
+    claims.sort(key=lambda item: int(item.get("match_score") or 0), reverse=True)
+    return claims[:8]
 
-    return claims
+
+def _normalize_claim_entries(claims: List[Any]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for index, claim in enumerate(claims):
+        if isinstance(claim, dict):
+            claim_id = str(claim.get("claim_id") or f"claim-candidate-{index + 1}").strip()
+            proposition = str(
+                claim.get("proposition")
+                or claim.get("claim_text")
+                or claim.get("text")
+                or ""
+            ).strip()
+            source_ids = [
+                str(item).strip()
+                for item in (claim.get("source_ids") or claim.get("support_ids") or [])
+                if str(item or "").strip()
+            ]
+            normalized.append(
+                {
+                    "claim_id": claim_id,
+                    "proposition": proposition or claim_id,
+                    "verification_status": str(
+                        claim.get("verification_status") or claim.get("status") or "supported"
+                    ).strip() or "supported",
+                    "source_ids": source_ids,
+                    "match_score": int(claim.get("match_score") or 0),
+                }
+            )
+            continue
+        text = str(claim or "").strip()
+        if text:
+            normalized.append(
+                {
+                    "claim_id": f"claim-candidate-{index + 1}",
+                    "proposition": text,
+                    "verification_status": "candidate",
+                    "source_ids": [],
+                    "match_score": 0,
+                }
+            )
+    return normalized
 
 
 def _extract_bettafish_context(
@@ -237,13 +554,25 @@ def _build_section_writer_prompt(
     report_ir: ReportIR,
     scene_profile: CompilerSceneProfile,
     skill_instructions: str,
+    runtime_context: Dict[str, Any] | None = None,
 ) -> tuple:
     """构建 BettaFish 质量章节写作 prompt（含结构化表格数据注入）"""
     payload = report_ir if isinstance(report_ir, ReportIR) else ReportIR.model_validate(report_ir)
+    runtime = runtime_context if isinstance(runtime_context, dict) else {}
 
-    evidence = _extract_evidence_for_section(payload, section.section_id)
-    claims = _extract_claims_for_section(payload, section.section_id)
+    section_query = f"{section.title} {section.goal}"
+    evidence = runtime.get("evidence_cards") if isinstance(runtime.get("evidence_cards"), list) else []
+    if not evidence:
+        evidence = _extract_evidence_for_section(payload, section_query)
+    packet = runtime.get("section_packet") if isinstance(runtime.get("section_packet"), dict) else {}
+    packet_claims = packet.get("claim_candidates") if isinstance(packet.get("claim_candidates"), list) else []
+    claims = _normalize_claim_entries(packet_claims) or _extract_claims_for_section(payload, section_query)
     bettafish_ctx = _extract_bettafish_context(payload, section.title, section.section_id)
+    section_intents = runtime.get("intents") if isinstance(runtime.get("intents"), list) else _infer_section_intents(section.title, section.goal)
+    tool_hints: List[str] = []
+    for intent in section_intents:
+        tool_hints.extend(_TOOL_RECALL_PLAYBOOK.get(intent, []))
+    tool_hints = list(dict.fromkeys(tool_hints))
 
     system_prompt = """你是舆情报告深度写作代理，负责产出媲美BettaFish的专业舆情分析报告章节。
 
@@ -282,11 +611,38 @@ block类型: heading / paragraph(≥80字) / table(Markdown格式) / quote(原�
         f"- section_id: {section.section_id}",
         f"- 标题: {section.title}",
         f"- 目标字数: {section.target_words}字",
+        f"- 模板标题: {section.template_title or section.title}",
         "",
         "## 章节写作要求（必须满足）",
         section.goal or "按模板要求进行深度分析",
         "",
     ]
+
+    if section.writing_instruction:
+        parts.extend([
+            "## 模板章节 guide（必须落实到正文）",
+            section.writing_instruction,
+            "",
+        ])
+
+    receipts = runtime.get("receipts") if isinstance(runtime.get("receipts"), list) else []
+    if receipts:
+        parts.append("## 已执行工具与产物摘要（必须基于这些结果写作）")
+        for receipt in receipts:
+            if not isinstance(receipt, dict):
+                continue
+            tool_name = str(receipt.get("tool_name") or "").strip()
+            result_count = int(receipt.get("result_count") or 0)
+            note = str(receipt.get("note") or "").strip()
+            parts.append(f"- {tool_name}: 返回 {result_count} 条/项" + (f"；{note}" if note else ""))
+        parts.append("")
+
+    if tool_hints:
+        parts.append("## 工具召回与证据组合建议（按需自由选择）")
+        for hint in tool_hints[:6]:
+            parts.append(f"- {hint}")
+        parts.append("说明：优先先检索证据，再组合结构化对象，最后落地正文。")
+        parts.append("")
 
     # --- 注入 BettaFish 结构化数据 ---
 
@@ -348,6 +704,61 @@ block类型: heading / paragraph(≥80字) / table(Markdown格式) / quote(原�
         for q in bettafish_ctx["netizen_quotes"][:6]:
             parts.append(f'> "{q}"')
         parts.append("")
+
+    if packet:
+        parts.append("## 章节材料包（优先使用）")
+        for hint in [str(item).strip() for item in (packet.get("writing_hints") or []) if str(item or "").strip()][:6]:
+            parts.append(f"- 写作提示: {hint}")
+        for note in [str(item).strip() for item in (packet.get("uncertainty_notes") or []) if str(item or "").strip()][:4]:
+            parts.append(f"- 边界说明: {note}")
+        parts.append("")
+
+    if runtime.get("timeline_nodes"):
+        parts.append("## 时间线节点（可直接转化为叙事）")
+        for node in runtime.get("timeline_nodes")[:6]:
+            if not isinstance(node, dict):
+                continue
+            parts.append(f"- {str(node.get('time_label') or '—').strip()}：{str(node.get('summary') or '').strip()}")
+        parts.append("")
+
+    if runtime.get("actor_positions"):
+        parts.append("## 主体立场对象")
+        for actor in runtime.get("actor_positions")[:6]:
+            if not isinstance(actor, dict):
+                continue
+            parts.append(f"- {str(actor.get('name') or '').strip()}：{str(actor.get('stance') or '').strip()}；{str(actor.get('stance_shift') or actor.get('summary') or '').strip()}")
+        parts.append("")
+
+    if runtime.get("risk_signals"):
+        parts.append("## 风险信号对象")
+        for risk in runtime.get("risk_signals")[:5]:
+            if not isinstance(risk, dict):
+                continue
+            parts.append(f"- {str(risk.get('risk_type') or risk.get('label') or '').strip()}：{str(risk.get('spread_condition') or risk.get('summary') or '').strip()}")
+        parts.append("")
+
+    if runtime.get("mechanism_summary"):
+        mechanism_summary = runtime.get("mechanism_summary") if isinstance(runtime.get("mechanism_summary"), dict) else {}
+        confidence_summary = str(mechanism_summary.get("confidence_summary") or "").strip()
+        if confidence_summary:
+            parts.extend([
+                "## 传播机制摘要",
+                confidence_summary,
+                "",
+            ])
+
+    if runtime.get("agenda_frame_map"):
+        agenda_map = runtime.get("agenda_frame_map") if isinstance(runtime.get("agenda_frame_map"), dict) else {}
+        frames = agenda_map.get("frames") if isinstance(agenda_map.get("frames"), list) else []
+        if frames:
+            parts.append("## 议题-框架对象")
+            for frame in frames[:4]:
+                if not isinstance(frame, dict):
+                    continue
+                parts.append(
+                    f"- problem={str(frame.get('problem') or '').strip()}；cause={str(frame.get('cause') or '').strip()}；judgment={str(frame.get('judgment') or '').strip()}"
+                )
+            parts.append("")
 
     # --- 证据素材 ---
     parts.append("## 证据素材（必须引用，在正文中嵌入原文）")
@@ -460,6 +871,7 @@ def _validate_content_density(
     section_id: str,
     evidence_refs: List[str] = None,
     section_title: str = "",
+    target_words: int = 0,
 ) -> None:
     """验证内容密度（BettaFish 增强版：含表格密度、引用计数）"""
     body_chars = 0
@@ -502,7 +914,11 @@ def _validate_content_density(
     if evidence_refs:
         quote_count += len(evidence_refs)
 
-    if body_chars < _MIN_SECTION_BODY_CHARACTERS:
+    expected_body_chars = max(_MIN_SECTION_BODY_CHARACTERS, int(max(target_words, 0) * 0.8))
+    expected_narrative_chars = max(_MIN_NARRATIVE_CHARACTERS, int(max(target_words, 0) * 0.4))
+    if body_chars < expected_body_chars:
+        raise SectionContentTooSparseError(section_id, body_chars, narrative_chars, quote_count)
+    if narrative_chars < expected_narrative_chars:
         raise SectionContentTooSparseError(section_id, body_chars, narrative_chars, quote_count)
     if quote_count < _MIN_QUOTE_COUNT:
         raise InsufficientQuotesError(section_id, quote_count)
@@ -522,6 +938,14 @@ def _validate_content_density(
     )
 
 
+def _has_substantive_blocks(blocks: List[Dict[str, Any]]) -> bool:
+    for block in blocks:
+        block_type = str(block.get("type", "") or "").strip().lower()
+        if block_type in {"paragraph", "table", "quote", "list", "callout"}:
+            return True
+    return False
+
+
 def _blocks_to_draft_units(
     blocks: List[Dict[str, Any]],
     section: CompilerSectionPlanItem,
@@ -534,17 +958,37 @@ def _blocks_to_draft_units(
     known_ids = _known_trace_ids(report_ir)
 
     for idx, block in enumerate(blocks):
-        block_type = block.get("type", "paragraph")
-        text = block.get("text", "")
+        block_type = str(block.get("type", "paragraph") or "paragraph").strip().lower()
+        text = str(block.get("text", "") or "").strip()
 
-        if not text.strip() and block_type not in {"hr"}:
+        if block_type == "table":
+            text = str(block.get("markdown", "") or "").strip()
+        elif block_type == "list":
+            items = [str(item or "").strip() for item in (block.get("items") or []) if str(item or "").strip()]
+            text = "\n".join([f"- {item}" for item in items]).strip()
+        elif block_type == "quote":
+            attribution = str(block.get("attribution", "") or "").strip()
+            if text:
+                text = f'> "{text}"' + (f" —— {attribution}" if attribution else "")
+        elif block_type == "callout":
+            tone = str(block.get("tone", "") or "").strip()
+            prefix = "提示"
+            if tone in {"warning", "risk"}:
+                prefix = "风险提示"
+            elif tone in {"success", "positive"}:
+                prefix = "正向提示"
+            text = f"> {prefix}：{text}".strip()
+        elif block_type == "hr":
+            text = "---"
+
+        if not text and block_type not in {"hr"}:
             continue
 
         # 确定unit_type
         unit_type = "finding"
         if block_type == "heading":
             unit_type = "heading"
-        elif block_type == "paragraph":
+        elif block_type in {"paragraph", "quote", "table", "list", "callout"}:
             unit_type = "finding"
 
         # 构建trace_refs
@@ -581,7 +1025,7 @@ def _blocks_to_draft_units(
             text=text,
             trace_refs=trace_refs,
             derived_from=list(claim_refs[:3]),
-            support_level="direct" if trace_refs else "structural",
+            support_level="direct" if any(ref.trace_kind != "section_context" for ref in trace_refs) else "structural",
             context_ref=section.section_id,
             render_template_id=f"{section.section_id}:{unit_type}",
             validation_status="pending",
@@ -614,7 +1058,7 @@ def generate_section_with_llm(
     skill_keys: List[str] = None,
     retry_count: int = 0,
     reflection_round: int = 0,
-) -> List[DraftUnitV2]:
+) -> Tuple[List[DraftUnitV2], Dict[str, Any]]:
     """使用LLM生成章节内容（带反思循环）"""
 
     skill_keys = skill_keys or [
@@ -623,9 +1067,10 @@ def generate_section_with_llm(
     ]
 
     skill_instructions = _load_skill_instructions(skill_keys)
+    runtime_context = _collect_section_tool_context(section, report_ir)
 
     system_prompt, user_prompt = _build_section_writer_prompt(
-        section, report_ir, scene_profile, skill_instructions
+        section, report_ir, scene_profile, skill_instructions, runtime_context
     )
 
     llm = _get_llm_client()
@@ -648,10 +1093,18 @@ def generate_section_with_llm(
 
     # 解析响应
     blocks, evidence_refs, claim_refs = _parse_llm_response_to_blocks(raw_response, section)
+    if not _has_substantive_blocks(blocks):
+        raise DeepWriterError(f"章节 {section.section_id} 仅生成标题骨架，未形成正文。")
 
     # 验证内容密度（包含引用计数）
     try:
-        _validate_content_density(blocks, section.section_id, evidence_refs, section.title)
+        _validate_content_density(
+            blocks,
+            section.section_id,
+            evidence_refs,
+            section.title,
+            target_words=int(section.target_words or 0),
+        )
     except (SectionContentTooSparseError, InsufficientQuotesError) as e:
         # 反思循环：如果内容密度不足且还有反思轮次，尝试补充
         if reflection_round < _MAX_REFLECTION_ROUNDS:
@@ -665,7 +1118,15 @@ def generate_section_with_llm(
                 ])
                 raw_response = response.content if hasattr(response, 'content') else str(response)
                 blocks, evidence_refs, claim_refs = _parse_llm_response_to_blocks(raw_response, section)
-                _validate_content_density(blocks, section.section_id, evidence_refs, section.title)
+                if not _has_substantive_blocks(blocks):
+                    raise DeepWriterError(f"章节 {section.section_id} 补充后仍只有标题骨架。")
+                _validate_content_density(
+                    blocks,
+                    section.section_id,
+                    evidence_refs,
+                    section.title,
+                    target_words=int(section.target_words or 0),
+                )
             except Exception as supp_e:
                 logger.warning(f"反思补充失败: {supp_e}")
                 if retry_count < _MAX_RETRY_ATTEMPTS:
@@ -673,12 +1134,29 @@ def generate_section_with_llm(
                         section, report_ir, scene_profile, skill_keys, retry_count + 1, reflection_round + 1
                     )
         else:
-            logger.warning(f"章节 {section.section_id} 反思循环结束，使用当前版本")
+            raise DeepWriterError(f"章节 {section.section_id} 反思循环结束后仍未通过质量门槛: {e}")
 
     # 转换为DraftUnitV2
     units = _blocks_to_draft_units(blocks, section, evidence_refs, claim_refs, report_ir)
 
-    return units
+    return units, {
+        "section_id": section.section_id,
+        "title": section.title,
+        "template_id": section.template_id,
+        "template_title": section.template_title or section.title,
+        "writing_instruction": section.writing_instruction,
+        "tool_receipts": runtime_context.get("receipts") if isinstance(runtime_context.get("receipts"), list) else [],
+        "tool_names": [
+            str(item.get("tool_name") or "").strip()
+            for item in (runtime_context.get("receipts") or [])
+            if isinstance(item, dict) and str(item.get("tool_name") or "").strip()
+        ],
+        "evidence_ref_count": len(evidence_refs),
+        "claim_ref_count": len(claim_refs),
+        "trace_refs_used": list(dict.fromkeys([*evidence_refs, *claim_refs])),
+        "unit_count": len(units),
+        "degraded": False,
+    }
 
 
 def compile_draft_units_with_llm(
@@ -691,11 +1169,13 @@ def compile_draft_units_with_llm(
     plan = section_plan if isinstance(section_plan, SectionPlan) else SectionPlan.model_validate(section_plan)
 
     all_units: List[DraftUnitV2] = []
+    section_receipts: List[Dict[str, Any]] = []
+    degraded_sections: List[Dict[str, Any]] = []
 
     for section in plan.sections:
         try:
             logger.info(f"LLM生成章节: {section.section_id} - {section.title}")
-            units = generate_section_with_llm(
+            units, receipt = generate_section_with_llm(
                 section, payload, scene_profile,
                 skill_keys=[
                     "report-writing-framework",
@@ -704,15 +1184,33 @@ def compile_draft_units_with_llm(
                 ]
             )
             all_units.extend(units)
+            section_receipts.append(receipt)
             logger.info(f"章节 {section.section_id} 生成完成，{len(units)}个单元")
         except DeepWriterError as e:
             logger.error(f"章节 {section.section_id} 生成失败: {e}")
-            # 创建fallback单元
-            fallback_unit = DraftUnitV2(
-                unit_id=f"unit:{section.section_id}:fallback",
+            # 创建可解释的降级单元，避免出现纯标题骨架。
+            fallback_heading = DraftUnitV2(
+                unit_id=f"unit:{section.section_id}:fallback-heading",
+                section_id=section.section_id,
+                unit_type="heading",
+                text=f"## {section.title}",
+                trace_refs=[TraceRef(
+                    trace_id=section.section_id,
+                    trace_kind="section_context",
+                    support_level="structural"
+                )],
+                derived_from=[],
+                support_level="structural",
+                context_ref=section.section_id,
+                render_template_id=f"{section.section_id}:heading",
+                validation_status="failed",
+                metadata={"error": str(e), "degraded": True},
+            )
+            fallback_paragraph = DraftUnitV2(
+                unit_id=f"unit:{section.section_id}:fallback-body",
                 section_id=section.section_id,
                 unit_type="finding",
-                text=f"## {section.title}\n\n（本章节内容生成失败，请检查上游数据）",
+                text="（本章节自动写作未达到质量门槛，已触发降级输出。请结合证据台账人工复核后再发布。）",
                 trace_refs=[TraceRef(
                     trace_id=section.section_id,
                     trace_kind="section_context",
@@ -723,9 +1221,34 @@ def compile_draft_units_with_llm(
                 context_ref=section.section_id,
                 render_template_id=f"{section.section_id}:finding",
                 validation_status="failed",
-                metadata={"error": str(e)},
+                metadata={"error": str(e), "degraded": True},
             )
-            all_units.append(fallback_unit)
+            all_units.extend([fallback_heading, fallback_paragraph])
+            degraded_sections.append(
+                {
+                    "section_id": section.section_id,
+                    "title": section.title,
+                    "reason": str(e),
+                    "template_id": section.template_id,
+                }
+            )
+            section_receipts.append(
+                {
+                    "section_id": section.section_id,
+                    "title": section.title,
+                    "template_id": section.template_id,
+                    "template_title": section.template_title or section.title,
+                    "writing_instruction": section.writing_instruction,
+                    "tool_receipts": [],
+                    "tool_names": [],
+                    "evidence_ref_count": 0,
+                    "claim_ref_count": 0,
+                    "trace_refs_used": [],
+                    "unit_count": 2,
+                    "degraded": True,
+                    "degraded_reason": str(e),
+                }
+            )
 
     return DraftBundleV2(
         source_artifact_id="draft_bundle.llm.v2",
@@ -737,5 +1260,16 @@ def compile_draft_units_with_llm(
             "generation_mode": "llm_deep_writer",
             "section_count": len(plan.sections),
             "unit_count": len(all_units),
+            "section_generation_receipts": section_receipts,
+            "degraded_sections": degraded_sections,
+            "selected_template": {
+                "template_id": str(scene_profile.template_id or "").strip(),
+                "template_name": str(scene_profile.template_name or "").strip(),
+                "template_path": str(scene_profile.template_path or "").strip(),
+                "scene_id": str(scene_profile.scene_id or "").strip(),
+                "scene_label": str(scene_profile.scene_label or "").strip(),
+                "score": float(scene_profile.selection_score or 0.0),
+                "matched_reasons": list(scene_profile.matched_reasons or []),
+            },
         },
     )

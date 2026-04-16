@@ -160,13 +160,13 @@ _CAPABILITY_SPECS: Tuple[ReportCapabilitySpec, ...] = (
         owned_artifacts=("AgendaFrameMap",),
         runtime_surfaces=(RUNTIME_COORDINATOR, RUNTIME_SUBAGENT),
         tool_ids=("build_agenda_frame_map",),
-        skill_ids=(),
+        skill_ids=("agenda-frame-builder",),
         entrypoints=("report_coordinator", "agenda_frame_builder"),
         entrypoint_tool_ids=_projection_map(
             report_coordinator=("build_agenda_frame_map",),
             agenda_frame_builder=("build_agenda_frame_map",),
         ),
-        backlog_status="partially_aligned",
+        backlog_status="aligned",
     ),
     _capability(
         "semantic.conflict_map_builder",
@@ -358,6 +358,13 @@ _SKILL_CONTRACTS: Tuple[ReportSkillContract, ...] = (
         capability_ids=("semantic.conflict_map_builder",),
         runtime_surfaces=(RUNTIME_SUBAGENT,),
         agent_families=("stance_conflict", "claim_actor_conflict"),
+        binding_mode=SKILL_MODE_METHOD,
+    ),
+    ReportSkillContract(
+        skill_id="agenda-frame-builder",
+        capability_ids=("semantic.agenda_frame_builder",),
+        runtime_surfaces=(RUNTIME_SUBAGENT,),
+        agent_families=("agenda_frame_builder",),
         binding_mode=SKILL_MODE_METHOD,
     ),
     ReportSkillContract(

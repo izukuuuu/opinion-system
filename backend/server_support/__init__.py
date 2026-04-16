@@ -85,6 +85,10 @@ from .publisher_detection import (
     build_status_payload as build_publisher_detection_status_payload,
     create_or_reuse_task as create_publisher_detection_task,
 )
+from .media_tagging import (
+    build_status_payload as build_media_tagging_status_payload,
+    create_or_reuse_task as create_media_tagging_task,
+)
 from .filter_templates import (
     load_filter_template_config,
     persist_filter_template_config,
@@ -182,6 +186,7 @@ __all__ = [
     "create_postclean_job",
     "create_deduplicate_job",
     "create_fetch_refresh_job",
+    "create_media_tagging_task",
     "create_publisher_detection_task",
     "create_rebuild_fetch_job",
     "get_deduplicate_job",
@@ -205,6 +210,7 @@ __all__ = [
     "update_postclean_job",
     "update_rebuild_fetch_job",
     "build_publisher_detection_status_payload",
+    "build_media_tagging_status_payload",
     "persist_filter_template_config",
     # Paths
     "BACKEND_DIR",

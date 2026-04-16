@@ -447,23 +447,42 @@ def _run_task(task_id: str) -> None:
                 },
             },
         )
-        mark_task_completed(
-            task_id,
-            message="报告已生成。",
-            payload={
-                "report_cache_path": str(cache_path),
-                "report_title": str(((report_payload.get("task") or {}).get("topic_label")) or topic_label).strip(),
-                "full_report_cache_path": str(full_cache_path),
-                "full_report_title": str(full_report_payload.get("title") or "").strip(),
-                "artifact_manifest": (
-                    full_report_payload.get("artifact_manifest")
-                    if isinstance(full_report_payload.get("artifact_manifest"), dict)
-                    else report_payload.get("artifact_manifest")
-                    if isinstance(report_payload.get("artifact_manifest"), dict)
-                    else {}
-                ),
-            },
-        )
+        terminal_payload = {
+            "report_cache_path": str(cache_path),
+            "report_title": str(((report_payload.get("task") or {}).get("topic_label")) or topic_label).strip(),
+            "full_report_cache_path": str(full_cache_path),
+            "full_report_title": str(full_report_payload.get("title") or "").strip(),
+            "artifact_manifest": (
+                full_report_payload.get("artifact_manifest")
+                if isinstance(full_report_payload.get("artifact_manifest"), dict)
+                else report_payload.get("artifact_manifest")
+                if isinstance(report_payload.get("artifact_manifest"), dict)
+                else {}
+            ),
+            "degraded_reason": str(full_report_payload.get("degraded_reason") or "").strip(),
+            "degraded_sections": (
+                full_report_payload.get("degraded_sections")
+                if isinstance(full_report_payload.get("degraded_sections"), list)
+                else []
+            ),
+        }
+        degraded_sections = terminal_payload.get("degraded_sections") if isinstance(terminal_payload.get("degraded_sections"), list) else []
+        degraded_reason = str(terminal_payload.get("degraded_reason") or "").strip()
+        if degraded_reason or degraded_sections:
+            mark_task_failed(
+                task_id,
+                "正式文稿已降级输出，需复核后再发布。",
+                payload={
+                    **terminal_payload,
+                    "failed_phase": "persist",
+                },
+            )
+        else:
+            mark_task_completed(
+                task_id,
+                message="报告已生成。",
+                payload=terminal_payload,
+            )
         LOGGER.warning(
             "report worker | task completed | task=%s cache=%s full_cache=%s",
             task_id,
@@ -863,7 +882,7 @@ def _resolved_graph_review(task: Dict[str, Any]) -> Dict[str, Any] | None:
         if tool_name != "graph_interrupt" and str(item.get("approval_kind") or "").strip() != "graph_interrupt":
             continue
         decision = str(item.get("decision") or "").strip().lower()
-        if decision != "approve":
+        if decision not in {"approve", "rewrite"}:
             continue
         review_payload = item.get("review_payload") if isinstance(item.get("review_payload"), dict) else {}
         return {

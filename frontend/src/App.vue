@@ -213,6 +213,7 @@ import {
   DocumentArrowUpIcon,
   DocumentTextIcon,
   ArrowsRightLeftIcon,
+  MegaphoneIcon,
   PresentationChartLineIcon,
   Squares2X2Icon,
   TableCellsIcon,
@@ -318,6 +319,17 @@ const navigationGroups = [
           'topic-analysis-bertopic-view'
         ],
         icon: BeakerIcon
+      },
+      {
+        label: '媒体识别与打标',
+        description: '维护媒体名单与正式标签',
+        to: { name: 'analysis-media-tagging' },
+        match: [
+          'analysis-media-tagging',
+          'analysis-media-tagging-run',
+          'analysis-media-tagging-view'
+        ],
+        icon: MegaphoneIcon
       },
       {
         label: '报告解读',

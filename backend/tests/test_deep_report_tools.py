@@ -39,6 +39,7 @@ from src.report.deep_report.payloads import (
     verify_claim_payload,
 )
 from src.report.deep_report.agent_tools import get_corpus_coverage, retrieve_evidence_cards
+from src.report.evidence_retriever import search_raw_records
 from src.report.tools import get_report_tool_catalog, select_report_tools
 from src.utils.setting.paths import get_data_root
 
@@ -57,6 +58,10 @@ class DeepReportToolsTests(unittest.TestCase):
                 "author": "城市日报",
                 "published_at": "2025-08-20T08:00:00",
                 "url": "https://example.com/policy-1",
+                "region": "本地",
+                "hit_words": "控烟,卫健委",
+                "polarity": "中性",
+                "classification": "未筛选",
             },
             {
                 "title": "网传市卫健委发布控烟通知系谣言",
@@ -65,6 +70,10 @@ class DeepReportToolsTests(unittest.TestCase):
                 "author": "辟谣号",
                 "published_at": "2025-08-22T11:00:00",
                 "url": "https://example.com/rumor-1",
+                "region": "本地",
+                "hit_words": "控烟,谣言",
+                "polarity": "负面",
+                "classification": "未筛选",
             },
             {
                 "title": "执法部门开展控烟专项行动",
@@ -73,6 +82,10 @@ class DeepReportToolsTests(unittest.TestCase):
                 "author": "晚报",
                 "published_at": "2025-08-25T09:30:00",
                 "url": "https://example.com/policy-2",
+                "region": "本地",
+                "hit_words": "控烟,执法",
+                "polarity": "中性",
+                "classification": "未筛选",
             },
             {
                 "title": "世界无烟日前宣传活动升温",
@@ -81,6 +94,34 @@ class DeepReportToolsTests(unittest.TestCase):
                 "author": "健康频道",
                 "published_at": "2025-05-28T09:00:00",
                 "url": "https://example.com/day-1",
+                "region": "本地",
+                "hit_words": "控烟,无烟日",
+                "polarity": "正面",
+                "classification": "未筛选",
+            },
+            {
+                "title": "乘客投诉站台吸烟引发争议，铁路部门回应将核查",
+                "contents": "多名乘客投诉站台吸烟问题，现场争议升温，铁路部门回应正在核查并评估是否处罚。",
+                "platform": "自媒体号",
+                "author": "深圳市大鹏新区控烟志愿者监督大队",
+                "published_at": "2025-08-26T10:30:00",
+                "url": "https://example.com/risk-1",
+                "region": "深圳",
+                "hit_words": "控烟,投诉,争议",
+                "polarity": "负面",
+                "classification": "未筛选",
+            },
+            {
+                "title": "吸烟危害科普：戒烟建议与健康提示",
+                "contents": "title: 吸烟危害科普：戒烟建议与健康提示",
+                "platform": "自媒体号",
+                "author": "健康科普站",
+                "published_at": "2025-08-27T10:00:00",
+                "url": "https://example.com/generic-1",
+                "region": "本地",
+                "hit_words": "控烟,戒烟",
+                "polarity": "中性",
+                "classification": "未筛选",
             },
         ]
         with (self.fetch_root / "总体.jsonl").open("w", encoding="utf-8") as handle:
@@ -341,6 +382,106 @@ class DeepReportToolsTests(unittest.TestCase):
         self.assertNotIn("normalized_task_json", evidence_args)
         self.assertNotIn("task_contract_json", evidence_args)
         self.assertNotIn("task_derivation_json", evidence_args)
+
+    def test_search_raw_records_exposes_available_raw_fields(self) -> None:
+        retrieval = search_raw_records(
+            topic_identifier=self.topic_identifier,
+            start="2025-08-01",
+            end="2025-08-31",
+            query="控烟 卫健委 投诉 争议",
+            top_k=6,
+            mode="fast",
+        )
+
+        self.assertTrue(retrieval["items"])
+        sample = retrieval["items"][0]
+        self.assertIn("contents", sample)
+        self.assertIn("polarity", sample)
+        self.assertIn("classification", sample)
+        self.assertIn("region", sample)
+        self.assertIn("hit_words", sample)
+        self.assertIn("matched_terms", sample)
+        self.assertIn("content_quality_hint", sample)
+
+    def test_retrieve_evidence_cards_exposes_inferred_fields_and_counts(self) -> None:
+        normalized = normalize_task_payload(
+            task_text="控烟政策建议",
+            topic_identifier=self.topic_identifier,
+            start="2025-08-01",
+            end="2025-08-31",
+            mode="fast",
+        )
+        evidence = EvidenceCardPage.model_validate(
+            retrieve_evidence_cards_payload(
+                normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+                intent="risk",
+                limit=6,
+            )
+        )
+
+        self.assertTrue(evidence.result)
+        first = evidence.result[0]
+        self.assertTrue(hasattr(first, "raw_contents"))
+        self.assertTrue(hasattr(first, "raw_polarity"))
+        self.assertTrue(hasattr(first, "content_quality_hint"))
+        self.assertTrue(hasattr(first, "official_source_hint"))
+        self.assertTrue(hasattr(first, "source_kind_hint"))
+        self.assertTrue(hasattr(first, "actor_salience_score"))
+        self.assertTrue(hasattr(first, "eventness_score"))
+        self.assertTrue(hasattr(first, "risk_salience_score"))
+        self.assertTrue(hasattr(first, "risk_facets"))
+        self.assertGreaterEqual(evidence.coverage.raw_matched_count, evidence.coverage.deduped_candidate_count)
+        self.assertEqual(evidence.coverage.returned_card_count, len(evidence.result))
+        self.assertTrue(evidence.trace.rerank_policy)
+        self.assertTrue(isinstance(evidence.trace.dominant_signals, list))
+
+    def test_intent_aware_rerank_prefers_actor_timeline_and_risk_signals(self) -> None:
+        normalized = normalize_task_payload(
+            task_text="控烟政策建议",
+            topic_identifier=self.topic_identifier,
+            start="2025-08-01",
+            end="2025-08-31",
+            mode="fast",
+        )
+        overview = EvidenceCardPage.model_validate(
+            retrieve_evidence_cards_payload(
+                normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+                intent="overview",
+                limit=4,
+            )
+        )
+        timeline = EvidenceCardPage.model_validate(
+            retrieve_evidence_cards_payload(
+                normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+                intent="timeline",
+                limit=4,
+            )
+        )
+        actors = EvidenceCardPage.model_validate(
+            retrieve_evidence_cards_payload(
+                normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+                intent="actors",
+                limit=4,
+            )
+        )
+        risk = EvidenceCardPage.model_validate(
+            retrieve_evidence_cards_payload(
+                normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+                intent="risk",
+                limit=4,
+            )
+        )
+
+        self.assertTrue(any(card.risk_facets for card in risk.result))
+        self.assertTrue(any(card.eventness_score >= 0.4 for card in timeline.result))
+        self.assertTrue(any(card.actor_salience_score >= 0.35 for card in actors.result))
+        self.assertNotEqual(
+            [card.source_id for card in overview.result[:3]],
+            [card.source_id for card in actors.result[:3]],
+        )
+        self.assertTrue(
+            any("投诉" in (card.title or "") or "谣言" in (card.title or "") or "争议" in (card.title or "") for card in risk.result[:3])
+        )
 
     def test_missing_contract_id_fails_instead_of_fallback_guess(self) -> None:
         coverage = CorpusCoverageResult.model_validate(

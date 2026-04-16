@@ -221,6 +221,7 @@ function approvalDecisionLabel(decision, reviewPayload = null) {
     const hasComment = reviewPayload?.comment || reviewPayload?.annotations?.length
     return hasComment ? '已批注通过' : '已通过'
   }
+  if (normalized === 'rewrite') return '已要求重写'
   if (normalized === 'reject') return '已拒绝'
   return '待处理'
 }

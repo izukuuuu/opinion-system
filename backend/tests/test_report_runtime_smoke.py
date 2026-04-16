@@ -326,6 +326,42 @@ class ReportRuntimeSmokeTests(unittest.TestCase):
             },
         )
 
+    def test_build_resume_payload_supports_rewrite_review_payload(self) -> None:
+        task = _sample_task(
+            approvals=[
+                {
+                    "approval_id": "approval-1",
+                    "interrupt_id": "interrupt-1",
+                    "decision_index": 0,
+                    "tool_name": "graph_interrupt",
+                    "status": "resolved",
+                    "decision": "rewrite",
+                    "review_payload": {
+                        "comment": "请删除未回溯句，并整体降调。",
+                        "rewrite_focus": ["delete_untraced"],
+                        "must_remove": ["未经证实"],
+                        "tone_target": "cautious",
+                    },
+                }
+            ]
+        )
+        payload = _build_resume_payload_from_task(task)
+        self.assertEqual(
+            payload,
+            {
+                "interrupt-1": {
+                    "decision": "rewrite",
+                    "approval_id": "approval-1",
+                    "review_payload": {
+                        "comment": "请删除未回溯句，并整体降调。",
+                        "rewrite_focus": ["delete_untraced"],
+                        "must_remove": ["未经证实"],
+                        "tone_target": "cautious",
+                    },
+                }
+            },
+        )
+
     def test_failure_resume_before_compile_skips_prepare_and_passes_context(self) -> None:
         task = _sample_task(status="queued")
         task["request"]["resume_context"] = {

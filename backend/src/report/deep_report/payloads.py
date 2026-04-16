@@ -81,6 +81,26 @@ _CLAIMABILITY_RULES = {
     "propagation_change": ("扩散", "热度", "峰值", "传播"),
     "risk_signal": ("辟谣", "冲突", "争议", "投诉"),
 }
+_OFFICIAL_AUTHOR_HINTS = (
+    "卫健委", "政府", "公安", "法院", "检察院", "铁路", "医院", "学校", "协会", "委员会", "办公室", "中心", "发布", "政务", "融媒",
+)
+_MEDIA_AUTHOR_HINTS = (
+    "日报", "晚报", "新闻", "电视台", "广播", "传媒", "客户端", "晨报", "商报", "观察", "网", "报业", "澎湃", "界面", "九派", "红星",
+)
+_GENERIC_INFO_HINTS = (
+    "科普", "知识", "危害", "建议", "提醒", "方法", "为什么", "为何", "怎么办", "健康提示", "戒烟建议", "小知识",
+)
+_EVENT_ACTION_HINTS = (
+    "发布", "出台", "通报", "回应", "处罚", "查处", "启动", "开展", "实施", "生效", "宣布", "引发", "举报", "投诉", "维权", "辟谣",
+)
+_RISK_FACET_HINTS: Dict[str, tuple[str, ...]] = {
+    "complaint": ("投诉", "举报", "反映"),
+    "dispute": ("质疑", "争议", "争执", "分歧"),
+    "refute": ("辟谣", "不实", "谣言", "误读", "网传"),
+    "sanction": ("处罚", "罚款", "查处", "问责"),
+    "conflict": ("冲突", "维权", "对立", "矛盾"),
+    "spread": ("扩散", "发酵", "爆发", "失控"),
+}
 _METRIC_SCOPE_ALLOWED = {"volume", "platform", "temporal", "overview"}
 _CONTRACT_REGISTRY_SUBDIR = "_report/contracts"
 _TOOL_INTENT_ALLOWED = ("overview", "timeline", "actors", "risk", "claim_support", "claim_counter")
@@ -107,6 +127,9 @@ _EVIDENCE_NEED_ALIASES = {
     "risk": "risk",
     "风险信号": "risk",
 }
+_SEMANTIC_ENTITY_CATEGORIES = {"policy", "organization", "event", "concept", "location", "person", "other"}
+_SEMANTIC_KEYWORD_RELEVANCE = {"primary", "secondary", "contextual"}
+_REPORT_TYPE_ALLOWED = {"propagation", "analysis", "risk", "comprehensive"}
 _EVIDENCE_NEED_TO_TOOL_INTENTS = {
     "overview": ["overview"],
     "timeline": ["timeline"],
@@ -348,6 +371,9 @@ def _coverage_payload(
     *,
     matched_count: int,
     sampled_count: int,
+    raw_matched_count: int | None = None,
+    deduped_candidate_count: int | None = None,
+    returned_card_count: int | None = None,
     source_resolution: str = "",
     resolved_fetch_range: Dict[str, str] | None = None,
     resolved_source_files: List[str] | None = None,
@@ -366,6 +392,9 @@ def _coverage_payload(
     return {
         "matched_count": int(matched_count or 0),
         "sampled_count": int(sampled_count or 0),
+        "raw_matched_count": int(raw_matched_count if raw_matched_count is not None else matched_count or 0),
+        "deduped_candidate_count": int(deduped_candidate_count if deduped_candidate_count is not None else matched_count or 0),
+        "returned_card_count": int(returned_card_count if returned_card_count is not None else sampled_count or 0),
         "platform_counts": dict(platform_counts or {}),
         "date_span": dict(date_span or {}),
         "source_resolution": str(source_resolution or "").strip(),
@@ -400,6 +429,8 @@ def _trace_payload(
     compiled_tool_intents: List[str] | None = None,
     requested_intent: str = "",
     allowed_intents: List[str] | None = None,
+    rerank_policy: str = "",
+    dominant_signals: List[str] | None = None,
 ) -> Dict[str, Any]:
     next_cursor = str(offset + len(items)) if offset + len(items) < max(total, 0) else ""
     return {
@@ -419,6 +450,8 @@ def _trace_payload(
         "compiled_tool_intents": [str(item).strip() for item in (compiled_tool_intents or []) if str(item or "").strip()],
         "requested_intent": str(requested_intent or "").strip(),
         "allowed_intents": [str(item).strip() for item in (allowed_intents or []) if str(item or "").strip()],
+        "rerank_policy": str(rerank_policy or "").strip(),
+        "dominant_signals": [str(item).strip() for item in (dominant_signals or []) if str(item or "").strip()],
     }
 
 
@@ -454,6 +487,8 @@ def _base_result(
             "compiled_tool_intents": [],
             "requested_intent": "",
             "allowed_intents": [],
+            "rerank_policy": "",
+            "dominant_signals": [],
         },
         "error_hint": str(error_hint or "").strip() or None,
     }
@@ -497,8 +532,6 @@ def _load_normalized_task(normalized_task_json: str) -> Dict[str, Any]:
     payload["mode"] = str(payload.get("mode") or "fast").strip().lower() or "fast"
     payload["task_contract"] = payload.get("task_contract") if isinstance(payload.get("task_contract"), dict) else {}
     for key in (
-        "entities",
-        "keywords",
         "platform_scope",
         "mandatory_sections",
         "risk_policy",
@@ -508,6 +541,8 @@ def _load_normalized_task(normalized_task_json: str) -> Dict[str, Any]:
         "contract_overrides_applied",
     ):
         payload[key] = [str(item).strip() for item in (payload.get(key) or []) if str(item or "").strip()]
+    payload["entities"] = _extract_semantic_entity_names(payload.get("entities") or [])
+    payload["keywords"] = _extract_semantic_keyword_terms(payload.get("keywords") or [])
     attempted_overrides = payload.get("attempted_overrides") if isinstance(payload.get("attempted_overrides"), dict) else {}
     payload["attempted_overrides"] = {str(key).strip(): str(value).strip() for key, value in attempted_overrides.items() if str(key or "").strip()}
     topic_aliases = payload.get("topic_aliases") if isinstance(payload.get("topic_aliases"), list) else []
@@ -542,6 +577,68 @@ def _build_task_contract(*, topic_identifier: str, topic_label: str, start: str,
     }
 
 
+def _coerce_topic_label_payload(topic_label: Any, *, fallback: str = "", full_description_fallback: str = "") -> Dict[str, str]:
+    if isinstance(topic_label, dict):
+        label = str(topic_label.get("label") or fallback).strip()
+        full_description = str(topic_label.get("full_description") or full_description_fallback).strip()
+    else:
+        label = str(topic_label or fallback).strip()
+        full_description = str(full_description_fallback or "").strip()
+    label = label[:30] if label else str(fallback or "")[:30].strip()
+    return {
+        "label": label or "待确定",
+        "full_description": full_description[:200],
+    }
+
+
+def _coerce_semantic_entity_list(values: Any) -> List[Dict[str, str]]:
+    output: List[Dict[str, str]] = []
+    for item in (values or []):
+        if isinstance(item, dict):
+            name = str(item.get("name") or "").strip()
+            category = str(item.get("category") or "other").strip().lower() or "other"
+        else:
+            name = str(item or "").strip()
+            category = "other"
+        if not name:
+            continue
+        output.append(
+            {
+                "name": name,
+                "category": category if category in _SEMANTIC_ENTITY_CATEGORIES else "other",
+            }
+        )
+    return output
+
+
+def _coerce_semantic_keyword_list(values: Any) -> List[Dict[str, str]]:
+    output: List[Dict[str, str]] = []
+    for item in (values or []):
+        if isinstance(item, dict):
+            term = str(item.get("term") or "").strip()
+            relevance = str(item.get("relevance") or "primary").strip().lower() or "primary"
+        else:
+            term = str(item or "").strip()
+            relevance = "primary"
+        if not term:
+            continue
+        output.append(
+            {
+                "term": term,
+                "relevance": relevance if relevance in _SEMANTIC_KEYWORD_RELEVANCE else "primary",
+            }
+        )
+    return output
+
+
+def _extract_semantic_entity_names(values: Any) -> List[str]:
+    return [str(item.get("name") or "").strip() for item in _coerce_semantic_entity_list(values) if str(item.get("name") or "").strip()]
+
+
+def _extract_semantic_keyword_terms(values: Any) -> List[str]:
+    return [str(item.get("term") or "").strip() for item in _coerce_semantic_keyword_list(values) if str(item.get("term") or "").strip()]
+
+
 def _build_normalized_task_view(task_contract: Dict[str, Any], task_derivation: Dict[str, Any]) -> Dict[str, Any]:
     contract = task_contract if isinstance(task_contract, dict) else {}
     derivation = task_derivation if isinstance(task_derivation, dict) else {}
@@ -549,10 +646,14 @@ def _build_normalized_task_view(task_contract: Dict[str, Any], task_derivation: 
     end = str(contract.get("end") or start).strip()
     topic_identifier = str(contract.get("topic_identifier") or "").strip()
     attempted_overrides = derivation.get("attempted_overrides") if isinstance(derivation.get("attempted_overrides"), dict) else {}
+    entity_names = _extract_semantic_entity_names(derivation.get("entities") or [])
+    keyword_terms = _extract_semantic_keyword_terms(derivation.get("keywords") or [])
     return {
         "task_id": f"{topic_identifier}:{start}:{end or start}",
         "topic": str(derivation.get("topic") or contract.get("topic_label") or topic_identifier).strip(),
         "topic_identifier": topic_identifier,
+        "topic_label": str(contract.get("topic_label") or "").strip(),
+        "contract_id": str(contract.get("contract_id") or f"{topic_identifier}:{start}:{end}").strip(),
         "task_contract": {
             "contract_id": str(contract.get("contract_id") or f"{topic_identifier}:{start}:{end}").strip(),
             "topic_identifier": topic_identifier,
@@ -562,8 +663,8 @@ def _build_normalized_task_view(task_contract: Dict[str, Any], task_derivation: 
             "mode": str(contract.get("mode") or "fast").strip().lower() or "fast",
             "thread_id": str(contract.get("thread_id") or "").strip(),
         },
-        "entities": [str(item).strip() for item in (derivation.get("entities") or []) if str(item or "").strip()],
-        "keywords": [str(item).strip() for item in (derivation.get("keywords") or []) if str(item or "").strip()],
+        "entities": entity_names,
+        "keywords": keyword_terms,
         "time_range": {"start": start, "end": end},
         "platform_scope": [str(item).strip() for item in (derivation.get("platform_scope") or []) if str(item or "").strip()],
         "report_type": str(derivation.get("report_type") or "analysis").strip() or "analysis",
@@ -603,14 +704,26 @@ def _load_task_derivation_payload(task_derivation_json: str) -> Dict[str, Any]:
     payload = _clean_dict(task_derivation_json)
     if isinstance(payload.get("task_derivation"), dict):
         payload = dict(payload.get("task_derivation") or {})
+    topic_identifier = str(payload.get("topic_identifier") or "").strip()
+    topic = str(payload.get("topic") or "").strip()
     return {
         "derivation_id": str(payload.get("derivation_id") or "").strip(),
-        "topic": str(payload.get("topic") or "").strip(),
+        "topic": topic,
+        "topic_identifier": topic_identifier,
+        "topic_label": _coerce_topic_label_payload(
+            payload.get("topic_label"),
+            fallback=topic or topic_identifier,
+            full_description_fallback=topic,
+        ),
         "topic_aliases": [str(item).strip() for item in (payload.get("topic_aliases") or []) if str(item or "").strip()],
-        "entities": [str(item).strip() for item in (payload.get("entities") or []) if str(item or "").strip()],
-        "keywords": [str(item).strip() for item in (payload.get("keywords") or []) if str(item or "").strip()],
+        "entities": _coerce_semantic_entity_list(payload.get("entities") or []),
+        "keywords": _coerce_semantic_keyword_list(payload.get("keywords") or []),
         "platform_scope": [str(item).strip() for item in (payload.get("platform_scope") or []) if str(item or "").strip()],
-        "report_type": str(payload.get("report_type") or "analysis").strip() or "analysis",
+        "report_type": (
+            str(payload.get("report_type") or "analysis").strip().lower()
+            if str(payload.get("report_type") or "").strip().lower() in _REPORT_TYPE_ALLOWED
+            else "analysis"
+        ),
         "mandatory_sections": [str(item).strip() for item in (payload.get("mandatory_sections") or []) if str(item or "").strip()],
         "risk_policy": [str(item).strip() for item in (payload.get("risk_policy") or []) if str(item or "").strip()],
         "analysis_question_set": [str(item).strip() for item in (payload.get("analysis_question_set") or []) if str(item or "").strip()],
@@ -974,6 +1087,267 @@ def _card_claimability(title: str, snippet: str) -> List[str]:
     return output or ["time_fact"]
 
 
+def _strip_title_prefix(text: str) -> str:
+    return re.sub(r"^\s*title:\s*", "", str(text or "").strip(), flags=re.IGNORECASE).strip()
+
+
+def _normalize_compact_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "").strip()).lower()
+
+
+def _content_quality_hint(title: str, raw_contents: str) -> str:
+    title_key = _normalize_compact_text(title)
+    contents_key = _normalize_compact_text(_strip_title_prefix(raw_contents))
+    if title_key and contents_key and title_key == contents_key:
+        return "title_echo"
+    return "short_excerpt"
+
+
+def _effective_text_payload(title: str, raw_contents: str, content_quality_hint: str) -> str:
+    stripped = _strip_title_prefix(raw_contents)
+    if stripped and content_quality_hint != "title_echo":
+        return stripped
+    return str(title or "").strip()
+
+
+def _is_placeholder_author(author: str) -> bool:
+    text = str(author or "").strip()
+    if not text or text in {"-", "未知", "null", "None"}:
+        return True
+    lowered = text.lower()
+    return lowered.startswith("user") or text.startswith("用户") or bool(re.fullmatch(r"\d{6,}", text))
+
+
+def _infer_official_source_hint(author: str, title: str, effective_text: str, platform: str) -> str:
+    author_text = str(author or "").strip()
+    label_haystack = f"{author_text} {title}".strip()
+    if any(hint in label_haystack for hint in _OFFICIAL_AUTHOR_HINTS):
+        return "official_like"
+    if platform == "新闻" or any(hint in label_haystack for hint in _MEDIA_AUTHOR_HINTS):
+        return "media_like"
+    if _is_placeholder_author(author_text):
+        return "unknown"
+    return "public_like"
+
+
+def _infer_source_kind_hint(author: str, platform: str, official_source_hint: str) -> str:
+    if official_source_hint == "official_like":
+        return "official_account"
+    if official_source_hint == "media_like":
+        return "news_media"
+    if _is_placeholder_author(author):
+        return "anonymous_account"
+    return {
+        "微博": "social_account",
+        "视频": "video_account",
+        "论坛": "forum_user",
+        "自媒体号": "self_media_account",
+    }.get(str(platform or "").strip(), "named_account")
+
+
+def _eventness_score(title: str, effective_text: str, published_at: str, official_source_hint: str) -> float:
+    haystack = f"{title} {effective_text}"
+    score = 0.12
+    if str(published_at or "").strip():
+        score += 0.16
+    if any(hint in haystack for hint in _EVENT_ACTION_HINTS):
+        score += 0.34
+    if official_source_hint in {"official_like", "media_like"}:
+        score += 0.12
+    if any(hint in haystack for hint in _GENERIC_INFO_HINTS):
+        score -= 0.24
+    return round(min(1.0, max(0.0, score)), 4)
+
+
+def _actor_salience_score(
+    author: str,
+    title: str,
+    effective_text: str,
+    official_source_hint: str,
+    matched_terms: List[str],
+    published_at: str,
+) -> float:
+    score = 0.08
+    if not _is_placeholder_author(author):
+        score += 0.22
+    if official_source_hint == "official_like":
+        score += 0.28
+    elif official_source_hint == "media_like":
+        score += 0.18
+    if any(hint in f"{title} {effective_text}" for hint in ("回应", "表态", "发布", "通报")):
+        score += 0.2
+    if len([term for term in matched_terms if str(term or "").strip()]) >= 2:
+        score += 0.08
+    if str(published_at or "").strip():
+        score += 0.06
+    return round(min(1.0, max(0.0, score)), 4)
+
+
+def _risk_facets(title: str, effective_text: str, author: str) -> List[str]:
+    haystack = f"{title} {effective_text} {author}".strip()
+    facets = [facet for facet, hints in _RISK_FACET_HINTS.items() if any(hint in haystack for hint in hints)]
+    return _unique_strings(facets, max_items=6)
+
+
+def _contradiction_signal(title: str, effective_text: str, raw_polarity: str, risk_facets: List[str]) -> float:
+    score = 0.18
+    if "refute" in risk_facets:
+        score += 0.48
+    if str(raw_polarity or "").strip() == "负面" and any(facet in risk_facets for facet in ("dispute", "conflict")):
+        score += 0.12
+    return round(min(0.92, max(0.0, score)), 4)
+
+
+def _risk_salience_score(
+    title: str,
+    effective_text: str,
+    raw_polarity: str,
+    risk_facets: List[str],
+    contradiction_signal: float,
+    eventness_score: float,
+) -> float:
+    haystack = f"{title} {effective_text}"
+    score = 0.06 + min(0.52, len(risk_facets) * 0.13)
+    if str(raw_polarity or "").strip() == "负面":
+        score += 0.16
+    if contradiction_signal >= 0.65:
+        score += 0.14
+    if eventness_score >= 0.45:
+        score += 0.08
+    if any(hint in haystack for hint in _GENERIC_INFO_HINTS) and not risk_facets:
+        score -= 0.24
+    return round(min(1.0, max(0.0, score)), 4)
+
+
+def _candidate_semantic_profile(item: Dict[str, Any], normalized_task: Dict[str, Any]) -> Dict[str, Any]:
+    title = _normalize_text(item.get("title"))
+    raw_contents = str(item.get("contents") or item.get("content") or "").strip()
+    author = str(item.get("author") or "").strip()
+    platform = str(item.get("platform") or "").strip()
+    published_at = str(item.get("published_at") or "").strip()
+    matched_terms = [str(term).strip() for term in (item.get("matched_terms") or []) if str(term or "").strip()]
+    raw_polarity = str(item.get("polarity") or item.get("sentiment_raw") or "").strip()
+    content_quality_hint = str(item.get("content_quality_hint") or "").strip() or _content_quality_hint(title, raw_contents)
+    effective_text = _effective_text_payload(title, raw_contents, content_quality_hint)
+    official_source_hint = _infer_official_source_hint(author, title, effective_text, platform)
+    source_kind_hint = _infer_source_kind_hint(author, platform, official_source_hint)
+    eventness = _eventness_score(title, effective_text, published_at, official_source_hint)
+    actor_salience = _actor_salience_score(author, title, effective_text, official_source_hint, matched_terms, published_at)
+    risk_facets = _risk_facets(title, effective_text, author)
+    contradiction_signal = _contradiction_signal(title, effective_text, raw_polarity, risk_facets)
+    risk_salience = _risk_salience_score(title, effective_text, raw_polarity, risk_facets, contradiction_signal, eventness)
+    generic_explainer = any(hint in f"{title} {effective_text}" for hint in _GENERIC_INFO_HINTS)
+    dominant_signals = []
+    if official_source_hint == "official_like":
+        dominant_signals.append("official_like")
+    elif official_source_hint == "media_like":
+        dominant_signals.append("media_like")
+    if eventness >= 0.45:
+        dominant_signals.append("event_dense")
+    if actor_salience >= 0.4:
+        dominant_signals.append("actor_dense")
+    if risk_salience >= 0.4:
+        dominant_signals.append("risk_dense")
+    dominant_signals.extend(risk_facets[:3])
+    return {
+        "raw_contents": raw_contents,
+        "raw_polarity": raw_polarity,
+        "region": str(item.get("region") or "").strip(),
+        "matched_terms": matched_terms,
+        "content_quality_hint": content_quality_hint,
+        "effective_text": effective_text,
+        "official_source_hint": official_source_hint,
+        "source_kind_hint": source_kind_hint,
+        "actor_salience_score": actor_salience,
+        "eventness_score": eventness,
+        "risk_salience_score": risk_salience,
+        "risk_facets": risk_facets,
+        "contradiction_signal": contradiction_signal,
+        "generic_explainer": generic_explainer,
+        "dominant_signals": _unique_strings(dominant_signals, max_items=6),
+    }
+
+
+def _intent_rerank_score(item: Dict[str, Any], intent: str) -> tuple[float, List[str]]:
+    profile = item.get("_semantic_profile") if isinstance(item.get("_semantic_profile"), dict) else {}
+    base_score = float(item.get("score") or 0.0)
+    score_breakdown = item.get("score_breakdown") if isinstance(item.get("score_breakdown"), dict) else {}
+    policy_context = float(score_breakdown.get("policy_context") or 0.0)
+    eventness = float(profile.get("eventness_score") or 0.0)
+    actor_salience = float(profile.get("actor_salience_score") or 0.0)
+    risk_salience = float(profile.get("risk_salience_score") or 0.0)
+    contradiction_signal = float(profile.get("contradiction_signal") or 0.0)
+    official_source_hint = str(profile.get("official_source_hint") or "").strip()
+    generic_explainer = bool(profile.get("generic_explainer"))
+    raw_polarity = str(profile.get("raw_polarity") or "").strip()
+    signals = list(profile.get("dominant_signals") or [])
+    if intent == "timeline":
+        score = base_score * 0.65 + eventness * 3.1 + policy_context * 0.25 - (0.85 if generic_explainer else 0.0)
+        return score, _unique_strings(signals + ["timeline_rerank"], max_items=6)
+    if intent == "actors":
+        score = base_score * 0.6 + actor_salience * 3.2 + eventness * 0.7 + (0.28 if official_source_hint in {"official_like", "media_like"} else 0.0)
+        return score, _unique_strings(signals + ["actors_rerank"], max_items=6)
+    if intent == "risk":
+        score = (
+            base_score * 0.52
+            + risk_salience * 3.6
+            + contradiction_signal * 1.5
+            + (0.24 if raw_polarity == "负面" else 0.0)
+            - (0.9 if generic_explainer and risk_salience < 0.35 else 0.0)
+        )
+        return score, _unique_strings(signals + ["risk_rerank"], max_items=6)
+    score = base_score * 0.78 + eventness * 0.9 + actor_salience * 0.45 + min(0.65, risk_salience * 0.25) + policy_context * 0.2
+    return score, _unique_strings(signals + ["overview_rerank"], max_items=6)
+
+
+def _select_intent_diverse_items(items: List[Dict[str, Any]], *, intent: str, total_needed: int) -> List[Dict[str, Any]]:
+    remaining = list(items)
+    selected: List[Dict[str, Any]] = []
+    platform_counts: Counter[str] = Counter()
+    date_counts: Counter[str] = Counter()
+    author_counts: Counter[str] = Counter()
+    kind_counts: Counter[str] = Counter()
+    facet_counts: Counter[str] = Counter()
+    while remaining and len(selected) < max(1, int(total_needed or 1)):
+        best_index = 0
+        best_score = -10**9
+        for index, candidate in enumerate(remaining[:160]):
+            adjusted = float(candidate.get("_intent_score") or 0.0)
+            profile = candidate.get("_semantic_profile") if isinstance(candidate.get("_semantic_profile"), dict) else {}
+            platform = str(candidate.get("platform") or "未知").strip() or "未知"
+            date_text = _extract_date(candidate.get("published_at")) or "未知"
+            author = str(candidate.get("author") or "").strip() or "匿名"
+            source_kind = str(profile.get("source_kind_hint") or "unknown").strip()
+            facet_signature = "|".join(list(profile.get("risk_facets") or [])[:2]) or "none"
+            if intent == "timeline":
+                adjusted -= 0.42 * date_counts.get(date_text, 0)
+                adjusted -= 0.18 * platform_counts.get(platform, 0)
+            elif intent == "actors":
+                adjusted -= 0.35 * author_counts.get(author, 0)
+                adjusted -= 0.22 * kind_counts.get(source_kind, 0)
+            elif intent == "risk":
+                adjusted -= 0.28 * facet_counts.get(facet_signature, 0)
+                adjusted -= 0.18 * author_counts.get(author, 0)
+                adjusted -= 0.12 * platform_counts.get(platform, 0)
+            else:
+                adjusted -= 0.24 * platform_counts.get(platform, 0)
+                adjusted -= 0.18 * date_counts.get(date_text, 0)
+                adjusted -= 0.12 * kind_counts.get(source_kind, 0)
+            if adjusted > best_score:
+                best_score = adjusted
+                best_index = index
+        chosen = remaining.pop(best_index)
+        selected.append(chosen)
+        profile = chosen.get("_semantic_profile") if isinstance(chosen.get("_semantic_profile"), dict) else {}
+        platform_counts[str(chosen.get("platform") or "未知").strip() or "未知"] += 1
+        date_counts[_extract_date(chosen.get("published_at")) or "未知"] += 1
+        author_counts[str(chosen.get("author") or "").strip() or "匿名"] += 1
+        kind_counts[str(profile.get("source_kind_hint") or "unknown").strip()] += 1
+        facet_signature = "|".join(list(profile.get("risk_facets") or [])[:2]) or "none"
+        facet_counts[facet_signature] += 1
+    return selected
+
+
 def _build_rewrite_queries(normalized_task: Dict[str, Any], *, intent: str, filters: Dict[str, Any]) -> List[str]:
     topic = str(normalized_task.get("topic") or normalized_task.get("topic_identifier") or "").strip()
     entities = [str(item).strip() for item in (normalized_task.get("entities") or []) if str(item or "").strip()]
@@ -1312,12 +1686,14 @@ def _map_item_to_card(item: Dict[str, Any], normalized_task: Dict[str, Any], ind
     snippet = _normalize_text(item.get("snippet"))
     url = str(item.get("url") or "").strip()
     dedupe_key = url.lower() if url else _normalize_key(title or snippet or source_id)
+    semantic_profile = item.get("_semantic_profile") if isinstance(item.get("_semantic_profile"), dict) else _candidate_semantic_profile(item, normalized_task)
+    raw_contents = str(semantic_profile.get("raw_contents") or item.get("contents") or item.get("content") or "").strip()
+    raw_polarity = str(semantic_profile.get("raw_polarity") or item.get("polarity") or item.get("sentiment_raw") or "").strip()
+    content_quality_hint = str(semantic_profile.get("content_quality_hint") or "").strip() or _content_quality_hint(title, raw_contents)
+    effective_text = str(semantic_profile.get("effective_text") or "").strip() or title
 
-    # 提取原文内容（用于引证）
-    content = str(item.get("content") or item.get("text") or item.get("full_text") or "").strip()
-    if not content:
-        # 如果没有完整原文，组合 title + snippet
-        content = f"{title}\n\n{snippet}" if title and snippet else snippet or title
+    # 当前 fetch 数据里 title 可能就是短平台正文，contents 多为 title_echo；因此 content 以有效文本为主。
+    content = effective_text or (snippet or title)
 
     entity_tags = [
         entity
@@ -1329,9 +1705,10 @@ def _map_item_to_card(item: Dict[str, Any], normalized_task: Dict[str, Any], ind
         entity_tags.append(author)
     keywords = [str(row).strip() for row in (normalized_task.get("keywords") or []) if str(row or "").strip()]
     topic_cluster = next((keyword for keyword in keywords if keyword in f"{title} {snippet}"), keywords[0] if keywords else "general")
+    matched_terms = [str(term).strip() for term in (semantic_profile.get("matched_terms") or item.get("matched_terms") or []) if str(term or "").strip()]
     relevance = float(item.get("score") or 0.0)
     novelty_score = round(min(1.0, 0.35 + (0.08 * len(_tokenize(f"{title} {snippet}", max_items=8)))), 4)
-    contradiction_signal = 0.78 if any(hint in f"{title} {snippet}" for hint in _STANCE_REFUTE_HINTS) else 0.18
+    contradiction_signal = float(semantic_profile.get("contradiction_signal") or 0.18)
 
     # 提取情感标签（优先使用从 retrieval pipeline 传递的 sentiment_raw，其次尝试原始字段）
     sentiment_label = str(
@@ -1341,7 +1718,7 @@ def _map_item_to_card(item: Dict[str, Any], normalized_task: Dict[str, Any], ind
     ).strip()
 
     # 提取关键词
-    extracted_keywords = _tokenize(f"{title} {snippet}", max_items=8)
+    extracted_keywords = _tokenize(f"{title} {effective_text}", max_items=8)
 
     # 提取互动数据（优先使用从 retrieval pipeline 传递的字段，其次尝试原始字段名）
     engagement = {
@@ -1381,9 +1758,6 @@ def _map_item_to_card(item: Dict[str, Any], normalized_task: Dict[str, Any], ind
         except Exception:
             pass
 
-    # 提取 organization/org 字段（用于主体分析）
-    organization = str(item.get("organization") or item.get("org") or "").strip()
-
     return {
         "evidence_id": f"ev-{_normalize_key(source_id)}",
         "source_id": source_id,
@@ -1391,13 +1765,16 @@ def _map_item_to_card(item: Dict[str, Any], normalized_task: Dict[str, Any], ind
         "published_at": str(item.get("published_at") or "").strip(),
         "time_label": time_label,  # 新增：友好的时间标签
         "author": author,
-        "organization": organization,  # 新增：组织字段
         "author_type": str(item.get("author_type") or item.get("account_type") or item.get("publisher_type") or "").strip(),
         "entity_tags": entity_tags[:6],
         "topic_cluster": topic_cluster,
         "title": title,
         "snippet": snippet,
-        "content": content[:2000] if content else "",  # 增强：截取前2000字用于深度引证
+        "content": content[:2000] if content else "",
+        "raw_contents": raw_contents[:2000] if raw_contents else "",
+        "raw_polarity": raw_polarity,
+        "region": str(semantic_profile.get("region") or item.get("region") or "").strip(),
+        "matched_terms": matched_terms[:8],
         "sentiment_label": sentiment_label,
         "keywords": extracted_keywords,
         "engagement": engagement,  # 互动数据（可能为空）
@@ -1406,13 +1783,20 @@ def _map_item_to_card(item: Dict[str, Any], normalized_task: Dict[str, Any], ind
         "confidence": round(min(1.0, max(0.05, relevance / 10.0)), 4),
         "dedupe_key": dedupe_key,
         "url": url,
-        "stance_hint": _card_stance_hint(title, snippet),
-        "stance": _card_stance_hint(title, snippet),  # 新增：立场摘要字段
+        "stance_hint": _card_stance_hint(title, effective_text),
+        "stance": _card_stance_hint(title, effective_text),
         "subject": entity_tags[0] if entity_tags else "",  # 新增：主体字段（用于引用）
         "finding": snippet[:150] if snippet else title[:150],  # 新增：核心发现字段
-        "claimability": _card_claimability(title, snippet),
+        "claimability": _card_claimability(title, effective_text),
         "novelty_score": novelty_score,
         "contradiction_signal": round(contradiction_signal, 4),
+        "content_quality_hint": content_quality_hint,
+        "official_source_hint": str(semantic_profile.get("official_source_hint") or "").strip(),
+        "source_kind_hint": str(semantic_profile.get("source_kind_hint") or "").strip(),
+        "actor_salience_score": round(float(semantic_profile.get("actor_salience_score") or 0.0), 4),
+        "eventness_score": round(float(semantic_profile.get("eventness_score") or 0.0), 4),
+        "risk_salience_score": round(float(semantic_profile.get("risk_salience_score") or 0.0), 4),
+        "risk_facets": [str(facet).strip() for facet in (semantic_profile.get("risk_facets") or []) if str(facet or "").strip()],
     }
 
 
@@ -1451,12 +1835,14 @@ def normalize_task_payload(*, task_text: str, topic_identifier: str, start: str,
     text = _normalize_text(task_text)
     topic = str(hinted_contract["topic_label"] or hints.get("topic") or text or effective_topic_identifier).strip() or effective_topic_identifier
     # 使用语义提取函数，而非简单 tokenize
-    entities = [str(item).strip() for item in (hints.get("entities") or []) if str(item or "").strip()] or _extract_entities(text, max_items=6)
-    keywords = [str(item).strip() for item in (hints.get("keywords") or []) if str(item or "").strip()] or _tokenize(text, max_items=10)
+    entity_names = _extract_semantic_entity_names(hints.get("entities") or []) or _extract_entities(text, max_items=6)
+    keyword_terms = _extract_semantic_keyword_terms(hints.get("keywords") or []) or _tokenize(text, max_items=10)
     platform_scope = [str(item).strip() for item in (hints.get("platform_scope") or []) if str(item or "").strip()]
     report_type = str(hints.get("report_type") or "").strip()
     if not report_type:
-        report_type = "briefing" if "快报" in text else "propagation" if "传播" in text or "走势" in text else "analysis"
+        report_type = "risk" if "风险" in text else "propagation" if "传播" in text or "走势" in text else "analysis"
+    if report_type not in _REPORT_TYPE_ALLOWED:
+        report_type = "analysis"
     mandatory_sections = [str(item).strip() for item in (hints.get("mandatory_sections") or []) if str(item or "").strip()] or ["overview", "timeline", "actors", "propagation", "risk"]
     risk_policy = [str(item).strip() for item in (hints.get("risk_policy") or []) if str(item or "").strip()] or ["evidence_first", "prefer_counterevidence", "keep_uncertainty_visible"]
     analysis_question_set = [str(item).strip() for item in (hints.get("analysis_question_set") or []) if str(item or "").strip()] or ["传播演化", "主体立场", "争议焦点", "风险信号"]
@@ -1483,9 +1869,15 @@ def normalize_task_payload(*, task_text: str, topic_identifier: str, start: str,
     task_derivation = {
         "derivation_id": f"drv:{task_contract['contract_id']}",
         "topic": topic,
+        "topic_identifier": effective_topic_identifier,
+        "topic_label": _coerce_topic_label_payload(
+            hinted_contract["topic_label"] or topic,
+            fallback=hinted_contract["topic_label"] or topic or effective_topic_identifier,
+            full_description_fallback=topic,
+        ),
         "topic_aliases": _unique_strings([text, requested_topic_identifier, hints.get("topic")], max_items=4),
-        "entities": entities,
-        "keywords": keywords,
+        "entities": _coerce_semantic_entity_list(entity_names),
+        "keywords": _coerce_semantic_keyword_list(keyword_terms),
         "platform_scope": platform_scope,
         "report_type": report_type,
         "mandatory_sections": mandatory_sections,
@@ -1511,8 +1903,8 @@ def normalize_task_payload(*, task_text: str, topic_identifier: str, start: str,
         "effective_contract": task_contract,
         "agent_semantic_fields": {
             "topic": topic,
-            "entities": entities,
-            "keywords": keywords,
+            "entities": entity_names,
+            "keywords": keyword_terms,
             "platform_scope": platform_scope,
             "mandatory_sections": mandatory_sections,
         },
@@ -1859,7 +2251,6 @@ def retrieve_evidence_cards_payload(
         ),
         }
     query_variants = _build_rewrite_queries(normalized_task, intent=safe_intent, filters=filters)
-    query = query_variants[0] if query_variants else ""
     effective_platforms = [str(item).strip() for item in (filters.get("platforms") or normalized_task.get("platform_scope") or []) if str(item or "").strip()]
     effective_entities = [str(item).strip() for item in (filters.get("entities") or normalized_task.get("entities") or []) if str(item or "").strip()]
     requested_limit = max(1, min(int(limit or 12), 20))
@@ -1895,13 +2286,23 @@ def retrieve_evidence_cards_payload(
             if existing is None or float(item.get("score") or 0.0) > float(existing.get("score") or 0.0):
                 merged[dedupe_key] = item
     items = list(merged.values())
+    rerank_policy = f"intent_balanced_v1:{safe_intent}"
+    for item in items:
+        profile = _candidate_semantic_profile(item, normalized_task)
+        intent_score, rerank_signals = _intent_rerank_score({**item, "_semantic_profile": profile}, safe_intent)
+        item["_semantic_profile"] = profile
+        item["_intent_score"] = round(float(intent_score), 4)
+        item["_rerank_signals"] = rerank_signals
     if str(sort_by or "").strip() == "time_desc":
-        items.sort(key=lambda item: str(item.get("published_at") or ""), reverse=True)
+        items.sort(key=lambda item: (str(item.get("published_at") or ""), float(item.get("_intent_score") or 0.0)), reverse=True)
+        selected_items = items[: offset + requested_limit]
     elif str(sort_by or "").strip() == "time_asc":
-        items.sort(key=lambda item: str(item.get("published_at") or ""))
+        items.sort(key=lambda item: (str(item.get("published_at") or ""), -float(item.get("_intent_score") or 0.0)))
+        selected_items = items[: offset + requested_limit]
     else:
-        items.sort(key=lambda item: (-float(item.get("score") or 0.0), -float(item.get("score_breakdown", {}).get("policy_context", 0.0))))
-    page_items = items[offset : offset + requested_limit]
+        items.sort(key=lambda item: (-float(item.get("_intent_score") or 0.0), -float(item.get("score") or 0.0)))
+        selected_items = _select_intent_diverse_items(items, intent=safe_intent, total_needed=offset + requested_limit)
+    page_items = selected_items[offset : offset + requested_limit]
     cards = [_map_item_to_card(item, normalized_task, index + offset) for index, item in enumerate(page_items)]
     source_scope = resolve_source_scope(
         str(normalized_task.get("topic_identifier") or "").strip(),
@@ -1915,8 +2316,11 @@ def retrieve_evidence_cards_payload(
         if flag not in source_quality_flags:
             source_quality_flags.append(flag)
     coverage = _coverage_payload(
-        matched_count=matched_records,
+        matched_count=len(items),
         sampled_count=len(cards),
+        raw_matched_count=matched_records,
+        deduped_candidate_count=len(items),
+        returned_card_count=len(cards),
         source_resolution=str(source_scope.get("source_resolution") or "").strip(),
         resolved_fetch_range=source_scope.get("resolved_fetch_range") if isinstance(source_scope.get("resolved_fetch_range"), dict) else {},
         resolved_source_files=[str(item).strip() for item in (source_scope.get("source_files") or []) if str(item or "").strip()],
@@ -1932,6 +2336,10 @@ def retrieve_evidence_cards_payload(
     )
     counterevidence = [card for card in cards if float(card.get("contradiction_signal") or 0.0) >= 0.7][:4]
     retrieval_strategy = "+".join(sorted([mode for mode in retrieval_modes if mode])) or "hybrid_lexical_semantic"
+    dominant_signals = _unique_strings(
+        [signal for item in page_items for signal in (item.get("_rerank_signals") or []) if str(signal or "").strip()],
+        max_items=10,
+    )
     return {
         "result": cards,
         "legacy_adapter_hit": legacy_adapter_hit,
@@ -1962,6 +2370,8 @@ def retrieve_evidence_cards_payload(
                 requested_intent=requested_intent,
                 allowed_intents=allowed_intents,
                 compiled_tool_intents=[safe_intent],
+                rerank_policy=rerank_policy,
+                dominant_signals=dominant_signals,
             ),
             error_hint=None,
         ),

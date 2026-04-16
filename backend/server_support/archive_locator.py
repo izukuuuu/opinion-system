@@ -40,6 +40,10 @@ LAYER_SIGNATURES: Dict[str, Optional[Sequence[str]]] = {
         "5大模型主题关键词.json",
     ),
     "reports": None,
+    "media_tags": (
+        "summary.json",
+        "candidates.json",
+    ),
 }
 
 

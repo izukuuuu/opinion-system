@@ -19,6 +19,10 @@ const ProjectBasicAnalysisLayout = () => import('../views/analysis/basic/Project
 const ProjectBasicAnalysisOverview = () => import('../views/analysis/basic/ProjectBasicAnalysisOverview.vue')
 const ProjectBasicAnalysisRun = () => import('../views/analysis/basic/ProjectBasicAnalysisRun.vue')
 const ProjectBasicAnalysisResults = () => import('../views/analysis/basic/ProjectBasicAnalysisResults.vue')
+const MediaTaggingLayout = () => import('../views/analysis/media/MediaTaggingLayout.vue')
+const MediaTaggingOverview = () => import('../views/analysis/media/MediaTaggingOverview.vue')
+const MediaTaggingRun = () => import('../views/analysis/media/MediaTaggingRun.vue')
+const MediaTaggingResults = () => import('../views/analysis/media/MediaTaggingResults.vue')
 const ContentAnalysisPrompt = () => import('../views/analysis/content/ContentAnalysisPrompt.vue')
 const TopicBertopicLayout = () => import('../views/analysis/topic/TopicBertopicLayout.vue')
 const TopicBertopicOverview = () => import('../views/analysis/topic/TopicBertopicOverview.vue')
@@ -206,6 +210,39 @@ export const routes = [
       title: '内容分析 · 提示词配置',
       breadcrumb: '内容分析'
     }
+  },
+  {
+    path: '/analysis/media-tags',
+    component: MediaTaggingLayout,
+    children: [
+      {
+        path: '',
+        name: 'analysis-media-tagging',
+        component: MediaTaggingOverview,
+        meta: {
+          title: '媒体识别与打标 · 流程概览',
+          breadcrumb: '流程概览'
+        }
+      },
+      {
+        path: 'run',
+        name: 'analysis-media-tagging-run',
+        component: MediaTaggingRun,
+        meta: {
+          title: '媒体识别与打标 · 运行识别',
+          breadcrumb: '运行识别'
+        }
+      },
+      {
+        path: 'view',
+        name: 'analysis-media-tagging-view',
+        component: MediaTaggingResults,
+        meta: {
+          title: '媒体识别与打标 · 查看结果',
+          breadcrumb: '查看结果'
+        }
+      }
+    ]
   },
   {
     path: '/analysis/report',

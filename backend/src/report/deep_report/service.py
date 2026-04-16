@@ -2757,8 +2757,10 @@ def _run_deep_report_exploration_task(
             str(markdown or "").strip(),
             cache_version=AI_FULL_REPORT_CACHE_VERSION,
             draft_bundle=compiled.get("draft_bundle") if isinstance(compiled.get("draft_bundle"), dict) else {},
+            draft_bundle_v2=compiled.get("draft_bundle_v2") if isinstance(compiled.get("draft_bundle_v2"), dict) else {},
             styled_draft_bundle=compiled.get("styled_draft_bundle") if isinstance(compiled.get("styled_draft_bundle"), dict) else {},
             factual_conformance=factual_conformance,
+            scene_profile=compiled.get("scene_profile") if isinstance(compiled.get("scene_profile"), dict) else {},
         )
         final_payload["meta"] = dict(final_payload.get("meta") or {})
         final_payload["meta"].update(
@@ -4191,6 +4193,22 @@ def generate_full_report_payload(
         task_id=runtime_task_id,
         full_cache_exists=True,
     )
+    structured.setdefault("task", {})
+    if isinstance(structured.get("task"), dict):
+        structured["task"] = {
+            **structured["task"],
+            "runtime_task_id": runtime_task_id,
+            "skip_validation": bool(skip_validation) if "skip_validation" in locals() else False,
+            "artifact_paths": {
+                "draft_bundle": str(draft_path),
+                "draft_bundle_v2": str(draft_v2_path),
+                "validation_result_v2": str(validation_path),
+                "repair_plan_v2": str(repair_plan_path),
+                "graph_state_v2": str(graph_state_path),
+                "approval_records": str(review_path),
+                "full_markdown": str(cache_path),
+            },
+        }
     semantic_review = semantic_review_decision if isinstance(semantic_review_decision, dict) else {}
     compile_graph_path = cache_dir / "compile_graph.sqlite"
     compile_graph_thread_id = f"{runtime_task_id}:compile"
@@ -4219,12 +4237,8 @@ def generate_full_report_payload(
     checkpoint_path = str(compiled.get("checkpoint_path") or "").strip()
     if not draft_bundle:
         raise ValueError("generate_full_report_payload requires DraftBundle before compiling final markdown.")
-    _write_json(draft_path, draft_bundle)
-    _write_json(draft_v2_path, draft_bundle_v2)
-    _write_json(validation_path, validation_result_v2)
-    _write_json(repair_plan_path, repair_plan_v2)
-    _write_json(graph_state_path, graph_state_v2)
-    requires_review = bool(compiled.get("review_required")) and not semantic_review
+    compile_status = str(compiled.get("status") or "").strip().lower()
+    requires_review = compile_status == "interrupted" or (bool(compiled.get("review_required")) and not semantic_review)
     manifest = build_artifact_manifest(
         topic_identifier=topic_identifier,
         thread_id=active_thread_id,
@@ -4256,14 +4270,8 @@ def generate_full_report_payload(
     structured["metadata"]["report_ir_summary"] = summarize_report_ir(structured.get("report_ir") or {})
     structured["meta"] = {**(structured.get("meta") or {}), **structured["metadata"]}
     _write_json(cache_dir / REPORT_CACHE_FILENAME, structured)
-    if requires_review:
+    if compile_status == "interrupted" or requires_review:
         graph_interrupts = compiled.get("interrupts") if isinstance(compiled.get("interrupts"), list) else []
-        interrupt_payload = _build_semantic_review_payload(
-            thread_id=active_thread_id,
-            task_id=runtime_task_id,
-            compiled=compiled,
-            artifact_manifest=manifest.model_dump(),
-        )
         approvals: List[Dict[str, Any]] = []
         for index, interrupt in enumerate(graph_interrupts or []):
             if not isinstance(interrupt, dict):
@@ -4278,13 +4286,22 @@ def generate_full_report_payload(
                     decision_index=0,
                     title=str(interrupt_value.get("title") or "语义边界确认").strip(),
                     summary=str(interrupt_value.get("summary") or "正式文稿包含需要人工确认的语义越界，确认后才能写入正式缓存。").strip(),
-                    allowed_decisions=list(interrupt_value.get("allowed_decisions") or ["approve", "reject"]),
+                    allowed_decisions=list(interrupt_value.get("allowed_decisions") or ["approve", "rewrite", "reject"]),
                     action={
                         "markdown_preview": markdown_preview[:1600],
                         "artifact_path": str(review_path),
                         "review_mode": "annotation",
-                        "review_prompt": "文稿预览保持只读。如需继续写入，请补充人工审核批注，说明边界判断或后续写作调整要求。",
-                        "review_placeholder": "请输入审核批注、边界说明或需保留的写作调整意见",
+                        "review_prompt": "文稿预览保持只读。可确认放行、要求最小改写，或拒绝本轮写入；如需重写，请补充结构化批注。",
+                        "review_placeholder": "请输入审核批注，说明需保留、需移除、语气调整或重写重点",
+                        "review_payload_schema": {
+                            "comment": "string",
+                            "rewrite_focus": ["string"],
+                            "must_keep": ["string"],
+                            "must_remove": ["string"],
+                            "tone_target": "string",
+                        },
+                        "protocol_version": str(interrupt_value.get("protocol_version") or "semantic-review.v1"),
+                        "approval_round": int(interrupt_value.get("approval_round") or 1),
                         "tool_args": {
                             "policy_version": str(factual_conformance.get("policy_version") or "policy.v2").strip() or "policy.v2",
                             "graph_thread_id": compile_graph_thread_id,
@@ -4293,7 +4310,17 @@ def generate_full_report_payload(
                             "checkpoint_path": checkpoint_path,
                         },
                         "graph_interrupt": {"interrupt_id": interrupt_id, "value": interrupt_value},
-                        "semantic_interrupt": interrupt_payload.model_dump(),
+                        "semantic_interrupt": {
+                            "thread_id": active_thread_id,
+                            "task_id": runtime_task_id,
+                            "policy_version": str(factual_conformance.get("policy_version") or "policy.v2").strip() or "policy.v2",
+                            "artifact_ids": [],
+                            "offending_unit_ids": list(compiled.get("repaired_unit_ids") or []),
+                            "semantic_deltas": list((factual_conformance.get("semantic_deltas") or [])),
+                            "allowed_rewrite_ops": list(((compiled.get("rewrite_contract") or {}).get("allowed_ops") or [])),
+                            "violation_summary": list((factual_conformance.get("issues") or []))[:8],
+                            "conformance": factual_conformance,
+                        },
                     },
                 ).model_dump()
             )
@@ -4306,13 +4333,22 @@ def generate_full_report_payload(
                     decision_index=0,
                     title="语义边界确认",
                     summary="正式文稿包含需要人工确认的语义越界，确认后才能写入正式缓存。",
-                    allowed_decisions=["approve", "reject"],
+                    allowed_decisions=["approve", "rewrite", "reject"],
                     action={
                         "markdown_preview": str(compiled.get("markdown") or "").strip()[:1600],
                         "artifact_path": str(review_path),
                         "review_mode": "annotation",
-                        "review_prompt": "文稿预览保持只读。如需继续写入，请补充人工审核批注，说明边界判断或后续写作调整要求。",
-                        "review_placeholder": "请输入审核批注、边界说明或需保留的写作调整意见",
+                        "review_prompt": "文稿预览保持只读。可确认放行、要求最小改写，或拒绝本轮写入；如需重写，请补充结构化批注。",
+                        "review_placeholder": "请输入审核批注，说明需保留、需移除、语气调整或重写重点",
+                        "review_payload_schema": {
+                            "comment": "string",
+                            "rewrite_focus": ["string"],
+                            "must_keep": ["string"],
+                            "must_remove": ["string"],
+                            "tone_target": "string",
+                        },
+                        "protocol_version": "semantic-review.v1",
+                        "approval_round": 1,
                         "tool_args": {
                             "policy_version": str(factual_conformance.get("policy_version") or "policy.v2").strip() or "policy.v2",
                             "graph_thread_id": compile_graph_thread_id,
@@ -4321,23 +4357,20 @@ def generate_full_report_payload(
                             "checkpoint_path": checkpoint_path,
                         },
                         "graph_interrupt": {"interrupt_id": interrupt_id, "value": {}},
-                        "semantic_interrupt": interrupt_payload.model_dump(),
+                        "semantic_interrupt": {
+                            "thread_id": active_thread_id,
+                            "task_id": runtime_task_id,
+                            "policy_version": str(factual_conformance.get("policy_version") or "policy.v2").strip() or "policy.v2",
+                            "artifact_ids": [],
+                            "offending_unit_ids": list(compiled.get("repaired_unit_ids") or []),
+                            "semantic_deltas": list((factual_conformance.get("semantic_deltas") or [])),
+                            "allowed_rewrite_ops": list(((compiled.get("rewrite_contract") or {}).get("allowed_ops") or [])),
+                            "violation_summary": list((factual_conformance.get("issues") or []))[:8],
+                            "conformance": factual_conformance,
+                        },
                     },
                 ).model_dump()
             )
-        approval_records = _append_approval_record(
-            [],
-            approval_id=f"semantic-review:{runtime_task_id}",
-            interrupt_id=str((approvals[0] or {}).get("interrupt_id") or f"semantic-review:{runtime_task_id}").strip()
-            or f"semantic-review:{runtime_task_id}",
-            decision="pending",
-            policy_version=interrupt_payload.policy_version,
-            artifact_refs=interrupt_payload.artifact_ids,
-            offending_unit_ids=interrupt_payload.offending_unit_ids,
-            approved_deltas=[item.model_dump() if hasattr(item, "model_dump") else item for item in interrupt_payload.semantic_deltas],
-            approved_rewrite_ops=interrupt_payload.allowed_rewrite_ops,
-            reason="semantic review requested",
-        )
         review_record = {
             "status": "waiting_approval",
             "message": "正式文稿触发语义边界审查，等待人工确认。",
@@ -4353,10 +4386,17 @@ def generate_full_report_payload(
             "factual_conformance": factual_conformance,
             "artifact_manifest": manifest.model_dump(),
             "report_ir_summary": summarize_report_ir(structured.get("report_ir") or {}),
-            "semantic_interrupt": interrupt_payload.model_dump(),
+            "semantic_interrupt": approvals[0]["action"]["semantic_interrupt"] if approvals else {},
             "graph_interrupts": graph_interrupts,
-            "approval_records": approval_records,
+            "approval_records": list(compiled.get("semantic_review_records") or []),
             "review_mode": "annotation",
+            "execution_phase": str(compiled.get("execution_phase") or "human_review"),
+            "rewrite_round": int(compiled.get("rewrite_round") or 0),
+            "rewrite_budget": int(compiled.get("rewrite_budget") or 0),
+            "rewrite_contract": compiled.get("rewrite_contract") if isinstance(compiled.get("rewrite_contract"), dict) else {},
+            "review_feedback_rounds": list(compiled.get("review_feedback_rounds") or []),
+            "rewrite_lineage": list(compiled.get("rewrite_lineage") or []),
+            "finalization_mode": str(compiled.get("finalization_mode") or "approval_required"),
         }
         _write_json(review_path, review_record)
         return {
@@ -4375,13 +4415,34 @@ def generate_full_report_payload(
         markdown,
         cache_version=AI_FULL_REPORT_CACHE_VERSION,
         draft_bundle=draft_bundle,
+        draft_bundle_v2=draft_bundle_v2,
         styled_draft_bundle=styled_draft_bundle,
         factual_conformance=factual_conformance,
+        scene_profile=compiled.get("scene_profile") if isinstance(compiled.get("scene_profile"), dict) else {},
     )
     full_payload["draft_bundle_v2"] = draft_bundle_v2
     full_payload["validation_result_v2"] = validation_result_v2
     full_payload["repair_plan_v2"] = repair_plan_v2
     full_payload["graph_state_v2"] = graph_state_v2
+    full_payload["execution_phase"] = str(compiled.get("execution_phase") or "")
+    full_payload["rewrite_round"] = int(compiled.get("rewrite_round") or 0)
+    full_payload["rewrite_budget"] = int(compiled.get("rewrite_budget") or 0)
+    full_payload["finalization_mode"] = str(compiled.get("finalization_mode") or "")
+    full_payload["auto_rewrite_attempted"] = bool(compiled.get("auto_rewrite_attempted"))
+    full_payload["auto_rewrite_succeeded"] = bool(compiled.get("auto_rewrite_succeeded"))
+    full_payload["rewrite_issue_count"] = int(compiled.get("rewrite_issue_count") or 0)
+    full_payload["source_checkpoint_id"] = str(compiled.get("source_checkpoint_id") or "")
+    full_payload["parent_artifact_id"] = str(compiled.get("parent_artifact_id") or "")
+    full_payload["repaired_unit_ids"] = list(compiled.get("repaired_unit_ids") or [])
+    full_payload["dropped_unit_ids"] = list(compiled.get("dropped_unit_ids") or [])
+    full_payload["unchanged_unit_ids"] = list(compiled.get("unchanged_unit_ids") or [])
+    full_payload["rewrite_contract"] = compiled.get("rewrite_contract") if isinstance(compiled.get("rewrite_contract"), dict) else {}
+    full_payload["repair_history"] = list(compiled.get("repair_history") or [])
+    full_payload["semantic_review_records"] = list(compiled.get("semantic_review_records") or [])
+    full_payload["progress_events"] = list(compiled.get("progress_events") or [])
+    full_payload["review_feedback_rounds"] = list(compiled.get("review_feedback_rounds") or [])
+    full_payload["rewrite_lineage"] = list(compiled.get("rewrite_lineage") or [])
+    full_payload["commit_artifacts"] = list(compiled.get("commit_artifacts") or [])
     full_payload["meta"] = dict(full_payload.get("meta") or {})
     full_payload["meta"].update(
         {
@@ -4404,7 +4465,7 @@ def generate_full_report_payload(
         }
     )
     full_payload["artifact_manifest"] = manifest.model_dump()
-    if semantic_review:
+    if semantic_review and str(semantic_review.get("decision") or "").strip().lower() == "approve":
         semantic_interrupt = review_record.get("semantic_interrupt") if isinstance(review_record.get("semantic_interrupt"), dict) else {}
         approval_records = _append_approval_record(
             review_record.get("approval_records") if isinstance(review_record.get("approval_records"), list) else [],

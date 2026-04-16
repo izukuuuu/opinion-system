@@ -22,12 +22,14 @@ from src.report.deep_report.compiler import (
     run_stylistic_rewrite,
     select_scene_profile,
 )
+from src.report.deep_report.deep_writer import compile_draft_units_with_llm
 from src.report.deep_report.payloads import build_retrieval_plan_payload, normalize_task_payload
 from src.report.deep_report.document import build_figure_pipeline, build_report_document, load_report_blueprint, sanitize_report_document
 from src.report.deep_report.presenter import build_full_payload, compile_markdown_artifacts, render_markdown
 from src.report.deep_report.report_ir import attach_report_ir, build_artifact_manifest, build_report_ir
 from src.report.deep_report.service import _build_semantic_review_payload, generate_full_report_payload
-from src.report.deep_report.schemas import ReportDataBundle, ReportDocument, SemanticLatticeState
+from src.report.deep_report.schemas import CompilerSceneProfile, ReportDataBundle, ReportDocument, SectionPlan, SemanticLatticeState
+from src.report.full_report_templates import choose_best_template
 
 
 def sample_bundle() -> ReportDataBundle:
@@ -545,7 +547,13 @@ class DeepReportDocumentTests(unittest.TestCase):
             figure_artifacts=structured["figure_artifacts"],
         )
         enriched = attach_report_ir(structured, artifact_manifest=manifest, task_id="task-2")
-        markdown = render_markdown(enriched)
+        with patch(
+            "src.report.deep_report.presenter.compile_markdown_artifacts",
+            return_value={
+                "markdown": "# 示例专题\n\n## 议题与框架\n示例框架。\n\n## 事实断言\n示例断言。\n\n## 冲突与收敛\n示例冲突。\n\n## 传播机制\n示例机制。",
+            },
+        ):
+            markdown = render_markdown(enriched)
         full_payload = build_full_payload(enriched, markdown, cache_version=10)
         self.assertIn("## 议题与框架", markdown)
         self.assertIn("## 事实断言", markdown)
@@ -574,7 +582,9 @@ class DeepReportDocumentTests(unittest.TestCase):
         layout = build_layout_plan(ir, scene, style)
         budget = build_section_budget(ir, scene, layout)
 
-        self.assertEqual(scene.render_mode, "claim_anchored")
+        self.assertEqual(scene.render_mode, "template_driven")
+        self.assertTrue(scene.template_id)
+        self.assertTrue(scene.template_path)
         self.assertEqual(style.style_id, "evidence_first")
         self.assertTrue(layout.sections)
         self.assertTrue(budget.sections)
@@ -603,6 +613,223 @@ class DeepReportDocumentTests(unittest.TestCase):
         section_units = compile_section_draft_units(ir, section_plan.sections[0])
         self.assertTrue(section_units)
         self.assertTrue(all(unit.text.startswith("## ") or (unit.trace_ids or unit.claim_ids or unit.evidence_ids or unit.risk_ids or unit.unresolved_point_ids or unit.stance_row_ids) for unit in section_units))
+
+    def test_choose_best_template_prefers_policy_template_for_tobacco_governance_topic(self):
+        bundle = sample_structured_payload()
+        bundle["task"]["topic_label"] = "2025控烟舆情"
+        bundle["report_data"]["task"]["topic_label"] = "2025控烟舆情"
+        manifest = build_artifact_manifest(
+            topic_identifier="demo-topic-policy",
+            thread_id="report::demo-topic-policy::2025-01-01::2025-01-31",
+            task_id="task-policy",
+            structured_path="structured.json",
+            ir_path="report_ir.json",
+        )
+        ir = build_report_ir(bundle, artifact_manifest=manifest, task_id="task-policy")
+
+        selected = choose_best_template(
+            topic_label="2025控烟舆情",
+            title="2025控烟舆情",
+            report_ir=ir.model_dump(),
+        )
+
+        self.assertEqual(selected["template_id"], "policy_dynamics")
+        self.assertTrue(selected["matched_reasons"])
+
+    def test_section_plan_uses_selected_template_sections_and_guides(self):
+        bundle = sample_structured_payload()
+        bundle["task"]["topic_label"] = "2025控烟舆情"
+        bundle["report_data"]["task"]["topic_label"] = "2025控烟舆情"
+        manifest = build_artifact_manifest(
+            topic_identifier="demo-topic-policy-plan",
+            thread_id="report::demo-topic-policy-plan::2025-01-01::2025-01-31",
+            task_id="task-policy-plan",
+            structured_path="structured.json",
+            ir_path="report_ir.json",
+        )
+        ir = build_report_ir(bundle, artifact_manifest=manifest, task_id="task-policy-plan")
+        scene = select_scene_profile(ir)
+        style = resolve_style_profile(ir, scene)
+        layout = build_layout_plan(ir, scene, style)
+        budget = build_section_budget(ir, scene, layout)
+        section_plan = build_section_plan(ir, layout, budget, scene)
+
+        self.assertEqual(scene.template_id, "policy_dynamics")
+        self.assertTrue(scene.template_sections)
+        self.assertEqual(section_plan.sections[0].title, scene.template_sections[0]["title"])
+        self.assertEqual(section_plan.sections[0].template_id, "policy_dynamics")
+        self.assertTrue(section_plan.sections[0].writing_instruction)
+        self.assertEqual(section_plan.sections[0].selection_context["template_id"], "policy_dynamics")
+
+    def test_llm_deep_writer_records_tool_receipts(self):
+        class _DummyResponse:
+            def __init__(self, content: str):
+                self.content = content
+
+        class _DummyLLM:
+            def invoke(self, _messages):
+                paragraph = "这是一段基于证据卡和章节材料包生成的正文分析。" * 18
+                content = json.dumps(
+                    {
+                        "section_id": "impact",
+                        "title": "影响与动作",
+                        "blocks": [
+                            {"type": "heading", "text": "影响与动作", "anchor": "impact"},
+                            {"type": "paragraph", "text": paragraph},
+                        ],
+                        "evidence_refs": ["ev-1", "ev-2", "ev-3", "ev-4", "ev-5"],
+                        "claim_refs": ["claimrec-1"],
+                    },
+                    ensure_ascii=False,
+                )
+                return _DummyResponse(content)
+
+        bundle = sample_structured_payload()
+        manifest = build_artifact_manifest(
+            topic_identifier="demo-topic-writer",
+            thread_id="report::demo-topic-writer::2025-01-01::2025-01-31",
+            task_id="task-writer",
+            structured_path="structured.json",
+            ir_path="report_ir.json",
+        )
+        ir = build_report_ir(bundle, artifact_manifest=manifest, task_id="task-writer")
+        scene = CompilerSceneProfile(
+            scene_id="policy_dynamics",
+            scene_label="政策行业场景",
+            template_id="policy_dynamics",
+            template_name="policy_dynamics",
+            template_path="policy_dynamics.md",
+        )
+        section_plan = SectionPlan.model_validate(
+            {
+                "sections": [
+                    {
+                        "section_id": "impact",
+                        "title": "影响与动作",
+                        "goal": "结合工具结果写出影响传导和动作建议。",
+                        "target_words": 360,
+                        "template_id": "policy_dynamics",
+                        "template_title": "影响与动作",
+                        "writing_instruction": "先写影响传导，再写动作建议。",
+                    }
+                ]
+            }
+        )
+        retrieve_payload = {
+            "result": [
+                {"evidence_id": f"ev-{idx}", "snippet": "示例原文", "platform": "微博", "author": f"作者{idx}", "sentiment_label": "负面"}
+                for idx in range(1, 6)
+            ],
+            "coverage": {"matched_count": 5},
+            "trace": {"compiled_tool_intents": ["risk"]},
+        }
+        section_packet_payload = {
+            "result": {
+                "section_id": "risk",
+                "writing_hints": ["先写影响传导", "再写动作建议"],
+                "uncertainty_notes": ["当前仍需保留边界表述"],
+                "claim_candidates": [{"claim_id": "claimrec-1", "proposition": "平台用户质疑执行安排"}],
+            },
+            "coverage": {"matched_count": 1},
+        }
+
+        with patch("src.report.deep_report.deep_writer._get_llm_client", return_value=_DummyLLM()), patch(
+            "src.report.deep_report.deep_writer.retrieve_evidence_cards_payload",
+            return_value=retrieve_payload,
+        ), patch(
+            "src.report.deep_report.deep_writer.build_section_packet_payload",
+            return_value=section_packet_payload,
+        ), patch(
+            "src.report.deep_report.deep_writer.build_event_timeline_payload",
+            return_value={"result": [{"time_label": "2025-01-10", "summary": "节点"}]},
+        ), patch(
+            "src.report.deep_report.deep_writer.extract_actor_positions_payload",
+            return_value={"result": [{"name": "平台用户", "stance": "质疑", "stance_shift": "关注执行影响"}]},
+        ), patch(
+            "src.report.deep_report.deep_writer.compute_report_metrics_payload",
+            return_value={"result": [{"metric_id": "m1", "label": "声量", "value": "10"}]},
+        ), patch(
+            "src.report.deep_report.deep_writer.detect_risk_signals_payload",
+            return_value={"result": [{"risk_type": "争议延续", "spread_condition": "若缺少回应"}]},
+        ):
+            draft_bundle_v2 = compile_draft_units_with_llm(ir, section_plan, scene)
+
+        metadata = draft_bundle_v2.metadata
+        self.assertEqual(metadata["selected_template"]["template_id"], "policy_dynamics")
+        self.assertFalse(metadata["degraded_sections"])
+        self.assertEqual(len(metadata["section_generation_receipts"]), 1)
+        self.assertIn("retrieve_evidence_cards", metadata["section_generation_receipts"][0]["tool_names"])
+        self.assertIn("detect_risk_signals", metadata["section_generation_receipts"][0]["tool_names"])
+
+    def test_llm_deep_writer_marks_heading_only_output_as_degraded(self):
+        class _DummyResponse:
+            def __init__(self, content: str):
+                self.content = content
+
+        class _DummyLLM:
+            def invoke(self, _messages):
+                content = json.dumps(
+                    {
+                        "section_id": "focus",
+                        "title": "核心焦点与情绪",
+                        "blocks": [
+                            {"type": "heading", "text": "核心焦点与情绪", "anchor": "focus"},
+                        ],
+                        "evidence_refs": [],
+                        "claim_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                return _DummyResponse(content)
+
+        bundle = sample_structured_payload()
+        manifest = build_artifact_manifest(
+            topic_identifier="demo-topic-writer-degraded",
+            thread_id="report::demo-topic-writer-degraded::2025-01-01::2025-01-31",
+            task_id="task-writer-degraded",
+            structured_path="structured.json",
+            ir_path="report_ir.json",
+        )
+        ir = build_report_ir(bundle, artifact_manifest=manifest, task_id="task-writer-degraded")
+        scene = CompilerSceneProfile(
+            scene_id="public_hotspot",
+            scene_label="公共热点场景",
+            template_id="public_hotspot",
+            template_name="public_hotspot",
+            template_path="public_hotspot.md",
+        )
+        section_plan = SectionPlan.model_validate(
+            {
+                "sections": [
+                    {
+                        "section_id": "focus",
+                        "title": "核心焦点与情绪",
+                        "goal": "拆解议题重心和情绪结构。",
+                        "target_words": 320,
+                        "template_id": "public_hotspot",
+                        "template_title": "核心焦点与情绪",
+                        "writing_instruction": "情绪必须附着在具体议题上。",
+                    }
+                ]
+            }
+        )
+        with patch("src.report.deep_report.deep_writer._get_llm_client", return_value=_DummyLLM()), patch(
+            "src.report.deep_report.deep_writer.retrieve_evidence_cards_payload",
+            return_value={"result": [], "coverage": {}},
+        ), patch(
+            "src.report.deep_report.deep_writer.build_section_packet_payload",
+            return_value={"result": {}, "coverage": {}},
+        ), patch(
+            "src.report.deep_report.deep_writer.extract_actor_positions_payload",
+            return_value={"result": []},
+        ), patch(
+            "src.report.deep_report.deep_writer.build_agenda_frame_map_payload",
+            return_value={"result": {}},
+        ):
+            draft_bundle_v2 = compile_draft_units_with_llm(ir, section_plan, scene)
+
+        self.assertEqual(len(draft_bundle_v2.metadata["degraded_sections"]), 1)
+        self.assertTrue(draft_bundle_v2.metadata["section_generation_receipts"][0]["degraded"])
 
     def test_recommendation_units_remain_traceable_without_support_claims(self):
         structured = sample_structured_payload()
@@ -699,6 +926,40 @@ class DeepReportDocumentTests(unittest.TestCase):
         self.assertTrue(finalized.startswith("# 示例专题"))
         self.assertEqual(styled.policy_version, "policy.v2")
         self.assertTrue(all(diff.ops for diff in styled.rewrite_diffs))
+
+    def test_build_full_payload_exposes_template_and_generation_receipts(self):
+        structured = sample_structured_payload()
+        payload = build_full_payload(
+            structured,
+            "# 示例专题\n\n## 摘要\n\n这是一段完整正文。",
+            cache_version=5,
+            draft_bundle={"units": [], "section_order": []},
+            draft_bundle_v2={
+                "units": [],
+                "section_order": [],
+                "metadata": {
+                    "selected_template": {
+                        "template_id": "policy_dynamics",
+                        "template_name": "policy_dynamics",
+                        "template_path": "policy_dynamics.md",
+                        "scene_id": "policy_dynamics",
+                        "scene_label": "政策行业场景",
+                        "score": 9.2,
+                        "matched_reasons": ["存在政策/治理信号: 控烟"],
+                    },
+                    "section_generation_receipts": [{"section_id": "summary", "tool_names": ["retrieve_evidence_cards"]}],
+                    "degraded_sections": [{"section_id": "action", "reason": "质量不足"}],
+                },
+            },
+            styled_draft_bundle={"units": [], "rewrite_ops": []},
+            factual_conformance={"passed": True},
+            scene_profile={"template_id": "policy_dynamics"},
+        )
+
+        self.assertEqual(payload["selected_template"]["template_id"], "policy_dynamics")
+        self.assertEqual(payload["template_match_reasons"], ["存在政策/治理信号: 控烟"])
+        self.assertEqual(payload["section_generation_receipts"][0]["tool_names"], ["retrieve_evidence_cards"])
+        self.assertEqual(payload["degraded_sections"][0]["section_id"], "action")
 
     def test_markdown_conformance_ignores_non_prefix_brackets(self):
         bundle = sample_structured_payload()

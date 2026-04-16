@@ -14,6 +14,7 @@ from server_support.topic_context import TopicContext
 from src.report.capability_manifest import (
     get_report_capability,
     get_report_capability_catalog,
+    get_skill_capability_ids,
     select_runtime_capability_ids,
     select_runtime_skill_ids,
 )
@@ -228,6 +229,7 @@ class ReportCapabilityAdaptersTests(unittest.TestCase):
         self.assertEqual(agenda.framework_layer, "subagent")
         self.assertIn("AgendaFrameMap", agenda.owned_artifacts)
         self.assertIn("agenda_frame_builder", agenda.entrypoints)
+        self.assertIn("agenda-frame-builder", agenda.skill_ids)
 
     def test_specialist_runtime_slices_map_to_declared_capability_owners(self) -> None:
         specialist_agents = [
@@ -251,6 +253,10 @@ class ReportCapabilityAdaptersTests(unittest.TestCase):
     def test_runtime_skill_defaults_follow_capability_contracts(self) -> None:
         self.assertIn("retrieval-router-rules", select_runtime_skill_ids(runtime_target="deep_report_subagent", agent_name="retrieval_router"))
         self.assertIn(
+            "agenda-frame-builder",
+            select_runtime_skill_ids(runtime_target="deep_report_subagent", agent_name="agenda_frame_builder"),
+        )
+        self.assertIn(
             "chart-interpretation-guidelines",
             select_runtime_skill_ids(runtime_target="deep_report_subagent", agent_name="propagation_analyst"),
         )
@@ -258,6 +264,28 @@ class ReportCapabilityAdaptersTests(unittest.TestCase):
             "sentiment-analysis-methodology",
             select_runtime_skill_ids(runtime_target="deep_report_coordinator"),
         )
+
+    def test_agenda_frame_builder_skill_contract_resolves_from_manifest_and_loader(self) -> None:
+        self.assertEqual(get_skill_capability_ids("agenda-frame-builder"), ["semantic.agenda_frame_builder"])
+
+        resolved = resolve_report_skill("agenda-frame-builder", topic="示例专题")
+        self.assertEqual(resolved.get("capabilityIds"), ["semantic.agenda_frame_builder"])
+        self.assertEqual(resolved.get("runtimeSurfaces"), ["deep_report_subagent"])
+        self.assertEqual(resolved.get("agentFamilies"), ["agenda_frame_builder"])
+        self.assertFalse(bool(resolved.get("guidanceOnly")))
+
+        skill_assets = build_report_skill_runtime_assets("示例专题")
+        agenda_sources = select_report_skill_sources(
+            skill_assets,
+            available_tool_ids=[
+                tool.name
+                for tool in select_report_tools(runtime_target="deep_report_subagent", agent_name="agenda_frame_builder")
+            ],
+            runtime_target="deep_report_subagent",
+            agent_name="agenda_frame_builder",
+            preferred_skill_keys=["agenda-frame-builder"],
+        )
+        self.assertTrue(any("agenda-frame-builder" in item for item in agenda_sources))
 
     def test_guidance_only_skills_attach_only_to_compatible_runtime_slice(self) -> None:
         skill_assets = build_report_skill_runtime_assets("示例专题")

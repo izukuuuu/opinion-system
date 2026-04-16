@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 _DEFAULT_LAYERS: Tuple[str, ...] = ("raw", "merge", "clean", "filter")
-_ALLOWED_LAYERS: Tuple[str, ...] = _DEFAULT_LAYERS + ("fetch", "analyze", "reports", "results")
+_ALLOWED_LAYERS: Tuple[str, ...] = _DEFAULT_LAYERS + ("fetch", "analyze", "reports", "results", "media_tags")
 _STAGE_DEPENDENCIES = {
     "clean": "merge",
     "filter": "clean",

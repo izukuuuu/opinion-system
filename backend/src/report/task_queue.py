@@ -1041,9 +1041,11 @@ def resolve_approval(
     review_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     decision_text = str(decision or "").strip().lower()
-    if decision_text not in {"approve", "reject"}:
-        raise ValueError("approval decision 仅支持 approve、reject")
+    if decision_text not in {"approve", "rewrite", "reject"}:
+        raise ValueError("approval decision 仅支持 approve、rewrite、reject")
     normalized_review_payload = review_payload if isinstance(review_payload, dict) else {}
+    if decision_text == "rewrite" and not str(normalized_review_payload.get("comment") or "").strip():
+        raise ValueError("rewrite 审批必须提供 review_payload.comment")
 
     def _mutate(task: Dict[str, Any]) -> None:
         approvals = task.get("approvals")
@@ -1062,7 +1064,7 @@ def resolve_approval(
         matched["status"] = "resolved"
         matched["decision"] = decision_text
         matched["resolved_at"] = _utc_now()
-        if normalized_review_payload and decision_text == "approve":
+        if normalized_review_payload and decision_text in {"approve", "rewrite"}:
             matched["review_payload"] = normalized_review_payload
         pending = [
             item
@@ -1092,7 +1094,7 @@ def resolve_approval(
         payload={
             "approval_id": str(approval_id or "").strip(),
             "decision": decision_text,
-            "review_payload": normalized_review_payload if normalized_review_payload and decision_text == "approve" else {},
+            "review_payload": normalized_review_payload if normalized_review_payload and decision_text in {"approve", "rewrite"} else {},
         },
     )
 

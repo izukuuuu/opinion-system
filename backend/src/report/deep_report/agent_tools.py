@@ -919,14 +919,15 @@ def judge_decision_utility(
         JSON 对象，顶层字段：
           status: str               — "ok"
           result: dict              — 裁决对象，写入 utility_assessment.json
-            .decision: str          — "pass" | "fallback_recompile" | "block"
+            .decision: str          — "pass" | "fallback_recompile" | "require_semantic_review"
             .completeness_score: float
             .missing_dimensions: list  — 缺失维度列表（若上游为 empty，必须记录原因）
             .unverified_points: list   — 未验证关键点
             .can_proceed_to_writing: bool
 
         下游传参约定：
-          utility_assessment.result.decision 为 "pass" 或 "fallback_recompile" 时才能进入 writer 阶段
+          utility_assessment.result.decision 为 "pass" 或 "fallback_recompile" 时可继续进入 writer 阶段；
+          "require_semantic_review" 表示允许继续编译，但后续需进入自动重写或人工审查。
     """
     return json.dumps(
         judge_decision_utility_payload(

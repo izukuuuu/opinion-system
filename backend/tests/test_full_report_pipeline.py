@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -664,65 +663,63 @@ class FullReportPipelineTests(unittest.TestCase):
     def test_exploration_runtime_uses_task_scoped_coordinator_thread_and_fallback_normalizes_payload(self):
         agent = DummyAgent({"messages": [], "files": {"/workspace/state/timeline_nodes.json": {"content": ["{}"]}}})
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cache_dir = Path(temp_dir)
-            artifacts_dir = cache_dir / "artifacts"
-            artifacts_dir.mkdir(parents=True, exist_ok=True)
-            with patch("src.report.deep_report.service.ensure_cache_dir", return_value=cache_dir), patch(
-                "src.report.deep_report.service.build_artifacts_root",
-                return_value=artifacts_dir,
-            ), patch(
-                "src.report.deep_report.service._prepare_runtime",
-                return_value=(
-                    {"thread_id": "report::demo-topic::2025-01-01::2025-01-31", "task_id": "task-123"},
-                    {"/workspace/state/.keep": {"content": [""]}},
-                    object(),
-                    {},
-                    [],
-                ),
-            ), patch(
-                "src.report.deep_report.service.build_langchain_chat_model",
-                return_value=(object(), {}),
-            ), patch(
-                "src.report.deep_report.service.build_report_deep_agent",
-                return_value={
-                    "agent": agent,
-                    "coordinator_runtime_profile": SimpleNamespace(checkpoint_locator="coordinator.sqlite"),
-                    "prompt": "prompt",
+        cache_dir = Path("F:/opinion-system/.tmp_pytest/exploration-runtime")
+        artifacts_dir = cache_dir / "artifacts"
+        with patch("src.report.deep_report.service.ensure_cache_dir", return_value=cache_dir), patch(
+            "src.report.deep_report.service.build_artifacts_root",
+            return_value=artifacts_dir,
+        ), patch(
+            "src.report.deep_report.service._prepare_runtime",
+            return_value=(
+                {"thread_id": "report::demo-topic::2025-01-01::2025-01-31", "task_id": "task-123"},
+                {"/workspace/state/.keep": {"content": [""]}},
+                object(),
+                {},
+                [],
+            ),
+        ), patch(
+            "src.report.deep_report.service.build_langchain_chat_model",
+            return_value=(object(), {}),
+        ), patch(
+            "src.report.deep_report.service.build_report_deep_agent",
+            return_value={
+                "agent": agent,
+                "coordinator_runtime_profile": SimpleNamespace(checkpoint_locator="coordinator.sqlite"),
+                "prompt": "prompt",
+            },
+        ), patch(
+            "src.report.deep_report.service._hydrate_render_layers",
+            side_effect=lambda payload, **_: payload,
+        ), patch(
+            "src.report.deep_report.service._attach_ir_layers",
+            side_effect=lambda payload, **_: payload,
+        ), patch(
+            "src.report.deep_report.service._synthesize_structured_report_from_files",
+            return_value={
+                "task": {"topic_identifier": "demo-topic"},
+                "summary": "fallback summary",
+                "timeline": {
+                    "nodes": [
+                        {
+                            "event_id": "event-1",
+                            "date": "2025-01-15",
+                            "title": "关键节点",
+                            "description": "讨论升温。",
+                        }
+                    ]
                 },
-            ), patch(
-                "src.report.deep_report.service._hydrate_render_layers",
-                side_effect=lambda payload, **_: payload,
-            ), patch(
-                "src.report.deep_report.service._attach_ir_layers",
-                side_effect=lambda payload, **_: payload,
-            ), patch(
-                "src.report.deep_report.service._synthesize_structured_report_from_files",
-                return_value={
-                    "task": {"topic_identifier": "demo-topic"},
-                    "summary": "fallback summary",
-                    "timeline": {
-                        "nodes": [
-                            {
-                                "event_id": "event-1",
-                                "date": "2025-01-15",
-                                "title": "关键节点",
-                                "description": "讨论升温。",
-                            }
-                        ]
-                    },
-                    "agenda_frame_map": {"summary": "议题框架已生成"},
-                },
-            ):
-                result = _run_deep_report_exploration_task(
-                    "demo-topic",
-                    "2025-01-01",
-                    "2025-01-31",
-                    topic_label="示例专题",
-                    mode="fast",
-                    thread_id="report::demo-topic::2025-01-01::2025-01-31",
-                    task_id="task-123",
-                )
+                "agenda_frame_map": {"summary": "议题框架已生成"},
+            },
+        ):
+            result = _run_deep_report_exploration_task(
+                "demo-topic",
+                "2025-01-01",
+                "2025-01-31",
+                topic_label="示例专题",
+                mode="fast",
+                thread_id="report::demo-topic::2025-01-01::2025-01-31",
+                task_id="task-123",
+            )
 
         self.assertEqual(result.status, "completed")
         self.assertEqual(

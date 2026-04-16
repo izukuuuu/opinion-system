@@ -6,10 +6,11 @@ metadata:
   report:
     skillKey: quality_validation_backlink
     goal: 对结构化结果做事实一致性、时间一致性和主体边界校验，产出 typed utility assessment。
-
-## Applies To
-agent_families: decision_utility_judge, validator
-runtime_surfaces: deep_report_subagent
+agent_families:
+  - decision_utility_judge
+  - validator
+runtime_surfaces:
+  - deep_report_subagent
 ---
 
 # Quality Validation And Backlink

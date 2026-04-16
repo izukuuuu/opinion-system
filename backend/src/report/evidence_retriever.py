@@ -67,6 +67,23 @@ def _tokenize(text: Any, *, max_items: int = 18) -> List[str]:
     return tokens
 
 
+def _strip_title_prefix(text: str) -> str:
+    raw = str(text or "").strip()
+    if raw.lower().startswith("title:"):
+        return raw.split(":", 1)[1].strip()
+    return raw
+
+
+def _content_quality_hint(title: str, contents: str) -> str:
+    raw_title = str(title or "").strip()
+    raw_contents = str(contents or "").strip()
+    if not raw_contents:
+        return "short_excerpt"
+    if _strip_title_prefix(raw_contents) == raw_title:
+        return "title_echo"
+    return "short_excerpt"
+
+
 def _normalise_platforms(platforms: Any) -> List[str]:
     if not isinstance(platforms, list):
         return []
@@ -721,6 +738,7 @@ def _retrieve_candidates(
         source_file = str(entry.get("source_file") or "").strip()
         row_index = int(entry.get("row_index") or 0)
         title = str(row.get("title") or "").strip()
+        contents = str(row.get("contents") or row.get("content") or "").strip()
         text = _record_text(row)
         token_score, matched_terms, token_breakdown = _score_row(text, title, query_terms)
         lexical_score = lexical_scores[index] if index < len(lexical_scores) else 0.0
@@ -752,10 +770,16 @@ def _retrieve_candidates(
                 "published_at": str(row.get("published_at") or row.get("publish_time") or row.get("date") or "").strip(),
                 "platform": platform,
                 "author": str(row.get("author") or "").strip(),
+                "contents": contents,
+                "polarity": str(row.get("polarity") or row.get("情感") or row.get("sentiment") or "").strip(),
+                "classification": str(row.get("classification") or "").strip(),
+                "region": str(row.get("region") or "").strip(),
+                "hit_words": str(row.get("hit_words") or "").strip(),
                 "matched_terms": matched_terms[:6],
                 "score": round(total_score, 4),
                 "source_file": source_file,
                 "source_row_index": row_index,
+                "content_quality_hint": _content_quality_hint(title, contents),
                 "score_breakdown": {
                     **token_breakdown,
                     "lexical": round(lexical_score * 6.0, 4),

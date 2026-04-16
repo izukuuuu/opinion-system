@@ -704,6 +704,7 @@ def stream_report_task(task_id: str):
     def _stream():
         last_id = since_id
         heartbeat_at = time.time()
+        last_worker_check_at = time.time()
         yield "retry: 2500\n\n"
         while True:
             try:
@@ -740,6 +741,12 @@ def stream_report_task(task_id: str):
                     },
                 )
                 break
+            if str(current_task.get("status") or "") == "queued" and time.time() - last_worker_check_at >= 10:
+                last_worker_check_at = time.time()
+                try:
+                    ensure_worker_running()
+                except Exception:
+                    pass
             time.sleep(1.0)
 
     response = Response(stream_with_context(_stream()), mimetype="text/event-stream")

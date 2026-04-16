@@ -4,11 +4,11 @@
     "canonical report tool registry is the only executable registry surface",
     "skills use allowed_tools and validate against canonical tool ids",
     "deep_report and agent_runtime both source tools from report/tools",
-    "manual methodology mutation tool stays registered but default-disabled"
+    "manual methodology mutation tool stays registered but default-disabled",
+    "agenda_frame_builder now has a dedicated method-binding skill contract aligned with its frozen capability owner"
   ],
   "partially_aligned": [
     "capability manifest now drives runtime tool and skill projections, but compiler-side guidance skills are still mostly documentation contracts",
-    "agenda_frame_builder has a frozen capability owner but no dedicated method-binding skill yet",
     "plain compat runtime remains load-skill based; compiler guidance is declared but not yet attached to a dedicated plain writer graph"
   ],
   "redesign_required": [

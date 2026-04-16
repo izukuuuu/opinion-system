@@ -318,40 +318,49 @@ def _section(section_id: str, title: str, goal: str, target_words: int) -> Compi
 
 
 def select_scene_profile(ir: ReportIR | Dict[str, Any]) -> CompilerSceneProfile:
-    """根据报告内容选择场景配置，并加载对应的报告模板."""
+    """根据报告内容选择最相近模板，并返回对应 scene/profile。"""
     payload = _ensure_ir(ir)
-    risk_count = len(payload.risk_register.risks)
+    from ..full_report_templates import choose_best_template
+    from ..scene_profile import load_full_report_scene_profile
+
+    template_data = choose_best_template(
+        topic_label=str(payload.meta.topic_label or payload.meta.topic_identifier or "").strip(),
+        title=str(payload.meta.topic_label or "").strip(),
+        subtitle="",
+        mode=str(payload.meta.mode or "").strip(),
+        report_ir=payload.model_dump(),
+    )
+    scene_id = str(template_data.get("scene_id") or template_data.get("template_id") or "public_hotspot").strip() or "public_hotspot"
+    scene_profile = load_full_report_scene_profile(scene_id)
+    scene_label = str(scene_profile.get("scene_label") or template_data.get("scene_label") or "").strip()
+
+    # 正式文稿统一使用模板驱动写作，避免固定 section_id 分支退化成骨架。
+    render_mode = "template_driven"
+    focus = (
+        "risk"
+        if scene_id == "crisis_response"
+        else "risk"
+        if scene_id == "policy_dynamics"
+        else "timeline"
+    )
     unresolved_count = len(payload.unresolved_points.items)
-
-    # 根据风险数量选择场景类型
-    if risk_count > 3:
-        scene_id = "crisis_response"
-        scene_label = "突发危机舆情分析"
-    elif risk_count or unresolved_count:
-        scene_id = "risk_brief"
-        scene_label = "风险研判"
-    else:
-        scene_id = "public_hotspot"
-        scene_label = "公共热点舆情分析"
-
-    # 加载对应的报告模板
-    from ..full_report_templates import attach_full_report_template
-    template_data = attach_full_report_template({"scene_id": scene_id})
-
-    # 根据内容特征决定渲染模式
-    if unresolved_count:
-        render_mode = "claim_anchored"
-    elif risk_count > 3:
-        render_mode = "template_driven"
-    else:
-        render_mode = "claim_anchored"
 
     return CompilerSceneProfile(
         scene_id=scene_id,
         scene_label=scene_label,
-        focus="risk" if risk_count else "timeline",
+        focus=focus,
         guardrail_mode="bounded_claims" if unresolved_count else "strict",
         render_mode=render_mode,
+        template_id=str(template_data.get("template_id") or "").strip(),
+        template_name=str(template_data.get("template_name") or "").strip(),
+        template_path=str(template_data.get("template_path") or "").strip(),
+        selection_score=float(template_data.get("score") or 0.0),
+        matched_reasons=[
+            str(item).strip()
+            for item in (template_data.get("matched_reasons") or [])
+            if str(item or "").strip()
+        ],
+        selection_context=template_data.get("selection_context") if isinstance(template_data.get("selection_context"), dict) else {},
         template_sections=template_data.get("template_sections", []),
         template_markdown=template_data.get("template_markdown", ""),
     )
@@ -569,19 +578,36 @@ def build_section_plan(
             if not title_key:
                 continue
             base_goal = str(s.get("summary", "")).strip()
+            extra_instruction = str(s.get("writing_instruction", "")).strip()
             bettafish_goal = _BETTAFISH_SECTION_GOALS.get(title_key, "")
             # BettaFish 结构要求在前，模板指导在后
             merged_goal = f"{bettafish_goal}\n\n{base_goal}".strip() if bettafish_goal else base_goal
+            if extra_instruction:
+                merged_goal = f"{merged_goal}\n\n补充要求：{extra_instruction}".strip()
             # BettaFish 章节字数更高（表格+叙事）
-            base_words = int(budget_map.get(_section_id_from_title(title_key), 280))
+            default_section_id = _section_id_from_title(title_key)
+            section_id = str(s.get("section_id", "")).strip() or default_section_id
+            base_words = int(budget_map.get(section_id, budget_map.get(default_section_id, 280)))
             target_words = max(base_words, 400) if bettafish_goal else base_words
             sections_list.append(
                 CompilerSectionPlanItem(
-                    section_id=_section_id_from_title(title_key),
+                    section_id=section_id,
                     title=title_key,
                     goal=merged_goal,
                     target_words=target_words,
-                    source_groups=group_map.get(_section_id_from_title(title_key), []),
+                    source_groups=group_map.get(section_id, group_map.get(default_section_id, [])),
+                    template_id=str(scene.template_id or "").strip(),
+                    template_title=title_key,
+                    template_summary=base_goal,
+                    writing_instruction=extra_instruction,
+                    selection_context={
+                        "scene_id": str(scene.scene_id or "").strip(),
+                        "template_id": str(scene.template_id or "").strip(),
+                        "template_name": str(scene.template_name or "").strip(),
+                        "template_path": str(scene.template_path or "").strip(),
+                        "template_score": float(scene.selection_score or 0.0),
+                        "matched_reasons": list(scene.matched_reasons or []),
+                    },
                 )
             )
         sections = sections_list
@@ -1039,15 +1065,22 @@ def compile_section_draft_units(
 ) -> List[DraftUnit]:
     payload = _ensure_ir(ir)
     plan_item = section if isinstance(section, CompilerSectionPlanItem) else CompilerSectionPlanItem.model_validate(section or {})
-    units: List[DraftUnit] = []
-    units.extend(compile_heading_units(plan_item))
-    units.extend(compile_transition_units(payload, plan_item))
-    if plan_item.section_id == "executive_summary":
-        units.extend(compile_summary_units(payload, plan_item))
-    units.extend(compile_evidence_anchor_units(payload, plan_item))
-    units.extend(compile_risk_statement_units(payload, plan_item))
-    units.extend(compile_recommendation_units(payload, plan_item))
-    units.extend(compile_closing_units(payload, plan_item))
+    heading_units = compile_heading_units(plan_item)
+    transition_units = compile_transition_units(payload, plan_item)
+    summary_units = compile_summary_units(payload, plan_item) if plan_item.section_id == "executive_summary" else []
+    evidence_units = compile_evidence_anchor_units(payload, plan_item)
+    risk_units = compile_risk_statement_units(payload, plan_item)
+    recommendation_units = compile_recommendation_units(payload, plan_item)
+    closing_units = compile_closing_units(payload, plan_item)
+    units: List[DraftUnit] = [
+        *heading_units,
+        *transition_units,
+        *summary_units,
+        *evidence_units,
+        *risk_units,
+        *recommendation_units,
+        *closing_units,
+    ]
     return units
 
 

@@ -14,6 +14,7 @@ from .fetch_refresh_jobs import (
 from .deduplicate_jobs import list_deduplicate_jobs
 from .postclean_jobs import list_postclean_jobs
 from .publisher_detection import load_worker_status as load_publisher_detection_worker_status
+from .media_tagging import load_worker_status as load_media_tagging_worker_status
 from .rebuild_fetch_jobs import list_rebuild_fetch_jobs
 from .stopword_suggestions import load_worker_status as load_stopword_worker_status
 from .fluid_analysis import load_worker_status as load_fluid_analysis_worker_status
@@ -84,6 +85,7 @@ def collect_background_task_payload(*, active_only: bool = True, limit: int = _D
         _collect_netinsight_tasks,
         _collect_stopword_tasks,
         _collect_publisher_detection_tasks,
+        _collect_media_tagging_tasks,
         _collect_fluid_analysis_tasks,
         _collect_bertopic_tasks,
         _collect_basic_analysis_tasks,
@@ -196,6 +198,25 @@ def _collect_publisher_detection_tasks(*, active_only: bool) -> Tuple[List[Dict[
         if not _include_task(payload, active_only=active_only):
             continue
         tasks.append(_normalise_publisher_detection_task(payload, worker_payload))
+    return tasks, [worker_payload]
+
+
+def _collect_media_tagging_tasks(*, active_only: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    task_dir = get_data_root() / "_media_tagging" / "tasks"
+    raw_worker = load_media_tagging_worker_status()
+    worker_payload = _normalise_worker(
+        source="media-tagging",
+        source_label="媒体识别 Worker",
+        payload=raw_worker,
+    )
+    tasks: List[Dict[str, Any]] = []
+    for path in sorted(task_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        payload = _load_json(path)
+        if not isinstance(payload, dict):
+            continue
+        if not _include_task(payload, active_only=active_only):
+            continue
+        tasks.append(_normalise_media_tagging_task(payload, worker_payload))
     return tasks, [worker_payload]
 
 
@@ -519,6 +540,44 @@ def _normalise_publisher_detection_task(task: Dict[str, Any], worker: Dict[str, 
         "percentage": percentage,
         "progress_text": progress_text,
         "detail_text": str(progress.get("current_table") or "").strip() or (publishers and f"{len(publishers)} 个候选发布者" or ""),
+        "updated_at": str(task.get("updated_at") or "").strip(),
+        "started_at": str(task.get("started_at") or "").strip(),
+        "finished_at": str(task.get("finished_at") or "").strip(),
+        "heartbeat_at": heartbeat_at,
+        "heartbeat_stale": _is_stale_timestamp(heartbeat_at),
+        "worker_pid": _safe_int(task.get("worker_pid"), 0) or _safe_int(worker.get("pid"), 0),
+    }
+
+
+def _normalise_media_tagging_task(task: Dict[str, Any], worker: Dict[str, Any]) -> Dict[str, Any]:
+    task_id = str(task.get("id") or "").strip()
+    progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    phase = str(task.get("phase") or task.get("status") or "").strip() or "queued"
+    percentage = _safe_int(progress.get("percentage"), _safe_int(task.get("percentage"), 0))
+    total_files = _safe_int(progress.get("total_files"), 0)
+    processed_files = _safe_int(progress.get("processed_files"), 0)
+    progress_text = f"{processed_files} / {total_files} 文件" if total_files > 0 else f"{percentage}%"
+    current_worker_task = str(worker.get("current_task_id") or "").strip()
+    heartbeat_at = str(worker.get("last_heartbeat") or "").strip() if current_worker_task == task_id else str(task.get("updated_at") or "").strip()
+    candidate_count = _safe_int(result.get("total_candidates"), _safe_int(progress.get("candidate_count"), 0))
+    detail_text = str(progress.get("current_file") or "").strip()
+    if not detail_text and candidate_count > 0:
+        detail_text = f"{candidate_count} 个候选媒体"
+    return {
+        "id": f"media-tagging:{task_id}",
+        "task_id": task_id,
+        "source": "media-tagging",
+        "source_label": "媒体识别",
+        "title": f"{str(task.get('topic_identifier') or '专题').strip()} 媒体识别",
+        "scope": f"{str(task.get('start_date') or '').strip()}" + (f" 至 {str(task.get('end_date') or '').strip()}" if str(task.get("end_date") or "").strip() else ""),
+        "status": _normalise_status(task.get("status")),
+        "phase": phase,
+        "phase_label": "媒体识别中" if str(task.get("status") or "") == "running" else GENERIC_PHASE_LABELS.get(phase, phase or "处理中"),
+        "message": str(task.get("message") or "").strip() or "等待处理。",
+        "percentage": percentage,
+        "progress_text": progress_text,
+        "detail_text": detail_text,
         "updated_at": str(task.get("updated_at") or "").strip(),
         "started_at": str(task.get("started_at") or "").strip(),
         "finished_at": str(task.get("finished_at") or "").strip(),

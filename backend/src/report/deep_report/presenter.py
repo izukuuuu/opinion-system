@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Callable, Dict
 
 from .graph_runtime import run_report_compilation_graph
-from .schemas import FactualConformanceIssue
 from .report_ir import summarize_report_ir
 
 
@@ -32,7 +31,6 @@ def compile_markdown_artifacts(
     if not report_ir:
         raise ValueError("render_markdown requires ReportIR and no longer accepts raw structured payload compilation.")
     utility_assessment = report_ir.get("utility_assessment") if isinstance(report_ir.get("utility_assessment"), dict) else {}
-    utility_decision = str(utility_assessment.get("decision") or "pass").strip() or "pass"
     review_decision_text = str((review_decision or {}).get("decision") or "").strip().lower()
     compiled = run_report_compilation_graph(
         payload,
@@ -52,50 +50,18 @@ def compile_markdown_artifacts(
     ).strip().lower()
     effective_review_decision_text = review_decision_text or graph_review_decision_text
     human_override_accepted = effective_review_decision_text in {"approve", "edit"}
-    if (
-        utility_decision == "pass"
-        and not (markdown_conformance.get("issues") or [])
-        and not (markdown_conformance.get("semantic_deltas") or [])
-    ):
-        markdown_conformance = {
-            **markdown_conformance,
-            "passed": True,
-            "can_auto_recover": False,
-            "requires_human_review": False,
-        }
-    if utility_decision != "pass":
-        issues = markdown_conformance.get("issues") if isinstance(markdown_conformance.get("issues"), list) else []
-        issues.append(
-            FactualConformanceIssue(
-                issue_id="utility-gate",
-                issue_type="utility_gate_violation",
-                message="当前 judgment object 尚未满足进入正式文稿的决策可用性门禁。",
-                section_role="utility",
-                sentence=str(utility_assessment.get("next_action") or "").strip(),
-                trace_ids=[],
-                suggested_action=str(utility_assessment.get("next_action") or "").strip(),
-            ).model_dump()
-        )
-        markdown_conformance = {
-            **markdown_conformance,
-            "issues": issues,
-            "passed": False,
-            "can_auto_recover": utility_decision == "fallback_recompile",
-            "requires_human_review": utility_decision == "require_semantic_review" and not human_override_accepted,
-            "metadata": {
-                **dict(markdown_conformance.get("metadata") or {}),
-                "utility_assessment": utility_assessment,
-                "human_override_accepted": human_override_accepted,
-                "review_decision": effective_review_decision_text,
-            },
-        }
+    markdown_conformance = {
+        **markdown_conformance,
+        "metadata": {
+            **dict(markdown_conformance.get("metadata") or {}),
+            "utility_assessment": utility_assessment,
+            "human_override_accepted": human_override_accepted,
+            "review_decision": effective_review_decision_text,
+        },
+    }
     compiled["factual_conformance"] = markdown_conformance
     compiled["utility_assessment"] = utility_assessment
     compiled["review_required"] = bool(markdown_conformance.get("requires_human_review") or compiled.get("review_required"))
-    # fallback_recompile 允许继续编译流程（can_auto_recover=True 表示可自动恢复）
-    # require_semantic_review 需要人工审核，由 allow_review_pending 控制
-    if not markdown_conformance.get("passed") and not allow_review_pending and not human_override_accepted:
-        raise ValueError("compile_markdown_artifacts aborted: final markdown requires review or contains novel claims.")
     return compiled
 
 
@@ -132,14 +98,52 @@ def build_structured_digest(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _evaluate_markdown_health(markdown: str) -> Dict[str, Any]:
+    text = str(markdown or "").strip()
+    if not text:
+        return {
+            "is_healthy": False,
+            "degraded_reason": "empty_markdown",
+            "heading_count": 0,
+            "body_line_count": 0,
+        }
+    lines = [line.rstrip() for line in text.splitlines()]
+    heading_count = len([line for line in lines if line.lstrip().startswith("## ")])
+    body_lines = [
+        line.strip()
+        for line in lines
+        if line.strip()
+        and not line.lstrip().startswith("#")
+        and not line.lstrip().startswith(">")
+        and line.strip() != "---"
+    ]
+    non_heading_chars = sum(len(line) for line in body_lines)
+    only_headings = bool(heading_count) and not body_lines
+    too_sparse = non_heading_chars < 120
+    degraded_reason = ""
+    if only_headings:
+        degraded_reason = "heading_only_skeleton"
+    elif too_sparse:
+        degraded_reason = "markdown_body_too_sparse"
+    return {
+        "is_healthy": not bool(degraded_reason),
+        "degraded_reason": degraded_reason,
+        "heading_count": heading_count,
+        "body_line_count": len(body_lines),
+        "non_heading_char_count": non_heading_chars,
+    }
+
+
 def build_full_payload(
     structured_payload: Dict[str, Any],
     markdown: str,
     *,
     cache_version: int,
     draft_bundle: Dict[str, Any] | None = None,
+    draft_bundle_v2: Dict[str, Any] | None = None,
     styled_draft_bundle: Dict[str, Any] | None = None,
     factual_conformance: Dict[str, Any] | None = None,
+    scene_profile: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     source = _report_source(structured_payload)
     task = source.get("task") if isinstance(source.get("task"), dict) else {}
@@ -147,12 +151,47 @@ def build_full_payload(
     report_ir = structured_payload.get("report_ir") if isinstance(structured_payload.get("report_ir"), dict) else {}
     artifact_manifest = structured_payload.get("artifact_manifest") if isinstance(structured_payload.get("artifact_manifest"), dict) else {}
     utility_assessment = report_ir.get("utility_assessment") if isinstance(report_ir.get("utility_assessment"), dict) else {}
+    markdown_text = str(markdown or "").strip()
+    markdown_health = _evaluate_markdown_health(markdown_text)
+    degraded_reason = str(markdown_health.get("degraded_reason") or "").strip()
+    draft_bundle_v2_payload = draft_bundle_v2 if isinstance(draft_bundle_v2, dict) else {}
+    draft_bundle_v2_meta = draft_bundle_v2_payload.get("metadata") if isinstance(draft_bundle_v2_payload.get("metadata"), dict) else {}
+    scene_payload = scene_profile if isinstance(scene_profile, dict) else {}
+    selected_template = (
+        draft_bundle_v2_meta.get("selected_template")
+        if isinstance(draft_bundle_v2_meta.get("selected_template"), dict)
+        else {
+            "template_id": str(scene_payload.get("template_id") or "").strip(),
+            "template_name": str(scene_payload.get("template_name") or "").strip(),
+            "template_path": str(scene_payload.get("template_path") or "").strip(),
+            "scene_id": str(scene_payload.get("scene_id") or "").strip(),
+            "scene_label": str(scene_payload.get("scene_label") or "").strip(),
+            "score": float(scene_payload.get("selection_score") or 0.0),
+            "matched_reasons": list(scene_payload.get("matched_reasons") or []),
+        }
+    )
+    section_generation_receipts = (
+        draft_bundle_v2_meta.get("section_generation_receipts")
+        if isinstance(draft_bundle_v2_meta.get("section_generation_receipts"), list)
+        else []
+    )
+    degraded_sections = (
+        draft_bundle_v2_meta.get("degraded_sections")
+        if isinstance(draft_bundle_v2_meta.get("degraded_sections"), list)
+        else []
+    )
     full_payload = {
         **structured_payload,
         "title": title,
         "rangeText": f"{str(task.get('start') or '').strip()} -> {str(task.get('end') or '').strip()}",
-        "markdown": str(markdown or "").strip(),
+        "markdown": markdown_text,
+        "degraded_reason": degraded_reason,
+        "selected_template": selected_template,
+        "template_match_reasons": list(selected_template.get("matched_reasons") or []) if isinstance(selected_template, dict) else [],
+        "section_generation_receipts": section_generation_receipts,
+        "degraded_sections": degraded_sections,
         "draft_bundle": draft_bundle if isinstance(draft_bundle, dict) else {},
+        "draft_bundle_v2": draft_bundle_v2_payload,
         "styled_draft_bundle": styled_draft_bundle if isinstance(styled_draft_bundle, dict) else {},
         "report_ir_summary": summarize_report_ir(report_ir) if report_ir else {},
         "meta": {
@@ -173,6 +212,11 @@ def build_full_payload(
                 "policy_version": str((styled_draft_bundle or {}).get("policy_version") or ""),
             },
             "factual_conformance": factual_conformance if isinstance(factual_conformance, dict) else {},
+            "markdown_health": markdown_health,
+            "selected_template": selected_template,
+            "template_match_reasons": list(selected_template.get("matched_reasons") or []) if isinstance(selected_template, dict) else [],
+            "section_generation_receipts": section_generation_receipts,
+            "degraded_sections": degraded_sections,
             "utility_assessment": utility_assessment,
             "utility_gate_trace": {
                 "decision": str(utility_assessment.get("decision") or "").strip(),
