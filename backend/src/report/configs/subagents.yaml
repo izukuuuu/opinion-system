@@ -46,6 +46,7 @@ subagents:
     description: 负责识别主体与立场关系。
     skill_keys:
     - subject-stance-merging
+    - media-analysis-framework
     output_files:
     - /workspace/state/actor_positions.json
     tier: 2
@@ -80,6 +81,7 @@ subagents:
     skill_keys:
     - propagation-explanation-framework
     - chart-interpretation-guidelines
+    - media-analysis-framework
     output_files:
     - /workspace/state/mechanism_summary.json
     - /workspace/state/risk_signals.json

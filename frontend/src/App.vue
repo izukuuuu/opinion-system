@@ -321,14 +321,10 @@ const navigationGroups = [
         icon: BeakerIcon
       },
       {
-        label: '媒体识别与打标',
+        label: '媒体打标',
         description: '维护媒体名单与正式标签',
         to: { name: 'analysis-media-tagging' },
-        match: [
-          'analysis-media-tagging',
-          'analysis-media-tagging-run',
-          'analysis-media-tagging-view'
-        ],
+        match: ['analysis-media-tagging'],
         icon: MegaphoneIcon
       },
       {

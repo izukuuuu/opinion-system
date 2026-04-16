@@ -48,6 +48,7 @@ from .retrieval_tools import (
     raw_item_search_tool,
     temporal_event_window_tool,
 )
+from .media_tools import media_coverage_summary_tool
 from .validation import validate_langchain_toolset
 
 
@@ -298,6 +299,12 @@ _TOOL_SPECS: Tuple[ReportToolSpec, ...] = (
         tool_class=MANUAL_TOOL,
         mutability=STATE_MUTATING,
     ),
+    _spec(
+        media_coverage_summary_tool,
+        capability_tags=("media_analysis", "source_credibility", "analysis"),
+        runtime_tags=(RUNTIME_COORDINATOR, RUNTIME_SUBAGENT),
+        tool_class=READ_TOOL,
+    ),
 )
 
 _TOOL_SPEC_BY_ID: Dict[str, ReportToolSpec] = {}
@@ -317,6 +324,7 @@ REPORT_ANALYSIS_TOOLS = [
     content_focus_compare_tool,
     recommendation_tool,
     claim_verifier_tool,
+    media_coverage_summary_tool,
 ]
 
 DEFAULT_TOOL_NAMES = [
@@ -481,7 +489,7 @@ SUBAGENT_TOOL_ID_MAP: Mapping[str, Sequence[str]] = {
     "retrieval_router": ("normalize_task", "get_corpus_coverage"),
     "archive_evidence_organizer": ("retrieve_evidence_cards", "get_basic_analysis_snapshot"),
     "timeline_analyst": ("build_event_timeline", "compute_report_metrics"),
-    "stance_conflict": ("extract_actor_positions",),
+    "stance_conflict": ("extract_actor_positions", "media_coverage_summary_tool"),
     "event_analyst": (
         "retrieve_evidence_cards",
         "build_event_timeline",
@@ -496,6 +504,7 @@ SUBAGENT_TOOL_ID_MAP: Mapping[str, Sequence[str]] = {
         "build_mechanism_summary",
         "detect_risk_signals",
         "build_basic_analysis_insight",
+        "media_coverage_summary_tool",
     ),
     "bertopic_evolution_analyst": ("get_bertopic_snapshot", "build_bertopic_insight"),
     "decision_utility_judge": ("judge_decision_utility",),

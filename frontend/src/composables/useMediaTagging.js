@@ -87,12 +87,14 @@ const resultsState = reactive({
 
 const filters = reactive({
   search: '',
-  label: 'all'
+  label: 'all',
+  platform: '',
+  sortMode: 'suggest_first' // suggest_first | publish_count
 })
 
 const mediaResult = ref(null)
 const registryItems = ref([])
-const pendingLabelMap = ref({})
+const selectedItems = ref(new Set())
 
 const topicOptions = computed(() => topicsState.options)
 const resultSummary = computed(() => mediaResult.value?.summary || null)
@@ -101,39 +103,48 @@ const rawCandidates = computed(() =>
   Array.isArray(mediaResult.value?.candidates) ? mediaResult.value.candidates : []
 )
 
-const mergedCandidates = computed(() =>
-  rawCandidates.value.map((candidate) => {
-    const key = candidateKey(candidate.publisher_name)
-    const draft = pendingLabelMap.value[key]
-    if (!draft) return candidate
-    return {
-      ...candidate,
-      current_label: draft.current_label,
-      _dirty: true
-    }
-  })
-)
-
 const candidateStats = computed(() => {
-  const total = mergedCandidates.value.length
-  const official = mergedCandidates.value.filter((item) => item.current_label === 'official_media').length
-  const local = mergedCandidates.value.filter((item) => item.current_label === 'local_media').length
+  const total = rawCandidates.value.length
+  const official = rawCandidates.value.filter((item) => item.current_label === 'official_media').length
+  const local = rawCandidates.value.filter((item) => item.current_label === 'local_media').length
+  const network = rawCandidates.value.filter((item) => item.current_label === 'network_media').length
+  const comprehensive = rawCandidates.value.filter((item) => item.current_label === 'comprehensive_media').length
   return {
     total,
     official,
     local,
-    unlabeled: Math.max(total - official - local, 0)
+    network,
+    comprehensive,
+    unlabeled: Math.max(total - official - local - network - comprehensive, 0)
   }
+})
+
+// 提取所有平台列表
+const allPlatforms = computed(() => {
+  const platforms = new Set()
+  rawCandidates.value.forEach((item) => {
+    if (Array.isArray(item.platforms)) {
+      item.platforms.forEach((p) => platforms.add(p))
+    }
+  })
+  return Array.from(platforms).sort()
 })
 
 const filteredCandidates = computed(() => {
   const searchText = String(filters.search || '').trim().toLowerCase()
   const labelFilter = String(filters.label || 'all').trim()
-  return [...mergedCandidates.value]
+  const platformFilter = String(filters.platform || '').trim()
+  const sortMode = String(filters.sortMode || 'suggest_first').trim()
+
+  let result = [...rawCandidates.value]
     .filter((candidate) => {
       if (labelFilter === 'official_media' && candidate.current_label !== 'official_media') return false
       if (labelFilter === 'local_media' && candidate.current_label !== 'local_media') return false
+      if (labelFilter === 'network_media' && candidate.current_label !== 'network_media') return false
+      if (labelFilter === 'comprehensive_media' && candidate.current_label !== 'comprehensive_media') return false
       if (labelFilter === 'unlabeled' && candidate.current_label) return false
+      if (labelFilter === 'has_suggest' && !candidate.suggested_label) return false
+      if (platformFilter && !candidate.platforms?.includes(platformFilter)) return false
       if (!searchText) return true
       const haystacks = [
         candidate.publisher_name,
@@ -142,20 +153,29 @@ const filteredCandidates = computed(() => {
       ]
       return haystacks.some((item) => String(item || '').toLowerCase().includes(searchText))
     })
-    .sort((left, right) => {
+
+  // 排序：建议优先 or 发布量优先
+  if (sortMode === 'suggest_first') {
+    result.sort((left, right) => {
+      // 有建议且未打标的排前面
+      const leftSuggest = left.suggested_label && !left.current_label ? 1 : 0
+      const rightSuggest = right.suggested_label && !right.current_label ? 1 : 0
+      if (leftSuggest !== rightSuggest) return rightSuggest - leftSuggest
+      // 然后按发布量
       const countDiff = Number(right.publish_count || 0) - Number(left.publish_count || 0)
       if (countDiff !== 0) return countDiff
       return String(right.latest_published_at || '').localeCompare(String(left.latest_published_at || ''))
     })
+  } else {
+    result.sort((left, right) => {
+      const countDiff = Number(right.publish_count || 0) - Number(left.publish_count || 0)
+      if (countDiff !== 0) return countDiff
+      return String(right.latest_published_at || '').localeCompare(String(left.latest_published_at || ''))
+    })
+  }
+
+  return result
 })
-
-const pendingUpdates = computed(() =>
-  Object.values(pendingLabelMap.value).filter(
-    (item) => item && typeof item === 'object' && item.publisher_name
-  )
-)
-
-const hasPendingChanges = computed(() => pendingUpdates.value.length > 0)
 
 const filteredRegistryItems = computed(() => {
   const searchText = String(filters.search || '').trim().toLowerCase()
@@ -164,6 +184,8 @@ const filteredRegistryItems = computed(() => {
     .filter((item) => {
       if (labelFilter === 'official_media' && item.media_level !== 'official_media') return false
       if (labelFilter === 'local_media' && item.media_level !== 'local_media') return false
+      if (labelFilter === 'network_media' && item.media_level !== 'network_media') return false
+      if (labelFilter === 'comprehensive_media' && item.media_level !== 'comprehensive_media') return false
       if (labelFilter === 'unlabeled' && item.media_level) return false
       if (!searchText) return true
       const haystacks = [
@@ -210,8 +232,10 @@ export const useMediaTagging = () => {
     filteredCandidates,
     filteredRegistryItems,
     candidateStats,
-    hasPendingChanges,
-    pendingUpdates,
+    allPlatforms,
+    selectedItems,
+    isAllSelected,
+    selectedCount,
     changeTopic,
     loadTopics,
     loadAvailableRange,
@@ -224,8 +248,10 @@ export const useMediaTagging = () => {
     loadRegistry,
     stageCandidateLabel,
     applyLabelToFilteredCandidates,
-    discardCandidateChanges,
-    clearAllCandidateChanges,
+    toggleSelectAll,
+    toggleSelectItem,
+    applyLabelToSelected,
+    clearSelection,
     saveCandidateUpdates,
     saveRegistryItem
   }
@@ -734,44 +760,71 @@ async function loadRegistry() {
   }
 }
 
-function stageCandidateLabel(publisherName, label) {
+async function stageCandidateLabel(publisherName, label) {
   const key = candidateKey(publisherName)
   const original = rawCandidates.value.find((item) => candidateKey(item.publisher_name) === key)
   if (!original) return
+
   const nextLabel = String(label || '').trim()
   if (nextLabel === String(original.current_label || '').trim()) {
-    delete pendingLabelMap.value[key]
-    pendingLabelMap.value = { ...pendingLabelMap.value }
     return
   }
-  pendingLabelMap.value = {
-    ...pendingLabelMap.value,
-    [key]: {
-      publisher_name: original.publisher_name,
-      current_label: nextLabel
-    }
+
+  // 直接保存，不使用暂存
+  await saveCandidateUpdates([publisherName], nextLabel)
+}
+
+async function applyLabelToFilteredCandidates(label) {
+  const names = filteredCandidates.value.map((c) => c.publisher_name)
+  if (!names.length) return
+  await saveCandidateUpdates(names, label)
+}
+
+// ── 多选相关函数 ──────────────────────────────────────────────────────
+function toggleSelectAll(checked) {
+  if (checked) {
+    filteredCandidates.value.forEach((c) => {
+      selectedItems.value.add(candidateKey(c.publisher_name))
+    })
+  } else {
+    selectedItems.value.clear()
   }
+  selectedItems.value = new Set(selectedItems.value)
 }
 
-function applyLabelToFilteredCandidates(label) {
-  filteredCandidates.value.forEach((candidate) => {
-    stageCandidateLabel(candidate.publisher_name, label)
-  })
-}
-
-function discardCandidateChanges(publisherName) {
+function toggleSelectItem(publisherName, checked) {
   const key = candidateKey(publisherName)
-  if (!pendingLabelMap.value[key]) return
-  const next = { ...pendingLabelMap.value }
-  delete next[key]
-  pendingLabelMap.value = next
+  if (checked) {
+    selectedItems.value.add(key)
+  } else {
+    selectedItems.value.delete(key)
+  }
+  selectedItems.value = new Set(selectedItems.value)
 }
 
-function clearAllCandidateChanges() {
-  pendingLabelMap.value = {}
+async function applyLabelToSelected(label) {
+  const names = filteredCandidates.value
+    .filter((c) => selectedItems.value.has(candidateKey(c.publisher_name)))
+    .map((c) => c.publisher_name)
+  if (!names.length) return
+
+  await saveCandidateUpdates(names, label)
+  clearSelection()
 }
 
-async function saveCandidateUpdates(publisherNames = null) {
+function clearSelection() {
+  selectedItems.value.clear()
+  selectedItems.value = new Set(selectedItems.value)
+}
+
+const isAllSelected = computed(() =>
+  filteredCandidates.value.length > 0 &&
+  filteredCandidates.value.every((c) => selectedItems.value.has(candidateKey(c.publisher_name)))
+)
+
+const selectedCount = computed(() => selectedItems.value.size)
+
+async function saveCandidateUpdates(publisherNames = null, label = null) {
   const range = normalizeRange({
     topic: viewSelection.topic || mediaResult.value?.topic || runForm.topic,
     start: currentRange.value?.start || viewSelection.start,
@@ -782,12 +835,21 @@ async function saveCandidateUpdates(publisherNames = null) {
     return false
   }
 
-  const targetSet = Array.isArray(publisherNames)
-    ? new Set(publisherNames.map((item) => candidateKey(item)))
-    : null
-  const updates = pendingUpdates.value.filter((item) =>
-    targetSet ? targetSet.has(candidateKey(item.publisher_name)) : true
-  )
+  // 如果提供了 label，直接构造更新对象
+  let updates
+  if (label !== null && Array.isArray(publisherNames)) {
+    updates = publisherNames.map((name) => ({
+      publisher_name: name,
+      current_label: String(label || '').trim()
+    }))
+  } else {
+    const targetSet = Array.isArray(publisherNames)
+      ? new Set(publisherNames.map((item) => candidateKey(item)))
+      : null
+    updates = pendingUpdates.value.filter((item) =>
+      targetSet ? targetSet.has(candidateKey(item.publisher_name)) : true
+    )
+  }
 
   if (!updates.length) {
     resultsState.saveNotice = '当前没有需要保存的标签变更。'
@@ -809,17 +871,9 @@ async function saveCandidateUpdates(publisherNames = null) {
     })
     mediaResult.value = response
     await loadRegistry()
-    if (targetSet) {
-      const next = { ...pendingLabelMap.value }
-      updates.forEach((item) => {
-        delete next[candidateKey(item.publisher_name)]
-      })
-      pendingLabelMap.value = next
-    } else {
-      pendingLabelMap.value = {}
-    }
+    pendingLabelMap.value = {}
     resultsState.saveNotice =
-      updates.length === 1 ? '这一条标签已经保存。' : `已保存 ${updates.length} 条媒体标签。`
+      updates.length === 1 ? '标签已保存。' : `已保存 ${updates.length} 条媒体标签。`
     return true
   } catch (error) {
     resultsState.saveError = error instanceof Error ? error.message : '标签保存失败'

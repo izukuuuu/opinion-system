@@ -36,6 +36,7 @@ _EXPORT_MAP: Dict[str, Tuple[str, str]] = {
     "content_focus_compare_tool": (".retrieval_tools", "content_focus_compare_tool"),
     "raw_item_search_tool": (".retrieval_tools", "raw_item_search_tool"),
     "temporal_event_window_tool": (".retrieval_tools", "temporal_event_window_tool"),
+    "media_coverage_summary_tool": (".media_tools", "media_coverage_summary_tool"),
     "append_expert_judgement": (".knowledge_base_tools", "append_expert_judgement"),
     "build_event_reference_links": (".knowledge_base_tools", "build_event_reference_links"),
     "get_sentiment_analysis_framework": (".knowledge_base_tools", "get_sentiment_analysis_framework"),

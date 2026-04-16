@@ -12,11 +12,67 @@ import pandas as pd
 from server_support.archive_locator import compose_folder_name
 from src.utils.setting.paths import bucket, ensure_bucket, get_data_root
 
-ALLOWED_MEDIA_LEVELS = {"official_media", "local_media"}
+ALLOWED_MEDIA_LEVELS = {"official_media", "local_media", "network_media", "comprehensive_media"}
 REGISTRY_ROOT = get_data_root() / "_media_registry"
 REGISTRY_PATH = REGISTRY_ROOT / "registry.json"
 DEFAULT_SAMPLE_LIMIT = 3
 READ_CHUNK_SIZE = 2000
+
+# ── 内建命中词表（用于 suggested_label 推断，不替代人工打标）──────────────
+# 完全命中官方媒体（归一化后精确匹配）
+_OFFICIAL_MEDIA_HINTS: frozenset[str] = frozenset([
+    "人民日报", "新华社", "新华网", "中央电视台", "央视", "中央广播电台",
+    "中国国际广播电台", "中国日报", "环球时报", "光明日报", "经济日报",
+    "科技日报", "农民日报", "法制日报", "检察日报",
+    "人民网", "新华网", "央广网", "中国网", "国际在线",
+    "中国新闻网", "中国政府网", "中国共产党新闻网",
+    "求是", "求是杂志", "半月谈", "瞭望", "学习时报",
+    "解放军报", "解放军日报", "中国青年报", "工人日报",
+])
+
+# 模式匹配推断地方媒体（含关键词即建议）
+_LOCAL_MEDIA_PATTERNS: List[re.Pattern] = [
+    re.compile(r"(日报|晚报|早报|周报|都市报|商报|新闻报|晨报|午报)"),
+    re.compile(r"(广播电台|广播电视台|广播总台|电视台|卫视|广电集团|广播集团)"),
+    re.compile(r"(新闻网|在线|传媒集团|报业集团|报业传媒|融媒体|新媒体中心)"),
+    re.compile(r"(发布|官方发布|官方账号|官方微博|官方微信)"),
+]
+
+# 模式匹配推断网络媒体（互联网原生平台账号）
+_NETWORK_MEDIA_PATTERNS: List[re.Pattern] = [
+    re.compile(r"(微博|微信|公众号|头条号|百家号|企鹅号|大鱼号|一点号)"),
+    re.compile(r"(抖音|快手|B站|哔哩哔哩|小红书|视频号|知乎|豆瓣)"),
+    re.compile(r"(博主|up主|网红|达人|KOL|自媒体|自媒)"),
+    re.compile(r"(论坛|贴吧|社区|问答|圈子|频道号)"),
+]
+
+# 模式匹配推断综合媒体（兼具官方属性与互联网属性）
+_COMPREHENSIVE_MEDIA_PATTERNS: List[re.Pattern] = [
+    re.compile(r"(融媒体|全媒体|综合新闻|新闻客户端|新闻门户)"),
+    re.compile(r"(官方号|政务号|政务新媒体|政务发布)"),
+]
+
+
+def _suggest_media_label(publisher_name: str) -> str:
+    """根据内建命中词推断建议标签（空字符串表示无建议）。"""
+    normalized = normalize_publisher_name(publisher_name)
+    # 精确命中官方媒体白名单
+    for hint in _OFFICIAL_MEDIA_HINTS:
+        if normalize_publisher_name(hint) == normalized or normalize_publisher_name(hint) in normalized:
+            return "official_media"
+    # 模式匹配综合媒体（兼具官方属性与互联网属性）
+    for pattern in _COMPREHENSIVE_MEDIA_PATTERNS:
+        if pattern.search(publisher_name):
+            return "comprehensive_media"
+    # 模式匹配地方媒体
+    for pattern in _LOCAL_MEDIA_PATTERNS:
+        if pattern.search(publisher_name):
+            return "local_media"
+    # 模式匹配网络媒体
+    for pattern in _NETWORK_MEDIA_PATTERNS:
+        if pattern.search(publisher_name):
+            return "network_media"
+    return ""
 
 
 def _utc_now() -> str:
@@ -108,6 +164,8 @@ def load_media_registry() -> Dict[str, Any]:
     _ensure_registry_root()
     payload = _load_json(REGISTRY_PATH, {})
     raw_items = payload.get("items") if isinstance(payload, dict) else []
+    if not isinstance(raw_items, list):
+        raw_items = []
     items = [_sanitize_registry_item(item) for item in raw_items if isinstance(item, dict)]
     items.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
     return {
@@ -230,8 +288,10 @@ def _iter_input_files(fetch_dir: Path) -> List[Path]:
 def _iter_jsonl_records(file_path: Path) -> Iterable[Dict[str, Any]]:
     try:
         reader = pd.read_json(file_path, lines=True, chunksize=READ_CHUNK_SIZE)
-    except ValueError:
-        reader = []
+    except Exception:
+        return
+    if reader is None:
+        return
     for chunk in reader:
         if chunk is None or chunk.empty:
             continue
@@ -272,6 +332,8 @@ def _append_sample(samples: List[Dict[str, Any]], sample: Dict[str, Any], limit:
 def _build_summary(topic_identifier: str, start: str, end: str, fetch_dir: Path, candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
     official_count = sum(1 for item in candidates if item.get("current_label") == "official_media")
     local_count = sum(1 for item in candidates if item.get("current_label") == "local_media")
+    network_count = sum(1 for item in candidates if item.get("current_label") == "network_media")
+    comprehensive_count = sum(1 for item in candidates if item.get("current_label") == "comprehensive_media")
     return {
         "topic_identifier": topic_identifier,
         "range": {
@@ -282,9 +344,11 @@ def _build_summary(topic_identifier: str, start: str, end: str, fetch_dir: Path,
         "fetch_dir": str(fetch_dir),
         "generated_at": _utc_now(),
         "total_candidates": len(candidates),
-        "labeled_count": official_count + local_count,
+        "labeled_count": official_count + local_count + network_count + comprehensive_count,
         "official_media_count": official_count,
         "local_media_count": local_count,
+        "network_media_count": network_count,
+        "comprehensive_media_count": comprehensive_count,
     }
 
 
@@ -376,6 +440,7 @@ def run_media_tagging(
             "matched_registry_id": _safe_text(matched.get("id")) if matched else "",
             "matched_registry_name": _safe_text(matched.get("name")) if matched else "",
             "current_label": current_label,
+            "suggested_label": _suggest_media_label(item["publisher_name"]),
             "sample_count": len(item["samples"]),
             "latest_published_at": _safe_text(item.get("latest_published_at")),
             "platforms": sorted(item["platforms"]),
@@ -448,11 +513,15 @@ def _rebuild_summary_from_candidates(summary: Dict[str, Any], candidates: List[D
     updated = dict(summary or {})
     official_count = sum(1 for item in candidates if _safe_text(item.get("current_label")) == "official_media")
     local_count = sum(1 for item in candidates if _safe_text(item.get("current_label")) == "local_media")
+    network_count = sum(1 for item in candidates if _safe_text(item.get("current_label")) == "network_media")
+    comprehensive_count = sum(1 for item in candidates if _safe_text(item.get("current_label")) == "comprehensive_media")
     updated["generated_at"] = _utc_now()
     updated["total_candidates"] = len(candidates)
     updated["official_media_count"] = official_count
     updated["local_media_count"] = local_count
-    updated["labeled_count"] = official_count + local_count
+    updated["network_media_count"] = network_count
+    updated["comprehensive_media_count"] = comprehensive_count
+    updated["labeled_count"] = official_count + local_count + network_count + comprehensive_count
     return updated
 
 
@@ -550,11 +619,15 @@ def build_labeled_media_payload(
         )
     official = [item for item in labeled if item.get("media_level") == "official_media"]
     local = [item for item in labeled if item.get("media_level") == "local_media"]
+    network = [item for item in labeled if item.get("media_level") == "network_media"]
+    comprehensive = [item for item in labeled if item.get("media_level") == "comprehensive_media"]
     return {
         "topic_identifier": topic_identifier,
         "range": payload.get("range") or {},
         "official_media": official,
         "local_media": local,
+        "network_media": network,
+        "comprehensive_media": comprehensive,
         "all_labeled_media": labeled,
     }
 
