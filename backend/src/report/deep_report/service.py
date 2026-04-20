@@ -31,6 +31,7 @@ from ..runtime_infra import (
 )
 from ..skills import select_report_skill_sources
 from ..tools import select_report_tools
+from ..tools.rag_knowledge_tools import build_rag_background_payload
 from .assets import RUNTIME_STORE, build_artifacts_root, build_runtime_assets, ensure_memory_seed
 from .deterministic import (
     RuntimeWorkspaceLayout,
@@ -1699,6 +1700,18 @@ def _assemble_structured_report_from_runtime_files(
         for index, item in enumerate(timeline_entries)
         if str(item.get("summary") or "").strip()
     ]
+
+    rag_background_payload = _load_runtime_json_object(files, layout.state_file("rag_background.json"))
+    assembled["rag_background"] = rag_background_payload if rag_background_payload else {}
+    _mark_adapter(
+        "rag_background",
+        status="ready" if assembled["rag_background"] else "empty",
+        counts={
+            "result_groups": len(assembled["rag_background"].get("results") or [])
+            if isinstance(assembled["rag_background"], dict)
+            else 0
+        },
+    )
     _mark_adapter("timeline_nodes", status="ready" if assembled["timeline"] else "empty", counts={"timeline": len(assembled["timeline"])})
 
     actor_payload = _load_runtime_json_object(files, layout.state_file("actor_positions.json"))
@@ -5612,6 +5625,16 @@ def generate_report_payload(
     _upsert_state_json_file(runtime_files, layout, "section_packets/overview.json", overview_packet.model_dump())
     _upsert_state_json_file(runtime_files, layout, "section_packets/timeline.json", timeline_packet.model_dump())
     _upsert_state_json_file(runtime_files, layout, "section_packets/risk.json", risk_packet.model_dump())
+    _upsert_state_json_file(
+        runtime_files,
+        layout,
+        "rag_background.json",
+        build_rag_background_payload(
+            display_name,
+            knowledge_types=["methodology", "cases", "youth_insight", "policy"],
+            top_k=4,
+        ),
+    )
 
     # 复用 overview packet 内部已完成的 claim 核验结果，构造 ClaimVerificationPage 对象
     # 避免重复触发向量检索（build_section_packet_payload 内部已调用 verify_claim_payload）

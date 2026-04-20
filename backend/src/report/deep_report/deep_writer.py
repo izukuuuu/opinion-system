@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from .agent_tools import get_report_template
 from .payloads import build_section_packet_payload, normalize_task_payload
 from .report_ir import ReportIR
+from ..tools.rag_knowledge_tools import rag_knowledge_search
 from .schemas import (
     CompilerSceneProfile,
     CompilerSectionPlanItem,
@@ -330,6 +331,7 @@ def build_template_brief(
         "counts": dict(context.get("counts") or {}),
         "basic_analysis_insight": dict(context.get("basic_analysis_insight") or {}),
         "bertopic_insight": dict(context.get("bertopic_insight") or {}),
+        "rag_background": dict(context.get("rag_background") or {}),
     }
 
 
@@ -376,6 +378,9 @@ def build_section_write_prompt(
         "你是舆情深度报告章节写作代理。"
         "你一次只负责一个章节正文。"
         "必须主动使用工具检索证据和结构化产物，再完成写作。"
+        "如需方法论、历史案例、专家视角、青年群体背景或政策背景，可调用 rag_knowledge_search。"
+        "rag_knowledge_search 返回的是 background_context，只能用于理论解释、历史类比、背景补充。"
+        "禁止把 rag_knowledge_search 的结果写成当前事件已证实事实，禁止把它们当作 evidence_cards 或 claim 验证来源。"
         "正文只输出 markdown 内容，不要输出 JSON，不要重复章节标题。"
         "不要暴露工具名、字段名、模块名。"
     )
@@ -396,11 +401,13 @@ def build_section_write_prompt(
         f"章节约束：\n{json.dumps(section_brief, ensure_ascii=False, indent=2)}\n\n"
         f"专题信息：\n{json.dumps({'topic_label': payload.meta.topic_label, 'topic_identifier': payload.meta.topic_identifier, 'time_scope': payload.meta.time_scope.model_dump(), 'mode': str(payload.meta.mode or 'fast')}, ensure_ascii=False, indent=2)}\n\n"
         f"写作上下文：\n{json.dumps({'topic': context.get('topic') or '', 'counts': context.get('counts') or {}, 'section_insight_context': section_insight_context}, ensure_ascii=False, indent=2)}\n\n"
+        f"背景参考：\n{json.dumps(context.get('rag_background') or {}, ensure_ascii=False, indent=2)}\n\n"
         "输出要求：\n"
         "1. 只输出当前章节正文 markdown，不要输出标题行，不要输出 JSON。\n"
         "2. 若证据不足，请保留审慎边界，用条件性表达说明限制。\n"
         "3. 优先引用 evidence_search 与 artifact_search 返回的内容组织判断。\n"
-        "4. 尽量覆盖 must_cover 中的点，但不要为了凑点数硬写结论。\n"
+        "4. 若调用 rag_knowledge_search，只能把命中结果写成理论视角、历史参照或背景补充，不能写成当前事件事实。\n"
+        "5. 尽量覆盖 must_cover 中的点，但不要为了凑点数硬写结论。\n"
         f"{extra_output_text}"
     )
     return {"system_prompt": system_prompt, "user_prompt": user_prompt}
@@ -770,7 +777,7 @@ def _build_section_writer_tools(
         )
         return json.dumps(packet_payload, ensure_ascii=False)
 
-    return [artifact_search, evidence_search, build_section_packet, get_report_template]
+    return [artifact_search, evidence_search, build_section_packet, rag_knowledge_search, get_report_template]
 
 
 def _default_annotation_for_section(payload: ReportIR, section: CompilerSectionPlanItem) -> SectionTraceAnnotation:

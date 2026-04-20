@@ -32,6 +32,7 @@ _EXPORT_MAP: Dict[str, Tuple[str, str]] = {
     "policy_document_lookup_tool": (".knowledge_tools", "policy_document_lookup_tool"),
     "reference_search_tool": (".knowledge_tools", "reference_search_tool"),
     "theory_matcher_tool": (".knowledge_tools", "theory_matcher_tool"),
+    "rag_knowledge_search": (".rag_knowledge_tools", "rag_knowledge_search"),
     "claim_verifier_tool": (".retrieval_tools", "claim_verifier_tool"),
     "content_focus_compare_tool": (".retrieval_tools", "content_focus_compare_tool"),
     "raw_item_search_tool": (".retrieval_tools", "raw_item_search_tool"),

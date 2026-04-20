@@ -1180,6 +1180,7 @@ class CompilerWriterContext(BaseModel):
     basic_analysis_insight: Dict[str, Any] = Field(default_factory=dict)
     bertopic_snapshot: Dict[str, Any] = Field(default_factory=dict)
     bertopic_insight: Dict[str, Any] = Field(default_factory=dict)
+    rag_background: Dict[str, Any] = Field(default_factory=dict)
     section_figure_refs: Dict[str, List[Dict[str, str]]] = Field(default_factory=dict)
 
 
@@ -2062,6 +2063,15 @@ class ClaimVerificationRecord(BaseModel):
     confidence: float = Field(default=0.0, description="核验置信度")
 
 
+class BackgroundReference(BaseModel):
+    knowledge_type: str = Field(default="", description="背景知识类型")
+    title: str = Field(default="", description="来源标题")
+    snippet: str = Field(default="", description="背景片段")
+    source_path: str = Field(default="", description="来源路径")
+    score: float = Field(default=0.0, description="相关度分数")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="额外元数据")
+
+
 class SectionPacket(BaseModel):
     section_id: str = Field(..., description="章节唯一键")
     section_goal: str = Field(default="", description="章节目标")
@@ -2070,6 +2080,7 @@ class SectionPacket(BaseModel):
     key_metrics: List[MetricRecord] = Field(default_factory=list, description="关键指标")
     evidence_cards: List[EvidenceCard] = Field(default_factory=list, description="证据卡")
     counterevidence: List[EvidenceCard] = Field(default_factory=list, description="反证卡")
+    background_refs: List[BackgroundReference] = Field(default_factory=list, description="背景参考，不作为事实证据")
     uncertainty_notes: List[str] = Field(default_factory=list, description="不确定性说明")
     chart_data_refs: List[Dict[str, Any]] = Field(default_factory=list, description="图表引用")
 

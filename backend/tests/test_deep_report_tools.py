@@ -40,7 +40,8 @@ from src.report.deep_report.payloads import (
 )
 from src.report.deep_report.agent_tools import get_corpus_coverage, retrieve_evidence_cards
 from src.report.evidence_retriever import search_raw_records
-from src.report.tools import get_report_tool_catalog, select_report_tools
+from src.report.capability_manifest import RUNTIME_SUBAGENT
+from src.report.tools import get_report_tool_catalog, select_report_tools, rag_knowledge_search
 from src.utils.setting.paths import get_data_root
 
 
@@ -909,6 +910,23 @@ class DeepReportToolsTests(unittest.TestCase):
         self.assertEqual(packet_payload["section_packet"]["canonical_intent"], "timeline")
         self.assertEqual(packet_payload["section_packet"]["original_section_title"], "事件脉络与传播演变")
         self.assertEqual(packet.section_packet.section_id, "事件脉络与传播演变")
+        self.assertEqual(packet.section_packet.background_refs, [])
+
+    def test_rag_knowledge_search_returns_background_context(self) -> None:
+        payload = json.loads(rag_knowledge_search.invoke({"query": "预制菜 餐饮 消费者争议", "knowledge_type": "cases", "top_k": 3}))
+
+        self.assertEqual(payload["context_kind"], "background_context")
+        self.assertEqual(payload["knowledge_type"], "cases")
+        self.assertLessEqual(len(payload["results"]), 3)
+        self.assertTrue(all("source_path" in item for item in payload["results"]))
+        self.assertTrue(all(item.get("knowledge_type") == "cases" for item in payload["results"]))
+
+    def test_writer_toolset_includes_rag_knowledge_search(self) -> None:
+        tool_names = [tool.name for tool in select_report_tools(runtime_target=RUNTIME_SUBAGENT, agent_name="writer")]
+        catalog_names = [item.tool_id for item in get_report_tool_catalog()]
+
+        self.assertIn("rag_knowledge_search", tool_names)
+        self.assertIn("rag_knowledge_search", catalog_names)
 
 
 if __name__ == "__main__":

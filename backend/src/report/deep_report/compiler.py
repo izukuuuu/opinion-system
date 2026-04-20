@@ -471,6 +471,7 @@ def assemble_writer_context(
     basic_analysis_insight = _pick_dict("basic_analysis_insight")
     bertopic_snapshot = _pick_dict("bertopic_snapshot")
     bertopic_insight = _pick_dict("bertopic_insight")
+    rag_background = _pick_dict("rag_background")
     return CompilerWriterContext(
         topic=payload.meta.topic_label or payload.meta.topic_identifier,
         range=payload.meta.time_scope,
@@ -493,6 +494,7 @@ def assemble_writer_context(
         basic_analysis_insight=basic_analysis_insight,
         bertopic_snapshot=bertopic_snapshot,
         bertopic_insight=bertopic_insight,
+        rag_background=rag_background,
         section_figure_refs={
             "basic_analysis_insight": [
                 {"figure_id": "fig:basic-analysis:sentiment-overview", "caption": "图1 情感分析总体"},

@@ -3640,7 +3640,7 @@ def build_section_packet_payload(*, normalized_task_json: str, section_id: str, 
     normalized_task = _load_normalized_task(normalized_task_json)
     safe_section_id = str(section_id or "").strip()
     if not safe_section_id:
-        empty_packet = {"section_id": "", "section_goal": "", "claim_candidates": [], "verified_claims": [], "key_metrics": [], "evidence_cards": [], "counterevidence": [], "uncertainty_notes": [], "chart_data_refs": []}
+        empty_packet = {"section_id": "", "section_goal": "", "claim_candidates": [], "verified_claims": [], "key_metrics": [], "evidence_cards": [], "counterevidence": [], "background_refs": [], "uncertainty_notes": [], "chart_data_refs": []}
         return {"section_packet": empty_packet, "result": empty_packet, **_base_result(normalized_task=normalized_task, tool_name="build_section_packet", error_hint=None)}
     alias_registry = normalized_task.get("section_intent_alias_registry") if isinstance(normalized_task.get("section_intent_alias_registry"), dict) else {}
     section_intent, degraded_reason = _resolve_section_intent(safe_section_id, alias_registry)
@@ -3673,6 +3673,7 @@ def build_section_packet_payload(*, normalized_task_json: str, section_id: str, 
         "key_metrics": [dict(item) for item in metrics if isinstance(item, dict)][:8],
         "evidence_cards": cards,
         "counterevidence": [dict(item) for item in (verification.get("counterevidence") or []) if isinstance(item, dict)][:6],
+        "background_refs": [],
         "uncertainty_notes": uncertainty_notes,
         "chart_data_refs": [dict(item) for item in metrics if isinstance(item, dict)][:8],
     }

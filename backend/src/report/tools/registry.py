@@ -42,6 +42,7 @@ from .knowledge_base_tools import (
     search_reference_insights,
 )
 from .knowledge_tools import policy_document_lookup_tool, reference_search_tool, theory_matcher_tool
+from .rag_knowledge_tools import rag_knowledge_search
 from .retrieval_tools import (
     claim_verifier_tool,
     content_focus_compare_tool,
@@ -122,6 +123,12 @@ _TOOL_SPECS: Tuple[ReportToolSpec, ...] = (
         policy_document_lookup_tool,
         capability_tags=("knowledge", "analysis"),
         runtime_tags=(RUNTIME_AGENT,),
+        tool_class=READ_TOOL,
+    ),
+    _spec(
+        rag_knowledge_search,
+        capability_tags=("knowledge", "background_context", "writer_support"),
+        runtime_tags=(RUNTIME_COORDINATOR, RUNTIME_SUBAGENT, RUNTIME_AGENT),
         tool_class=READ_TOOL,
     ),
     _spec(
@@ -320,6 +327,7 @@ REPORT_ANALYSIS_TOOLS = [
     temporal_event_window_tool,
     theory_matcher_tool,
     policy_document_lookup_tool,
+    rag_knowledge_search,
     risk_assessment_tool,
     content_focus_compare_tool,
     recommendation_tool,
@@ -385,6 +393,7 @@ SECTION_TOOL_NAME_MAP: Mapping[Tuple[str, str], Sequence[str]] = {
         "raw_item_search_tool",
         "content_focus_compare_tool",
         "theory_matcher_tool",
+        "rag_knowledge_search",
         "claim_verifier_tool",
         "reference_search_tool",
     ],
@@ -477,6 +486,7 @@ DEEP_REPORT_COORDINATOR_TOOL_IDS: Sequence[str] = (
     "get_bertopic_snapshot",
     "build_bertopic_insight",
     "build_section_packet",
+    "rag_knowledge_search",
     "get_sentiment_analysis_framework",
     "get_sentiment_theories",
     "get_sentiment_case_template",
@@ -518,6 +528,7 @@ SUBAGENT_TOOL_ID_MAP: Mapping[str, Sequence[str]] = {
         "build_basic_analysis_insight",
         "build_bertopic_insight",
         "retrieve_evidence_cards",
+        "rag_knowledge_search",
         "get_report_template",  # 新增：模板读取工具
     ),
 }
@@ -538,9 +549,9 @@ ANALYSIS_AGENT_TOOL_ID_MAP: Mapping[Tuple[str, str], Sequence[str]] = {
         "temporal_event_window_tool",
         "content_focus_compare_tool",
     ],
-    ("policy_dynamics", "mechanism_analyst"): ["theory_matcher_tool", "reference_search_tool"],
-    ("public_hotspot", "mechanism_analyst"): ["theory_matcher_tool", "reference_search_tool"],
-    ("crisis_response", "mechanism_analyst"): ["theory_matcher_tool", "reference_search_tool"],
+    ("policy_dynamics", "mechanism_analyst"): ["theory_matcher_tool", "reference_search_tool", "rag_knowledge_search"],
+    ("public_hotspot", "mechanism_analyst"): ["theory_matcher_tool", "reference_search_tool", "rag_knowledge_search"],
+    ("crisis_response", "mechanism_analyst"): ["theory_matcher_tool", "reference_search_tool", "rag_knowledge_search"],
     ("policy_dynamics", "claim_judge"): ["claim_verifier_tool"],
     ("public_hotspot", "claim_judge"): ["claim_verifier_tool"],
     ("crisis_response", "claim_judge"): ["claim_verifier_tool"],

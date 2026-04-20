@@ -89,23 +89,8 @@
       </div>
     </section>
 
-    <section v-if="fullReport" class="grid gap-6 xl:grid-cols-[280px,minmax(0,1fr)]">
+    <section v-if="fullReport" class="grid gap-6 xl:grid-cols-[220px,minmax(0,1fr)]">
       <aside class="space-y-6 xl:sticky xl:top-24 xl:self-start">
-        <section class="card-surface space-y-4 p-5">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">报告信息</p>
-            <h3 class="mt-2 text-lg font-semibold text-primary">{{ reportTitle }}</h3>
-            <p class="mt-2 text-sm text-secondary">{{ reportSubtitle }}</p>
-          </div>
-          <div class="space-y-2 text-sm text-secondary">
-            <p>{{ fullReport.rangeText || reportRange }}</p>
-            <p v-if="sceneLabel">场景：{{ sceneLabel }}</p>
-            <p v-if="templateName">模板：{{ templateName }}</p>
-            <p>插图资源：{{ assetsCount }} 个</p>
-            <p v-if="fullReportState.lastLoaded">读取时间：{{ fullReportState.lastLoaded }}</p>
-          </div>
-        </section>
-
         <section class="card-surface space-y-4 p-5">
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">章节导航</p>
@@ -173,23 +158,17 @@ const {
 } = useReportGeneration()
 
 const fullReport = computed(() => (fullReportData.value && typeof fullReportData.value === 'object' ? fullReportData.value : null))
-const meta = computed(() => (fullReport.value?.meta && typeof fullReport.value.meta === 'object' ? fullReport.value.meta : {}))
 const markdown = computed(() => String(fullReport.value?.markdown || '').trim())
 const reportIr = computed(() => (fullReport.value?.report_ir && typeof fullReport.value.report_ir === 'object' ? fullReport.value.report_ir : {}))
 const artifactManifest = computed(() => (fullReport.value?.artifact_manifest && typeof fullReport.value.artifact_manifest === 'object' ? fullReport.value.artifact_manifest : {}))
 const reportTitle = computed(() => fullReport.value?.title || '正式文稿')
-const reportSubtitle = computed(() => fullReport.value?.subtitle || '正式 Markdown 报告')
-const reportRange = computed(() => fullReport.value?.rangeText || '-- → --')
-const sceneLabel = computed(() => String(meta.value.scene_label || '').trim())
-const templateName = computed(() => String(meta.value.template_name || '').trim())
-const assetsCount = computed(() => (Array.isArray(fullReport.value?.assets) ? fullReport.value.assets.length : 0))
 const reportHtml = computed(() => renderAiReportMarkdown(markdown.value, {
   assets: fullReport.value?.assets || [],
   reportIr: reportIr.value,
   artifactManifest: artifactManifest.value
 }))
-const tocItems = computed(() => extractMarkdownToc(markdown.value))
 const figureContractMap = computed(() => buildFigureContractMap(reportIr.value, artifactManifest.value))
+const tocItems = computed(() => extractMarkdownToc(markdown.value))
 const markdownRootRef = ref(null)
 
 const topicSelectOptions = computed(() => topicOptions.value.map((option) => ({ value: option, label: option })))

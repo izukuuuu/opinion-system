@@ -1,0 +1,35 @@
+{
+  "version": "rag-manifest.v1",
+  "knowledge_types": {
+    "methodology": {
+      "label": "方法论库",
+      "directory": "methodology",
+      "description": "舆情分析方法论、理论框架、综述型研究资料。",
+      "writer_auto_allowed": true
+    },
+    "cases": {
+      "label": "案例库",
+      "directory": "cases",
+      "description": "历史案例、事件复盘、相似争议情境材料。",
+      "writer_auto_allowed": true
+    },
+    "expert_notes": {
+      "label": "专家研判库",
+      "directory": "expert_notes",
+      "description": "专家研判、专题笔记、专家观点资料。",
+      "writer_auto_allowed": true
+    },
+    "youth_insight": {
+      "label": "青年心态库",
+      "directory": "youth_insight",
+      "description": "青年群体画像、青年心态、代际特征材料。",
+      "writer_auto_allowed": true
+    },
+    "policy": {
+      "label": "政策法规库",
+      "directory": "policy",
+      "description": "政策、法规、治理规范、官方制度文件。",
+      "writer_auto_allowed": false
+    }
+  }
+}
