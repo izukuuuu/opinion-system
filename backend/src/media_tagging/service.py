@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -17,6 +18,19 @@ REGISTRY_ROOT = get_data_root() / "_media_registry"
 REGISTRY_PATH = REGISTRY_ROOT / "registry.json"
 DEFAULT_SAMPLE_LIMIT = 3
 READ_CHUNK_SIZE = 2000
+
+# 文件写入锁，防止并发写入冲突
+_file_locks: Dict[str, threading.Lock] = {}
+_global_lock = threading.Lock()
+
+
+def _get_file_lock(path: Path) -> threading.Lock:
+    """获取文件级别的锁。"""
+    key = str(path)
+    with _global_lock:
+        if key not in _file_locks:
+            _file_locks[key] = threading.Lock()
+        return _file_locks[key]
 
 # ── 内建命中词表（用于 suggested_label 推断，不替代人工打标）──────────────
 # 完全命中官方媒体（归一化后精确匹配）
@@ -106,17 +120,44 @@ def _ensure_registry_root() -> None:
 def _load_json(path: Path, default: Any) -> Any:
     if not path.exists():
         return default
-    try:
-        with path.open("r", encoding="utf-8") as stream:
-            return json.load(stream)
-    except Exception:
-        return default
+    lock = _get_file_lock(path)
+    with lock:
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                return json.load(stream)
+        except json.JSONDecodeError as e:
+            # JSON 解析错误，记录日志
+            print(f"[WARN] JSON 解析失败: {path}, 错误: {e}")
+            return default
+        except UnicodeDecodeError as e:
+            # UTF-8 编码错误，文件损坏
+            print(f"[ERROR] 文件编码损坏: {path}, 错误: {e}")
+            return default
+        except Exception as e:
+            print(f"[ERROR] 文件读取失败: {path}, 错误: {e}")
+            return default
 
 
 def _write_json(path: Path, payload: Any) -> None:
+    """原子写入 JSON 文件，带锁保护，避免并发写入和写入中断导致文件损坏。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as stream:
-        json.dump(payload, stream, ensure_ascii=False, indent=2)
+    lock = _get_file_lock(path)
+    with lock:
+        # 先写入临时文件
+        temp_path = path.with_suffix(path.suffix + ".tmp")
+        try:
+            with temp_path.open("w", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=False, indent=2)
+            # 原子替换：rename 在同一文件系统上是原子操作
+            temp_path.replace(path)
+        except Exception:
+            # 写入失败时清理临时文件，不污染原文件
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+            raise
 
 
 def _sanitize_aliases(values: Any) -> List[str]:
@@ -584,6 +625,35 @@ def update_media_tagging_labels(
     result_dir = _resolve_media_tags_dir(topic_identifier, start_date, end_date)
     _write_json(result_dir / "summary.json", updated_summary)
     _write_json(result_dir / "candidates.json", {"generated_at": _utc_now(), "candidates": candidates})
+    return read_media_tagging_result(topic_identifier, start_date, end_date)
+
+
+def delete_media_tagging_candidates(
+    topic_identifier: str,
+    start_date: str,
+    *,
+    end_date: Optional[str] = None,
+    publisher_names: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """删除指定的候选媒体记录。"""
+    payload = read_media_tagging_result(topic_identifier, start_date, end_date)
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    delete_names = publisher_names or []
+
+    if not delete_names:
+        return payload
+
+    delete_keys = {normalize_publisher_name(name) for name in delete_names}
+    remaining = [
+        candidate for candidate in candidates
+        if normalize_publisher_name(candidate.get("publisher_name")) not in delete_keys
+    ]
+
+    updated_summary = _rebuild_summary_from_candidates(summary, remaining)
+    result_dir = _resolve_media_tags_dir(topic_identifier, start_date, end_date)
+    _write_json(result_dir / "summary.json", updated_summary)
+    _write_json(result_dir / "candidates.json", {"generated_at": _utc_now(), "candidates": remaining})
     return read_media_tagging_result(topic_identifier, start_date, end_date)
 
 

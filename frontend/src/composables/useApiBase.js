@@ -98,6 +98,15 @@ function buildUrl(path) {
 async function safeReadBody(response) {
   try {
     const text = await response.text()
+    // 尝试解析JSON提取message字段
+    try {
+      const json = JSON.parse(text)
+      if (json && typeof json.message === 'string') {
+        return json.message
+      }
+    } catch {
+      // 不是JSON，直接返回文本
+    }
     return text
   } catch {
     return ''

@@ -47,10 +47,32 @@ def get_subagent_skill_keys(agent_name: str) -> list:
     return agent_config.get("skill_keys", [])
 
 
-def get_subagent_output_files(agent_name: str) -> list:
+def _format_path_templates(values: list, *, path_tokens: Optional[Dict[str, Any]] = None) -> list:
+    tokens = {str(key): str(value) for key, value in (path_tokens or {}).items() if str(key or "").strip()}
+    output = []
+    for item in values or []:
+        template = str(item or "").strip()
+        if not template:
+            continue
+        if tokens:
+            try:
+                template = template.format(**tokens)
+            except Exception:
+                pass
+        output.append(template)
+    return output
+
+
+def get_subagent_output_files(agent_name: str, *, path_tokens: Optional[Dict[str, Any]] = None) -> list:
     """Get output files for a specific subagent."""
     agent_config = get_subagent_config(agent_name)
-    return agent_config.get("output_files", [])
+    return _format_path_templates(agent_config.get("output_files", []), path_tokens=path_tokens)
+
+
+def get_subagent_output_globs(agent_name: str, *, path_tokens: Optional[Dict[str, Any]] = None) -> list:
+    """Get output globs for a specific subagent."""
+    agent_config = get_subagent_config(agent_name)
+    return _format_path_templates(agent_config.get("output_globs", []), path_tokens=path_tokens)
 
 
 def get_subagents_by_tier(tier: int) -> list:
@@ -66,5 +88,6 @@ __all__ = [
     "get_coordinator_skill_keys",
     "get_subagent_skill_keys",
     "get_subagent_output_files",
+    "get_subagent_output_globs",
     "get_subagents_by_tier",
 ]

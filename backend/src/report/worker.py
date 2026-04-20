@@ -18,6 +18,7 @@ for path in (BACKEND_DIR, SRC_DIR):
 
 from server_support.archive_locator import compose_folder_name  # type: ignore
 from server_support.topic_context import TopicContext  # type: ignore
+from src.project import get_project_manager  # type: ignore
 from src.report.deep_report import (  # type: ignore
     AI_FULL_REPORT_CACHE_FILENAME,
     REPORT_CACHE_FILENAME,
@@ -67,6 +68,8 @@ PHASE_PERCENTAGE = {
     "review": 93,
     "persist": 98,
 }
+
+PROJECT_MANAGER = get_project_manager()
 
 
 class TaskCancelled(RuntimeError):
@@ -166,6 +169,8 @@ def _run_task(task_id: str) -> None:
     start = str(request.get("start") or task.get("start") or "").strip()
     end = str(request.get("end") or task.get("end") or start).strip() or start
     mode = str(request.get("mode") or task.get("mode") or "fast").strip().lower() or "fast"
+    project_raw = str(request.get("project") or "").strip()
+    project_identifier = str(PROJECT_MANAGER.resolve_identifier(project_raw) or "").strip() if project_raw else ""
     skip_validation = bool(request.get("skip_validation"))
     aliases = [
         str(item).strip()
@@ -174,8 +179,9 @@ def _run_task(task_id: str) -> None:
     ]
     ctx = TopicContext(identifier=topic_identifier, display_name=topic_label, aliases=aliases)
     folder = compose_folder_name(start, end)
-    cache_path = bucket("reports", topic_identifier, folder) / REPORT_CACHE_FILENAME
-    full_cache_path = bucket("reports", topic_identifier, folder) / AI_FULL_REPORT_CACHE_FILENAME
+    storage_topic = f"{project_identifier}-{topic_identifier}".strip("-") if project_identifier else topic_identifier
+    cache_path = bucket("reports", storage_topic, folder) / REPORT_CACHE_FILENAME
+    full_cache_path = bucket("reports", storage_topic, folder) / AI_FULL_REPORT_CACHE_FILENAME
     LOGGER.warning(
         "report worker | task start | task=%s topic=%s start=%s end=%s mode=%s",
         task_id,
@@ -341,6 +347,7 @@ def _run_task(task_id: str) -> None:
             start,
             end,
             topic_label=topic_label,
+            project_identifier=project_identifier,
             mode=mode,
             thread_id=str(task.get("thread_id") or request.get("thread_id") or "").strip(),
             task_id=task_id,

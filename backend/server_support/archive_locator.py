@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .paths import DATA_PROJECTS_ROOT
 from .topic_context import TopicContext
 
+_MIGRATED_POINTER_FILENAME = "MIGRATED_TO.json"
+
 
 # ── File signature map per layer ───────────────────────────────────────────
 # If a layer has an entry here the directory must contain **at least one** of
@@ -139,6 +141,14 @@ class ArchiveLocator:
         # and normalised forms (built by resolve_context).
         candidates = list(self._ctx.aliases)
 
+        # Prefer project-scoped storage keys when available (reports migration).
+        project_id = str(getattr(self._ctx, "project_identifier", "") or "").strip()
+        topic_id = str(self._ctx.identifier or "").strip()
+        if project_id and topic_id:
+            scoped = f"{project_id}-{topic_id}".strip("-")
+            if scoped and scoped not in candidates:
+                candidates.insert(0, scoped)
+
         # Suffix match: scan projects root for dirs ending with any alias.
         seed_labels = [
             v for v in (self._ctx.aliases or [self._ctx.identifier])
@@ -223,19 +233,44 @@ class ArchiveLocator:
                             continue
 
                 # Compute latest mtime
+                effective_entry = entry
+                redirected = False
+                if layer == "reports":
+                    pointer = entry / _MIGRATED_POINTER_FILENAME
+                    if pointer.exists():
+                        try:
+                            import json as _json  # local import to keep module light
+
+                            payload = _json.loads(pointer.read_text(encoding="utf-8"))
+                        except Exception:
+                            payload = {}
+                        target_dir = str((payload or {}).get("target_dir") or "").strip()
+                        if target_dir:
+                            target_path = Path(target_dir)
+                            if target_path.exists() and target_path.is_dir():
+                                effective_entry = target_path
+                                redirected = True
+
                 try:
-                    latest_mtime = entry.stat().st_mtime
+                    latest_mtime = effective_entry.stat().st_mtime
                 except OSError:
                     latest_mtime = 0.0
 
                 if signatures is not None:
                     for sig_file in signatures:
-                        sig_path = entry / sig_file
+                        sig_path = effective_entry / sig_file
                         if sig_path.exists():
                             try:
                                 latest_mtime = max(latest_mtime, sig_path.stat().st_mtime)
                             except OSError:
                                 pass
+                elif redirected and layer == "reports":
+                    # Reports layer doesn't have signatures; include a light file listing
+                    # so history callers can tell something exists at the target.
+                    try:
+                        available_keys = sorted([p.name for p in effective_entry.iterdir() if p.is_file() and not p.name.startswith(".")])[:60]
+                    except Exception:
+                        available_keys = []
 
                 record_id = f"{cleaned}:{entry.name}"
                 if record_id in seen_ids:

@@ -126,15 +126,15 @@ metadata:
 ## Current Backend Contract
 
 **读取（只读）：**
-- `/workspace/state/normalized_task.json` → 提取顶层对象，传给 `normalized_task_json`
-- `/workspace/state/evidence_cards.json` → 提取 `.result[*].evidence_id` 字符串列表，传给 `evidence_ids_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json` → 提取顶层对象，传给 `normalized_task_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json` → 提取 `.result[*].evidence_id` 字符串列表，传给 `evidence_ids_json`
 
 **写入：**
-- `stance_conflict` 代理写入：`/workspace/state/actor_positions.json`
+- `stance_conflict` 代理写入：`/workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json`
   ```json
   { "status": "ok", "result": [...actor 对象列表...] }
   ```
-- `claim_actor_conflict` 代理写入：`/workspace/state/conflict_map.json`
+- `claim_actor_conflict` 代理写入：`/workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json`
   ```json
   { "status": "ok", "result": { "claim_nodes": [], "actor_positions": [], "conflict_edges": [], "resolution_states": [] } }
   ```
@@ -166,3 +166,4 @@ metadata:
 | Standpoint Theory（Hartsock / Collins） | 立场的社会位置性 | 分析边缘主体的视角为何被忽视 |
 | 话语联盟理论（Hajer, 1995） | 共享叙事的主体聚合 | 政策领域多方博弈 |
 | 辩证张力理论（Baxter & Montgomery） | 关系中不可消解的对立张力 | 组织内部长期冲突 |
+

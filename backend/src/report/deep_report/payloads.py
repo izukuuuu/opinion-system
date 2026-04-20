@@ -2206,6 +2206,11 @@ def retrieve_evidence_cards_payload(
             ),
         }
     filters = _clean_dict(filters_json)
+    sentiment_filters = {
+        str(item).strip().lower()
+        for item in (filters.get("sentiment_labels") or filters.get("sentiments") or [])
+        if str(item or "").strip()
+    }
     time_range = normalized_task.get("time_range") if isinstance(normalized_task.get("time_range"), dict) else {}
     scope_range = scope_meta.get("effective_time_range") if isinstance(scope_meta.get("effective_time_range"), dict) else {}
     if contract_binding_failed:
@@ -2281,6 +2286,11 @@ def retrieve_evidence_cards_payload(
         source_distribution.update({str(key): int(value) for key, value in (retrieval.get("source_distribution") or {}).items()})
         for item in [dict(row) for row in (retrieval.get("items") or []) if isinstance(row, dict)]:
             dedupe_key = str(item.get("url") or "").strip().lower() or f"{str(item.get('source_file') or '').strip()}:{str(item.get('source_row_index') or '').strip()}"
+            sentiment_label = str(
+                item.get("sentiment_raw") or item.get("sentiment") or item.get("emotion") or item.get("sentiment_label") or ""
+            ).strip().lower()
+            if sentiment_filters and sentiment_label not in sentiment_filters:
+                continue
             item["score"] = round(float(item.get("score") or 0.0) + max(0.0, 0.18 - variant_index * 0.05), 4)
             existing = merged.get(dedupe_key)
             if existing is None or float(item.get("score") or 0.0) > float(existing.get("score") or 0.0):
@@ -2293,11 +2303,28 @@ def retrieve_evidence_cards_payload(
         item["_semantic_profile"] = profile
         item["_intent_score"] = round(float(intent_score), 4)
         item["_rerank_signals"] = rerank_signals
-    if str(sort_by or "").strip() == "time_desc":
+    normalized_sort = str(sort_by or "").strip().lower()
+    if normalized_sort == "time_desc":
         items.sort(key=lambda item: (str(item.get("published_at") or ""), float(item.get("_intent_score") or 0.0)), reverse=True)
         selected_items = items[: offset + requested_limit]
-    elif str(sort_by or "").strip() == "time_asc":
+    elif normalized_sort == "time_asc":
         items.sort(key=lambda item: (str(item.get("published_at") or ""), -float(item.get("_intent_score") or 0.0)))
+        selected_items = items[: offset + requested_limit]
+    elif normalized_sort == "sentiment":
+        sentiment_rank = {"negative": 3, "neutral": 2, "positive": 1}
+        items.sort(
+            key=lambda item: (
+                sentiment_rank.get(
+                    str(
+                        item.get("sentiment_raw") or item.get("sentiment") or item.get("emotion") or item.get("sentiment_label") or ""
+                    ).strip().lower(),
+                    0,
+                ),
+                float(item.get("_intent_score") or 0.0),
+                float(item.get("score") or 0.0),
+            ),
+            reverse=True,
+        )
         selected_items = items[: offset + requested_limit]
     else:
         items.sort(key=lambda item: (-float(item.get("_intent_score") or 0.0), -float(item.get("score") or 0.0)))
@@ -2622,6 +2649,89 @@ def compute_report_metrics_payload(*, normalized_task_json: str, metric_scope: s
     return {"result": metrics, "metric_scope": safe_scope, "chart_data_refs": chart_data_refs, **_base_result(normalized_task=normalized_task, tool_name="compute_report_metrics", coverage=coverage, confidence=min(0.94, 0.45 + len(cards) * 0.03), trace=_trace_payload(cards, offset=0, total=len(cards)), error_hint=error_hint)}
 
 
+def _build_media_registry_lookup(normalized_task: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """从媒体打标结果构建 normalized_name -> 媒体信息 的查找表。失败时静默返回空字典。"""
+    topic = str(normalized_task.get("topic_identifier") or "").strip()
+    time_range = normalized_task.get("time_range") if isinstance(normalized_task.get("time_range"), dict) else {}
+    start = str(time_range.get("start") or "").strip()
+    end = str(time_range.get("end") or "").strip()
+    if not topic or not start:
+        return {}
+    try:
+        from src.media_tagging import build_labeled_media_payload, normalize_publisher_name  # type: ignore
+    except ImportError:
+        return {}
+    try:
+        payload = build_labeled_media_payload(topic, start, end_date=end)
+    except Exception:
+        return {}
+    labeled = payload.get("all_labeled_media") if isinstance(payload.get("all_labeled_media"), list) else []
+    lookup: Dict[str, Dict[str, Any]] = {}
+    for item in labeled:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        media_level = str(item.get("media_level") or "").strip()
+        if not name or not media_level:
+            continue
+        aliases = [str(a).strip() for a in (item.get("aliases") or []) if str(a or "").strip()]
+        entry = {"media_level": media_level, "canonical_name": name, "aliases": aliases}
+        for candidate in [name, *aliases]:
+            key = normalize_publisher_name(candidate)
+            if key:
+                lookup.setdefault(key, entry)
+    return lookup
+
+
+def _enrich_actor_counter_from_registry(actor_counter: Dict[str, Dict[str, Any]], normalized_task: Dict[str, Any]) -> None:
+    """查询媒体打标注册表，为 actor_counter 补全 is_official / organization_type / aliases，并合并同一媒体的别名主体。"""
+    registry = _build_media_registry_lookup(normalized_task)
+    if not registry:
+        return
+    try:
+        from src.media_tagging import normalize_publisher_name  # type: ignore
+    except ImportError:
+        return
+    # 第一步：找出每个主体对应的注册表命中
+    hits: Dict[str, Dict[str, Any]] = {}
+    for actor_name in list(actor_counter.keys()):
+        key = normalize_publisher_name(actor_name)
+        hit = registry.get(key)
+        if hit:
+            hits[actor_name] = hit
+    # 第二步：按 canonical_name 合并别名重复的主体（同一媒体注册表条目的不同写法）
+    canonical_to_actors: Dict[str, List[str]] = {}
+    for actor_name, hit in hits.items():
+        canonical_to_actors.setdefault(hit["canonical_name"], []).append(actor_name)
+    for canonical, actor_names in canonical_to_actors.items():
+        if len(actor_names) <= 1:
+            continue
+        primary_name = actor_names[0]
+        primary = actor_counter[primary_name]
+        for other_name in actor_names[1:]:
+            other = actor_counter.pop(other_name, None)
+            if other is None:
+                continue
+            primary["representative_evidence_ids"].extend(other["representative_evidence_ids"])
+            primary["confidence"] = round(min(0.98, primary["confidence"] + other["confidence"] * 0.3), 4)
+        if primary_name != canonical:
+            actor_counter[canonical] = actor_counter.pop(primary_name)
+            actor_counter[canonical]["name"] = canonical
+            actor_counter[canonical]["actor_id"] = f"actor-{_normalize_key(canonical)}"
+    # 第三步：用注册表数据富化主体字段
+    for actor_data in actor_counter.values():
+        key = normalize_publisher_name(actor_data.get("name") or "")
+        hit = registry.get(key)
+        if not hit:
+            continue
+        media_level = hit["media_level"]
+        actor_data["is_official"] = media_level in {"official_media", "local_media"}
+        actor_data["organization_type"] = media_level
+        if hit["aliases"]:
+            actor_data["aliases"] = hit["aliases"]
+        actor_data["confidence"] = round(min(0.98, float(actor_data.get("confidence") or 0.0) + 0.06), 4)
+
+
 def extract_actor_positions_payload(*, normalized_task_json: str, evidence_ids_json: str = "[]", actor_limit: int = 10) -> Dict[str, Any]:
     normalized_task = _load_normalized_task(normalized_task_json)
     cards = _cards_from_input(normalized_task, evidence_ids_json, intent="overview", fallback_limit=max(12, actor_limit * 2))
@@ -2632,6 +2742,7 @@ def extract_actor_positions_payload(*, normalized_task_json: str, evidence_ids_j
             current = actor_counter.setdefault(name, {"actor_id": f"actor-{_normalize_key(name)}", "name": name, "stance": str(card.get("stance_hint") or "neutral"), "stance_shift": "stable", "representative_evidence_ids": [], "conflict_actor_ids": [], "confidence": 0.0})
             current["representative_evidence_ids"].append(str(card.get("evidence_id") or "").strip())
             current["confidence"] = round(min(0.98, float(current["confidence"]) + 0.18), 4)
+    _enrich_actor_counter_from_registry(actor_counter, normalized_task)
     actors = sorted(actor_counter.values(), key=lambda item: (-len(item["representative_evidence_ids"]), item["name"]))[: max(1, min(int(actor_limit or 10), 16))]
     if len(actors) >= 2:
         leader_id = str(actors[0].get("actor_id") or "").strip()
@@ -3499,26 +3610,40 @@ _SECTION_ID_INTENT_MAP: Dict[str, str] = {
 }
 
 
-def _resolve_section_intent(section_id: str) -> str:
-    """将 section_id 映射到证据过滤 intent，精确匹配优先，未知 id 降级到 overview 并记录日志。"""
+def _resolve_section_intent(section_id: str, alias_registry: Dict[str, Any] | None = None) -> tuple[str, str]:
+    """将 section_id 映射到证据过滤 intent；支持模板章节别名映射。"""
     sid = section_id.lower()
+    normalized_sid = re.sub(r"\s+", "", sid)
+    registry = alias_registry if isinstance(alias_registry, dict) else {}
+    for item in registry.values():
+        if not isinstance(item, dict):
+            continue
+        aliases = {
+            re.sub(r"\s+", "", str(alias).strip()).lower()
+            for alias in (item.get("aliases") or [])
+            if str(alias or "").strip()
+        }
+        canonical = str(item.get("canonical_intent") or "").strip()
+        if normalized_sid in aliases and canonical:
+            return canonical, ""
     if sid in _SECTION_ID_INTENT_MAP:
-        return _SECTION_ID_INTENT_MAP[sid]
+        return _SECTION_ID_INTENT_MAP[sid], ""
     # 前缀匹配（兼容带后缀的 section_id，如 "risk_v2"）
     for key, intent in _SECTION_ID_INTENT_MAP.items():
         if sid.startswith(key):
-            return intent
-    logger.warning("build_section_packet: 未知 section_id=%r，降级为 overview intent", section_id)
-    return "overview"
+            return intent, ""
+    logger.warning("build_section_packet: 未知 section_id=%r，降级为 degraded packet", section_id)
+    return "overview", "unknown_section_intent"
 
 
-def build_section_packet_payload(*, normalized_task_json: str, section_id: str, section_goal: str = "", evidence_ids_json: str = "[]", metric_refs_json: str = "[]", claim_ids_json: str = "[]") -> Dict[str, Any]:
+def build_section_packet_payload(*, normalized_task_json: str, section_id: str, section_goal: str = "", evidence_ids_json: str = "[]", metric_refs_json: str = "[]", claim_ids_json: str = "[]", original_section_id: str = "", original_section_title: str = "") -> Dict[str, Any]:
     normalized_task = _load_normalized_task(normalized_task_json)
     safe_section_id = str(section_id or "").strip()
     if not safe_section_id:
         empty_packet = {"section_id": "", "section_goal": "", "claim_candidates": [], "verified_claims": [], "key_metrics": [], "evidence_cards": [], "counterevidence": [], "uncertainty_notes": [], "chart_data_refs": []}
         return {"section_packet": empty_packet, "result": empty_packet, **_base_result(normalized_task=normalized_task, tool_name="build_section_packet", error_hint=None)}
-    section_intent = _resolve_section_intent(safe_section_id)
+    alias_registry = normalized_task.get("section_intent_alias_registry") if isinstance(normalized_task.get("section_intent_alias_registry"), dict) else {}
+    section_intent, degraded_reason = _resolve_section_intent(safe_section_id, alias_registry)
     cards = _cards_from_input(normalized_task, evidence_ids_json, intent=section_intent, fallback_limit=10)
     metrics = _safe_parse_json(metric_refs_json, [])
     if not isinstance(metrics, list):
@@ -3537,6 +3662,26 @@ def build_section_packet_payload(*, normalized_task_json: str, section_id: str, 
         logger.warning("build_section_packet: section_id=%r 无证据卡片，packet 将为空（section_packet_thin）", safe_section_id)
     if any(str(item.get("status") or "") in {"unsupported", "contradicted"} for item in verified_claims):
         uncertainty_notes.append("部分候选判断未获稳定支持，应保守表述并保留证据边界。")
-    packet = {"section_id": safe_section_id, "section_goal": str(section_goal or "").strip() or f"围绕 {safe_section_id} 提炼可写、可核验的章节材料。", "claim_candidates": claim_candidates[:6], "verified_claims": verified_claims, "key_metrics": [dict(item) for item in metrics if isinstance(item, dict)][:8], "evidence_cards": cards, "counterevidence": [dict(item) for item in (verification.get("counterevidence") or []) if isinstance(item, dict)][:6], "uncertainty_notes": uncertainty_notes, "chart_data_refs": [dict(item) for item in metrics if isinstance(item, dict)][:8]}
+    packet = {
+        "section_id": safe_section_id,
+        "original_section_id": str(original_section_id or safe_section_id).strip(),
+        "original_section_title": str(original_section_title or original_section_id or safe_section_id).strip(),
+        "canonical_intent": section_intent,
+        "section_goal": str(section_goal or "").strip() or f"围绕 {safe_section_id} 提炼可写、可核验的章节材料。",
+        "claim_candidates": claim_candidates[:6],
+        "verified_claims": verified_claims,
+        "key_metrics": [dict(item) for item in metrics if isinstance(item, dict)][:8],
+        "evidence_cards": cards,
+        "counterevidence": [dict(item) for item in (verification.get("counterevidence") or []) if isinstance(item, dict)][:6],
+        "uncertainty_notes": uncertainty_notes,
+        "chart_data_refs": [dict(item) for item in metrics if isinstance(item, dict)][:8],
+    }
     coverage = _coverage_payload(matched_count=len(cards), sampled_count=len(verified_claims), readiness_flags=["section_packet_ready"] if cards else ["section_packet_thin"])
-    return {"section_packet": packet, "result": packet, **_base_result(normalized_task=normalized_task, tool_name="build_section_packet", coverage=coverage, counterevidence=packet["counterevidence"], confidence=min(0.94, 0.5 + len(cards) * 0.04), trace=_trace_payload(cards, offset=0, total=len(cards)))}
+    result = {
+        "section_packet": packet,
+        "result": packet,
+        "status": "degraded" if degraded_reason else "ok",
+        "degraded_reason": degraded_reason,
+        **_base_result(normalized_task=normalized_task, tool_name="build_section_packet", coverage=coverage, counterevidence=packet["counterevidence"], confidence=min(0.94, 0.5 + len(cards) * 0.04), trace=_trace_payload(cards, offset=0, total=len(cards))),
+    }
+    return result

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -24,6 +25,81 @@ from .runtime_contract import RUNTIME_CONTRACT_VERSION
 
 
 TOKEN_RE = re.compile(r"[\u4e00-\u9fffA-Za-z0-9_-]{2,24}")
+_RUNTIME_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._@:+~-]+")
+
+
+def _safe_runtime_component(value: str, *, fallback: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    normalized = _RUNTIME_COMPONENT_RE.sub("-", text).strip("-")
+    return normalized or fallback
+
+
+@dataclass(frozen=True)
+class RuntimeWorkspaceLayout:
+    project_identifier: str
+    topic_identifier: str
+    start: str
+    end: str
+
+    @property
+    def project_component(self) -> str:
+        source = self.project_identifier or self.topic_identifier
+        return _safe_runtime_component(source, fallback="topic")
+
+    @property
+    def range_component(self) -> str:
+        start = _safe_runtime_component(self.start, fallback="start")
+        end = _safe_runtime_component(self.end or self.start, fallback=start)
+        return f"{start}_{end}"
+
+    @property
+    def workspace_root(self) -> str:
+        return f"/workspace/projects/{self.project_component}/reports/{self.range_component}"
+
+    @property
+    def state_root(self) -> str:
+        return f"{self.workspace_root}/state"
+
+    @property
+    def section_packets_root(self) -> str:
+        return f"{self.state_root}/section_packets"
+
+    @property
+    def section_drafts_root(self) -> str:
+        return f"{self.state_root}/section_drafts"
+
+    @property
+    def base_context_path(self) -> str:
+        return f"{self.workspace_root}/base_context.json"
+
+    @property
+    def summary_path(self) -> str:
+        return f"{self.workspace_root}/summary.md"
+
+    def state_file(self, relative_path: str) -> str:
+        rel = str(relative_path or "").strip().lstrip("/")
+        return f"{self.state_root}/{rel}"
+
+    def state_glob(self, relative_glob: str) -> str:
+        rel = str(relative_glob or "").strip().lstrip("/")
+        return f"{self.state_root}/{rel}"
+
+
+def build_runtime_workspace_layout(
+    *,
+    project_identifier: str,
+    topic_identifier: str,
+    start: str,
+    end: str,
+) -> RuntimeWorkspaceLayout:
+    return RuntimeWorkspaceLayout(
+        project_identifier=str(project_identifier or "").strip(),
+        topic_identifier=str(topic_identifier or "").strip(),
+        start=str(start or "").strip(),
+        end=str(end or start or "").strip() or str(start or "").strip(),
+    )
 
 
 def _safe_json(path: Path) -> Any:
@@ -94,10 +170,12 @@ def _guess_peak_from_trends(trends_payload: Any) -> Dict[str, Any]:
 
 
 def _guess_sentiment(attitude_payload: Any) -> Dict[str, int]:
-    if not isinstance(attitude_payload, dict):
-        return {"positive": 0, "neutral": 0, "negative": 0}
     out = {"positive": 0, "neutral": 0, "negative": 0}
-    for key, value in attitude_payload.items():
+    if isinstance(attitude_payload, dict):
+        iterable: Iterable[Tuple[Any, Any]] = attitude_payload.items()
+    else:
+        iterable = []
+    for key, value in iterable:
         lowered = str(key or "").lower()
         total = max((int(num) for num in _iter_numbers(value)), default=0)
         if any(token in lowered for token in ("positive", "积极", "正向")):
@@ -105,6 +183,21 @@ def _guess_sentiment(attitude_payload: Any) -> Dict[str, int]:
         elif any(token in lowered for token in ("neutral", "中性")):
             out["neutral"] = max(out["neutral"], total)
         elif any(token in lowered for token in ("negative", "消极", "负向")):
+            out["negative"] = max(out["negative"], total)
+    for item in _iter_records(attitude_payload):
+        label = str(
+            item.get("name")
+            or item.get("label")
+            or item.get("sentiment")
+            or item.get("polarity")
+            or ""
+        ).strip().lower()
+        total = max((int(num) for num in _iter_numbers(item.get("value") if "value" in item else item.get("count") if "count" in item else item)), default=0)
+        if any(token in label for token in ("positive", "积极", "正向")):
+            out["positive"] = max(out["positive"], total)
+        elif any(token in label for token in ("neutral", "中性")):
+            out["neutral"] = max(out["neutral"], total)
+        elif any(token in label for token in ("negative", "消极", "负向")):
             out["negative"] = max(out["negative"], total)
     return out
 
@@ -326,14 +419,26 @@ def build_analyze_results_payload(
     }
 
 
-def build_workspace_files(base_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def build_workspace_files(
+    base_context: Dict[str, Any],
+    *,
+    layout: RuntimeWorkspaceLayout | None = None,
+) -> Dict[str, Dict[str, Any]]:
     from deepagents.backends.utils import create_file_data
 
-    files: Dict[str, Dict[str, Any]] = {}
-    files["/workspace/base_context.json"] = create_file_data(json.dumps(base_context, ensure_ascii=False, indent=2))
     task_contract = base_context.get("task_contract") if isinstance(base_context.get("task_contract"), dict) else {}
+    resolved_layout = layout or build_runtime_workspace_layout(
+        project_identifier=str(base_context.get("project_identifier") or task_contract.get("project_identifier") or "").strip(),
+        topic_identifier=str(base_context.get("topic_identifier") or task_contract.get("topic_identifier") or "").strip(),
+        start=str((base_context.get("time_range") or {}).get("start") or task_contract.get("start") or "").strip(),
+        end=str((base_context.get("time_range") or {}).get("end") or task_contract.get("end") or "").strip(),
+    )
+
+    files: Dict[str, Dict[str, Any]] = {}
+    files[resolved_layout.base_context_path] = create_file_data(json.dumps(base_context, ensure_ascii=False, indent=2))
     if task_contract:
-        files["/workspace/state/task_contract.json"] = create_file_data(json.dumps(task_contract, ensure_ascii=False, indent=2))
+        task_contract_text = json.dumps(task_contract, ensure_ascii=False, indent=2)
+        files[resolved_layout.state_file("task_contract.json")] = create_file_data(task_contract_text)
     overview = base_context.get("overview") if isinstance(base_context.get("overview"), dict) else {}
     raw_digest = base_context.get("raw_digest") if isinstance(base_context.get("raw_digest"), dict) else {}
     sample_lines = []
@@ -355,12 +460,41 @@ def build_workspace_files(base_context: Dict[str, Any]) -> Dict[str, Dict[str, A
         "## 样本摘录",
         *sample_lines[:12],
     ]
-    files["/workspace/summary.md"] = create_file_data("\n".join(summary_md).strip())
+    summary_text = "\n".join(summary_md).strip()
+    files[resolved_layout.summary_path] = create_file_data(summary_text)
     # Keep the state directory available for agent writes without pre-creating
     # individual payload files that can trigger "already exists" write errors.
-    files["/workspace/state/.keep"] = create_file_data("")
+    files[resolved_layout.state_file(".keep")] = create_file_data("")
     return files
 
 
 def ensure_cache_dir(topic_identifier: str, start: str, end: str) -> Path:
-    return ensure_bucket("reports", topic_identifier, compose_folder_name(start, end))
+    return ensure_cache_dir_v2(topic_identifier, start, end)
+
+
+def _safe_storage_component(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    # Disallow path separators to avoid escaping the data root.
+    return text.replace("\\", "-").replace("/", "-").strip("-")
+
+
+def resolve_report_storage_topic(*, topic_identifier: str, project_identifier: str = "") -> str:
+    """Build the storage topic for report artifacts.
+
+    New format (preferred): <project_identifier>-<topic_identifier>
+    Legacy format: <topic_identifier>
+    """
+    topic = _safe_storage_component(topic_identifier)
+    project = _safe_storage_component(project_identifier)
+    if project and topic and not topic.startswith(f"{project}-"):
+        return f"{project}-{topic}"
+    return topic or project or "topic"
+
+
+def ensure_cache_dir_v2(topic_identifier: str, start: str, end: str, *, project_identifier: str = "") -> Path:
+    project_component = _safe_storage_component(project_identifier) or _safe_storage_component(topic_identifier) or "topic"
+    report_dir = get_data_root() / "projects" / project_component / "reports" / compose_folder_name(start, end)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    return report_dir

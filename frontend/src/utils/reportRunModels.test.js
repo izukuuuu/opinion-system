@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDebugEvent, buildRunConsoleViewModel } from './reportRunModels'
+import { buildDebugEvent, buildRunConsoleViewModel, subagentLabel } from './reportRunModels'
 
 describe('reportRunModels', () => {
   it('builds a failure debug event with next step guidance', () => {
@@ -74,10 +74,10 @@ describe('reportRunModels', () => {
     expect(vm.decisionObservability.utilityDecision).toBe('fallback_recompile')
     expect(vm.decisionObservability.utilityDecisionLabel).toBe('待补全')
     expect(vm.artifactObservability.items.length).toBeGreaterThan(0)
-    expect(vm.approvalObservability.compactStatus).toBe('未触发审批')
-    expect(vm.runtimeDiagnostics.runtimeModeLabel).toBe('Deep Coordinator')
+    expect(vm.approvalObservability.compactStatus).toBe('暂未触发')
+    expect(vm.runtimeDiagnostics.runtimeModeLabel).toBe('深度分析主控')
     expect(vm.runtimeDiagnostics.checkpointBackendLabel).toBe('SQLITE')
-    expect(vm.runtimeDiagnostics.tracingLabel).toContain('LangSmith')
+    expect(vm.runtimeDiagnostics.tracingLabel).toContain('已开启')
   })
 
   it('keeps intelligence tool events visible while filtering low-signal file io noise', () => {
@@ -396,6 +396,75 @@ describe('reportRunModels', () => {
     expect(vm.todoObservability.items[1].isCurrent).toBe(true)
   })
 
+  it('prefers tier todos as the main stage timeline when available', () => {
+    const vm = buildRunConsoleViewModel({
+      id: 'rp-tier',
+      threadId: 'thread-tier',
+      topic: '专题 Tier',
+      start: '2026-04-01',
+      end: '2026-04-07',
+      status: 'running',
+      phase: 'interpret',
+      todos: [
+        { id: 'tier-0', label: '范围确认与检索冻结', status: 'completed', detail: '已冻结检索合同。', agents: ['retrieval_router'], tier: 0 },
+        { id: 'tier-1', label: '证据与主题演化', status: 'running', detail: '证据与主题演化正在执行。', agents: ['archive_evidence_organizer', 'bertopic_evolution_analyst'], tier: 1 },
+        { id: 'tier-2', label: '时间线与立场', status: 'pending', detail: '等待时间线与主体立场分析。', agents: ['timeline_analyst', 'stance_conflict'], tier: 2 }
+      ]
+    })
+
+    expect(vm.stageTimeline).toHaveLength(3)
+    expect(vm.stageTimeline[0].id).toBe('tier-0')
+    expect(vm.stageTimeline[1].label).toBe('证据与主题演化')
+    expect(vm.stageTimeline[1].detail).toContain('正在执行')
+    expect(vm.stageTimeline[1].isCurrent).toBe(true)
+    expect(vm.todoObservability.items[1].agents).toContain('主题演化')
+  })
+
+  it('ignores legacy non-tier todo events when tier todo events are present', () => {
+    const vm = buildRunConsoleViewModel({
+      id: 'rp-tier-priority',
+      threadId: 'thread-tier-priority',
+      topic: '专题 Tier Priority',
+      start: '2026-04-01',
+      end: '2026-04-07',
+      status: 'running',
+      phase: 'interpret',
+      events: [
+        {
+          event_id: 1,
+          type: 'todo.updated',
+          ts: '2026-04-18T11:00:00Z',
+          payload: {
+            todos: [
+              { id: 'todo-1', label: '创建 section_drafts 目录并写入 overview.json', status: 'running' },
+              { id: 'todo-2', label: '写入 summary.json', status: 'pending' }
+            ]
+          }
+        },
+        {
+          event_id: 2,
+          type: 'todo.updated',
+          ts: '2026-04-18T11:00:10Z',
+          payload: {
+            todos: [
+              { id: 'tier-0', label: '范围确认与检索冻结', status: 'completed', detail: '已冻结检索合同。', tier: 0 },
+              { id: 'tier-1', label: '证据与主题演化', status: 'running', detail: '证据与主题演化正在执行。', tier: 1 }
+            ]
+          }
+        }
+      ]
+    })
+
+    expect(vm.stageTimeline[0].id).toBe('tier-0')
+    expect(vm.stageTimeline[1].label).toBe('证据与主题演化')
+    expect(vm.todoObservability.items[0].label).toBe('范围确认与检索冻结')
+  })
+
+  it('maps newly added exploration subagents to stable labels', () => {
+    expect(subagentLabel('bertopic_evolution_analyst')).toBe('主题演化')
+    expect(subagentLabel('event_analyst')).toBe('事件分析')
+  })
+
   it('surfaces graph validation and compile gate events in the debug console', () => {
     const vm = buildRunConsoleViewModel({
       id: 'rp-graph',
@@ -460,5 +529,34 @@ describe('reportRunModels', () => {
     expect(vm.artifacts.find((item) => item.key === 'validation_result')?.ready).toBe(true)
     expect(vm.debugEvents[0].title).toContain('正式编译已阻止')
     expect(vm.debugEvents[1].title).toContain('单元验证')
+  })
+
+  it('humanizes utility judge receipts instead of exposing internal graph jargon', () => {
+    const model = buildDebugEvent({
+      event_id: 35,
+      type: 'agent.memo',
+      ts: '2026-04-18T12:22:28Z',
+      agent: 'decision_utility_judge',
+      payload: {
+        stage_id: 'validation',
+        tool_name: 'judge_decision_utility',
+        decision: 'fallback_recompile',
+        decision_summary: '当前裁决为 fallback_recompile。',
+        skip_reason: 'object_scope；key_actors；primary_contradiction',
+        next_action: '停止继续 fan-out，保留空证据或空结构边界并重新编译。',
+        counts: {
+          matched_count: 0,
+          missing_dimensions_count: 12,
+          platform_count: 0,
+          sampled_count: 1
+        }
+      }
+    })
+
+    expect(model.title).toContain('评估成稿条件')
+    expect(model.message).toBe('当前内容还不够完整，暂不直接进入成稿。')
+    expect(model.nextStep).toBe('当前证据不足，系统会保留缺失说明并重组结果。')
+    expect(model.detailLines).toContain('计数：命中：0，缺口维度：12，平台：0，采样：1')
+    expect(model.detailLines).toContain('跳过原因：结论对象还不够明确；关键主体还不够完整；主要矛盾还不够清楚')
   })
 })

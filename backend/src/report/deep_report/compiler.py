@@ -450,12 +450,27 @@ def assemble_writer_context(
     style_profile: CompilerStyleProfile | Dict[str, Any] | None = None,
     layout_plan: CompilerLayoutPlan | Dict[str, Any] | None = None,
     section_budget: CompilerSectionBudget | Dict[str, Any] | None = None,
+    supporting_payload: Dict[str, Any] | None = None,
 ) -> CompilerWriterContext:
     payload = _ensure_ir(ir)
     scene = scene_profile if isinstance(scene_profile, CompilerSceneProfile) else CompilerSceneProfile.model_validate(scene_profile or {})
     style = style_profile if isinstance(style_profile, CompilerStyleProfile) else CompilerStyleProfile.model_validate(style_profile or {})
     layout = layout_plan if isinstance(layout_plan, CompilerLayoutPlan) else CompilerLayoutPlan.model_validate(layout_plan or {})
     budget = section_budget if isinstance(section_budget, CompilerSectionBudget) else CompilerSectionBudget.model_validate(section_budget or {})
+    support = supporting_payload if isinstance(supporting_payload, dict) else {}
+    report_data = support.get("report_data") if isinstance(support.get("report_data"), dict) else {}
+
+    def _pick_dict(key: str) -> Dict[str, Any]:
+        root_value = support.get(key)
+        if isinstance(root_value, dict) and root_value:
+            return root_value
+        report_data_value = report_data.get(key)
+        return report_data_value if isinstance(report_data_value, dict) else {}
+
+    basic_analysis_snapshot = _pick_dict("basic_analysis_snapshot")
+    basic_analysis_insight = _pick_dict("basic_analysis_insight")
+    bertopic_snapshot = _pick_dict("bertopic_snapshot")
+    bertopic_insight = _pick_dict("bertopic_insight")
     return CompilerWriterContext(
         topic=payload.meta.topic_label or payload.meta.topic_identifier,
         range=payload.meta.time_scope,
@@ -473,6 +488,19 @@ def assemble_writer_context(
             "mechanism_paths": len(payload.mechanism_summary.amplification_paths),
             "risks": len(payload.risk_register.risks),
             "unresolved": len(payload.unresolved_points.items),
+        },
+        basic_analysis_snapshot=basic_analysis_snapshot,
+        basic_analysis_insight=basic_analysis_insight,
+        bertopic_snapshot=bertopic_snapshot,
+        bertopic_insight=bertopic_insight,
+        section_figure_refs={
+            "basic_analysis_insight": [
+                {"figure_id": "fig:basic-analysis:sentiment-overview", "caption": "图1 情感分析总体"},
+                {"figure_id": "fig:basic-analysis:keywords-wordcloud", "caption": "图2 高频关键词词云"},
+            ],
+            "bertopic_insight": [
+                {"figure_id": "fig:bertopic:temporal-evolution", "caption": "图3 主题演变图"},
+            ],
         },
     )
 
@@ -529,17 +557,42 @@ def build_section_plan(
     layout_plan: CompilerLayoutPlan | Dict[str, Any],
     section_budget: CompilerSectionBudget | Dict[str, Any],
     scene_profile: CompilerSceneProfile | Dict[str, Any] | None = None,
+    supporting_payload: Dict[str, Any] | None = None,
 ) -> SectionPlan:
     """构建章节规划，优先使用模板章节，fallback 到布局规划章节."""
     _ = _ensure_ir(ir)
     layout = layout_plan if isinstance(layout_plan, CompilerLayoutPlan) else CompilerLayoutPlan.model_validate(layout_plan or {})
     budget = section_budget if isinstance(section_budget, CompilerSectionBudget) else CompilerSectionBudget.model_validate(section_budget or {})
     budget_map = {item.section_id: item.target_words for item in budget.sections}
+    support = supporting_payload if isinstance(supporting_payload, dict) else {}
+    support_report_data = support.get("report_data") if isinstance(support.get("report_data"), dict) else {}
+
+    def _pick_support_dict(key: str) -> Dict[str, Any]:
+        root_value = support.get(key)
+        if isinstance(root_value, dict) and root_value:
+            return root_value
+        report_data_value = support_report_data.get(key)
+        return report_data_value if isinstance(report_data_value, dict) else {}
+
+    basic_analysis_insight = _pick_support_dict("basic_analysis_insight")
+    bertopic_insight = _pick_support_dict("bertopic_insight")
+
+    def _has_insight(payload: Dict[str, Any]) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        if str(payload.get("summary") or "").strip():
+            return True
+        findings = payload.get("key_findings")
+        return bool(isinstance(findings, list) and any(str(item or "").strip() for item in findings))
+
+    insert_basic_analysis = _has_insight(basic_analysis_insight)
+    insert_bertopic = _has_insight(bertopic_insight)
 
     # 章节与数据源的映射
     group_map = {
         "executive_summary": ["narrative_views", "claim_set", "risk_register", "unresolved_points"],
         "监测口径与样本说明": ["meta", "evidence_ledger"],
+        "监测口径与样本边界": ["meta", "evidence_ledger"],
         "摘要": ["narrative_views", "claim_set", "risk_register"],
         "事件演变": ["timeline", "evidence_ledger", "claim_set"],
         "传播路径": ["mechanism_summary", "timeline", "evidence_ledger"],
@@ -548,6 +601,8 @@ def build_section_plan(
         "深层动因": ["mechanism_summary", "agenda_frame_map", "conflict_map"],
         "影响与动作": ["risk_register", "recommendation_candidates", "utility_assessment"],
         "附录": ["evidence_ledger", "citations"],
+        "basic_analysis_insight": ["basic_analysis_insight", "basic_analysis_snapshot", "meta"],
+        "bertopic_insight": ["bertopic_insight", "bertopic_snapshot", "meta"],
         # fallback IDs
         "claims": ["claim_set", "evidence_ledger"],
         "agenda": ["agenda_frame_map", "evidence_ledger", "actor_registry"],
@@ -610,6 +665,41 @@ def build_section_plan(
                     },
                 )
             )
+
+        dynamic_sections: List[CompilerSectionPlanItem] = []
+        if insert_basic_analysis:
+            dynamic_sections.append(
+                CompilerSectionPlanItem(
+                    section_id="basic_analysis_insight",
+                    title="基础分析洞察",
+                    goal="围绕样本总体分布、情绪结构与高频表达形成综合判断，先给出总体现象，再解释图表所支持的判断，最后交代样本边界。",
+                    target_words=max(int(budget_map.get("basic_analysis_insight", 360)), 320),
+                    source_groups=group_map["basic_analysis_insight"],
+                    template_id=str(scene.template_id or "").strip() if scene else "",
+                    template_title="基础分析洞察",
+                    template_summary=str(basic_analysis_insight.get("summary") or "").strip(),
+                    writing_instruction="先写综合判断，再解释情感分析总体图与词云图，不要写成指标清单或技术说明。",
+                )
+            )
+        if insert_bertopic:
+            dynamic_sections.append(
+                CompilerSectionPlanItem(
+                    section_id="bertopic_insight",
+                    title="BERTopic 主题演化",
+                    goal="围绕主题簇主线、阶段迁移与演化节奏展开，先给出主线判断，再解释主题演变图所体现的阶段变化，最后交代覆盖边界。",
+                    target_words=max(int(budget_map.get("bertopic_insight", 360)), 320),
+                    source_groups=group_map["bertopic_insight"],
+                    template_id=str(scene.template_id or "").strip() if scene else "",
+                    template_title="BERTopic 主题演化",
+                    template_summary=str(bertopic_insight.get("summary") or "").strip(),
+                    writing_instruction="聚焦主题迁移与阶段切换，不要写成技术说明、模型说明或主题编号罗列。",
+                )
+            )
+
+        if dynamic_sections:
+            # 动态章节固定插在前两章之后，不再做标题锚点推断。
+            insert_at = min(2, len(sections_list))
+            sections_list[insert_at:insert_at] = dynamic_sections
         sections = sections_list
     else:
         # fallback 到布局规划章节

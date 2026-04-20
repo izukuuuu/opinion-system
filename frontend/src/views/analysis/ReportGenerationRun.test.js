@@ -46,7 +46,8 @@ const mockState = reactive({
   subagents: [{ id: 'retrieval_router', status: 'running', message: '检索中' }],
   events: [
     { event_id: 1, type: 'phase.started', ts: '2026-04-10T10:00:00Z', message: '开始并行调研' },
-    { event_id: 2, type: 'todo.updated', ts: '2026-04-11T12:23:00Z', agent: 'report_coordinator', message: '总控代理更新了任务清单（2 项）。', payload: { todos: [{ id: 'scope', label: '范围确认', status: 'completed' }, { id: 'retrieval', label: '检索路由', status: 'running' }] } }
+    { event_id: 2, type: 'todo.updated', ts: '2026-04-11T12:23:00Z', agent: 'report_coordinator', message: '总控代理更新了任务清单（2 项）。', payload: { todos: [{ id: 'scope', label: '范围确认', status: 'completed' }, { id: 'retrieval', label: '检索路由', status: 'running' }] } },
+    { event_id: 3, type: 'agent.memo', ts: '2026-04-11T12:24:00Z', agent: 'writer', message: 'writer 更新了内部执行计划，但不会覆盖主流程清单。', payload: { stage_id: 'agent_todo', todos: [{ id: 'overview', label: '写入 overview.json', status: 'running' }, { id: 'timeline', label: '写入 timeline.json', status: 'pending' }] } }
   ]
 })
 
@@ -111,7 +112,7 @@ const mountOptions = {
 }
 
 describe('ReportGenerationRun', () => {
-  it('keeps result navigation disabled without thread even if artifacts look ready', async () => {
+  it('allows result navigation from ready historical artifacts even without thread', async () => {
     mockState.threadId = ''
     mockState.artifactManifest = {
       structured_projection: { status: 'ready' },
@@ -123,8 +124,8 @@ describe('ReportGenerationRun', () => {
     const resultButton = buttons.find((item) => item.text().includes('语义报告'))
     const fullButton = buttons.find((item) => item.text().includes('正式文稿'))
 
-    expect(resultButton.attributes('disabled')).toBeDefined()
-    expect(fullButton.attributes('disabled')).toBeDefined()
+    expect(resultButton.attributes('disabled')).toBeUndefined()
+    expect(fullButton.attributes('disabled')).toBeUndefined()
 
     mockState.threadId = 'thread-1'
     mockState.artifactManifest = {}
@@ -174,9 +175,12 @@ describe('ReportGenerationRun', () => {
     const todoTab = wrapper.findAll('button').find((item) => item.text() === '清单')
     await todoTab.trigger('click')
 
-    expect(wrapper.text()).toContain('当前任务清单')
+    expect(wrapper.text()).toContain('总控任务清单')
+    expect(wrapper.text()).toContain('当前子代理计划')
     expect(wrapper.text()).toContain('检索路由')
+    expect(wrapper.text()).toContain('写入 overview.json')
     expect(wrapper.text()).toContain('总控代理更新了任务清单')
+    expect(wrapper.text()).toContain('writer 更新了内部执行计划')
   })
 
   it('shows and triggers resume-before-failure when capability is enabled', async () => {

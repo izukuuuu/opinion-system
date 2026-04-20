@@ -13,7 +13,7 @@ metadata:
 ## Goal
 
 - 先冻结任务边界，再决定后续应该优先走哪些中间对象工具。
-- 先产出 `/workspace/state/normalized_task.json`、`/workspace/state/retrieval_plan.json`、`/workspace/state/corpus_coverage.json`。
+- 先产出 `/workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json`、`/workspace/projects/{project_identifier}/reports/{report_range}/state/retrieval_plan.json`、`/workspace/projects/{project_identifier}/reports/{report_range}/state/corpus_coverage.json`。
 - 检索路径只服务于当前任务，不追求“能查的都查”。
 
 ## Reasoning Style
@@ -31,21 +31,21 @@ metadata:
 - 不要把工具清单直接复述给用户。
 - 不要把“多查一点”当作默认最优策略。
 - legacy raw-hit 工具已经从默认 tool surface 中移除；不要再假设存在 `query_documents`、`build_timeline`、`build_entity_graph` 这类入口。
-- 不要让 writer 直接接触原始检索命中；writer 只应消费 `/workspace/state/section_packets/*.json`。
+- 不要让 writer 直接接触原始检索命中；writer 只应消费 `/workspace/projects/{project_identifier}/reports/{report_range}/state/section_packets/*.json`。
 - 不要让 router 用 prose token fallback 决定 specialist；派工依据必须能回放为 typed facets 与 dispatch reason。
 
 ## Current Backend Contract
 
 **读取（只读，禁止改写）：**
-- `/workspace/base_context.json` → 提取 `task_contract.topic_identifier / start / end / contract_id / mode`（这 5 个字段只读不写）
+- `/workspace/projects/{project_identifier}/reports/{report_range}/base_context.json` → 提取 `task_contract.topic_identifier / start / end / contract_id / mode`（这 5 个字段只读不写）
 
 **写入（6 个文件，若已存在先 read 再 edit，禁止 write 覆盖）：**
-- `/workspace/state/task_derivation.json`
-- `/workspace/state/task_derivation_proposal.json`
-- `/workspace/state/normalized_task.json` — normalize_task 工具返回值
-- `/workspace/state/retrieval_plan.json` — 含 router_facets / dispatch_plan / dispatch_quality_ledger
-- `/workspace/state/dispatch_quality.json`
-- `/workspace/state/corpus_coverage.json` — get_corpus_coverage 工具返回值
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation.json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation_proposal.json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json` — normalize_task 工具返回值
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/retrieval_plan.json` — 含 router_facets / dispatch_plan / dispatch_quality_ledger
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/dispatch_quality.json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/corpus_coverage.json` — get_corpus_coverage 工具返回值
 
 **空结果/降级：**
 - 若 `coverage.readiness_flags` 含 `no_records_in_scope`，在 corpus_coverage.json 记录此状态，dispatch_quality.json 标注 `status='no_data'`，结束，禁止继续扩检。
@@ -58,7 +58,7 @@ metadata:
   - coverage 是否满足最低要求
   - 后续应优先支撑哪些 judgment artifacts
   - 是否需要扩大时间窗、增加平台或补充反证检索
-- 同时把 retrieval plan 写入 `/workspace/state/retrieval_plan.json`，至少包含：
+- 同时把 retrieval plan 写入 `/workspace/projects/{project_identifier}/reports/{report_range}/state/retrieval_plan.json`，至少包含：
   - `intent`
   - `query_variants`
   - `filters`
@@ -68,3 +68,4 @@ metadata:
   - `router_facets`
   - `dispatch_plan`
   - `dispatch_quality_ledger`
+

@@ -24,16 +24,16 @@ runtime_surfaces:
 ## Current Backend Contract
 
 **读取（只读，全部上游文件）：**
-- `/workspace/state/normalized_task.json` → 提取顶层对象，传给 `normalized_task_json`
-- `/workspace/state/risk_signals.json` → 提取 `.result` 数组，传给 `risk_signals_json`
-- `/workspace/state/actor_positions.json` → 提取 `.result` 数组，传给 `actor_positions_json`
-- `/workspace/state/agenda_frame_map.json` → 提取 `.result` 内层核心对象，传给 `agenda_frame_map_json`
-- `/workspace/state/conflict_map.json` → 提取 `.result` 内层核心对象，传给 `conflict_map_json`
-- `/workspace/state/mechanism_summary.json` → 提取 `.result` 内层核心对象，传给 `mechanism_summary_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json` → 提取顶层对象，传给 `normalized_task_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/risk_signals.json` → 提取 `.result` 数组，传给 `risk_signals_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json` → 提取 `.result` 数组，传给 `actor_positions_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/agenda_frame_map.json` → 提取 `.result` 内层核心对象，传给 `agenda_frame_map_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json` → 提取 `.result` 内层核心对象，传给 `conflict_map_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/mechanism_summary.json` → 提取 `.result` 内层核心对象，传给 `mechanism_summary_json`
 - 其余文件（corpus_coverage / evidence_cards / task_derivation）只读，用于检测上游空状态
 
 **写入：**
-- `/workspace/state/utility_assessment.json`，格式：
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/utility_assessment.json`，格式：
   ```json
   {
     "status": "ok",
@@ -62,3 +62,4 @@ runtime_surfaces:
 - 不把文风问题伪装成事实问题。
 - 没有明确问题时要说明通过理由，而不是空输出。
 - 禁止把整个包装对象传给工具参数（只传 .result 内层内容）。
+

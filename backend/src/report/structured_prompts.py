@@ -349,7 +349,7 @@ def build_full_report_risk_map_prompt(facts: Dict[str, Any]) -> str:
 def build_full_report_brief_prompt(facts: Dict[str, Any]) -> str:
     schema = {
         "core_thesis": "80-160字，说明完整报告最核心的主线判断。",
-        "tone_notes": ["最多4条，说明行文口径、边界与应保持的表达克制。"],
+        "tone_notes": ["最多4条，说明行文基调、判断边界与应保持的表达克制。"],
         "preferred_terms": ["最多8条，优先沿用方法论/知识库中的术语。"],
         "sections": [
             {

@@ -19,11 +19,11 @@ metadata:
 ## Current Backend Contract
 
 **读取（只读）：**
-- `/workspace/state/task_contract.json` → 提取 `.contract_id`，用于所有 `retrieve_evidence_cards` 调用
-- `/workspace/state/corpus_coverage.json` → 检查 `.coverage.readiness_flags`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/task_contract.json` → 提取 `.contract_id`，用于所有 `retrieve_evidence_cards` 调用
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/corpus_coverage.json` → 检查 `.coverage.readiness_flags`
 
 **写入：**
-- `/workspace/state/evidence_cards.json`，格式：
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json`，格式：
   ```json
   { “status”: “ok”, “result”: [...证据卡对象列表...], “coverage”: {...} }
   ```
@@ -48,3 +48,4 @@ metadata:
 - 证据不足时，宁可保留低置信度，也不要凑成强判断。
 - 引用索引必须能回到具体来源。
 - intent 必须从枚举白名单选取：`overview / timeline / actors / risk / claim_support / claim_counter`，禁止直接传中文词。
+

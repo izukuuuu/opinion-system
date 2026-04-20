@@ -43,6 +43,10 @@ const props = defineProps({
   clearable: {
     type: Boolean,
     default: false
+  },
+  size: {
+    type: String,
+    default: 'md' // sm | md | lg
   }
 })
 
@@ -84,6 +88,12 @@ const filteredOptions = computed(() => {
 const isSearchActive = computed(() =>
   props.searchable && (isSearchFocused.value || searchQuery.value.trim().length > 0)
 )
+
+const sizeClass = computed(() => {
+  if (props.size === 'sm') return 'app-select-trigger--sm'
+  if (props.size === 'lg') return 'app-select-trigger--lg'
+  return ''
+})
 
 function toggleDropdown() {
   if (props.disabled) return
@@ -291,6 +301,7 @@ watch(() => isOpen.value, async (open) => {
       ref="triggerRef"
       type="button"
       class="input app-select-trigger"
+      :class="sizeClass"
       :disabled="disabled"
       @click="toggleDropdown"
       @keydown="handleKeydown"

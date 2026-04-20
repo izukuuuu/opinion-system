@@ -24,8 +24,8 @@ runtime_surfaces:
 ## Current Backend Contract
 
 **读取（只读）：**
-- `/workspace/state/metrics_bundle.json` → 读取 `.result` 数组（完整指标对象列表）
-- `/workspace/state/event_analysis.json` → 读取 `.result.platform_analysis` 用于跨平台差异说明
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/metrics_bundle.json` → 读取 `.result` 数组（完整指标对象列表）
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/event_analysis.json` → 读取 `.result.platform_analysis` 用于跨平台差异说明
 
 **注意：**
 - 图表数据来自 `metrics_bundle.result`，不要直接从 `evidence_cards` 自行汇总统计数字
@@ -36,3 +36,4 @@ runtime_surfaces:
 - 不要把单一指标直接提升为综合结论。
 - 不要把图表标签当成现实世界的确定事实。
 - 平台差异必须落到内容形态、节奏或主体结构上，而非只引用数量对比。
+

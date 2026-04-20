@@ -67,9 +67,17 @@ class _GraphState(TypedDict, total=False):
     section_budget: Dict[str, Any]
     writer_context: Dict[str, Any]
     section_plan: Dict[str, Any]
+    template_brief: Dict[str, Any]
+    section_markdowns: Dict[str, str]
+    section_markdown_manifest: Dict[str, Any]
+    section_write_receipts: List[Dict[str, Any]]
+    section_trace_annotations: List[Dict[str, Any]]
+    compile_quality: str
+    degraded_sections: List[Dict[str, Any]]
     draft_bundle: Dict[str, Any]
     draft_bundle_v2: Dict[str, Any]
     validation_result_v2: Dict[str, Any]
+    factual_conformance: Dict[str, Any]
     repair_plan_v2: Dict[str, Any]
     graph_state_v2: Dict[str, Any]
     markdown: str
@@ -435,11 +443,13 @@ def _validation_failure(
     failure_type: str,
     message: str,
     patchable: bool,
+    severity: str = "error",
 ) -> ValidationFailure:
     return ValidationFailure(
         failure_id=failure_id,
         target_unit_id=unit.unit_id,
         failure_type=failure_type,
+        severity=severity,
         message=message,
         candidate_trace_refs=list(unit.trace_refs),
         candidate_derived_from=list(unit.derived_from),
@@ -449,6 +459,7 @@ def _validation_failure(
             "section_id": unit.section_id,
             "unit_type": unit.unit_type,
             "support_level": unit.support_level,
+            "trace_binding_mode": str((unit.metadata or {}).get("trace_binding_mode") or "").strip(),
         },
     )
 
@@ -465,6 +476,7 @@ def validate_draft_bundle_v2(
     known_ids = set().union(*buckets.values()) if buckets else set()
     prior_patch_count = int((bundle.metadata or {}).get("repair_patch_count") or 0)
     failures: List[ValidationFailure] = []
+    warnings: List[ValidationFailure] = []
     for index, unit in enumerate(bundle.units, start=1):
         if not str(unit.text or "").strip():
             failures.append(
@@ -477,6 +489,7 @@ def validate_draft_bundle_v2(
                 )
             )
             continue
+        trace_binding_mode = str((unit.metadata or {}).get("trace_binding_mode") or "").strip()
         trace_ids = [str(item.trace_id or "").strip() for item in unit.trace_refs if str(item.trace_id or "").strip()]
         unknown_trace_ids = [
             str(item.trace_id or "").strip()
@@ -507,19 +520,20 @@ def validate_draft_bundle_v2(
                         message="结构或过渡单元只能使用 structural support。",
                         patchable=True,
                     )
-                )
-            continue
-        if unit.unit_type in _TRACEABLE_UNIT_TYPES and not trace_ids:
-            failures.append(
-                _validation_failure(
-                    failure_id=f"missing_trace:{index}",
-                    unit=unit,
-                    failure_type="missing_trace",
-                    message="该单元缺少 trace 绑定。",
-                    patchable=bool(unit.metadata.get("legacy_evidence_ids") or unit.metadata.get("legacy_claim_ids") or unit.metadata.get("legacy_risk_ids")),
-                )
             )
             continue
+        if unit.unit_type in _TRACEABLE_UNIT_TYPES and not trace_ids:
+            if unit.unit_type != "finding" or trace_binding_mode not in {"provisional", "structural_only"}:
+                failures.append(
+                    _validation_failure(
+                        failure_id=f"missing_trace:{index}",
+                        unit=unit,
+                        failure_type="missing_trace",
+                        message="该单元缺少 trace 绑定。",
+                        patchable=bool(unit.metadata.get("legacy_evidence_ids") or unit.metadata.get("legacy_claim_ids") or unit.metadata.get("legacy_risk_ids")),
+                    )
+                )
+                continue
         if unit.unit_type == "observation":
             has_evidence = any(item.trace_kind == "evidence" for item in unit.trace_refs)
             if unit.support_level != "direct" or not has_evidence:
@@ -535,15 +549,29 @@ def validate_draft_bundle_v2(
         elif unit.unit_type == "finding":
             has_support = any(item.trace_kind in {"claim", "evidence"} for item in unit.trace_refs) or bool(unit.derived_from)
             if unit.support_level != "aggregated" or not has_support:
-                failures.append(
-                    _validation_failure(
-                        failure_id=f"unsupported_inference:{index}",
-                        unit=unit,
-                        failure_type="unsupported_inference",
-                        message="归纳判断句必须至少绑定 claim、evidence 或 derived_from。",
-                        patchable=True,
+                provisional_claims = list((unit.metadata or {}).get("provisional_claim_refs") or [])
+                provisional_evidences = list((unit.metadata or {}).get("provisional_evidence_refs") or [])
+                if trace_binding_mode in {"provisional", "structural_only"}:
+                    warnings.append(
+                        _validation_failure(
+                            failure_id=f"degraded_trace:{index}",
+                            unit=unit,
+                            failure_type="degraded_trace",
+                            message="归纳判断句已产出正文，但 trace 绑定仍处于降级状态。",
+                            patchable=bool(provisional_claims or provisional_evidences),
+                            severity="warning",
+                        )
                     )
-                )
+                else:
+                    failures.append(
+                        _validation_failure(
+                            failure_id=f"unsupported_inference:{index}",
+                            unit=unit,
+                            failure_type="unsupported_inference",
+                            message="归纳判断句必须至少绑定 claim、evidence 或 derived_from。",
+                            patchable=True,
+                        )
+                    )
         elif unit.unit_type in {"mechanism", "risk", "recommendation"}:
             if unit.support_level != "derived" or not unit.derived_from:
                 failures.append(
@@ -583,11 +611,13 @@ def validate_draft_bundle_v2(
         passed=not failures,
         failures=failures,
         patchable_failures=patchable,
+        warnings=warnings,
         gate=gate,
         repair_count=int(repair_count or 0),
         next_node=next_node,
         metadata={
             "failure_count": len(failures),
+            "warning_count": len(warnings),
             "patchable_count": len(patchable),
             "max_repairs": int(max_repairs or 0),
         },
@@ -951,8 +981,8 @@ def run_report_compilation_graph(
         style_profile = resolve_style_profile(report_ir, scene_profile)
         layout_plan = build_layout_plan(report_ir, scene_profile, style_profile)
         section_budget = build_section_budget(report_ir, scene_profile, layout_plan)
-        writer_context = assemble_writer_context(report_ir, scene_profile, style_profile, layout_plan, section_budget)
-        section_plan = build_section_plan(report_ir, layout_plan, section_budget, scene_profile)
+        writer_context = assemble_writer_context(report_ir, scene_profile, style_profile, layout_plan, section_budget, payload)
+        section_plan = build_section_plan(report_ir, layout_plan, section_budget, scene_profile, payload)
         return {
             "payload": payload,
             "report_ir": report_ir,
@@ -966,6 +996,12 @@ def run_report_compilation_graph(
             "writer_context": writer_context.model_dump(),
             "section_plan": section_plan.model_dump(),
             "execution_phase": "prepare",
+            "section_markdowns": {},
+            "section_markdown_manifest": {},
+            "section_write_receipts": [],
+            "section_trace_annotations": [],
+            "compile_quality": "healthy",
+            "degraded_sections": [],
             "rewrite_round": 0,
             "rewrite_budget": rewrite_budget,
             "rewrite_issue_count": 0,
@@ -998,91 +1034,172 @@ def run_report_compilation_graph(
             "commit_artifacts": [],
         }
 
-    def planner_agent(state: _GraphState) -> Dict[str, Any]:
-        section_plan = state.get("section_plan") if isinstance(state.get("section_plan"), dict) else {}
-        sections = section_plan.get("sections") if isinstance(section_plan.get("sections"), list) else []
-        planner_slots = [
-            {
-                "section_id": str(item.get("section_id") or "").strip(),
-                "analysis_goal": str(item.get("goal") or "").strip(),
-                "coverage_need": list(item.get("source_groups") or []),
+    def template_brief_node(state: _GraphState) -> Dict[str, Any]:
+        from .deep_writer import build_template_brief
+
+        brief = build_template_brief(
+            state.get("section_plan") or {},
+            state.get("scene_profile") or {},
+            state.get("writer_context") or {},
+        )
+        return {"template_brief": brief}
+
+    def section_writer_node(state: _GraphState) -> Dict[str, Any]:
+        from .deep_writer import write_section_markdown
+        from .schemas import CompilerSceneProfile, SectionPlan
+
+        scene = CompilerSceneProfile.model_validate(state.get("scene_profile") or {})
+        plan = SectionPlan.model_validate(state.get("section_plan") or {})
+        markdown_map: Dict[str, str] = {}
+        receipts: List[Dict[str, Any]] = []
+        degraded_sections: List[Dict[str, Any]] = []
+        for section in plan.sections:
+            _emit(
+                event_callback,
+                {
+                    "type": "graph.section.write.started",
+                    "phase": "write",
+                    "agent": "section_writer",
+                    "title": f"{section.section_id} 章节写作已启动",
+                    "message": f"正在生成 {section.title} 章节正文。",
+                    "payload": {"section_id": section.section_id, "title": section.title},
+                },
+            )
+            result = write_section_markdown(
+                state.get("report_ir") or {},
+                section,
+                scene,
+                template_brief=state.get("template_brief") or {},
+                writer_context=state.get("writer_context") or {},
+                section_plan=plan,
+            )
+            markdown_map[result.section_id] = str(result.markdown_body or "").strip()
+            receipt = {
+                "section_id": result.section_id,
+                "title": result.title,
+                "artifact_search_receipts": list(result.artifact_search_receipts),
+                "evidence_search_receipts": list(result.evidence_search_receipts),
+                "packet_receipts": list(result.packet_receipts),
+                "degraded_reason": str(result.degraded_reason or "").strip(),
             }
-            for item in sections
-            if isinstance(item, dict) and str(item.get("section_id") or "").strip()
-        ]
+            receipts.append(receipt)
+            if str(result.degraded_reason or "").strip():
+                degraded_sections.append({"section_id": result.section_id, "title": result.title, "reason": str(result.degraded_reason or "").strip()})
+            _emit(
+                event_callback,
+                {
+                    "type": "graph.section.write.completed",
+                    "phase": "write",
+                    "agent": "section_writer",
+                    "title": f"{section.section_id} 章节写作已完成",
+                    "message": f"{section.title} 章节正文已生成。",
+                    "payload": {"section_id": result.section_id, "title": result.title, "has_markdown": bool(str(result.markdown_body or "").strip()), "degraded_reason": str(result.degraded_reason or "").strip()},
+                },
+            )
         return {
-            "section_plan": {
-                **section_plan,
-                "planner_slots": planner_slots,
+            "section_markdowns": markdown_map,
+            "section_markdown_manifest": {
+                "section_order": [section.section_id for section in plan.sections],
+                "items": [
+                    {
+                        "section_id": section.section_id,
+                        "title": section.title,
+                        "markdown_path": f"state/section_markdowns/{section.section_id}.md",
+                        "has_markdown": bool(str(markdown_map.get(section.section_id) or "").strip()),
+                    }
+                    for section in plan.sections
+                ],
             },
-            "planner_slots": planner_slots,
+            "section_write_receipts": receipts,
+            "degraded_sections": degraded_sections,
+            "compile_quality": "degraded" if degraded_sections else "healthy",
         }
 
-    def existing_analysis_workers_subgraph(state: _GraphState) -> Dict[str, Any]:
-        report_ir = state.get("report_ir") if isinstance(state.get("report_ir"), dict) else {}
-        return {"report_ir": report_ir}
+    def bundle_from_sections_node(state: _GraphState) -> Dict[str, Any]:
+        from .deep_writer import compose_bundle_from_section_markdowns
+        from .schemas import CompilerSceneProfile, SectionPlan
 
-    def ir_merge(state: _GraphState) -> Dict[str, Any]:
-        return {"report_ir": state.get("report_ir") or {}}
-
-    def trace_binder(state: _GraphState) -> Dict[str, Any]:
-        # 正式文稿统一走模板驱动写作，确定性拼接仅保留历史兼容函数。
-        scene_profile = state.get("scene_profile") or {}
-        from .schemas import CompilerSceneProfile
-
-        scene = CompilerSceneProfile.model_validate(scene_profile)
-        draft_bundle_v2 = compile_draft_units(
-            state["report_ir"],
-            state["section_plan"],
+        scene = CompilerSceneProfile.model_validate(state.get("scene_profile") or {})
+        plan = SectionPlan.model_validate(state.get("section_plan") or {})
+        section_results = [
+            {
+                "section_id": str(item.get("section_id") or "").strip(),
+                "title": str(item.get("title") or "").strip(),
+                "markdown_body": str((state.get("section_markdowns") or {}).get(str(item.get("section_id") or "").strip()) or "").strip(),
+                "artifact_search_receipts": list(item.get("artifact_search_receipts") or []),
+                "evidence_search_receipts": list(item.get("evidence_search_receipts") or []),
+                "packet_receipts": list(item.get("packet_receipts") or []),
+                "degraded_reason": str(item.get("degraded_reason") or "").strip(),
+            }
+            for item in (state.get("section_write_receipts") or [])
+            if isinstance(item, dict) and str(item.get("section_id") or "").strip()
+        ]
+        draft_bundle_v2 = compose_bundle_from_section_markdowns(
+            state.get("report_ir") or {},
+            plan,
             scene,
+            section_results,
+            template_brief=state.get("template_brief") or {},
         )
         draft_bundle = _legacy_draft_bundle_from_v2(draft_bundle_v2)
         return {
             "draft_bundle": draft_bundle.model_dump(),
             "draft_bundle_v2": draft_bundle_v2.model_dump(),
+            "draft_bundle_current": draft_bundle_v2.model_dump(),
+            "degraded_sections": list(draft_bundle_v2.metadata.get("degraded_sections") or []) if isinstance(draft_bundle_v2.metadata, dict) else list(state.get("degraded_sections") or []),
+            "compile_quality": "degraded" if list((draft_bundle_v2.metadata or {}).get("degraded_sections") or []) else str(state.get("compile_quality") or "healthy"),
         }
 
-    def section_realizer_worker(state: _GraphState) -> Dict[str, Any]:
-        bundle = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state.get("draft_bundle_v2") or {})
-        slot = state.get("planner_slot") if isinstance(state.get("planner_slot"), dict) else {}
-        section_id = str(slot.get("section_id") or "").strip()
-        units = [
-            unit.model_copy(
-                update={
-                    "validation_status": "pending",
-                    "metadata": {
-                        **dict(unit.metadata or {}),
-                        "planner_slot": slot,
-                    },
-                }
-            ).model_dump()
-            for unit in bundle.units
-            if str(unit.section_id or "").strip() == section_id
+    def trace_extractor_node(state: _GraphState) -> Dict[str, Any]:
+        from .deep_writer import apply_section_trace_annotations, extract_section_trace_annotations
+        from .schemas import SectionPlan
+
+        plan = SectionPlan.model_validate(state.get("section_plan") or {})
+        section_results = [
+            {
+                "section_id": section.section_id,
+                "title": section.title,
+                "markdown_body": str((state.get("section_markdowns") or {}).get(section.section_id) or "").strip(),
+            }
+            for section in plan.sections
         ]
-        return {"section_batches": [{"section_id": section_id, "units": units}]}
-
-    def section_realizer_finalize(state: _GraphState) -> Dict[str, Any]:
-        bundle = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state.get("draft_bundle_v2") or {})
-        section_batches = state.get("section_batches") if isinstance(state.get("section_batches"), list) else []
-        realized_by_section = {
-            str(item.get("section_id") or "").strip(): [
-                DraftUnitV2.model_validate(unit)
-                for unit in (item.get("units") or [])
-                if isinstance(unit, dict)
-            ]
-            for item in section_batches
-            if isinstance(item, dict) and str(item.get("section_id") or "").strip()
+        annotations = extract_section_trace_annotations(
+            state.get("report_ir") or {},
+            plan,
+            section_results,
+        )
+        for item in annotations:
+            if isinstance(item, dict) and str(item.get("status") or "").strip() == "degraded":
+                _emit(
+                    event_callback,
+                    {
+                        "type": "graph.section.trace_extract.failed",
+                        "phase": "review",
+                        "agent": "trace_extractor",
+                        "title": f"{str(item.get('section_id') or '').strip()} trace 抽取降级",
+                        "message": str(item.get("degraded_reason") or "trace_extraction_failed").strip() or "trace_extraction_failed",
+                        "payload": item,
+                    },
+                )
+        draft_bundle_v2 = apply_section_trace_annotations(state.get("draft_bundle_v2") or {}, annotations)
+        return {
+            "section_trace_annotations": annotations,
+            "draft_bundle_v2": draft_bundle_v2.model_dump(),
+            "draft_bundle_current": draft_bundle_v2.model_dump(),
+            "degraded_sections": list(draft_bundle_v2.metadata.get("degraded_sections") or []) if isinstance(draft_bundle_v2.metadata, dict) else list(state.get("degraded_sections") or []),
+            "compile_quality": "degraded" if any(str((item or {}).get("status") or "").strip() == "degraded" for item in annotations if isinstance(item, dict)) or list((draft_bundle_v2.metadata or {}).get("degraded_sections") or []) else str(state.get("compile_quality") or "healthy"),
         }
-        realized_units: List[DraftUnitV2] = []
-        for unit in bundle.units:
-            section_id = str(unit.section_id or "").strip()
-            candidates = realized_by_section.get(section_id) or []
-            if candidates:
-                realized_units.append(candidates.pop(0))
-            else:
-                realized_units.append(unit.model_copy(update={"validation_status": "pending"}))
-        realized = bundle.model_copy(update={"units": realized_units})
-        return {"draft_bundle_v2": realized.model_dump(), "section_batches": None}
+
+    def light_editor_node(state: _GraphState) -> Dict[str, Any]:
+        from .deep_writer import light_edit_draft_bundle
+        from .schemas import SectionPlan
+
+        plan = SectionPlan.model_validate(state.get("section_plan") or {})
+        bundle = light_edit_draft_bundle(state.get("draft_bundle_v2") or {}, plan)
+        return {
+            "draft_bundle_v2": bundle.model_dump(),
+            "draft_bundle_current": bundle.model_dump(),
+        }
 
     def unit_validator(state: _GraphState) -> Dict[str, Any]:
         validation = validate_draft_bundle_v2(
@@ -1091,6 +1208,7 @@ def run_report_compilation_graph(
             repair_count=int(state.get("repair_count") or 0),
             max_repairs=max_repairs,
         )
+        warning_count = len(validation.warnings)
         if not validation.passed:
             _emit_graph_event(
                 event_callback,
@@ -1099,7 +1217,17 @@ def run_report_compilation_graph(
                 phase="review",
                 title="验证失败",
                 message=f"验证失败：{len(validation.failures)} 个单元需要修复或人工复核。",
-                payload={"validation_result_v2": validation.model_dump(), "failure_count": len(validation.failures), "repair_count": int(state.get("repair_count") or 0)},
+                payload={"validation_result_v2": validation.model_dump(), "failure_count": len(validation.failures), "warning_count": warning_count, "repair_count": int(state.get("repair_count") or 0)},
+            )
+        if warning_count:
+            _emit_graph_event(
+                event_callback,
+                event_type="validation.warning",
+                node_name="unit_validator",
+                phase="review",
+                title="验证降级",
+                message=f"存在 {warning_count} 个章节处于 trace 降级状态，但不会阻塞正式文稿输出。",
+                payload={"warning_count": warning_count, "warnings": [item.model_dump() for item in validation.warnings]},
             )
         return {
             "validation_result_v2": validation.model_dump(),
@@ -1108,18 +1236,20 @@ def run_report_compilation_graph(
                     "stage": "unit_validation",
                     "repair_count": int(state.get("repair_count") or 0),
                     "failures": [item.model_dump() for item in validation.failures],
+                    "warnings": [item.model_dump() for item in validation.warnings],
                     "gate": validation.gate,
                 }
             ],
-            "execution_phase": "review" if not validation.passed else "compile",
+            "execution_phase": "compile",
             "draft_bundle_current": state.get("draft_bundle_v2") or {},
+            "compile_quality": "degraded" if (not validation.passed) or warning_count else str(state.get("compile_quality") or "healthy"),
             "progress_events": [
                 _state_progress_event(
                     event_type="compile.validation.completed",
                     node_name="unit_validator",
                     phase="review" if not validation.passed else "compile",
                     message="结构验证已完成。",
-                    payload={"passed": validation.passed, "gate": validation.gate, "failure_count": len(validation.failures)},
+                    payload={"passed": validation.passed, "gate": validation.gate, "failure_count": len(validation.failures), "warning_count": warning_count},
                 )
             ],
         }
@@ -1213,8 +1343,6 @@ def run_report_compilation_graph(
     def markdown_compiler(state: _GraphState) -> Dict[str, Any]:
         bundle_v2 = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state["draft_bundle_v2"])
         validation = ValidationResultV2.model_validate(state["validation_result_v2"])
-        if not validation.passed:
-            raise ValueError("markdown_compiler requires a validated DraftBundleV2.")
         title = str(((state.get("task") or {}).get("topic_label")) or "").strip()
         _emit_graph_event(
             event_callback,
@@ -1222,8 +1350,8 @@ def run_report_compilation_graph(
             node_name="markdown_compiler",
             phase="write",
             title="开始正式编译",
-            message="正在把 validated bundle 渲染为正式 Markdown。",
-            payload={"validated_unit_count": len(bundle_v2.units)},
+            message="正在把 section markdown 与 draft bundle 渲染为正式 Markdown。",
+            payload={"validated_unit_count": len(bundle_v2.units), "validation_passed": bool(validation.passed)},
         )
         markdown = render_markdown_from_v2(state["report_ir"], bundle_v2, title=title)
         factual = run_factual_conformance(state["report_ir"], markdown)
@@ -1244,6 +1372,7 @@ def run_report_compilation_graph(
             "rewrite_issue_count": len(factual.issues),
             "draft_bundle_current": bundle_v2.model_dump(),
             "execution_phase": "compile",
+            "compile_quality": "degraded" if (not validation.passed) or bool(factual.issues) or str(state.get("compile_quality") or "") == "degraded" else "healthy",
             "validation_issues": [
                 {
                     "stage": "semantic_conformance",
@@ -1260,7 +1389,14 @@ def run_report_compilation_graph(
                     phase="write",
                     message="正式文稿已完成一次编译。",
                     payload={"issue_count": len(factual.issues), "requires_human_review": bool(factual.requires_human_review)},
-                )
+                ),
+                _state_progress_event(
+                    event_type="compile.markdown.available",
+                    node_name="markdown_compiler",
+                    phase="persist",
+                    message="主产物 markdown 已可用。",
+                    payload={"has_markdown_output": bool(markdown.strip())},
+                ),
             ],
         }
 
@@ -1577,6 +1713,12 @@ def run_report_compilation_graph(
             section_budget=state.get("section_budget") or {},
             writer_context=state.get("writer_context") or {},
             section_plan=state.get("section_plan") or {},
+            section_markdowns={str(key): str(value or "").strip() for key, value in ((state.get("section_markdowns") or {})).items()},
+            section_markdown_manifest=state.get("section_markdown_manifest") or {},
+            section_write_receipts=list(state.get("section_write_receipts") or []),
+            section_trace_annotations=list(state.get("section_trace_annotations") or []),
+            compile_quality=str(state.get("compile_quality") or "healthy"),
+            degraded_sections=list(state.get("degraded_sections") or []),
             structured_report_current=state.get("structured_report_current") or {},
             draft_bundle_current=state.get("draft_bundle_current") or draft_bundle_v2.model_dump(),
             final_markdown_current=str(state.get("final_markdown_current") or state.get("markdown") or "").strip(),
@@ -1647,6 +1789,8 @@ def run_report_compilation_graph(
             "validation_result_v2": validation.model_dump(),
             "repair_plan_v2": state.get("repair_plan_v2") or {},
             "graph_state_v2": graph_state_v2,
+            "section_markdown_manifest": state.get("section_markdown_manifest") or {},
+            "section_trace_annotations": {"items": list(state.get("section_trace_annotations") or [])},
             "approval_records": {
                 "semantic_review_records": list(state.get("semantic_review_records") or []),
                 "review_feedback_rounds": list(state.get("review_feedback_rounds") or []),
@@ -1664,6 +1808,8 @@ def run_report_compilation_graph(
             "validation_result_v2": "validation-result.v2",
             "repair_plan_v2": "repair-plan.v2",
             "graph_state_v2": str(graph_state_v2.get("schema_version") or "deep-report-graph.v3"),
+            "section_markdown_manifest": "section-markdown-manifest.v1",
+            "section_trace_annotations": "section-trace-annotations.v1",
             "approval_records": "approval-records.v1",
             "full_markdown": "full-markdown.v1",
         }
@@ -1687,8 +1833,17 @@ def run_report_compilation_graph(
             records.append(record)
             if record.path and isinstance(record.payload, dict):
                 _upsert_json_artifact(record.path, record.payload)
+        manifest_path = artifact_paths.get("section_markdown_manifest", "")
+        if manifest_path:
+            section_dir = Path(str(manifest_path)).with_suffix("").parent / "section_markdowns"
+            section_dir.mkdir(parents=True, exist_ok=True)
+            for section_id, markdown_text in (state.get("section_markdowns") or {}).items():
+                if not str(section_id or "").strip():
+                    continue
+                (section_dir / f"{str(section_id).strip()}.md").write_text(str(markdown_text or "").strip(), encoding="utf-8")
+                (section_dir / f"{str(section_id).strip()}.md").touch()
         final_output = {
-            "status": "completed" if not state.get("review_required") else "failed",
+            "status": "completed_with_warnings" if not state.get("review_required") and str(state.get("compile_quality") or "") == "degraded" else "completed" if not state.get("review_required") else "failed",
             "policy_registry": state.get("policy_registry") or {},
             "scene_profile": state.get("scene_profile") or {},
             "style_profile": state.get("style_profile") or {},
@@ -1696,6 +1851,10 @@ def run_report_compilation_graph(
             "section_budget": state.get("section_budget") or {},
             "writer_context": state.get("writer_context") or {},
             "section_plan": state.get("section_plan") or {},
+            "section_markdowns": state.get("section_markdowns") or {},
+            "section_markdown_manifest": state.get("section_markdown_manifest") or {},
+            "section_trace_annotations": list(state.get("section_trace_annotations") or []),
+            "section_write_receipts": list(state.get("section_write_receipts") or []),
             "draft_bundle": legacy_bundle.model_dump(),
             "draft_bundle_v2": draft_bundle_v2.model_dump(),
             "styled_draft_bundle": legacy_bundle.model_dump(),
@@ -1711,6 +1870,11 @@ def run_report_compilation_graph(
             "approval_status": str(state.get("approval_status") or "none"),
             "blocked_reason": str(state.get("blocked_reason") or "").strip(),
             "markdown": str(state.get("final_markdown_current") or state.get("markdown") or "").strip(),
+            "has_markdown_output": bool(str(state.get("final_markdown_current") or state.get("markdown") or "").strip()),
+            "compile_quality": str(state.get("compile_quality") or "healthy"),
+            "validation_gate": str(validation.gate or "pass"),
+            "semantic_gate": "review_required" if bool(state.get("review_required")) else "pass",
+            "publish_status": "pending_review" if bool(state.get("review_required")) else "ready",
             "selected_template": (
                 draft_bundle_v2.metadata.get("selected_template")
                 if isinstance(draft_bundle_v2.metadata, dict)
@@ -1768,12 +1932,7 @@ def run_report_compilation_graph(
         }
 
     def route_after_validation(state: _GraphState) -> str:
-        validation = ValidationResultV2.model_validate(state.get("validation_result_v2") or {})
-        if validation.passed:
-            return "markdown_compiler"
-        if validation.gate == "repair":
-            return "repair_patch_planner"
-        return "semantic_review_interrupt"
+        return "markdown_compiler"
 
     def route_after_semantic_gate(state: _GraphState) -> str:
         phase = str(state.get("execution_phase") or "").strip()
@@ -1805,12 +1964,11 @@ def run_report_compilation_graph(
 
     builder = StateGraph(_GraphState)
     builder.add_node("load_context", _node("load_context", load_context))
-    builder.add_node("planner_agent", _node("planner_agent", planner_agent))
-    builder.add_node("existing_analysis_workers_subgraph", _node("existing_analysis_workers_subgraph", existing_analysis_workers_subgraph))
-    builder.add_node("ir_merge", _node("ir_merge", ir_merge))
-    builder.add_node("trace_binder", _node("trace_binder", trace_binder))
-    builder.add_node("section_realizer_worker", _node("section_realizer_worker", section_realizer_worker, mutate_state=False))
-    builder.add_node("section_realizer_finalize", _node("section_realizer_finalize", section_realizer_finalize))
+    builder.add_node("template_brief", _node("template_brief", template_brief_node))
+    builder.add_node("section_writer", _node("section_writer", section_writer_node))
+    builder.add_node("bundle_from_sections", _node("bundle_from_sections", bundle_from_sections_node))
+    builder.add_node("trace_extractor", _node("trace_extractor", trace_extractor_node))
+    builder.add_node("light_editor", _node("light_editor", light_editor_node))
     builder.add_node("unit_validator", _node("unit_validator", unit_validator))
     builder.add_node("repair_patch_planner", _node("repair_patch_planner", repair_patch_planner))
     builder.add_node("repair_worker", _node("repair_worker", repair_worker, mutate_state=False))
@@ -1823,20 +1981,12 @@ def run_report_compilation_graph(
     builder.add_node("finalize_artifacts", _node("finalize_artifacts", finalize_artifacts))
     builder.add_node("commit_artifacts", _node("commit_artifacts", commit_artifacts))
     builder.add_edge(START, "load_context")
-    builder.add_edge("load_context", "planner_agent")
-    builder.add_edge("planner_agent", "existing_analysis_workers_subgraph")
-    builder.add_edge("existing_analysis_workers_subgraph", "ir_merge")
-    builder.add_edge("ir_merge", "trace_binder")
-    builder.add_conditional_edges(
-        "trace_binder",
-        route_section_workers,
-        {
-            "section_realizer_finalize": "section_realizer_finalize",
-            "section_realizer_worker": "section_realizer_worker",
-        },
-    )
-    builder.add_edge("section_realizer_worker", "section_realizer_finalize")
-    builder.add_edge("section_realizer_finalize", "unit_validator")
+    builder.add_edge("load_context", "template_brief")
+    builder.add_edge("template_brief", "section_writer")
+    builder.add_edge("section_writer", "bundle_from_sections")
+    builder.add_edge("bundle_from_sections", "trace_extractor")
+    builder.add_edge("trace_extractor", "light_editor")
+    builder.add_edge("light_editor", "unit_validator")
     builder.add_conditional_edges(
         "unit_validator",
         route_after_validation,
@@ -1893,6 +2043,13 @@ def run_report_compilation_graph(
         "commit_pending": False,
         "commit_idempotency_key": "",
         "visited_nodes": [],
+        "template_brief": {},
+        "section_markdowns": {},
+        "section_markdown_manifest": {},
+        "section_write_receipts": [],
+        "section_trace_annotations": [],
+        "compile_quality": "healthy",
+        "degraded_sections": [],
         "planner_slots": [],
         "section_batches": [],
         "repair_batches": [],

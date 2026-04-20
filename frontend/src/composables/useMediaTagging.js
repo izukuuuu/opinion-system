@@ -13,7 +13,8 @@ const { callApi } = useApiBase()
 const topicsState = reactive({
   loading: false,
   error: '',
-  options: []
+  options: [],
+  topicIdentifiers: {} // name -> identifier mapping
 })
 
 const runForm = reactive({
@@ -63,6 +64,7 @@ const selectedHistoryId = ref('')
 
 const viewSelection = reactive({
   topic: '',
+  topic_identifier: '',
   start: '',
   end: ''
 })
@@ -95,6 +97,7 @@ const filters = reactive({
 const mediaResult = ref(null)
 const registryItems = ref([])
 const selectedItems = ref(new Set())
+const selectedRegistryItems = ref(new Set())
 
 const topicOptions = computed(() => topicsState.options)
 const resultSummary = computed(() => mediaResult.value?.summary || null)
@@ -109,13 +112,15 @@ const candidateStats = computed(() => {
   const local = rawCandidates.value.filter((item) => item.current_label === 'local_media').length
   const network = rawCandidates.value.filter((item) => item.current_label === 'network_media').length
   const comprehensive = rawCandidates.value.filter((item) => item.current_label === 'comprehensive_media').length
+  const hasSuggest = rawCandidates.value.filter((item) => item.suggested_label && !item.current_label).length
   return {
     total,
     official,
     local,
     network,
     comprehensive,
-    unlabeled: Math.max(total - official - local - network - comprehensive, 0)
+    unlabeled: Math.max(total - official - local - network - comprehensive, 0),
+    hasSuggest
   }
 })
 
@@ -253,7 +258,18 @@ export const useMediaTagging = () => {
     applyLabelToSelected,
     clearSelection,
     saveCandidateUpdates,
-    saveRegistryItem
+    saveRegistryItem,
+    deleteCandidates,
+    deleteSelectedCandidates,
+    deleteRegistryItem,
+    acceptAllSuggestions,
+    selectedRegistryItems,
+    isAllRegistrySelected,
+    selectedRegistryCount,
+    toggleSelectAllRegistry,
+    toggleSelectRegistryItem,
+    clearRegistrySelection,
+    mergeRegistryItems
   }
 }
 
@@ -311,10 +327,10 @@ function initializeStore() {
   )
 
   watch(
-    () => viewSelection.topic,
-    (topic) => {
-      const trimmed = String(topic || '').trim()
-      viewManualForm.topic = trimmed
+    () => viewSelection.topic_identifier || viewSelection.topic,
+    (topicIdentifier) => {
+      const trimmed = String(topicIdentifier || '').trim()
+      viewManualForm.topic = viewSelection.topic || trimmed
       if (!trimmed) {
         historyRecords.value = []
         historyState.topic = ''
@@ -348,7 +364,10 @@ function candidateKey(value) {
 }
 
 function normalizeRange(form) {
-  const topic = String(form?.topic || '').trim()
+  const topicInput = String(form?.topic || '').trim()
+  const identifierInput = String(form?.topic_identifier || '').trim()
+  // 优先使用展示名称（topic），没有时才用内部 identifier，避免时间戳前缀被 URL 编码后触发后端解析失败
+  let topic = topicInput || identifierInput
   const start = String(form?.start || '').trim()
   const end = String(form?.end || '').trim() || start
   return { topic, start, end }
@@ -483,6 +502,14 @@ async function loadTopics() {
       body: JSON.stringify({ include_counts: false })
     })
     const databases = Array.isArray(response?.data?.databases) ? response.data.databases : []
+    // Build name -> identifier mapping from database records
+    const mapping = {}
+    databases.forEach((item) => {
+      const name = String(item?.name || '').trim()
+      const identifier = String(item?.identifier || item?.project_id || name).trim()
+      if (name) mapping[name] = identifier
+    })
+    topicsState.topicIdentifiers = mapping
     topicsState.options = databases
       .map((item) => String(item?.name || '').trim())
       .filter((name, index, array) => name && array.indexOf(name) === index)
@@ -689,6 +716,7 @@ async function applyHistorySelection(historyId, { shouldLoad = false } = {}) {
   const entry = historyRecords.value.find((item) => item.id === historyId)
   if (!entry) return
   viewSelection.topic = entry.topic
+  viewSelection.topic_identifier = entry.topic_identifier || entry.topic
   viewSelection.start = entry.start
   viewSelection.end = entry.end
   viewManualForm.topic = entry.topic
@@ -700,16 +728,20 @@ async function applyHistorySelection(historyId, { shouldLoad = false } = {}) {
 }
 
 async function loadResults(rangeOverride = null) {
-  const range = normalizeRange(rangeOverride || viewSelection)
+  // 优先使用传入的 range，其次用当前结果中的 range，最后用 viewSelection
+  const currentLoadedRange = mediaResult.value?.range || currentRange.value
+  const range = normalizeRange(rangeOverride || currentLoadedRange || viewSelection)
+
   if (!range.topic || !range.start || !range.end) {
     resultsState.error = '请选择要查看的专题和时间范围。'
     return
   }
+
   resultsState.loading = true
   resultsState.error = ''
-  resultsState.saveError = ''
-  resultsState.saveNotice = ''
-  pendingLabelMap.value = {}
+  selectedItems.value.clear()
+  selectedItems.value = new Set()
+
   try {
     const params = new URLSearchParams({
       topic: range.topic,
@@ -721,12 +753,10 @@ async function loadResults(rangeOverride = null) {
     })
     mediaResult.value = response
     registryItems.value = Array.isArray(response?.registry) ? response.registry : registryItems.value
-    viewSelection.topic = range.topic
+    viewSelection.topic_identifier = response?.topic_identifier || range.topic
+    viewSelection.topic = response?.topic || range.topic
     viewSelection.start = range.start
     viewSelection.end = range.end
-    viewManualForm.topic = range.topic
-    viewManualForm.start = range.start
-    viewManualForm.end = range.end
   } catch (error) {
     mediaResult.value = null
     resultsState.error = error instanceof Error ? error.message : '结果读取失败'
@@ -760,18 +790,130 @@ async function loadRegistry() {
   }
 }
 
+// 构建候选索引，加速查找
+const candidateIndex = computed(() => {
+  const index = new Map()
+  for (const item of rawCandidates.value) {
+    const key = candidateKey(item.publisher_name)
+    index.set(key, item)
+  }
+  return index
+})
+
+// 本地乐观更新候选标签（不等待API）
+function optimisticUpdateLabel(publisherName, label) {
+  const key = candidateKey(publisherName)
+  const candidate = candidateIndex.value.get(key)
+  if (!candidate) return
+
+  // 立即更新本地状态
+  candidate.current_label = String(label || '').trim()
+
+  // 触发响应式更新
+  mediaResult.value = { ...mediaResult.value }
+}
+
+// 后台批量保存标签（不阻塞UI）
+async function saveLabelsInBackground(publisherNames, label) {
+  const range = normalizeRange({
+    topic: viewSelection.topic || viewSelection.topic_identifier || mediaResult.value?.topic || runForm.topic,
+    start: currentRange.value?.start || viewSelection.start,
+    end: currentRange.value?.end || viewSelection.end
+  })
+
+  if (!range.topic || !range.start || !range.end) {
+    console.warn('缺少专题或时间范围，无法后台保存')
+    return false
+  }
+
+  const updates = publisherNames.map((name) => ({
+    publisher_name: name,
+    current_label: String(label || '').trim()
+  }))
+
+  try {
+    await callApi('/api/media-tags/results/labels', {
+      method: 'POST',
+      body: JSON.stringify({
+        topic: range.topic,
+        start: range.start,
+        end: range.end,
+        updates
+      })
+    })
+    // 不需要用 API response 替换，乐观更新已经生效
+    // 后台静默刷新 registry
+    loadRegistry().catch(() => {})
+    return true
+  } catch (error) {
+    console.error('后台保存失败:', error)
+    return false
+  }
+}
+
 async function stageCandidateLabel(publisherName, label) {
   const key = candidateKey(publisherName)
-  const original = rawCandidates.value.find((item) => candidateKey(item.publisher_name) === key)
-  if (!original) return
+  const original = candidateIndex.value.get(key)
+  if (!original) {
+    console.warn(`未找到候选媒体：${publisherName}`)
+    return false
+  }
 
   const nextLabel = String(label || '').trim()
   if (nextLabel === String(original.current_label || '').trim()) {
+    return true
+  }
+
+  // 1. 立即乐观更新UI（零延迟）
+  optimisticUpdateLabel(publisherName, nextLabel)
+
+  // 2. 后台保存，不阻塞
+  await saveLabelsInBackground([publisherName], nextLabel)
+  return true
+}
+
+// 一键采纳所有建议
+function acceptAllSuggestions() {
+  const toUpdate = rawCandidates.value.filter((c) => c.suggested_label && !c.current_label)
+  if (!toUpdate.length) return
+
+  // 批量乐观更新
+  toUpdate.forEach((c) => {
+    c.current_label = c.suggested_label
+  })
+  mediaResult.value = { ...mediaResult.value }
+
+  // 后台批量保存
+  const updates = toUpdate.map((c) => ({
+    publisher_name: c.publisher_name,
+    current_label: c.suggested_label
+  }))
+
+  const range = normalizeRange({
+    topic: viewSelection.topic || viewSelection.topic_identifier || mediaResult.value?.topic || runForm.topic,
+    start: currentRange.value?.start || viewSelection.start,
+    end: currentRange.value?.end || viewSelection.end
+  })
+
+  if (!range.topic || !range.start || !range.end) {
+    console.warn('缺少专题或时间范围，无法保存')
     return
   }
 
-  // 直接保存，不使用暂存
-  await saveCandidateUpdates([publisherName], nextLabel)
+  callApi('/api/media-tags/results/labels', {
+    method: 'POST',
+    body: JSON.stringify({
+      topic: range.topic,
+      start: range.start,
+      end: range.end,
+      updates
+    })
+  }).then((response) => {
+    mediaResult.value = response
+    loadRegistry().catch(() => {})
+  }).catch((err) => {
+    console.error('批量采纳保存失败:', err)
+  })
 }
 
 async function applyLabelToFilteredCandidates(label) {
@@ -803,13 +945,24 @@ function toggleSelectItem(publisherName, checked) {
 }
 
 async function applyLabelToSelected(label) {
-  const names = filteredCandidates.value
+  const selectedCandidates = filteredCandidates.value
     .filter((c) => selectedItems.value.has(candidateKey(c.publisher_name)))
-    .map((c) => c.publisher_name)
-  if (!names.length) return
 
-  await saveCandidateUpdates(names, label)
+  if (!selectedCandidates.length) return
+
+  const names = selectedCandidates.map((c) => c.publisher_name)
+
+  // 1. 批量乐观更新
+  selectedCandidates.forEach((c) => {
+    c.current_label = String(label || '').trim()
+  })
+  mediaResult.value = { ...mediaResult.value }
+
+  // 2. 清除选择
   clearSelection()
+
+  // 3. 后台保存
+  await saveLabelsInBackground(names, label)
 }
 
 function clearSelection() {
@@ -824,9 +977,16 @@ const isAllSelected = computed(() =>
 
 const selectedCount = computed(() => selectedItems.value.size)
 
+const isAllRegistrySelected = computed(() =>
+  filteredRegistryItems.value.length > 0 &&
+  filteredRegistryItems.value.every((item) => selectedRegistryItems.value.has(item.id))
+)
+
+const selectedRegistryCount = computed(() => selectedRegistryItems.value.size)
+
 async function saveCandidateUpdates(publisherNames = null, label = null) {
   const range = normalizeRange({
-    topic: viewSelection.topic || mediaResult.value?.topic || runForm.topic,
+    topic: viewSelection.topic || viewSelection.topic_identifier || mediaResult.value?.topic || runForm.topic,
     start: currentRange.value?.start || viewSelection.start,
     end: currentRange.value?.end || viewSelection.end
   })
@@ -835,26 +995,16 @@ async function saveCandidateUpdates(publisherNames = null, label = null) {
     return false
   }
 
-  // 如果提供了 label，直接构造更新对象
-  let updates
-  if (label !== null && Array.isArray(publisherNames)) {
-    updates = publisherNames.map((name) => ({
-      publisher_name: name,
-      current_label: String(label || '').trim()
-    }))
-  } else {
-    const targetSet = Array.isArray(publisherNames)
-      ? new Set(publisherNames.map((item) => candidateKey(item)))
-      : null
-    updates = pendingUpdates.value.filter((item) =>
-      targetSet ? targetSet.has(candidateKey(item.publisher_name)) : true
-    )
-  }
-
-  if (!updates.length) {
+  // 直接保存：必须提供 publisherNames 和 label
+  if (!Array.isArray(publisherNames) || publisherNames.length === 0) {
     resultsState.saveNotice = '当前没有需要保存的标签变更。'
     return true
   }
+
+  const updates = publisherNames.map((name) => ({
+    publisher_name: name,
+    current_label: String(label || '').trim()
+  }))
 
   resultsState.saving = true
   resultsState.saveError = ''
@@ -871,7 +1021,6 @@ async function saveCandidateUpdates(publisherNames = null, label = null) {
     })
     mediaResult.value = response
     await loadRegistry()
-    pendingLabelMap.value = {}
     resultsState.saveNotice =
       updates.length === 1 ? '标签已保存。' : `已保存 ${updates.length} 条媒体标签。`
     return true
@@ -881,6 +1030,57 @@ async function saveCandidateUpdates(publisherNames = null, label = null) {
   } finally {
     resultsState.saving = false
   }
+}
+
+async function deleteCandidates(publisherNames) {
+  const range = normalizeRange({
+    topic: viewSelection.topic || viewSelection.topic_identifier || mediaResult.value?.topic || runForm.topic,
+    start: currentRange.value?.start || viewSelection.start,
+    end: currentRange.value?.end || viewSelection.end
+  })
+  if (!range.topic || !range.start || !range.end) {
+    resultsState.saveError = '缺少专题或时间范围，暂时无法删除。'
+    return false
+  }
+
+  if (!Array.isArray(publisherNames) || publisherNames.length === 0) {
+    return true
+  }
+
+  resultsState.saving = true
+  resultsState.saveError = ''
+  resultsState.saveNotice = ''
+  try {
+    const response = await callApi('/api/media-tags/results/candidates', {
+      method: 'DELETE',
+      body: JSON.stringify({
+        topic: range.topic,
+        start: range.start,
+        end: range.end,
+        publisher_names: publisherNames
+      })
+    })
+    mediaResult.value = response
+    resultsState.saveNotice = `已删除 ${publisherNames.length} 条候选媒体。`
+    return true
+  } catch (error) {
+    resultsState.saveError = error instanceof Error ? error.message : '删除失败'
+    return false
+  } finally {
+    resultsState.saving = false
+  }
+}
+
+async function deleteSelectedCandidates() {
+  const names = filteredCandidates.value
+    .filter((c) => selectedItems.value.has(candidateKey(c.publisher_name)))
+    .map((c) => c.publisher_name)
+  if (!names.length) return false
+  const success = await deleteCandidates(names)
+  if (success) {
+    clearSelection()
+  }
+  return success
 }
 
 async function saveRegistryItem(payload) {
@@ -915,6 +1115,121 @@ async function saveRegistryItem(payload) {
     return response?.data || null
   } catch (error) {
     resultsState.registryError = error instanceof Error ? error.message : '共享字典保存失败'
+    return null
+  } finally {
+    resultsState.registrySaving = false
+  }
+}
+
+async function deleteRegistryItem(itemId) {
+  const id = String(itemId || '').trim()
+  if (!id) {
+    resultsState.registryError = '缺少条目 ID。'
+    return false
+  }
+
+  resultsState.registrySaving = true
+  resultsState.registryError = ''
+  resultsState.registryNotice = ''
+  try {
+    await callApi(`/api/media-tags/registry/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    })
+    await loadRegistry()
+    resultsState.registryNotice = '字典条目已删除。'
+    return true
+  } catch (error) {
+    resultsState.registryError = error instanceof Error ? error.message : '删除失败'
+    return false
+  } finally {
+    resultsState.registrySaving = false
+  }
+}
+
+// ── Registry 多选相关函数 ────────────────────────────────────────────────
+function toggleSelectAllRegistry(checked) {
+  if (checked) {
+    filteredRegistryItems.value.forEach((item) => {
+      selectedRegistryItems.value.add(item.id)
+    })
+  } else {
+    selectedRegistryItems.value.clear()
+  }
+  selectedRegistryItems.value = new Set(selectedRegistryItems.value)
+}
+
+function toggleSelectRegistryItem(itemId, checked) {
+  if (checked) {
+    selectedRegistryItems.value.add(itemId)
+  } else {
+    selectedRegistryItems.value.delete(itemId)
+  }
+  selectedRegistryItems.value = new Set(selectedRegistryItems.value)
+}
+
+function clearRegistrySelection() {
+  selectedRegistryItems.value.clear()
+  selectedRegistryItems.value = new Set(selectedRegistryItems.value)
+}
+
+async function mergeRegistryItems({ canonicalId, canonicalName, mediaLevel, notes }) {
+  const selectedIds = Array.from(selectedRegistryItems.value)
+  if (selectedIds.length < 2) {
+    resultsState.registryError = '请至少选择 2 条条目进行合并。'
+    return null
+  }
+
+  // 收集所有选中条目的别名
+  const allAliases = new Set()
+  selectedIds.forEach((id) => {
+    const item = registryItems.value.find((r) => r.id === id)
+    if (item) {
+      if (item.name !== canonicalName) {
+        allAliases.add(item.name)
+      }
+      if (Array.isArray(item.aliases)) {
+        item.aliases.forEach((a) => {
+          if (a !== canonicalName) allAliases.add(a)
+        })
+      }
+    }
+  })
+
+  resultsState.registrySaving = true
+  resultsState.registryError = ''
+  resultsState.registryNotice = ''
+
+  try {
+    // 更新主条目
+    const mainItem = registryItems.value.find((r) => r.id === canonicalId)
+    const updatedAliases = Array.from(allAliases)
+    await callApi(`/api/media-tags/registry/${encodeURIComponent(canonicalId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: canonicalId,
+        name: canonicalName,
+        aliases: updatedAliases,
+        media_level: mediaLevel || mainItem?.media_level || '',
+        status: 'active',
+        notes: notes || mainItem?.notes || ''
+      })
+    })
+
+    // 删除其他条目
+    for (const id of selectedIds) {
+      if (id !== canonicalId) {
+        await callApi(`/api/media-tags/registry/${encodeURIComponent(id)}`, {
+          method: 'DELETE'
+        })
+      }
+    }
+
+    await loadRegistry()
+    clearRegistrySelection()
+    resultsState.registryNotice = `已合并 ${selectedIds.length} 条条目到「${canonicalName}」。`
+    return { name: canonicalName, aliases: updatedAliases }
+  } catch (error) {
+    resultsState.registryError = error instanceof Error ? error.message : '合并失败'
     return null
   } finally {
     resultsState.registrySaving = false

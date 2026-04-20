@@ -10,13 +10,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from server_support import error, resolve_topic_identifier, success
-from server_support.archive_locator import ArchiveLocator, compose_folder_name
+from server_support.archive_locator import ArchiveLocator
 from server_support.topic_context import TopicContext, resolve_context
 from src.fetch.data_fetch import get_topic_available_date_range
 from src.project import get_project_manager
-from src.utils.setting.paths import bucket
 
 from .deep_report import AI_FULL_REPORT_CACHE_FILENAME, REPORT_CACHE_FILENAME, generate_full_report_payload, generate_report_payload
+from .deep_report.deterministic import ensure_cache_dir_v2
 from .runtime_infra import resolve_runtime_profile
 from .task_queue import (
     cancel_task,
@@ -143,6 +143,23 @@ def _task_summary_payload(
     run_state: Optional[Dict[str, Any]] = None,
     orchestrator_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    metadata = task_details.get("metadata") if isinstance(task_details, dict) and isinstance(task_details.get("metadata"), dict) else {}
+    workspace_root = str((metadata.get("workspace_root") or (task_details or {}).get("workspace_root") or "")).strip()
+    state_root = str((metadata.get("state_root") or (task_details or {}).get("state_root") or "")).strip()
+    reuse_decision = (
+        metadata.get("reuse_decision")
+        if isinstance(metadata.get("reuse_decision"), dict)
+        else (task_details or {}).get("reuse_decision")
+        if isinstance((task_details or {}).get("reuse_decision"), dict)
+        else {}
+    )
+    reuse_candidates_summary = (
+        metadata.get("reuse_candidates_summary")
+        if isinstance(metadata.get("reuse_candidates_summary"), dict)
+        else (task_details or {}).get("reuse_candidates_summary")
+        if isinstance((task_details or {}).get("reuse_candidates_summary"), dict)
+        else {}
+    )
     structured_ready = _artifact_ready(artifact_manifest, "structured_projection")
     full_ready = _artifact_ready(artifact_manifest, "full_markdown")
     percentage = int((task_details or {}).get("percentage") or 0)
@@ -252,6 +269,10 @@ def _task_summary_payload(
             "structured_result_digest": structured_result_digest,
             "report_ir_summary": report_ir_summary,
             "artifact_manifest": artifact_manifest,
+            "workspace_root": workspace_root,
+            "state_root": state_root,
+            "reuse_decision": reuse_decision,
+            "reuse_candidates_summary": reuse_candidates_summary,
             "trust": trust or {},
             "recent_events": recent_events,
         },
@@ -265,6 +286,8 @@ def _task_summary_payload(
             "full_cache_exists": full_ready,
             "full_cache_path": str((cache_paths or {}).get("full_report_cache_path") or "").strip(),
             "artifact_manifest": artifact_manifest,
+            "workspace_root": workspace_root,
+            "state_root": state_root,
         },
     }
 
@@ -278,8 +301,8 @@ def _extract_cache_meta(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_historical_progress_payload(ctx: TopicContext, start: str, end: Optional[str]) -> Dict[str, Any]:
-    folder = compose_folder_name(start, end)
-    report_dir = bucket("reports", ctx.identifier, folder)
+    project_identifier = str(getattr(ctx, "project_identifier", "") or "").strip()
+    report_dir = ensure_cache_dir_v2(ctx.identifier, start, end, project_identifier=project_identifier)
     report_cache = report_dir / REPORT_CACHE_FILENAME
     full_cache = report_dir / AI_FULL_REPORT_CACHE_FILENAME
     structured_payload = _load_report_cache_payload(report_cache)
@@ -341,6 +364,18 @@ def _build_historical_progress_payload(ctx: TopicContext, start: str, end: Optio
         cache_paths={
             "report_cache_path": str(report_cache) if structured_payload else "",
             "full_report_cache_path": str(full_cache) if full_payload else "",
+        },
+        task_details={
+            "metadata": {
+                "workspace_root": str(structured_meta.get("workspace_root") or full_meta.get("workspace_root") or "").strip(),
+                "state_root": str(structured_meta.get("state_root") or full_meta.get("state_root") or "").strip(),
+                "reuse_decision": structured_meta.get("reuse_decision") if isinstance(structured_meta.get("reuse_decision"), dict) else {},
+                "reuse_candidates_summary": (
+                    structured_meta.get("reuse_candidates_summary")
+                    if isinstance(structured_meta.get("reuse_candidates_summary"), dict)
+                    else {}
+                ),
+            }
         },
     )
 
@@ -436,12 +471,15 @@ def get_report_payload():
     if not start:
         return error("Missing required field(s): start")
     try:
-        topic_identifier, display_name = _resolve_topic(topic_param, project_param, dataset_id)
+        ctx = _build_topic_context(topic_param, project_param, dataset_id)
+        topic_identifier = ctx.identifier
+        display_name = ctx.display_name or topic_identifier
         payload = generate_report_payload(
             topic_identifier,
             start,
             end,
             topic_label=display_name,
+            project_identifier=str(getattr(ctx, "project_identifier", "") or "").strip(),
             regenerate=False,
         )
     except ValueError as exc:
@@ -463,12 +501,27 @@ def get_full_report_payload():
     if not start:
         return error("Missing required field(s): start")
     try:
-        topic_identifier, display_name = _resolve_topic(topic_param, project_param, dataset_id)
+        ctx = _build_topic_context(topic_param, project_param, dataset_id)
+        topic_identifier = ctx.identifier
+        display_name = ctx.display_name or topic_identifier
+        project_identifier = str(getattr(ctx, "project_identifier", "") or "").strip()
+        # Guard: if the full report cache doesn't exist or is unreadable and we're not
+        # explicitly regenerating, return a clear 404 instead of falling through to
+        # synchronous generation (which is slow and inappropriate for a GET endpoint).
+        if not regenerate:
+            cache_dir = ensure_cache_dir_v2(topic_identifier, start, end or start, project_identifier=project_identifier)
+            full_cache = cache_dir / AI_FULL_REPORT_CACHE_FILENAME
+            if not full_cache.exists():
+                return error("AI完整报告尚未生成，请先通过任务队列生成报告。", status_code=404)
+            cached = _load_report_cache_payload(full_cache)
+            if not cached:
+                return error("AI完整报告缓存文件损坏或无法读取，请重新生成报告。", status_code=404)
         payload = generate_full_report_payload(
             topic_identifier,
             start,
             end,
             topic_label=display_name,
+            project_identifier=project_identifier,
             regenerate=regenerate,
         )
     except ValueError as exc:

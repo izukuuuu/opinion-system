@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -18,7 +19,10 @@ from src.report.api import report_bp
 from src.report.agent_runtime import _build_runtime_middleware, _json_safe_runtime_value, run_report_agent_step, snapshot_tool_policy
 from src.report.deepagents_backends import _build_artifacts_backend, build_report_backend
 from src.report.deep_report.compiler import sanitize_public_markdown
+from src.report.deep_report import exploration_deterministic_graph as exploration_graph
+from src.report.deep_report import service
 from src.report.deep_report.service import (
+    _collect_section_drafts_from_files,
     _extract_structured_response,
     _build_tool_intelligence_receipt,
     _ensure_validation_notes_from_claim_checks,
@@ -28,8 +32,11 @@ from src.report.deep_report.service import (
     _ready_for_deterministic_finalize,
     _result_diagnostic_summary,
     _run_deep_report_exploration_task,
+    _synthesize_structured_report_from_files,
 )
 from src.report.deep_report.builder import ReportCoordinatorContext, build_report_deep_agent
+from src.report.deep_report.deterministic import build_runtime_workspace_layout
+from src.report.deep_report.exploration_deterministic_graph import run_exploration_deterministic_graph
 from src.report.deep_report.orchestrator_graph import run_report_orchestrator_graph
 from src.report.deep_report.schemas import StructuredReport
 from src.report.worker import _run_task
@@ -492,18 +499,30 @@ class FullReportPipelineTests(unittest.TestCase):
         self.assertIn("空证据对象", receipt["next_action"])
 
     def test_ready_for_deterministic_finalize_only_requires_structured_report_for_graph_handoff(self):
+        layout = build_runtime_workspace_layout(
+            project_identifier="demo-project",
+            topic_identifier="demo-topic",
+            start="2025-01-01",
+            end="2025-01-31",
+        )
         runtime_files = {
-            "/workspace/state/structured_report.json": {"content": ["{}"]},
+            layout.state_file("structured_report.json"): {"content": ["{}"]},
         }
 
         self.assertTrue(_ready_for_deterministic_finalize(runtime_files))
 
-        runtime_files["/workspace/state/structured_report.json"] = {"content": ["   "]}
+        runtime_files[layout.state_file("structured_report.json")] = {"content": ["   "]}
         self.assertFalse(_ready_for_deterministic_finalize(runtime_files))
 
     def test_validation_notes_are_derived_from_claim_checks(self):
+        layout = build_runtime_workspace_layout(
+            project_identifier="demo-project",
+            topic_identifier="demo-topic",
+            start="2025-01-01",
+            end="2025-01-31",
+        )
         runtime_files = {
-            "/workspace/state/claim_checks.json": {
+            layout.state_file("claim_checks.json"): {
                 "content": [
                     '{"result":['
                     '{"claim_id":"c1","claim_text":"A","status":"supported"},'
@@ -519,7 +538,7 @@ class FullReportPipelineTests(unittest.TestCase):
         self.assertEqual(counts["checked_count"], 3)
         self.assertEqual(counts["unsupported_count"], 1)
         self.assertEqual(counts["contradicted_count"], 1)
-        raw_notes = runtime_files["/workspace/state/validation_notes.md"]["content"]
+        raw_notes = runtime_files[layout.state_file("validation_notes.md")]["content"]
         notes = raw_notes if isinstance(raw_notes, str) else "\n".join(raw_notes)
         self.assertIn("unsupported：1 条", notes)
         self.assertIn("contradicted：1 条", notes)
@@ -660,19 +679,293 @@ class FullReportPipelineTests(unittest.TestCase):
         self.assertEqual(result["message"], "compiled")
         self.assertEqual(result["full_payload"]["markdown"], "# report")
 
+    def test_exploration_deterministic_graph_initial_state_excludes_runtime_callables(self):
+        captured_initial_state = {}
+
+        class FakeCompiledGraph:
+            def stream(self, initial_state, **kwargs):
+                captured_initial_state.update(initial_state)
+                yield {
+                    "type": "updates",
+                    "data": {
+                        "finalize_node": {
+                            "status": "completed",
+                            "message": "ok",
+                            "files": {},
+                            "gaps": [],
+                            "structured_payload": {},
+                        }
+                    },
+                }
+
+        class FakeBuilder:
+            def compile(self, checkpointer=None):
+                return FakeCompiledGraph()
+
+        with patch(
+            "src.report.deep_report.exploration_deterministic_graph.build_exploration_deterministic_graph",
+            return_value=FakeBuilder(),
+        ), patch(
+            "src.report.deep_report.exploration_deterministic_graph.get_shared_report_checkpointer",
+            return_value=(None, SimpleNamespace(checkpoint_locator="explore.sqlite")),
+        ):
+            result = run_exploration_deterministic_graph(
+                request={
+                    "task_id": "task-123",
+                    "thread_id": "task-123:explore",
+                    "topic_identifier": "demo-topic",
+                    "topic_label": "示例专题",
+                    "start": "2025-01-01",
+                    "end": "2025-01-31",
+                    "mode": "fast",
+                },
+                skill_assets={"skill": "asset"},
+                middleware_factory=lambda _agent: [],
+                event_callback=lambda _event: None,
+                llm=object(),
+                initial_files={
+                    build_runtime_workspace_layout(
+                        project_identifier="demo-project",
+                        topic_identifier="demo-topic",
+                        start="2025-01-01",
+                        end="2025-01-31",
+                    ).base_context_path: {"content": ["{}"]}
+                },
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertIn("files", captured_initial_state)
+        self.assertNotIn("skill_assets", captured_initial_state)
+        self.assertNotIn("middleware_factory", captured_initial_state)
+        self.assertNotIn("event_callback", captured_initial_state)
+        self.assertNotIn("llm", captured_initial_state)
+
+    def test_exploration_route_after_utility_accepts_nested_result_decision(self):
+        layout = build_runtime_workspace_layout(
+            project_identifier="demo-project",
+            topic_identifier="demo-topic",
+            start="2025-01-01",
+            end="2025-01-31",
+        )
+        route = exploration_graph.route_after_utility(
+            {
+                "project_identifier": "demo-project",
+                "topic_identifier": "demo-topic",
+                "start": "2025-01-01",
+                "end": "2025-01-31",
+                "files": {
+                    layout.state_file("utility_assessment.json"): {
+                        "content": [json.dumps({"result": {"decision": "pass"}}, ensure_ascii=False)]
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(route, "writer_node")
+
+    def test_exploration_parallel_dispatch_does_not_write_nonreduced_state(self):
+        sends = exploration_graph.dispatch_tier1({})
+
+        self.assertEqual(len(sends), 2)
+        self.assertTrue(all(getattr(item, "arg", None) == {} for item in sends))
+
+    def test_exploration_gather_tier_omits_status_and_emits_tier_todo(self):
+        captured_events = []
+        runtime_deps = exploration_graph._ExplorationRuntimeDeps(
+            skill_assets={},
+            middleware_factory=lambda _agent: [],
+            event_callback=lambda event: captured_events.append(event),
+            llm=None,
+            runtime_backend=None,
+            common_context={},
+            subagent_specs={},
+        )
+        gather = exploration_graph._make_gather_node(
+            runtime_deps,
+            tier=1,
+            phase="interpret",
+            agent_names=["archive_evidence_organizer", "bertopic_evolution_analyst"],
+        )
+
+        with patch(
+            "src.report.deep_report.exploration_deterministic_graph._collect_tier_gaps",
+            return_value=([], []),
+        ):
+            result = gather(
+                {
+                    "agent_statuses": {
+                        "archive_evidence_organizer": "completed",
+                        "bertopic_evolution_analyst": "completed",
+                    },
+                    "tier_results": {},
+                }
+            )
+
+        self.assertNotIn("status", result)
+        self.assertEqual(result["tier_results"]["tier_1"]["status"], "completed")
+        todo_event = next(event for event in captured_events if event.get("type") == "todo.updated")
+        todos = todo_event.get("payload", {}).get("todos") or []
+        self.assertEqual(todos[1]["id"], "tier-1")
+        self.assertEqual(todos[1]["status"], "completed")
+
+    def test_exploration_node_skip_by_reuse_emits_event_and_status(self):
+        layout = build_runtime_workspace_layout(
+            project_identifier="demo-project",
+            topic_identifier="demo-topic",
+            start="2025-01-01",
+            end="2025-01-31",
+        )
+        captured_events = []
+        runtime_deps = exploration_graph._ExplorationRuntimeDeps(
+            skill_assets={},
+            middleware_factory=lambda _agent: [],
+            event_callback=lambda event: captured_events.append(event),
+            llm=None,
+            runtime_backend=None,
+            common_context={
+                "project_identifier": "demo-project",
+                "topic_identifier": "demo-topic",
+                "start": "2025-01-01",
+                "end": "2025-01-31",
+            },
+            subagent_specs={},
+        )
+
+        result = exploration_graph._run_subagent_node(
+            {
+                "files": {
+                    layout.state_file("evidence_cards.json"): {
+                        "content": [json.dumps({"status": "ready", "result": [{"id": "e1"}]}, ensure_ascii=False)]
+                    }
+                },
+                "project_identifier": "demo-project",
+                "topic_identifier": "demo-topic",
+                "start": "2025-01-01",
+                "end": "2025-01-31",
+                "execution_plan": {
+                    "nodes": {
+                        "archive_evidence_organizer": {
+                            "skip": True,
+                            "artifact_keys": ["evidence_cards"],
+                            "source_report_ranges": ["2024-12-01_2024-12-31"],
+                        }
+                    }
+                },
+            },
+            runtime_deps,
+            agent_name="archive_evidence_organizer",
+            tier=1,
+            phase="interpret",
+        )
+
+        self.assertEqual(result["agent_statuses"]["archive_evidence_organizer"], "skipped")
+        self.assertEqual(result["agent_results"]["archive_evidence_organizer"]["reason"], "reused_from_history")
+        skip_event = next(event for event in captured_events if event.get("type") == "graph.node.skipped")
+        self.assertEqual(skip_event["payload"]["artifact_keys"], ["evidence_cards"])
+
+    def test_exploration_finalize_generates_non_empty_structured_payload_from_fallback(self):
+        layout = build_runtime_workspace_layout(
+            project_identifier="demo-project",
+            topic_identifier="demo-topic",
+            start="2025-01-01",
+            end="2025-01-31",
+        )
+        runtime_deps = exploration_graph._ExplorationRuntimeDeps(
+            skill_assets={},
+            middleware_factory=lambda _agent: [],
+            event_callback=None,
+            llm=None,
+            runtime_backend=None,
+            common_context={"project_identifier": "demo-project", "topic_identifier": "demo-topic", "start": "2025-01-01", "end": "2025-01-31"},
+            subagent_specs={},
+        )
+
+        with patch(
+            "src.report.deep_report.service._synthesize_structured_report_from_files",
+            return_value={
+                "task": {
+                    "topic_identifier": "demo-topic",
+                    "topic_label": "示例专题",
+                    "start": "2025-01-01",
+                    "end": "2025-01-31",
+                    "mode": "fast",
+                    "thread_id": "task-123:explore",
+                },
+                "summary": "fallback summary",
+            },
+        ):
+            result = exploration_graph.finalize_node(
+                {
+                    "files": {},
+                    "topic_identifier": "demo-topic",
+                    "project_identifier": "demo-project",
+                    "topic_label": "示例专题",
+                    "start": "2025-01-01",
+                    "end": "2025-01-31",
+                    "mode": "fast",
+                    "thread_id": "task-123:explore",
+                    "gaps": [{"agent": "writer", "file": "missing", "reason": "missing", "tier": 6}],
+                    "agent_statuses": {"writer": "failed"},
+                },
+                runtime_deps,
+            )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["structured_payload"])
+        self.assertEqual(result["structured_payload"]["conclusion"]["executive_summary"], "fallback summary")
+        self.assertIn(layout.state_file("structured_report.json"), result["files"])
+
+    def test_synthesize_structured_report_from_files_ignores_section_drafts_as_top_level_source(self):
+        layout = build_runtime_workspace_layout(
+            project_identifier="demo-project",
+            topic_identifier="demo-topic",
+            start="2025-01-01",
+            end="2025-01-31",
+        )
+
+        files = {
+            layout.state_file("section_drafts/overview.json"): {
+                "content": [json.dumps({"section_id": "overview", "title": "概览", "content": "章节内容"}, ensure_ascii=False)]
+            },
+            layout.base_context_path: {
+                "content": [json.dumps({"project_identifier": "demo-project"}, ensure_ascii=False)]
+            },
+        }
+
+        with patch("src.report.deep_report.service.call_langchain_chat") as mocked_chat:
+            result = _synthesize_structured_report_from_files(
+                files=files,
+                topic_identifier="demo-topic",
+                topic_label="示例专题",
+                start_text="2025-01-01",
+                end_text="2025-01-31",
+                mode="fast",
+                thread_id="task-123",
+            )
+
+        mocked_chat.assert_not_called()
+        self.assertEqual(result["task"]["topic_identifier"], "demo-topic")
+        self.assertFalse((result.get("metadata") or {}).get("section_drafts"))
+
     def test_exploration_runtime_uses_task_scoped_coordinator_thread_and_fallback_normalizes_payload(self):
-        agent = DummyAgent({"messages": [], "files": {"/workspace/state/timeline_nodes.json": {"content": ["{}"]}}})
+        layout = build_runtime_workspace_layout(
+            project_identifier="demo-project",
+            topic_identifier="demo-topic",
+            start="2025-01-01",
+            end="2025-01-31",
+        )
+        agent = DummyAgent({"messages": [], "files": {layout.state_file("timeline_nodes.json"): {"content": ["{}"]}}})
 
         cache_dir = Path("F:/opinion-system/.tmp_pytest/exploration-runtime")
         artifacts_dir = cache_dir / "artifacts"
-        with patch("src.report.deep_report.service.ensure_cache_dir", return_value=cache_dir), patch(
+        with patch("src.report.deep_report.service.ensure_cache_dir_v2", return_value=cache_dir), patch(
             "src.report.deep_report.service.build_artifacts_root",
             return_value=artifacts_dir,
         ), patch(
             "src.report.deep_report.service._prepare_runtime",
-            return_value=(
+                return_value=(
                 {"thread_id": "report::demo-topic::2025-01-01::2025-01-31", "task_id": "task-123"},
-                {"/workspace/state/.keep": {"content": [""]}},
+                {layout.state_file(".keep"): {"content": [""]}},
                 object(),
                 {},
                 [],
@@ -726,9 +1019,48 @@ class FullReportPipelineTests(unittest.TestCase):
             agent.calls[0][1]["config"]["configurable"]["thread_id"],
             "task-123:coordinator",
         )
-        self.assertEqual(result.structured_payload["conclusion"]["executive_summary"], "fallback summary")
-        self.assertEqual(len(result.structured_payload["timeline"]), 1)
-        self.assertEqual(result.structured_payload["agenda_frame_map"]["summary"], "议题框架已生成")
+
+    def test_run_or_resume_deep_report_task_attaches_ir_before_compile_when_missing(self):
+        captured_structured = {}
+
+        def _fake_orchestrator_graph(**kwargs):
+            run_compile = kwargs["run_compile"]
+            output = run_compile({"task": {"topic_identifier": "demo-topic"}}, {"gap_summary": [], "todos": []})
+            return {
+                "status": "completed",
+                "message": "compiled",
+                "structured_payload": {},
+                "full_payload": output,
+                "exploration_bundle": {},
+                "thread_id": "report::demo-topic::2025-01-01::2025-01-31",
+            }
+
+        def _fake_generate_full_report_payload(topic_identifier, start_text, end_text, **kwargs):
+            captured_structured["payload"] = kwargs.get("structured_payload")
+            return {"status": "completed", "message": "ok", "markdown": "# report", "metadata": {}}
+
+        with patch(
+            "src.report.deep_report.service.run_report_orchestrator_graph",
+            side_effect=_fake_orchestrator_graph,
+        ), patch(
+            "src.report.deep_report.service._attach_ir_layers",
+            side_effect=lambda payload, **_kwargs: {**payload, "report_ir": {"meta": {"topic_identifier": "demo-topic"}}, "metadata": {}},
+        ) as attach_ir_mock, patch(
+            "src.report.deep_report.service.generate_full_report_payload",
+            side_effect=_fake_generate_full_report_payload,
+        ):
+            result = service.run_or_resume_deep_report_task(
+                "demo-topic",
+                "2025-01-01",
+                "2025-01-31",
+                topic_label="示例专题",
+                task_id="task-123",
+                thread_id="report::demo-topic::2025-01-01::2025-01-31",
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(attach_ir_mock.called)
+        self.assertIn("report_ir", captured_structured["payload"])
 
     def test_tool_policy_snapshot_keeps_only_serializable_fields(self):
         class FakeStructuredTool:

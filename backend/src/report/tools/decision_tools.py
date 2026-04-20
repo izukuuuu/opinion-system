@@ -102,7 +102,7 @@ def recommendation_tool(topic: str, risks_json: str, stage: str = "", event_type
             continue
         risk_name = str(item.get("risk") or "").strip()
         if "情绪对立" in risk_name:
-            actions.append("优先统一口径并缩短回应周期，避免情绪主导议程。")
+            actions.append("优先统一事实说明并缩短回应周期，避免情绪主导议程。")
         elif "议题泛化" in risk_name:
             actions.append("围绕核心争议建立问答与澄清素材，压缩次生议题扩散空间。")
         elif "扩散未收敛" in risk_name:

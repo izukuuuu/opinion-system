@@ -42,14 +42,7 @@ export function buildFigureContractMap(reportIr = {}, artifactManifest = {}) {
     map.set(figureId, {
       figure_id: figureId,
       caption: String(artifact?.caption || figure?.caption || '').trim() || '图表',
-      title: String(artifact?.caption || figure?.caption || '').trim() || '图表',
-      description: String(artifact?.chart_spec?.blocked_reason || '').trim(),
-      intent: String(figure?.intent || '').trim(),
       chartType: String(artifact?.chart_spec?.chart_type || figure?.chart_type || '').trim(),
-      functionName:
-        String(figure?.chart_type || '').trim() === 'word-cloud' || figureId.includes('keywords') || String(artifact?.caption || figure?.caption || '').includes('关键词')
-          ? 'keywords'
-          : '',
       option: optionArtifact?.option && typeof optionArtifact.option === 'object' ? optionArtifact.option : {},
       allRows: rows,
       previewRows,
@@ -71,19 +64,18 @@ export function replaceFigureDirectives(markdown = '') {
 export function renderStaticFigureMarkup(contract) {
   if (!contract) return ''
   const rows = Array.isArray(contract.previewRows) ? contract.previewRows : []
-  const table = rows.length
-    ? `<table><thead><tr><th>名称</th><th>数值</th></tr></thead><tbody>${rows
-        .map((row) => `<tr><td>${escapeHtml(row?.name || row?.label || row?.source || '未命名')}</td><td>${escapeHtml(row?.value ?? row?.target ?? '--')}</td></tr>`)
-        .join('')}</tbody></table>`
-    : '<p>当前图表暂无可展示数据。</p>'
+  const preview = rows.length
+    ? `<ul class="report-figure-static__rows">${rows
+        .slice(0, 8)
+        .map((row) => `<li>${escapeHtml(row?.name || row?.label || row?.source || '未命名')}：${escapeHtml(row?.value ?? row?.target ?? '--')}</li>`)
+        .join('')}</ul>`
+    : `<p class="report-figure-static__empty">${escapeHtml(contract.emptyMessage || '当前图表暂无可展示数据。')}</p>`
   return `
-    <section class="export-figure-card" data-report-figure="${escapeHtml(contract.figure_id)}">
-      <header class="export-figure-card__header">
-        <h3>${escapeHtml(contract.caption)}</h3>
-        ${contract.description ? `<p>${escapeHtml(contract.description)}</p>` : ''}
-      </header>
-      <div class="export-figure-card__body">${table}</div>
-    </section>
+    <figure class="report-figure-static" data-report-figure="${escapeHtml(contract.figure_id)}">
+      <div class="report-figure-static__canvas">图表导出预览</div>
+      ${preview}
+      <figcaption class="report-figure-static__caption">${escapeHtml(contract.caption)}</figcaption>
+    </figure>
   `
 }
 

@@ -15,6 +15,18 @@
           <span v-if="candidateStats.total" class="rounded-full border border-soft bg-surface px-3 py-1.5 text-xs font-semibold text-secondary">
             候选 {{ candidateStats.total }}
           </span>
+          <span v-if="candidateStats.hasSuggest" class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700">
+            有建议 {{ candidateStats.hasSuggest }}
+          </span>
+          <button
+            v-if="candidateStats.hasSuggest"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
+            @click="acceptAllSuggestions"
+          >
+            <CheckIcon class="h-3.5 w-3.5" />
+            一键采纳全部
+          </button>
           <span v-if="candidateStats.official" class="rounded-full border border-brand-soft bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700">
             官方 {{ candidateStats.official }}
           </span>
@@ -206,11 +218,12 @@
       </div>
 
       <!-- 统计卡片 -->
-      <div class="grid gap-3 sm:grid-cols-4">
+      <div class="grid gap-3 sm:grid-cols-4 lg:grid-cols-7">
         <div
           v-for="card in summaryCards"
           :key="card.label"
           class="rounded-2xl border border-soft bg-surface-muted/60 px-4 py-4"
+          :class="{ 'opacity-50': !card.value }"
         >
           <p class="text-xs text-muted">{{ card.label }}</p>
           <p class="mt-1 text-2xl font-semibold text-primary">{{ card.value }}</p>
@@ -225,28 +238,42 @@
           <button
             type="button"
             class="rounded-full border border-soft bg-white px-2 py-1 text-xs text-secondary transition hover:border-brand-soft hover:text-brand-600"
-            @click="applyLabelToSelected('official_media')"
+            :disabled="resultsState.saving"
+            @click="handleBatchLabel('official_media')"
           >→官方</button>
           <button
             type="button"
             class="rounded-full border border-soft bg-white px-2 py-1 text-xs text-secondary transition hover:border-brand-soft hover:text-brand-600"
-            @click="applyLabelToSelected('local_media')"
+            :disabled="resultsState.saving"
+            @click="handleBatchLabel('local_media')"
           >→地方</button>
           <button
             type="button"
             class="rounded-full border border-soft bg-white px-2 py-1 text-xs text-secondary transition hover:border-amber-soft hover:text-amber-600"
-            @click="applyLabelToSelected('network_media')"
+            :disabled="resultsState.saving"
+            @click="handleBatchLabel('network_media')"
           >→网络</button>
           <button
             type="button"
             class="rounded-full border border-soft bg-white px-2 py-1 text-xs text-secondary transition hover:border-emerald-soft hover:text-emerald-600"
-            @click="applyLabelToSelected('comprehensive_media')"
+            :disabled="resultsState.saving"
+            @click="handleBatchLabel('comprehensive_media')"
           >→综合</button>
           <button
             type="button"
             class="rounded-full border border-soft bg-white px-2 py-1 text-xs text-muted transition hover:bg-surface-muted"
-            @click="applyLabelToSelected('')"
+            :disabled="resultsState.saving"
+            @click="handleBatchLabel('')"
           >清除标签</button>
+          <button
+            type="button"
+            class="rounded-full border border-danger-soft bg-white px-2 py-1 text-xs text-danger transition hover:bg-danger-50"
+            :disabled="resultsState.saving"
+            @click="handleDeleteSelected"
+          >
+            <TrashIcon class="h-3 w-3" />
+            删除
+          </button>
           <button
             type="button"
             class="rounded-full border border-soft bg-white px-2 py-1 text-xs text-muted transition hover:bg-surface-muted"
@@ -255,14 +282,14 @@
         </div>
 
         <!-- 中间：筛选条件 -->
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-3 shrink-0">
           <!-- 标签筛选 -->
-          <div class="flex flex-wrap gap-2">
+          <div class="flex gap-2 shrink-0">
             <button
               v-for="opt in labelOptions"
               :key="opt.value"
               type="button"
-              class="rounded-full border px-3 py-1.5 text-xs font-medium transition"
+              class="rounded-full border px-3 py-1.5 text-xs font-medium transition shrink-0"
               :class="filters.label === opt.value
                 ? 'border-brand-soft bg-brand-50 text-brand-700'
                 : 'border-soft bg-surface text-secondary hover:border-brand-soft'"
@@ -273,36 +300,30 @@
           </div>
 
           <!-- 平台筛选 -->
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 shrink-0 whitespace-nowrap">
             <span class="text-xs text-muted">平台</span>
-            <select
-              v-model="filters.platform"
-              class="input h-8 min-w-[120px] rounded-lg px-2 py-1 text-xs"
-            >
-              <option value="">全部</option>
-              <option
-                v-for="platform in allPlatforms"
-                :key="platform"
-                :value="platform"
-              >{{ platform }}</option>
-            </select>
+            <AppSelect
+              :options="platformSelectOptions"
+              :value="filters.platform"
+              size="sm"
+              @change="filters.platform = $event"
+            />
           </div>
 
           <!-- 排序模式 -->
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 shrink-0 whitespace-nowrap">
             <span class="text-xs text-muted">排序</span>
-            <select
-              v-model="filters.sortMode"
-              class="input h-8 min-w-[120px] rounded-lg px-2 py-1 text-xs"
-            >
-              <option value="suggest_first">建议优先</option>
-              <option value="publish_count">发布量优先</option>
-            </select>
+            <AppSelect
+              :options="sortModeOptions"
+              :value="filters.sortMode"
+              size="sm"
+              @change="filters.sortMode = $event"
+            />
           </div>
         </div>
 
         <!-- 右侧：搜索框 -->
-        <div class="ml-auto flex items-center gap-2">
+        <div class="ml-auto flex items-center gap-2 shrink-0">
           <input
             v-model="filters.search"
             type="text"
@@ -312,12 +333,6 @@
         </div>
       </div>
 
-      <div v-if="resultsState.saveNotice" class="rounded-2xl border border-brand-soft bg-brand-50 px-4 py-3 text-sm text-brand-700">
-        {{ resultsState.saveNotice }}
-      </div>
-      <div v-if="resultsState.saveError" class="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
-        {{ resultsState.saveError }}
-      </div>
       <div v-if="resultsState.error" class="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
         {{ resultsState.error }}
       </div>
@@ -331,18 +346,12 @@
           </p>
           <div class="flex items-center gap-2">
             <span class="text-xs text-muted">每页</span>
-            <div class="flex gap-1">
-              <button
-                v-for="size in pageSizeOptions"
-                :key="size"
-                type="button"
-                class="rounded px-2 py-1 text-xs font-medium transition"
-                :class="pageSize === size
-                  ? 'bg-brand-100 text-brand-700'
-                  : 'text-secondary hover:bg-surface-muted'"
-                @click="pageSize = size; currentPage = 1"
-              >{{ size }}</button>
-            </div>
+            <TabSwitch
+              :tabs="pageSizeTabs"
+              :active="String(pageSize)"
+              size="sm"
+              @change="handlePageSizeChange"
+            />
           </div>
         </div>
 
@@ -408,20 +417,22 @@
                   </div>
                 </td>
                 <td class="px-4 py-3">
+                  <!-- 建议标签：有建议时显示，未打标时可点击采纳 -->
                   <span
-                    v-if="candidate.suggested_label && !candidate.current_label"
-                    class="inline-flex cursor-pointer rounded-full border border-dashed px-2.5 py-1 text-xs transition"
-                    :class="candidate.suggested_label === 'official_media'
-                      ? 'border-brand-soft/60 text-brand-600 hover:bg-brand-50'
-                      : candidate.suggested_label === 'network_media'
-                        ? 'border-amber-soft/60 text-amber-600 hover:bg-amber-50'
-                        : candidate.suggested_label === 'comprehensive_media'
-                          ? 'border-emerald-soft/60 text-emerald-600 hover:bg-emerald-50'
-                          : 'border-soft text-muted hover:bg-surface-muted'"
-                    :title="`系统建议：${labelText(candidate.suggested_label)}，点击采纳`"
-                    @click="stageCandidateLabel(candidate.publisher_name, candidate.suggested_label)"
+                    v-if="candidate.suggested_label"
+                    class="inline-flex rounded-full border px-2.5 py-1 text-xs"
+                    :class="[
+                      candidate.current_label ? 'border-soft bg-surface-muted text-muted' : 'cursor-pointer border-dashed transition',
+                      !candidate.current_label && candidate.suggested_label === 'official_media' ? 'border-brand-soft/60 text-brand-600 hover:bg-brand-50' : '',
+                      !candidate.current_label && candidate.suggested_label === 'local_media' ? 'border-soft text-secondary hover:bg-surface-muted' : '',
+                      !candidate.current_label && candidate.suggested_label === 'network_media' ? 'border-amber-soft/60 text-amber-600 hover:bg-amber-50' : '',
+                      !candidate.current_label && candidate.suggested_label === 'comprehensive_media' ? 'border-emerald-soft/60 text-emerald-600 hover:bg-emerald-50' : ''
+                    ]"
+                    :title="candidate.current_label ? '已打标' : `系统建议：${labelText(candidate.suggested_label)}，点击采纳`"
+                    @click="!candidate.current_label && handleLabelClick(candidate.publisher_name, candidate.suggested_label)"
                   >
                     {{ labelText(candidate.suggested_label) }}
+                    <span v-if="!candidate.current_label" class="ml-1 text-muted">?</span>
                   </span>
                   <span v-else class="text-muted">—</span>
                 </td>
@@ -439,7 +450,7 @@
                       :class="candidate.current_label === 'official_media'
                         ? 'border-brand-soft bg-brand-50 text-brand-700'
                         : 'border-soft text-secondary hover:border-brand-soft hover:bg-surface-muted'"
-                      @click="stageCandidateLabel(candidate.publisher_name, 'official_media')"
+                      @click="handleLabelClick(candidate.publisher_name, 'official_media')"
                     >官方</button>
                     <button
                       type="button"
@@ -447,7 +458,7 @@
                       :class="candidate.current_label === 'local_media'
                         ? 'border-brand-soft bg-brand-50 text-brand-700'
                         : 'border-soft text-secondary hover:border-brand-soft hover:bg-surface-muted'"
-                      @click="stageCandidateLabel(candidate.publisher_name, 'local_media')"
+                      @click="handleLabelClick(candidate.publisher_name, 'local_media')"
                     >地方</button>
                     <button
                       type="button"
@@ -455,7 +466,7 @@
                       :class="candidate.current_label === 'network_media'
                         ? 'border-amber-soft bg-amber-50 text-amber-700'
                         : 'border-soft text-secondary hover:border-amber-soft hover:bg-amber-50'"
-                      @click="stageCandidateLabel(candidate.publisher_name, 'network_media')"
+                      @click="handleLabelClick(candidate.publisher_name, 'network_media')"
                     >网络</button>
                     <button
                       type="button"
@@ -463,13 +474,13 @@
                       :class="candidate.current_label === 'comprehensive_media'
                         ? 'border-emerald-soft bg-emerald-50 text-emerald-700'
                         : 'border-soft text-secondary hover:border-emerald-soft hover:bg-emerald-50'"
-                      @click="stageCandidateLabel(candidate.publisher_name, 'comprehensive_media')"
+                      @click="handleLabelClick(candidate.publisher_name, 'comprehensive_media')"
                     >综合</button>
                     <button
                       v-if="candidate.current_label"
                       type="button"
                       class="rounded-full border border-soft px-2.5 py-1 text-xs text-muted transition hover:bg-surface-muted"
-                      @click="stageCandidateLabel(candidate.publisher_name, '')"
+                      @click="handleLabelClick(candidate.publisher_name, '')"
                     >清除</button>
                   </div>
                 </td>
@@ -480,6 +491,13 @@
                       class="rounded-full border border-soft px-3 py-1.5 text-xs text-secondary transition hover:border-brand-soft hover:text-brand-600"
                       @click="openDetailModal(candidate)"
                     >详情</button>
+                    <button
+                      type="button"
+                      class="rounded-full border border-danger-soft px-3 py-1.5 text-xs text-danger transition hover:bg-danger-50"
+                      @click="handleDeleteCandidate(candidate)"
+                    >
+                      <TrashIcon class="h-3 w-3" />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -556,9 +574,27 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 class="text-base font-semibold text-primary">共享媒体字典</h3>
-          <p class="mt-1 text-sm text-secondary">跨专题复用的媒体名称与正式标签，识别时会自动对齐。</p>
+          <p class="mt-1 text-sm text-secondary">跨专题复用的媒体名称与正式标签，识别时会自动对齐。支持多选合并。</p>
         </div>
         <div class="flex items-center gap-2">
+          <!-- 多选操作栏 -->
+          <div v-if="selectedRegistryCount > 0" class="flex items-center gap-2 rounded-lg border border-brand-soft bg-brand-50 px-3 py-2">
+            <span class="text-xs font-semibold text-brand-700">已选 {{ selectedRegistryCount }} 条</span>
+            <button
+              type="button"
+              class="rounded-full border border-soft bg-white px-2 py-1 text-xs text-secondary transition hover:border-brand-soft hover:text-brand-600"
+              @click="openMergeRegistryModal"
+            >
+              <svg class="h-3 w-3 inline mr-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>
+              合并
+            </button>
+            <button
+              type="button"
+              class="rounded-full border border-soft bg-white px-2 py-1 text-xs text-muted transition hover:bg-surface-muted"
+              @click="clearRegistrySelection()"
+            >取消</button>
+          </div>
+          <!-- 常规按钮 -->
           <button
             type="button"
             class="inline-flex items-center gap-2 rounded-full border border-soft px-3 py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-soft hover:text-brand-600"
@@ -591,6 +627,17 @@
           <table class="min-w-full text-sm">
             <thead class="bg-surface-muted text-xs uppercase tracking-[0.18em] text-muted">
               <tr>
+                <th class="w-12 px-2 py-3 text-center">
+                  <label class="inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      :checked="isAllRegistrySelected"
+                      :indeterminate.prop="selectedRegistryCount > 0 && !isAllRegistrySelected"
+                      class="rounded border-soft"
+                      @change="toggleSelectAllRegistry($event.target.checked)"
+                    />
+                  </label>
+                </th>
                 <th class="px-4 py-3 text-left">名称</th>
                 <th class="px-4 py-3 text-left">别名</th>
                 <th class="px-4 py-3 text-left">标签</th>
@@ -603,8 +650,19 @@
               <tr
                 v-for="item in filteredRegistryItems"
                 :key="item.id"
-                class="border-t border-soft align-middle"
+                class="border-t border-soft align-middle transition hover:bg-surface-muted/40"
+                :class="{ 'bg-brand-50/30': selectedRegistryItems.has(item.id) }"
               >
+                <td class="w-12 px-2 py-3 text-center">
+                  <label class="inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      :checked="selectedRegistryItems.has(item.id)"
+                      class="rounded border-soft"
+                      @change="toggleSelectRegistryItem(item.id, $event.target.checked)"
+                    />
+                  </label>
+                </td>
                 <td class="px-4 py-3 font-semibold text-primary">{{ item.name }}</td>
                 <td class="px-4 py-3 text-secondary">{{ item.aliases?.join('、') || '—' }}</td>
                 <td class="px-4 py-3">
@@ -615,15 +673,24 @@
                 <td class="px-4 py-3 text-secondary">{{ item.notes || '—' }}</td>
                 <td class="px-4 py-3 text-secondary">{{ formatTimestamp(item.updated_at) }}</td>
                 <td class="px-4 py-3">
-                  <button
-                    type="button"
-                    class="rounded-full border border-soft px-3 py-1.5 text-xs text-secondary transition hover:border-brand-soft hover:text-brand-600"
-                    @click="openRegistryModal(item)"
-                  >编辑</button>
+                  <div class="flex gap-1.5">
+                    <button
+                      type="button"
+                      class="rounded-full border border-soft px-3 py-1.5 text-xs text-secondary transition hover:border-brand-soft hover:text-brand-600"
+                      @click="openRegistryModal(item)"
+                    >编辑</button>
+                    <button
+                      type="button"
+                      class="rounded-full border border-danger-soft px-3 py-1.5 text-xs text-danger transition hover:bg-danger-50"
+                      @click="handleDeleteRegistryItem(item)"
+                    >
+                      <TrashIcon class="h-3 w-3" />
+                    </button>
+                  </div>
                 </td>
               </tr>
               <tr v-if="!filteredRegistryItems.length">
-                <td colspan="6" class="px-4 py-8 text-center text-sm text-muted">
+                <td colspan="7" class="px-4 py-8 text-center text-sm text-muted">
                   字典为空，请先运行识别并打标，或手动新增。
                 </td>
               </tr>
@@ -771,6 +838,59 @@
         </label>
       </div>
     </AppModal>
+
+    <!-- ── 合并字典条目 Modal ─────────────────────────────────────────── -->
+    <AppModal
+      v-model="mergeRegistryModalOpen"
+      eyebrow="合并字典条目"
+      title="合并选中条目"
+      description="选择主条目，其他条目的名称和别名将合并为该条目的别名。"
+      confirm-text="确认合并"
+      confirm-loading-text="合并中…"
+      width="max-w-xl"
+      :confirm-disabled="!mergeForm.canonicalName.trim()"
+      :confirm-loading="resultsState.registrySaving"
+      @confirm="submitMergeRegistryModal"
+      @cancel="closeMergeRegistryModal"
+    >
+      <div class="space-y-4">
+        <p class="text-sm text-secondary">已选择 {{ selectedRegistryCount }} 条条目：</p>
+        <div class="rounded-xl border border-soft bg-surface-muted/50 px-4 py-3">
+          <ul class="space-y-1 text-sm">
+            <li v-for="item in selectedRegistryItemsList" :key="item.id" class="flex items-center gap-2">
+              <input
+                type="radio"
+                :value="item.id"
+                :checked="mergeForm.canonicalId === item.id"
+                class="rounded border-soft"
+                @change="selectMergeCanonical(item)"
+              />
+              <span class="font-semibold text-primary">{{ item.name }}</span>
+              <span class="text-xs text-muted">( {{ labelText(item.media_level) }} )</span>
+              <span v-if="item.aliases?.length" class="text-xs text-secondary">别名: {{ item.aliases.join('、') }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="space-y-2">
+            <span class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">主条目名称</span>
+            <input v-model="mergeForm.canonicalName" type="text" class="input h-10" placeholder="选择或输入主名称" />
+          </label>
+
+          <label class="space-y-2">
+            <span class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">合并后标签</span>
+            <AppSelect
+              :options="registryLabelOptions"
+              :value="mergeForm.mediaLevel"
+              @change="mergeForm.mediaLevel = $event"
+            />
+          </label>
+        </div>
+
+        <p class="text-xs text-muted">合并后，其他条目将被删除，其名称和别名将汇总到主条目的别名列表中。</p>
+      </div>
+    </AppModal>
   </div>
 </template>
 
@@ -781,9 +901,11 @@ import {
   MegaphoneIcon,
   PencilSquareIcon,
   CheckIcon,
+  TrashIcon,
 } from '@heroicons/vue/24/outline'
 import AppModal from '../../../components/AppModal.vue'
 import AppSelect from '../../../components/AppSelect.vue'
+import TabSwitch from '../../../components/TabSwitch.vue'
 import { useMediaTagging } from '../../../composables/useMediaTagging'
 
 const {
@@ -824,18 +946,37 @@ const {
   toggleSelectItem,
   applyLabelToSelected,
   clearSelection,
-  saveRegistryItem
+  saveCandidateUpdates,
+  saveRegistryItem,
+  deleteCandidates,
+  deleteSelectedCandidates,
+  deleteRegistryItem,
+  acceptAllSuggestions,
+  selectedRegistryItems,
+  isAllRegistrySelected,
+  selectedRegistryCount,
+  toggleSelectAllRegistry,
+  toggleSelectRegistryItem,
+  clearRegistrySelection,
+  mergeRegistryItems
 } = useMediaTagging()
 
 // ── Modals ──────────────────────────────────────────────────────────────
 const detailModalOpen = ref(false)
 const detailCandidate = ref(null)
 const registryModalOpen = ref(false)
+const mergeRegistryModalOpen = ref(false)
 
 // ── Pagination ───────────────────────────────────────────────────────────
 const pageSize = ref(30)
 const currentPage = ref(1)
 const pageSizeOptions = [10, 30, 50, 100]
+const pageSizeTabs = pageSizeOptions.map((size) => ({ value: String(size), label: String(size) }))
+
+function handlePageSizeChange(value) {
+  pageSize.value = Number(value)
+  currentPage.value = 1
+}
 
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(filteredCandidates.value.length / pageSize.value))
@@ -888,6 +1029,12 @@ const registryForm = reactive({
   notes: ''
 })
 
+const mergeForm = reactive({
+  canonicalId: '',
+  canonicalName: '',
+  mediaLevel: ''
+})
+
 // ── Computed ─────────────────────────────────────────────────────────────
 const topicSelectOptions = computed(() =>
   topicOptions.value.map((item) => ({ value: item, label: item }))
@@ -900,8 +1047,19 @@ const historySelectOptions = computed(() =>
   }))
 )
 
+const platformSelectOptions = computed(() => [
+  { value: '', label: '全部' },
+  ...allPlatforms.value.map((platform) => ({ value: platform, label: platform }))
+])
+
+const sortModeOptions = [
+  { value: 'suggest_first', label: '建议优先' },
+  { value: 'publish_count', label: '发布量优先' }
+]
+
 const summaryCards = computed(() => [
   { label: '候选总数', value: candidateStats.value.total },
+  { label: '有建议', value: candidateStats.value.hasSuggest },
   { label: '官方媒体', value: candidateStats.value.official },
   { label: '地方媒体', value: candidateStats.value.local },
   { label: '网络媒体', value: candidateStats.value.network },
@@ -966,6 +1124,35 @@ function handleTopicChange(value) {
 
 async function handleRun() {
   await runMediaTagging()
+}
+
+async function handleDeleteCandidate(candidate) {
+  if (!candidate?.publisher_name) return
+  if (!confirm(`确定删除候选媒体「${candidate.publisher_name}」吗？此操作不可恢复。`)) return
+  await deleteCandidates([candidate.publisher_name])
+}
+
+async function handleDeleteSelected() {
+  if (!selectedCount.value) return
+  if (!confirm(`确定删除已选的 ${selectedCount.value} 条候选媒体吗？此操作不可恢复。`)) return
+  await deleteSelectedCandidates()
+}
+
+async function handleDeleteRegistryItem(item) {
+  if (!item?.id) return
+  if (!confirm(`确定删除字典条目「${item.name}」吗？此操作不可恢复。`)) return
+  await deleteRegistryItem(item.id)
+}
+
+// 打标点击处理：包装异步调用，确保错误被正确显示
+// 打标点击处理：乐观更新，不等待API
+function handleLabelClick(publisherName, label) {
+  stageCandidateLabel(publisherName, label)
+}
+
+// 批量打标处理
+function handleBatchLabel(label) {
+  applyLabelToSelected(label)
 }
 
 // ── Detail Modal ─────────────────────────────────────────────────────────
@@ -1041,6 +1228,11 @@ function resetRegistryForm() {
   registryForm.notes = ''
 }
 
+function resetRegistryModal() {
+  registryModalOpen.value = false
+  resetRegistryForm()
+}
+
 async function submitRegistryModal() {
   const saved = await saveRegistryItem({
     id: registryForm.id,
@@ -1053,6 +1245,56 @@ async function submitRegistryModal() {
   if (saved) {
     registryModalOpen.value = false
     resetRegistryForm()
+  }
+}
+
+// ── Merge Registry Modal ────────────────────────────────────────────────────
+const selectedRegistryItemsList = computed(() =>
+  registryItems.value.filter((item) => selectedRegistryItems.value.has(item.id))
+)
+
+function openMergeRegistryModal() {
+  if (selectedRegistryCount.value < 2) {
+    resultsState.registryError = '请至少选择 2 条条目进行合并。'
+    return
+  }
+  // 默认选择第一个作为 canonical
+  const first = selectedRegistryItemsList.value[0]
+  if (first) {
+    mergeForm.canonicalId = first.id
+    mergeForm.canonicalName = first.name
+    mergeForm.mediaLevel = first.media_level || ''
+  } else {
+    mergeForm.canonicalId = ''
+    mergeForm.canonicalName = ''
+    mergeForm.mediaLevel = ''
+  }
+  resultsState.registryError = ''
+  mergeRegistryModalOpen.value = true
+}
+
+function selectMergeCanonical(item) {
+  mergeForm.canonicalId = item.id
+  mergeForm.canonicalName = item.name
+  mergeForm.mediaLevel = item.media_level || ''
+}
+
+function closeMergeRegistryModal() {
+  mergeRegistryModalOpen.value = false
+  mergeForm.canonicalId = ''
+  mergeForm.canonicalName = ''
+  mergeForm.mediaLevel = ''
+}
+
+async function submitMergeRegistryModal() {
+  const result = await mergeRegistryItems({
+    canonicalId: mergeForm.canonicalId,
+    canonicalName: mergeForm.canonicalName,
+    mediaLevel: mergeForm.mediaLevel,
+    notes: ''
+  })
+  if (result) {
+    closeMergeRegistryModal()
   }
 }
 

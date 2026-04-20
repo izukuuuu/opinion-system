@@ -4,48 +4,100 @@ deep_report/exploration_deterministic_graph.py
 ===============================================
 
 确定性子代理调度图：将子代理委派从 LLM-driven coordinator 改为确定性 LangGraph 流程。
-
-每个节点内部仍使用 LangChain agent（保留 skills/tools），但调度顺序由图结构决定，
-而非依赖 LLM 的 prompt 理解。
-
-执行层级：
-  Tier 0: retrieval_router（无依赖）
-      ↓
-  Tier 1: [并行] archive_evidence_organizer + bertopic_evolution_analyst
-      ↓
-  Tier 2: [并行] timeline_analyst + stance_conflict
-      ↓
-  Tier 3: [并行] event_analyst + claim_actor_conflict
-      ↓
-  Tier 4: [并行] agenda_frame_builder + propagation_analyst
-      ↓
-  Tier 5: decision_utility_judge
-      ↓
-  Tier 6: writer（条件执行）
-      ↓
-  Tier 7: finalize（汇总 + 保存）
 """
 from __future__ import annotations
 
-import operator
-from typing import Annotated, Any, Callable, Dict, List, Optional, TypedDict
+import fnmatch
+import json
+from dataclasses import dataclass
+from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
+from deepagents import create_deep_agent
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from ..capability_manifest import RUNTIME_SUBAGENT
-from ..runtime_infra import get_shared_report_checkpointer, build_report_runnable_config
-from ..tools import select_report_tools
-from ..skills import select_report_skill_sources
-from ..configs import get_subagent_skill_keys, get_subagent_output_files, get_subagents_by_tier
+from ..configs import get_subagent_output_files, get_subagent_output_globs
+from ..runtime_infra import build_report_runnable_config, get_shared_report_checkpointer
+from .assets import RUNTIME_STORE
+from .builder import ReportCoordinatorContext, _build_subagent_specs
+from .deterministic import build_runtime_workspace_layout
 
+_TIER_PHASES: Dict[int, str] = {
+    0: "interpret",
+    1: "interpret",
+    2: "interpret",
+    3: "interpret",
+    4: "interpret",
+    5: "interpret",
+    6: "write",
+}
 
-# ---------------------------------------------------------------------------
-# State Schema
-# ---------------------------------------------------------------------------
+_TIER_NODE_AGENTS: Dict[int, List[Tuple[str, str]]] = {
+    1: [
+        ("archive_evidence_node", "archive_evidence_organizer"),
+        ("bertopic_node", "bertopic_evolution_analyst"),
+    ],
+    2: [
+        ("timeline_node", "timeline_analyst"),
+        ("stance_node", "stance_conflict"),
+    ],
+    3: [
+        ("event_analyst_node", "event_analyst"),
+        ("conflict_node", "claim_actor_conflict"),
+    ],
+    4: [
+        ("agenda_node", "agenda_frame_builder"),
+        ("propagation_node", "propagation_analyst"),
+    ],
+}
+
+_TIER_TODO_SPECS: Dict[int, Dict[str, Any]] = {
+    0: {
+        "id": "tier-0",
+        "label": "范围确认与检索冻结",
+        "detail": "等待开始。",
+        "agents": ["retrieval_router"],
+    },
+    1: {
+        "id": "tier-1",
+        "label": "证据与主题演化",
+        "detail": "等待并行证据整理与主题演化。",
+        "agents": ["archive_evidence_organizer", "bertopic_evolution_analyst"],
+    },
+    2: {
+        "id": "tier-2",
+        "label": "时间线与立场",
+        "detail": "等待时间线与主体立场分析。",
+        "agents": ["timeline_analyst", "stance_conflict"],
+    },
+    3: {
+        "id": "tier-3",
+        "label": "事件分析与冲突图",
+        "detail": "等待事件分析与冲突图整理。",
+        "agents": ["event_analyst", "claim_actor_conflict"],
+    },
+    4: {
+        "id": "tier-4",
+        "label": "议题框架与传播机制",
+        "detail": "等待议题框架与传播机制分析。",
+        "agents": ["agenda_frame_builder", "propagation_analyst"],
+    },
+    5: {
+        "id": "tier-5",
+        "label": "效用裁决",
+        "detail": "等待效用裁决结果。",
+        "agents": ["decision_utility_judge"],
+    },
+    6: {
+        "id": "tier-6",
+        "label": "文稿生成与结构化交付",
+        "detail": "等待文稿草拟与结构化交付。",
+        "agents": ["writer"],
+    },
+}
+
 
 def _merge_files(existing: Dict[str, Any], update: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """合并 files 字典（用于 state reducer）。"""
     if update is None:
         return existing or {}
     merged = dict(existing or {})
@@ -53,811 +105,1385 @@ def _merge_files(existing: Dict[str, Any], update: Optional[Dict[str, Any]]) -> 
     return merged
 
 
-def _accumulate_gaps(existing: List, update: Optional[List]) -> List:
-    """累积 gaps 列表。"""
-    if update is None:
-        return existing or []
-    return (existing or []) + update
+def _merge_dicts(existing: Optional[Dict[str, Any]], update: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    merged = dict(existing or {})
+    merged.update(update or {})
+    return merged
+
+
+def _merge_unique_strings(existing: Optional[List[str]], update: Optional[List[str]]) -> List[str]:
+    output: List[str] = []
+    for item in [*(existing or []), *(update or [])]:
+        value = str(item or "").strip()
+        if value and value not in output:
+            output.append(value)
+    return output
+
+
+def _dedupe_gaps(existing: Optional[List[Dict[str, Any]]], update: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    output: List[Dict[str, Any]] = []
+    seen: set[Tuple[str, str, str, int]] = set()
+    for item in [*(existing or []), *(update or [])]:
+        if not isinstance(item, dict):
+            continue
+        normalized = {
+            "agent": str(item.get("agent") or "").strip(),
+            "file": str(item.get("file") or "").strip(),
+            "reason": str(item.get("reason") or "").strip(),
+            "tier": int(item.get("tier") or 0),
+        }
+        key = (
+            normalized["agent"],
+            normalized["file"],
+            normalized["reason"],
+            normalized["tier"],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(normalized)
+    return output
 
 
 class ExplorationDeterministicState(TypedDict, total=False):
-    """确定性调度图的状态 schema。"""
-
-    # 运行时文件系统（虚拟 workspace）
     files: Annotated[Dict[str, Dict[str, Any]], _merge_files]
-
-    # 任务元数据
     task_id: str
     thread_id: str
     topic_identifier: str
+    project_identifier: str
     topic_label: str
     start: str
     end: str
     mode: str
-
-    # 执行状态
-    status: str  # running | completed | failed | partial
+    status: str
     message: str
-
-    # 缺失记录
-    gaps: Annotated[List[Dict[str, Any]], _accumulate_gaps]
-
-    # 结构化结果
+    gaps: Annotated[List[Dict[str, Any]], _dedupe_gaps]
     structured_payload: Dict[str, Any]
+    current_agent: str
+    agent_attempts: Annotated[Dict[str, int], _merge_dicts]
+    agent_statuses: Annotated[Dict[str, str], _merge_dicts]
+    agent_messages: Annotated[Dict[str, str], _merge_dicts]
+    agent_results: Annotated[Dict[str, Dict[str, Any]], _merge_dicts]
+    tier_results: Annotated[Dict[str, Dict[str, Any]], _merge_dicts]
+    section_draft_paths: Annotated[List[str], _merge_unique_strings]
+    reuse_plan: Annotated[Dict[str, Any], _merge_dicts]
+    execution_plan: Annotated[Dict[str, Any], _merge_dicts]
+    reused_artifacts: Annotated[Dict[str, Any], _merge_dicts]
+    supplement_candidates: Annotated[Dict[str, Any], _merge_dicts]
+    skipped_agents: Annotated[Dict[str, Any], _merge_dicts]
+    repair_context: Annotated[Dict[str, Any], _merge_dicts]
 
-    # 运行时资产（传入）
+
+@dataclass(frozen=True)
+class _ExplorationRuntimeDeps:
     skill_assets: Dict[str, Any]
     middleware_factory: Callable[[str], List[Any]]
-    event_callback: Callable[[Dict[str, Any]], None]
+    event_callback: Callable[[Dict[str, Any]], None] | None
     llm: Any
+    runtime_backend: Any = None
+    common_context: Dict[str, Any] | None = None
+    subagent_specs: Dict[str, Dict[str, Any]] | None = None
+    lifecycle_tracker: Dict[str, Any] | None = None
 
-    # 当前执行的子代理名称（用于并行分支）
-    current_agent: str
-
-
-# ---------------------------------------------------------------------------
-# 文件完整性检查
-# ---------------------------------------------------------------------------
 
 _TIER_REQUIRED_FILES: Dict[int, List[str]] = {
     0: [
-        "/workspace/state/task_contract.json",  # 已存在
-        "/workspace/state/task_derivation.json",
-        "/workspace/state/task_derivation_proposal.json",
-        "/workspace/state/normalized_task.json",
-        "/workspace/state/retrieval_plan.json",
-        "/workspace/state/dispatch_quality.json",
-        "/workspace/state/corpus_coverage.json",
+        "task_contract.json",
+        "task_derivation.json",
+        "task_derivation_proposal.json",
+        "normalized_task.json",
+        "retrieval_plan.json",
+        "dispatch_quality.json",
+        "corpus_coverage.json",
     ],
     1: [
-        "/workspace/state/evidence_cards.json",
-        "/workspace/state/bertopic_insight.json",
+        "evidence_cards.json",
+        "bertopic_insight.json",
     ],
     2: [
-        "/workspace/state/timeline_nodes.json",
-        "/workspace/state/metrics_bundle.json",
-        "/workspace/state/actor_positions.json",
+        "timeline_nodes.json",
+        "metrics_bundle.json",
+        "actor_positions.json",
     ],
     3: [
-        "/workspace/state/event_analysis.json",
-        "/workspace/state/conflict_map.json",
+        "event_analysis.json",
+        "conflict_map.json",
     ],
     4: [
-        "/workspace/state/agenda_frame_map.json",
-        "/workspace/state/mechanism_summary.json",
-        "/workspace/state/risk_signals.json",
+        "agenda_frame_map.json",
+        "mechanism_summary.json",
+        "risk_signals.json",
     ],
     5: [
-        "/workspace/state/utility_assessment.json",
-    ],
-    6: [
-        # writer 输出 section_drafts，可选检查
+        "utility_assessment.json",
     ],
 }
 
 
-def _get_tier_required_files_from_config(tier: int) -> List[str]:
-    """从 YAML 配置获取指定 tier 的必需输出文件。"""
-    subagents_in_tier = get_subagents_by_tier(tier)
-    all_files: List[str] = []
-    for agent_name in subagents_in_tier:
-        agent_files = get_subagent_output_files(agent_name)
-        all_files.extend(agent_files)
-    # Fallback to hardcoded if config returns empty
-    if not all_files:
-        all_files = _TIER_REQUIRED_FILES.get(tier, [])
-    return all_files
+def _path_tokens(common_context: Dict[str, Any] | None) -> Dict[str, str]:
+    context = common_context if isinstance(common_context, dict) else {}
+    configured = context.get("workspace_path_tokens") if isinstance(context.get("workspace_path_tokens"), dict) else {}
+    if configured:
+        return {str(key): str(value) for key, value in configured.items()}
+    layout = build_runtime_workspace_layout(
+        project_identifier=str(context.get("project_identifier") or "").strip(),
+        topic_identifier=str(context.get("topic_identifier") or "").strip(),
+        start=str(context.get("start") or "").strip(),
+        end=str(context.get("end") or "").strip(),
+    )
+    return {
+        "project_identifier": layout.project_component,
+        "report_range": layout.range_component,
+        "workspace_root": layout.workspace_root,
+        "state_root": layout.state_root,
+    }
 
 
-def _is_empty_result(content: Dict[str, Any]) -> bool:
-    """检查是否为结构化空结果。"""
-    if not isinstance(content, dict):
-        return True
-    result = content.get("result")
-    if isinstance(result, list) and len(result) == 0:
-        # 检查是否有明确的空标记
-        coverage = content.get("coverage", {})
-        flags = coverage.get("readiness_flags", [])
-        if "no_cards" in flags or "no_records_in_scope" in flags:
-            return True
-        # 有 coverage 但 result 为空，可能是合法空结果
-        return False
-    return False
+def _state_path(relative_path: str, common_context: Dict[str, Any] | None) -> str:
+    tokens = _path_tokens(common_context)
+    return f"{tokens['state_root']}/{str(relative_path or '').strip().lstrip('/')}"
 
 
-def _check_files(
-    files: Dict[str, Dict[str, Any]],
-    required_paths: List[str],
-    agent: str = "",
-    tier: int = 0,
-) -> List[Dict[str, Any]]:
-    """检查必需文件是否存在，返回缺失列表。"""
-    gaps: List[Dict[str, Any]] = []
-    for path in required_paths:
-        content = files.get(path)
-        if not content:
-            gaps.append({
-                "agent": agent,
-                "file": path,
-                "reason": "missing",
-                "tier": tier,
-            })
-        elif _is_empty_result(content):
-            gaps.append({
-                "agent": agent,
-                "file": path,
-                "reason": "empty_result",
-                "tier": tier,
-            })
-    return gaps
-
-
-def _read_file(files: Dict[str, Dict[str, Any]], path: str) -> Dict[str, Any]:
-    """从 files 字典读取文件内容。"""
-    content = files.get(path)
-    return content if isinstance(content, dict) else {}
-
-
-# ---------------------------------------------------------------------------
-# 子代理调用工厂
-# ---------------------------------------------------------------------------
-
-# 子代理 system_prompt 配置（从 builder.py 复制）
-_SUBAGENT_SYSTEM_PROMPTS: Dict[str, str] = {
-    "retrieval_router": (
-        "你是任务规范化与覆盖诊断代理。先读取 /workspace/base_context.json，"
-        "**绝对禁止**自行生成、改写或覆盖以下字段：\n"
-        "- topic_identifier（必须严格沿用 base_context.task_contract.topic_identifier）\n"
-        "- start / end 时间窗口（必须严格沿用 base_context.task_contract.start/end）\n"
-        "- contract_id（必须严格沿用 base_context.task_contract.contract_id）\n"
-        "- mode 执行模式（必须严格沿用 base_context.task_contract.mode）\n"
-        "如果发现 task_contract 与 base_context 不一致，必须立即终止并报错，不允许自动覆盖。\n\n"
-        "调用 normalize_task 时，必须传入 base_context 中已有的 topic_identifier、start、end、mode 作为参数，"
-        "只补充 topic / entities / keywords / platform_scope / mandatory_sections 等语义字段，"
-        "再基于 analysis_question_set、coverage_expectation 与 inference_policy 归纳 retrieval plan，"
-        "最后从 /workspace/state/task_contract.json 读取 contract_id，并调用 get_corpus_coverage(contract_id=..., retrieval_scope_json=..., filters_json=...) 区分'没有数据'与'没有发现'。"
-        "把结果分别写入 /workspace/state/task_derivation.json、/workspace/state/task_derivation_proposal.json、/workspace/state/normalized_task.json、/workspace/state/retrieval_plan.json、/workspace/state/dispatch_quality.json 和 /workspace/state/corpus_coverage.json，"
-        "并返回简短总结。默认策略是少调用、重研判。"
-        "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-    ),
-    "archive_evidence_organizer": """
-        你是证据卡整理代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json 和 /workspace/state/corpus_coverage.json。
-        其中 task_contract 是唯一执行 authority，normalized_task 只用于调试和兼容展示。
-        从 /workspace/state/task_contract.json 提取 contract_id，只使用 retrieve_evidence_cards(contract_id=..., retrieval_scope_json=..., filters_json=..., intent=...) 产出分页证据卡与反证卡。
-        intent 只允许使用以下 ABI 白名单：overview、timeline、actors、risk、claim_support、claim_counter。
-        不要直接传中文语义词或自造值；例如 "传播总览" 必须映射为 overview，"传播演化"/"时间线" 映射为 timeline，"主体立场" 映射为 actors，"风险信号" 映射为 risk，"争议焦点" 必须拆成 claim_support 和 claim_counter，禁止直接传 "关键事件"、"主体立场"、"争议焦点"、"风险信号" 等中文 intent。
-        如果 corpus_coverage.coverage.readiness_flags 包含 no_records_in_scope，
-        只允许生成一次空 evidence_cards.json，随后立即结束，不要继续换 intent 重试。
-        把聚合后的结果写入 /workspace/state/evidence_cards.json，并返回摘要。
-        不要回写长段原文，不要把数据库字段直接搬进文稿。
-        若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。
-        """,
-    "bertopic_evolution_analyst": (
-        "你是 BERTopic 主题演化代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json 与 /workspace/state/normalized_task.json，"
-        "先使用 get_bertopic_snapshot 读取当前专题在本地归档中的 BERTopic 结果，再使用 build_bertopic_insight 输出主题演化章节洞察。"
-        "若快照不存在或可用主题为空，写出结构化空洞察，不输出警告性提示，不要伪造演化趋势。"
-        "把结果写入 /workspace/state/bertopic_insight.json，并返回简短总结。"
-        "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-    ),
-    "timeline_analyst": (
-        "你是时间线分析代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json 与 /workspace/state/evidence_cards.json，"
-        "如果 evidence_cards.coverage.readiness_flags 包含 no_cards，则只生成结构化空结果并附带跳过原因，不要继续尝试深描。"
-        "使用 build_event_timeline 生成带 support_evidence_ids 的时间线节点，再用 compute_report_metrics 输出 chart-ready 指标。\n\n"
-        "**关键传参约束**:\n"
-        "调用 build_event_timeline 时必须显式传参：\n"
-        "- normalized_task_json 必须传 normalized_task.json 的完整内容（可以是顶层对象或其 normalized_task/result 子字段）\n"
-        "- evidence_ids_json 必须传 evidence_cards.json 中的 result 数组（而非整个包装对象），不能为空或默认值\n"
-        "不要只读取文件不传参，也不要把整个包装对象直接传给工具。\n\n"
-        "只有在 evidence_cards.result 明确为空时，才允许返回空时间线结果。\n\n"
-        "结果写入 /workspace/state/timeline_nodes.json 和 /workspace/state/metrics_bundle.json，并返回简短总结。"
-        "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-    ),
-    "stance_conflict": (
-        "你是主体立场代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json 与 /workspace/state/evidence_cards.json，"
-        "只使用 extract_actor_positions 输出主体、立场变化、冲突关系。"
-        "调用时必须把 evidence_cards.json 中的 result 数组原样作为 evidence_ids_json 传入，不要只读取文件不传参，也不要把整个包装对象直接传给工具。"
-        "只有在 evidence_cards.result 明确为空时，才允许返回空主体结果；不要依赖工具自行 fallback 重召回。"
-        "把结果写入 /workspace/state/actor_positions.json，并返回简短总结。"
-        "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-    ),
-    "event_analyst": (
-        "你是事件结构分析代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、"
-        "/workspace/state/evidence_cards.json、/workspace/state/timeline_nodes.json 和 /workspace/state/metrics_bundle.json。\n\n"
-        "**必须输出的结构**:\n"
-        "1. event_trigger: {\n"
-        "   'trigger_point': '事件触发点描述',\n"
-        "   'first_source': '首发信源（平台/账号）',\n"
-        "   'first_platform': '首发平台',\n"
-        "   'trigger_time': '首发时间',\n"
-        "   'trigger_content': '首发内容摘要（必须引用原文）'\n"
-        "}\n"
-        "2. discussion_evolution: {\n"
-        "   'phases': [{'phase': '阶段名', 'focus': '焦点', 'mechanism': '机制', 'evidence_ids': ['ev-xxx']}],\n"
-        "   'frame_shifts': ['框架转换描述'],\n"
-        "   'key_nodes': ['关键转折节点']\n"
-        "}\n"
-        "3. actor_distribution: {\n"
-        "   'actors': [{\n"
-        "     'name': '主体名', 'type': '类型', 'stance': '立场', 'influence': '影响力',\n"
-        "     'key_statements': ['具体发言（必须引用原文，≤80字/条）'],\n"
-        "     'evidence_ids': ['ev-xxx']  # 对应 evidence_cards 中的 evidence_id\n"
-        "   }],\n"
-        "   'stance_summary': '整体立场结构摘要'\n"
-        "}\n"
-        "4. platform_analysis: {\n"
-        "   'platforms': [{\n"
-        "     'platform': '平台名',\n"
-        "     'discussion_style': '讨论特征（如：情绪宣泄型/理性分析型/娱乐化解构型）',\n"
-        "     'emotion_dist': {'positive': X, 'negative': Y, 'neutral': Z},\n"
-        "     'dominant_emotion': '主导情绪关键词（如：愤怒/焦虑/讽刺/同情）',\n"
-        "     'representative_quotes': ['原文引用1（≤80字，来自该平台的 evidence_cards）', '原文引用2'],\n"
-        "     'key_users': ['关键用户'],\n"
-        "     'evidence_ids': ['ev-xxx']  # 该平台的支撑证据ID\n"
-        "   }],\n"
-        "   'cross_platform_diff': '跨平台差异分析'\n"
-        "}\n"
-        "5. keywords: {\n"
-        "   'top_keywords': ['关键词1', '关键词2', ...],\n"
-        "   'keyword_semantics': {'关键词': '语义含义'}\n"
-        "}\n"
-        "6. sentiment_summary: {\n"
-        "   'overall_emotion': '整体情感倾向',\n"
-        "   'emotion_by_platform': {'平台': '情感描述'},\n"
-        "   'emotion_drivers': ['情感驱动因素']\n"
-        "}\n\n"
-        "**关键约束**:\n"
-        "- 每个判断必须有evidence_id支撑\n"
-        "- key_statements必须引用evidence_cards中的snippet/content原文\n"
-        "- 不能写'网友认为'，必须写具体发言者和原文\n"
-        "- 使用 build_basic_analysis_insight 获取基础数据支撑\n\n"
-        "结果写入 /workspace/state/event_analysis.json，并返回简短总结。"
-    ),
-    "claim_actor_conflict": (
-        "你是断言冲突构建代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json、/workspace/state/evidence_cards.json、"
-        "/workspace/state/actor_positions.json 和 /workspace/state/timeline_nodes.json，"
-        "如果 evidence_cards.coverage.readiness_flags 包含 no_cards，或 actor_positions / timeline_nodes 明显为空，"
-        "只生成结构化空图谱，不输出警告性提示，不要反复重试。"
-        "使用 build_claim_actor_conflict 生成 claim graph、actor positions、conflict edges 与 resolution states。"
-        "调用时必须把 evidence_cards.json 中的 result 数组作为 evidence_ids_json，把 actor_positions.json 中的 result 数组作为 actor_positions_json，把 timeline_nodes.json 中的 result 数组作为 timeline_nodes_json。"
-        "不要只读取这些文件而不传给工具，也不要把整个包装对象直接传给工具。"
-        "把结果写入 /workspace/state/conflict_map.json，并返回简短总结。"
-        "不要输出 prose 结论，不要默认把冲突写成已收敛。"
-        "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-    ),
-    "agenda_frame_builder": (
-        "你是议题与框架构建代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json、/workspace/state/evidence_cards.json、"
-        "/workspace/state/actor_positions.json、/workspace/state/conflict_map.json 与 /workspace/state/timeline_nodes.json，"
-        "使用 build_agenda_frame_map 生成 issue nodes、attribute nodes、frame records、frame shifts 与 counter-frames。"
-        "调用工具时必须显式传参："
-        "normalized_task_json 从 normalized_task.json 提取，"
-        "evidence_ids_json 必须传 evidence_cards.json 的 result 数组（而非整个包装对象），"
-        "actor_positions_json 必须传 actor_positions.json 的 result 数组，"
-        "timeline_nodes_json 必须传 timeline_nodes.json 的 result 数组，"
-        "conflict_map_json 必须传 conflict_map.json 的核心对象内容。"
-        "如果依赖文件不存在或为空，只生成结构化空结果，不输出警告性提示。"
-        "把结果写入 /workspace/state/agenda_frame_map.json，并返回简短总结。"
-        "不要输出 prose 结论，不要把框架写成普通摘要。"
-        "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-    ),
-    "propagation_analyst": (
-        "你是传播与风险代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json、/workspace/state/evidence_cards.json、"
-        "/workspace/state/metrics_bundle.json、/workspace/state/timeline_nodes.json 与 /workspace/state/conflict_map.json，"
-        "如果 evidence_cards.coverage.readiness_flags 包含 no_cards，或 conflict_map / timeline_nodes 为空，"
-        "只生成结构化空机制与空风险对象，不输出警告性提示。"
-        "必要时补做 compute_report_metrics，使用 build_mechanism_summary 生成传播机制对象，再使用 detect_risk_signals 输出风险对象。\n\n"
-        "**关键传参约束**:\n"
-        "调用 build_mechanism_summary 时必须显式传参：\n"
-        "- normalized_task_json 必须传 normalized_task.json 的完整内容\n"
-        "- evidence_ids_json 必须传 evidence_cards.json 的 result 数组\n"
-        "- timeline_nodes_json 必须传 timeline_nodes.json 的 result 数组\n"
-        "- conflict_map_json 必须传 conflict_map.json 的核心对象（可传 result 内层或整个对象）\n"
-        "不要只读取文件不传参，不要把包装对象直接传给工具，不要传空值。\n\n"
-        "调用 detect_risk_signals 时同样必须显式传参：\n"
-        "- evidence_ids_json 必须传 evidence_cards.json 的 result 数组\n\n"
-        "把结果写入 /workspace/state/mechanism_summary.json 与 /workspace/state/risk_signals.json，并返回简短总结。"
-        "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-    ),
-    "decision_utility_judge": (
-        "你是决策可用性裁决代理。请读取 /workspace/state/task_contract.json、/workspace/state/task_derivation.json、/workspace/state/normalized_task.json、/workspace/state/corpus_coverage.json、"
-        "/workspace/state/evidence_cards.json、/workspace/state/conflict_map.json、/workspace/state/mechanism_summary.json、"
-        "/workspace/state/agenda_frame_map.json、/workspace/state/risk_signals.json 与 /workspace/state/actor_positions.json，"
-        "如果上游已经进入 empty_corpus / empty_evidence / insufficient_structure，"
-        "必须把这些原因写入 utility assessment 的 missing_dimensions 或 fallback reason，不要假装仍可正常放行。"
-        "使用 judge_decision_utility 产出 typed utility assessment。"
-        "调用时必须显式传参，不要只读取文件。"
-        "risk_signals_json 必须传 risk_signals.json 的 result 数组；actor_positions_json 必须传 actor_positions.json 的 result 数组。"
-        "agenda_frame_map_json、conflict_map_json、mechanism_summary_json 必须传各自的核心对象内容，可传 result 内层对象，也可传已展开的对象本身，但不要传空壳或只传文件元信息。"
-        "把结果写入 /workspace/state/utility_assessment.json，并返回简短总结。"
-        "不要直接写正文，不要用 prose 代替结构化裁决。"
-        "若目标文件已存在，先读取再使用 edit_file 更新，不要直接用 write_file 覆盖。"
-    ),
-    "writer": (
-        "你是舆情报告深度写作代理。你的职责是按模板章节产出正式报告正文，不是数据拼接。\n\n"
-        "**核心要求（最高优先级）**：\n"
-        "1. 每个判断必须有证据支撑，必须引用具体原文（使用 snippet/content 字段）\n"
-        "2. 绝对不能只写'网友认为'，必须写出具体发言者和原文内容\n"
-        "3. 每章节至少引用5条具体原文（使用引用格式）\n"
-        "4. 段落组织遵循：锚定现象 → 交代机制 → 点出含义\n"
-        "5. 情感强度必须匹配证据确定性\n\n"
-        "**引用格式示例**：\n"
-        "> \"武大这次真的让人心疼，校友群里都在讨论\" —— 微博用户@xxx（点赞数：1234）\n"
-        "> \"我觉得问题不在个人，整个审核流程都有漏洞\" —— 知乎回答（评论数：567）\n"
-        "> \"官方回应太慢了，等了14小时才发通报\" —— 贴吧用户（热度：89）\n\n"
-        "**必须读取的文件**：\n"
-        "/workspace/state/task_contract.json、/workspace/state/task_derivation.json、\n"
-        "/workspace/state/event_analysis.json  # 事件分析结果（新增，必须读取）\n"
-        "/workspace/state/evidence_cards.json  # 证据卡（含完整snippet/content）\n"
-        "/workspace/state/timeline_nodes.json、/workspace/state/actor_positions.json、\n"
-        "/workspace/state/conflict_map.json、/workspace/state/mechanism_summary.json、\n"
-        "/workspace/state/risk_signals.json、/workspace/state/bertopic_insight.json、\n"
-        "/workspace/state/utility_assessment.json。\n\n"
-        "**模板使用**：\n"
-        "先调用 get_report_template(mode=...) 获取模板内容。\n"
-        "根据 task_contract.mode 选择模板：\n"
-        "- 'public_hotspot' → 公共热点模板\n"
-        "- 'crisis_response' → 危机响应模板\n"
-        "- 'policy_dynamics' → 政策动态模板\n"
-        "按模板各章节要求写作，特别注意：\n"
-        "- 监测口径与样本说明：界定结论适用范围\n"
-        "- 事件演变：围绕节点-转折-再定义展开\n"
-        "- 传播路径：区分首发源、搬运节点、情绪放大节点\n"
-        "- 舆论立场：区分主体类型，不能混写'公众反应'\n\n"
-        "**内容密度要求**：\n"
-        "- 每章节正文≥800字\n"
-        "- 每100字至少包含1-2个具体数据点或引用\n"
-        "- 每章节至少包含8-12条用户评论引用\n\n"
-        "**使用工具**：\n"
-        "- get_report_template(mode=...) 获取模板\n"
-        "- retrieve_evidence_cards(intent=...) 获取补充证据\n"
-        "- build_section_packet 构建章节材料包\n"
-        "- get_sentiment_analysis_framework 获取方法论支撑\n\n"
-        "**输出格式**：\n"
-        "每章节使用 edit_file 写入 /workspace/state/section_drafts/{section_id}.json，\n"
-        "包含 section_id、title、content（完整段落）、evidence_refs、claim_refs。\n"
-        "完成后返回简短总结。若目标文件已存在，先读取再更新。\n\n"
-        "**禁止事项**：\n"
-        "- 禁止暴露系统字段名、工具名、模块名\n"
-        "- 禁止使用'舆情爆炸''彻底翻车'等修辞\n"
-        "- 禁止在没有证据支撑的情况下下结论"
-    ),
-}
-
-
-def _get_subagent_system_prompt(agent_name: str) -> str:
-    """获取子代理的 system_prompt。"""
-    return _SUBAGENT_SYSTEM_PROMPTS.get(agent_name, "")
-
-
-def _emit_event(
-    event_callback: Callable[[Dict[str, Any]], None] | None,
-    event: Dict[str, Any],
-) -> None:
-    """发送事件。"""
+def _emit_event(event_callback: Callable[[Dict[str, Any]], None] | None, event: Dict[str, Any]) -> None:
     if callable(event_callback):
         event_callback(event)
 
 
-# ---------------------------------------------------------------------------
-# 节点实现
-# ---------------------------------------------------------------------------
+def _tier_status_from_result(result: Dict[str, Any]) -> str:
+    normalized = str(result.get("status") or "").strip()
+    if normalized == "failed":
+        return "failed"
+    if normalized in {"completed", "partial"}:
+        return "completed"
+    return "pending"
 
-def _invoke_subagent(
+
+def _base_tier_todos() -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for tier in sorted(_TIER_TODO_SPECS.keys()):
+        spec = _TIER_TODO_SPECS[tier]
+        rows.append(
+            {
+                "id": spec["id"],
+                "label": spec["label"],
+                "status": "pending",
+                "detail": spec["detail"],
+                "agents": list(spec["agents"]),
+                "tier": tier,
+            }
+        )
+    return rows
+
+
+def _build_tier_todos(
+    state: Optional[ExplorationDeterministicState] = None,
+    *,
+    tier_overrides: Optional[Dict[int, Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    output = _base_tier_todos()
+    tier_results = state.get("tier_results") if isinstance(state, dict) and isinstance(state.get("tier_results"), dict) else {}
+    for row in output:
+        tier = int(row["tier"])
+        result = tier_results.get(f"tier_{tier}") if isinstance(tier_results, dict) else None
+        if isinstance(result, dict):
+            row["status"] = _tier_status_from_result(result)
+            detail = str(result.get("detail") or "").strip()
+            if detail:
+                row["detail"] = detail
+            agents = result.get("agents")
+            if isinstance(agents, list) and agents:
+                row["agents"] = [str(item).strip() for item in agents if str(item or "").strip()]
+    for tier, patch in (tier_overrides or {}).items():
+        for row in output:
+            if int(row["tier"]) != int(tier):
+                continue
+            row.update({key: value for key, value in dict(patch or {}).items() if key != "tier"})
+            break
+    return output
+
+
+def _emit_todo_update(
+    event_callback: Callable[[Dict[str, Any]], None] | None,
+    *,
+    state: Optional[ExplorationDeterministicState],
+    phase: str,
+    title: str,
+    message: str,
+    tier_overrides: Optional[Dict[int, Dict[str, Any]]] = None,
+    agent: str = "exploration_subgraph",
+) -> None:
+    todos = _build_tier_todos(state, tier_overrides=tier_overrides)
+    _emit_event(
+        event_callback,
+        {
+            "type": "todo.updated",
+            "phase": phase,
+            "agent": agent,
+            "title": title,
+            "message": message,
+            "payload": {"todos": todos},
+        },
+    )
+
+
+def _merge_stream_update(existing: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(existing or {})
+    for key, value in dict(update or {}).items():
+        if key == "files":
+            merged[key] = _merge_files(merged.get(key) if isinstance(merged.get(key), dict) else {}, value if isinstance(value, dict) else {})
+        elif key == "gaps":
+            merged[key] = _dedupe_gaps(merged.get(key) if isinstance(merged.get(key), list) else [], value if isinstance(value, list) else [])
+        elif key in {"agent_attempts", "agent_statuses", "agent_messages", "agent_results", "tier_results", "reused_artifacts", "supplement_candidates", "skipped_agents"}:
+            merged[key] = _merge_dicts(merged.get(key) if isinstance(merged.get(key), dict) else {}, value if isinstance(value, dict) else {})
+        elif key in {"section_draft_paths"}:
+            merged[key] = _merge_unique_strings(merged.get(key) if isinstance(merged.get(key), list) else [], value if isinstance(value, list) else [])
+        else:
+            merged[key] = value
+    return merged
+
+
+def _read_runtime_file(files: Dict[str, Dict[str, Any]], path: str) -> str:
+    payload = files.get(str(path or "").strip())
+    if not isinstance(payload, dict):
+        return ""
+    content = payload.get("content")
+    if isinstance(content, list):
+        return "\n".join(str(line) for line in content)
+    return str(content or "")
+
+
+def _read_runtime_json_file(files: Dict[str, Dict[str, Any]], path: str) -> Dict[str, Any]:
+    raw = _read_runtime_file(files, path).strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _state_path_from_state(relative_path: str, state: ExplorationDeterministicState) -> str:
+    return _state_path(
+        relative_path,
+        {
+            "project_identifier": str(state.get("project_identifier") or "").strip(),
+            "topic_identifier": str(state.get("topic_identifier") or "").strip(),
+            "start": str(state.get("start") or "").strip(),
+            "end": str(state.get("end") or "").strip(),
+        },
+    )
+
+
+def _execution_plan_nodes(state: ExplorationDeterministicState) -> Dict[str, Dict[str, Any]]:
+    plan = state.get("execution_plan") if isinstance(state.get("execution_plan"), dict) else {}
+    nodes = plan.get("nodes") if isinstance(plan.get("nodes"), dict) else {}
+    return nodes if isinstance(nodes, dict) else {}
+
+
+def _plan_for_agent(state: ExplorationDeterministicState, agent_name: str) -> Dict[str, Any]:
+    node = _execution_plan_nodes(state).get(agent_name)
+    return dict(node) if isinstance(node, dict) else {}
+
+
+def _is_skipped_by_reuse(state: ExplorationDeterministicState, agent_name: str) -> bool:
+    return bool(_plan_for_agent(state, agent_name).get("skip"))
+
+
+def _skip_payload_for_agent(state: ExplorationDeterministicState, agent_name: str, tier: int) -> Dict[str, Any]:
+    plan = _plan_for_agent(state, agent_name)
+    artifact_keys = [str(item).strip() for item in (plan.get("artifact_keys") or []) if str(item or "").strip()]
+    source_ranges = [str(item).strip() for item in (plan.get("source_report_ranges") or []) if str(item or "").strip()]
+    message = "已复用历史产物，当前节点跳过执行。"
+    if artifact_keys:
+        message = f"已复用历史产物：{', '.join(artifact_keys)}。"
+    return {
+        "status": "skipped",
+        "attempts": 0,
+        "message": message,
+        "gaps": [],
+        "reason": "reused_from_history",
+        "artifact_keys": artifact_keys,
+        "source_report_ranges": source_ranges,
+        "tier": tier,
+    }
+
+
+def _result_payload(result: Any) -> Dict[str, Any]:
+    if isinstance(result, dict):
+        return result
+    value = getattr(result, "value", None)
+    return value if isinstance(value, dict) else {}
+
+
+def _result_summary(result: Any) -> str:
+    def _flatten_content(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            parts: List[str] = []
+            for item in value:
+                if isinstance(item, dict):
+                    text = str(item.get("text") or item.get("thinking") or "").strip()
+                    if text:
+                        parts.append(text)
+                else:
+                    text = str(getattr(item, "text", "") or getattr(item, "content", "") or "").strip()
+                    if text:
+                        parts.append(text)
+            return "\n".join(part for part in parts if part).strip()
+        if isinstance(value, dict):
+            return str(value.get("text") or value.get("thinking") or value.get("content") or "").strip()
+        return str(value or "").strip()
+
+    payload = _result_payload(result)
+    message = str(payload.get("message") or "").strip()
+    if message:
+        return message
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    for item in reversed(messages):
+        if isinstance(item, dict):
+            content = _flatten_content(item.get("content"))
+        else:
+            content = _flatten_content(getattr(item, "content", ""))
+        if content:
+            return content[:240]
+    return ""
+
+
+def _required_paths_for_agent(agent_name: str, tier: int, common_context: Dict[str, Any] | None) -> List[str]:
+    configured = [
+        str(item).strip()
+        for item in get_subagent_output_files(agent_name, path_tokens=_path_tokens(common_context))
+        if str(item or "").strip()
+    ]
+    if configured:
+        return configured
+    return [_state_path(item, common_context) for item in _TIER_REQUIRED_FILES.get(tier, [])]
+
+
+def _output_globs_for_agent(agent_name: str, common_context: Dict[str, Any] | None) -> List[str]:
+    globs = [
+        str(item).strip()
+        for item in get_subagent_output_globs(agent_name, path_tokens=_path_tokens(common_context))
+        if str(item or "").strip()
+    ]
+    writer_glob = _state_path("section_drafts/*.json", common_context)
+    if agent_name == "writer" and writer_glob not in globs:
+        globs.append(writer_glob)
+    return globs
+
+
+def _output_state(content: Dict[str, Any]) -> str:
+    if not isinstance(content, dict):
+        return "missing"
+    status = str(content.get("status") or "").strip().lower()
+    skipped_due_to = content.get("skipped_due_to") if isinstance(content.get("skipped_due_to"), list) else []
+    coverage = content.get("coverage") if isinstance(content.get("coverage"), dict) else {}
+    readiness_flags = coverage.get("readiness_flags") if isinstance(coverage.get("readiness_flags"), list) else []
+    if status == "error":
+        return "error"
+    if status == "empty" or skipped_due_to:
+        return "empty"
+    if any(str(item or "").strip() in {"no_cards", "no_records_in_scope", "upstream_empty"} for item in readiness_flags):
+        return "empty"
+    return "ready"
+
+
+def _is_provider_throttling_error(message: str) -> bool:
+    text = str(message or "").strip().lower()
+    if not text:
+        return False
+    markers = [
+        "error code: 429",
+        "week allocated quota exceeded",
+        "throttling",
+        "rate limit",
+        "ratelimit",
+        "quota exceeded",
+    ]
+    return any(marker in text for marker in markers)
+
+
+def _check_required_files(
+    files: Dict[str, Dict[str, Any]],
+    *,
+    agent_name: str,
+    tier: int,
+    required_paths: List[str],
+) -> List[Dict[str, Any]]:
+    from .service import _runtime_file_content
+
+    gaps: List[Dict[str, Any]] = []
+    for path in required_paths:
+        raw = _runtime_file_content(files, path).strip()
+        if not raw:
+            gaps.append({"agent": agent_name, "file": path, "reason": "missing", "tier": tier})
+            continue
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            gaps.append({"agent": agent_name, "file": path, "reason": "invalid_json", "tier": tier})
+            continue
+        if isinstance(parsed, dict):
+            semantic_state = _output_state(parsed)
+            if semantic_state == "error":
+                gaps.append({"agent": agent_name, "file": path, "reason": "error", "tier": tier})
+            elif semantic_state == "empty":
+                gaps.append({"agent": agent_name, "file": path, "reason": "empty", "tier": tier})
+    return gaps
+
+
+def _validate_output_globs(
+    files: Dict[str, Dict[str, Any]],
+    *,
+    agent_name: str,
+    tier: int,
+    output_globs: List[str],
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    matched_paths: List[str] = []
+    gaps: List[Dict[str, Any]] = []
+    for pattern in output_globs:
+        current = sorted(path for path in files.keys() if fnmatch.fnmatch(str(path or "").strip(), pattern))
+        if not current:
+            gaps.append({"agent": agent_name, "file": pattern, "reason": "missing", "tier": tier})
+            continue
+        for path in current:
+            raw = _read_runtime_file(files, path).strip()
+            if not raw:
+                gaps.append({"agent": agent_name, "file": path, "reason": "empty", "tier": tier})
+                continue
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                gaps.append({"agent": agent_name, "file": path, "reason": "invalid_json", "tier": tier})
+                continue
+            if not isinstance(parsed, dict):
+                gaps.append({"agent": agent_name, "file": path, "reason": "invalid_shape", "tier": tier})
+                continue
+            matched_paths.append(path)
+    return matched_paths, gaps
+
+
+def _subagent_prompt(
     agent_name: str,
     state: ExplorationDeterministicState,
+    runtime_deps: _ExplorationRuntimeDeps,
+    *,
+    tier: int,
+) -> str:
+    required_paths = _required_paths_for_agent(agent_name, tier, runtime_deps.common_context)
+    output_globs = _output_globs_for_agent(agent_name, runtime_deps.common_context)
+    lines = [
+        f"当前专题：{str(state.get('topic_label') or state.get('topic_identifier') or '').strip()}",
+        f"时间范围：{str(state.get('start') or '').strip()} 至 {str(state.get('end') or '').strip()}",
+        f"当前子代理：{agent_name}",
+        "请在一次运行内完成你的职责，自主读取 /workspace 中所需输入文件，并把结果写回工作区。",
+    ]
+    if required_paths:
+        lines.append("必须产出的固定文件：")
+        lines.extend(f"- {path}" for path in required_paths)
+    if output_globs:
+        lines.append("必须命中的输出模式：")
+        lines.extend(f"- {pattern}" for pattern in output_globs)
+    node_plan = _plan_for_agent(state, agent_name)
+    if bool(node_plan.get("supplement")):
+        lines.append("本轮要求补跑并参考历史候选，不允许直接复用旧结果。")
+        for artifact_key, artifact_payload in (state.get("supplement_candidates") or {}).items():
+            if not isinstance(artifact_payload, dict):
+                continue
+            if str((artifact_payload.get("target_agent") or "")).strip() != agent_name:
+                continue
+            source_range = str(artifact_payload.get("source_report_range") or "").strip()
+            runtime_path = str(artifact_payload.get("runtime_path") or "").strip()
+            lines.append(
+                f"- supplement artifact={artifact_key} source_report_range={source_range or 'unknown'} runtime_path={runtime_path or 'unknown'}"
+            )
+    repair_context = state.get("repair_context") if isinstance(state.get("repair_context"), dict) else {}
+    if repair_context and str(repair_context.get("target_agent") or "").strip() == agent_name:
+        lines.append("本次调用是 compile 前的受限补救重跑，只允许补齐指定产物。")
+        lines.append(
+            f"- target_artifact={str(repair_context.get('target_artifact') or '').strip() or 'unknown'}"
+        )
+        lines.append(
+            f"- reason={str(repair_context.get('reason') or '').strip() or 'artifact_not_ready'}"
+        )
+        expected_paths = [
+            str(item).strip()
+            for item in (repair_context.get("expected_output_paths") or [])
+            if str(item or "").strip()
+        ]
+        if expected_paths:
+            lines.append("- expected_output_paths:")
+            lines.extend(f"  - {path}" for path in expected_paths)
+        upstream_paths = [
+            str(item).strip()
+            for item in (repair_context.get("ready_input_paths") or [])
+            if str(item or "").strip()
+        ]
+        if upstream_paths:
+            lines.append("- ready_inputs:")
+            lines.extend(f"  - {path}" for path in upstream_paths)
+        lines.append("禁止扩写任务范围、禁止顺手重跑其他代理、禁止写非 canonical workspace 路径。")
+    lines.extend(
+        [
+            "如果上游为空或工具明确返回 empty/skipped_due_to，可输出合法降级结果，但不要省略目标文件。",
+            "完成后只返回简短总结，不要再要求人工确认。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_subagent_spec_map(
+    *,
+    skill_assets: Dict[str, Any],
+    middleware_factory: Callable[[str], List[Any]],
+) -> Dict[str, Dict[str, Any]]:
+    specs = _build_subagent_specs(
+        skill_assets=skill_assets,
+        middleware_factory=middleware_factory,
+    )
+    output: Dict[str, Dict[str, Any]] = {}
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        name = str(spec.get("name") or "").strip()
+        if name:
+            output[name] = dict(spec)
+    return output
+
+
+def _invoke_subagent_once(
+    agent_name: str,
+    state: ExplorationDeterministicState,
+    runtime_deps: _ExplorationRuntimeDeps,
+    *,
+    tier: int,
 ) -> Dict[str, Any]:
-    """
-    调用单个子代理并返回结果。
+    from .service import _runtime_thread_id, _seed_invoke_payload
 
-    注意：这是一个简化实现，实际调用 LangChain agent 需要：
-    1. 构建 agent（使用 create_agent）
-    2. 配置 tools、skills、middleware
-    3. 调用 agent.invoke()
-    4. 从结果中提取 files 更新
+    spec = dict((runtime_deps.subagent_specs or {}).get(agent_name) or {})
+    if not spec:
+        raise ValueError(f"Unknown deterministic exploration subagent: {agent_name}")
+    if isinstance(runtime_deps.lifecycle_tracker, dict):
+        runtime_deps.lifecycle_tracker["runtime_files"] = (
+            state.get("files") if isinstance(state.get("files"), dict) else {}
+        )
 
-    当前实现返回占位结果，后续需要与 builder.py 中的 subagent spec 整合。
-    """
-    # 占位实现：返回空结果
-    # 实际实现需要：
-    #   llm = state.get("llm")
-    #   tools = select_report_tools(runtime_target=RUNTIME_SUBAGENT, agent_name=agent_name)
-    #   skill_keys = _SUBAGENT_SKILL_KEYS.get(agent_name, [])
-    #   skills = select_report_skill_sources(state.get("skill_assets"), ...)
-    #   middleware = state.get("middleware_factory")(agent_name)
-    #   agent = create_agent(model=llm, system_prompt=_get_subagent_system_prompt(agent_name), ...)
-    #   result = agent.invoke({"prompt": "执行任务..."})
-    #   return {"files": result.files, "status": "completed"}
+    purpose = f"deep-report-subagent-{agent_name}"
+    checkpointer, runtime_profile = get_shared_report_checkpointer(purpose=purpose)
+    agent = create_deep_agent(
+        model=runtime_deps.llm,
+        tools=spec.get("tools") or [],
+        system_prompt=str(spec.get("system_prompt") or "").strip(),
+        middleware=list(runtime_deps.middleware_factory(agent_name) or []),
+        skills=spec.get("skills") or None,
+        context_schema=ReportCoordinatorContext,
+        checkpointer=checkpointer,
+        store=RUNTIME_STORE,
+        backend=runtime_deps.runtime_backend,
+        debug=False,
+        name=f"deep-report-{agent_name}",
+    )
+    thread_id = _runtime_thread_id(task_id=str(state.get("task_id") or "").strip(), role=agent_name)
+    result = agent.invoke(
+        _seed_invoke_payload(
+            state.get("files") if isinstance(state.get("files"), dict) else {},
+            _subagent_prompt(agent_name, state, runtime_deps, tier=tier),
+        ),
+        config=build_report_runnable_config(
+            thread_id=thread_id,
+            purpose=purpose,
+            task_id=str(state.get("task_id") or "").strip(),
+            tags=["deterministic", "exploration", agent_name],
+            metadata={
+                "topic_identifier": str(state.get("topic_identifier") or "").strip(),
+                "subagent": agent_name,
+            },
+            locator_hint=runtime_profile.checkpoint_locator,
+        ),
+        context=runtime_deps.common_context or {},
+        version="v2",
+    )
+    payload = _result_payload(result)
+    updated_files = payload.get("files") if isinstance(payload.get("files"), dict) else {}
+    tracker_files = {}
+    if isinstance(runtime_deps.lifecycle_tracker, dict):
+        tracker_candidate = runtime_deps.lifecycle_tracker.get("runtime_files")
+        if isinstance(tracker_candidate, dict):
+            tracker_files = tracker_candidate
+    return {
+        "payload": payload,
+        "files": _merge_files(
+            _merge_files(state.get("files") if isinstance(state.get("files"), dict) else {}, tracker_files),
+            updated_files,
+        ),
+        "message": _result_summary(result),
+    }
 
+
+def _run_subagent_node(
+    state: ExplorationDeterministicState,
+    runtime_deps: _ExplorationRuntimeDeps,
+    *,
+    agent_name: str,
+    tier: int,
+    phase: str,
+) -> Dict[str, Any]:
+    required_paths = _required_paths_for_agent(agent_name, tier, runtime_deps.common_context)
+    output_globs = _output_globs_for_agent(agent_name, runtime_deps.common_context)
+    if _is_skipped_by_reuse(state, agent_name):
+        skip_payload = _skip_payload_for_agent(state, agent_name, tier)
+        _emit_event(
+            runtime_deps.event_callback,
+            {
+                "type": "graph.node.skipped",
+                "phase": phase,
+                "agent": agent_name,
+                "title": f"{agent_name} 已复用跳过",
+                "message": skip_payload["message"],
+                "payload": {
+                    "reason": "reused_from_history",
+                    "artifact_keys": skip_payload["artifact_keys"],
+                    "source_report_ranges": skip_payload["source_report_ranges"],
+                },
+            },
+        )
+        if tier in {0, 5, 6}:
+            _emit_todo_update(
+                runtime_deps.event_callback,
+                state=state,
+                phase=phase,
+                title=f"{_TIER_TODO_SPECS[tier]['label']} 已复用",
+                message=skip_payload["message"],
+                tier_overrides={
+                    tier: {
+                        "status": "completed",
+                        "detail": "已复用历史产物。",
+                        "agents": [agent_name],
+                    }
+                },
+                agent=agent_name,
+            )
+        return {
+            "gaps": [],
+            "agent_attempts": {agent_name: 0},
+            "agent_statuses": {agent_name: "skipped"},
+            "agent_messages": {agent_name: str(skip_payload["message"])},
+            "agent_results": {agent_name: skip_payload},
+            "skipped_agents": {
+                agent_name: {
+                    "reason": "reused_from_history",
+                    "artifact_keys": skip_payload["artifact_keys"],
+                    "source_report_ranges": skip_payload["source_report_ranges"],
+                }
+            },
+            "tier_results": {
+                f"tier_{tier}": {
+                    "tier": tier,
+                    "agents": [agent_name],
+                    "status": "completed",
+                    "detail": "已复用历史产物。",
+                    "gaps": [],
+                    "failed_agents": [],
+                    "skipped_agents": [agent_name],
+                }
+            } if tier in {0, 5, 6} else {},
+        }
+    if tier in {0, 5, 6}:
+        _emit_todo_update(
+            runtime_deps.event_callback,
+            state=state,
+            phase=phase,
+            title=f"{_TIER_TODO_SPECS[tier]['label']} 已启动",
+            message=f"{_TIER_TODO_SPECS[tier]['label']} 正在执行。",
+            tier_overrides={
+                tier: {
+                    "status": "running",
+                    "detail": f"{_TIER_TODO_SPECS[tier]['label']} 正在执行。",
+                }
+            },
+            agent=agent_name,
+        )
     _emit_event(
-        state.get("event_callback"),
+        runtime_deps.event_callback,
         {
             "type": "graph.node.started",
-            "phase": "interpret",
+            "phase": phase,
             "agent": agent_name,
             "title": f"{agent_name} 已启动",
             "message": f"{agent_name} 正在执行。",
         },
     )
 
-    # TODO: 实际调用子代理
-    return {
-        "files": {},
-        "status": "running",
-        "gaps": [],
-    }
+    latest_files = state.get("files") if isinstance(state.get("files"), dict) else {}
+    latest_message = ""
+    latest_gaps: List[Dict[str, Any]] = []
+    section_paths: List[str] = []
 
+    for attempt in range(1, 3):
+        if attempt > 1:
+            _emit_event(
+                runtime_deps.event_callback,
+                {
+                    "type": "agent.memo",
+                    "phase": phase,
+                    "agent": agent_name,
+                    "title": f"{agent_name} 重试",
+                    "message": f"{agent_name} 正在进行第 {attempt} 次尝试。",
+                    "payload": {"attempt": attempt},
+                },
+            )
+        try:
+            result = _invoke_subagent_once(agent_name, {**state, "files": latest_files}, runtime_deps, tier=tier)
+            latest_files = result.get("files") if isinstance(result.get("files"), dict) else latest_files
+            latest_message = str(result.get("message") or "").strip()
+        except Exception as exc:
+            latest_message = str(exc or "子代理执行失败。").strip() or "子代理执行失败。"
+            latest_gaps = [{"agent": agent_name, "file": "__runtime__", "reason": "exception", "tier": tier}]
+            if attempt < 2 and not _is_provider_throttling_error(latest_message):
+                continue
+            _emit_event(
+                runtime_deps.event_callback,
+                {
+                    "type": "graph.node.failed",
+                    "phase": phase,
+                    "agent": agent_name,
+                    "title": f"{agent_name} 失败",
+                    "message": latest_message,
+                    "payload": {"failed_node": agent_name, "attempts": attempt},
+                },
+            )
+            if tier in {0, 5, 6}:
+                _emit_todo_update(
+                    runtime_deps.event_callback,
+                    state=state,
+                    phase=phase,
+                    title=f"{_TIER_TODO_SPECS[tier]['label']} 失败",
+                    message=latest_message,
+                    tier_overrides={
+                        tier: {
+                            "status": "failed",
+                            "detail": latest_message,
+                            "agents": [agent_name],
+                        }
+                    },
+                    agent=agent_name,
+                )
+            return {
+                "files": latest_files,
+                "gaps": latest_gaps,
+                "agent_attempts": {agent_name: attempt},
+                "agent_statuses": {agent_name: "failed"},
+                "agent_messages": {agent_name: latest_message},
+                "agent_results": {
+                    agent_name: {
+                        "status": "failed",
+                        "attempts": attempt,
+                        "message": latest_message,
+                        "gaps": latest_gaps,
+                    }
+                },
+                "tier_results": {
+                    f"tier_{tier}": {
+                        "tier": tier,
+                        "agents": [agent_name],
+                        "status": "failed",
+                        "detail": latest_message,
+                        "gaps": latest_gaps,
+                        "failed_agents": [agent_name],
+                    }
+                } if tier in {0, 5, 6} else {},
+            }
 
-# Tier 0: retrieval_router
-def retrieval_router_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 retrieval_router 子代理。"""
-    result = _invoke_subagent("retrieval_router", state)
-
-    # 检查必需文件
-    gaps = _check_files(
-        result.get("files", {}),
-        _TIER_REQUIRED_FILES.get(0, []),
-        agent="retrieval_router",
-        tier=0,
-    )
+        latest_gaps = _check_required_files(
+            latest_files,
+            agent_name=agent_name,
+            tier=tier,
+            required_paths=required_paths,
+        )
+        if output_globs:
+            section_paths, glob_gaps = _validate_output_globs(
+                latest_files,
+                agent_name=agent_name,
+                tier=tier,
+                output_globs=output_globs,
+            )
+            latest_gaps = _dedupe_gaps(latest_gaps, glob_gaps)
+        if not latest_gaps:
+            _emit_event(
+                runtime_deps.event_callback,
+                {
+                    "type": "graph.node.completed",
+                    "phase": phase,
+                    "agent": agent_name,
+                    "title": f"{agent_name} 已完成",
+                    "message": latest_message or f"{agent_name} 已完成。",
+                    "payload": {"attempts": attempt},
+                },
+            )
+            if tier in {0, 5, 6}:
+                _emit_todo_update(
+                    runtime_deps.event_callback,
+                    state=state,
+                    phase=phase,
+                    title=f"{_TIER_TODO_SPECS[tier]['label']} 已完成",
+                    message=latest_message or f"{agent_name} 已完成。",
+                    tier_overrides={
+                        tier: {
+                            "status": "completed",
+                            "detail": latest_message or f"{agent_name} 已完成。",
+                            "agents": [agent_name],
+                        }
+                    },
+                    agent=agent_name,
+                )
+            return {
+                "files": latest_files,
+                "gaps": [],
+                "section_draft_paths": section_paths,
+                "agent_attempts": {agent_name: attempt},
+                "agent_statuses": {agent_name: "completed"},
+                "agent_messages": {agent_name: latest_message or f"{agent_name} 已完成。"},
+                "agent_results": {
+                    agent_name: {
+                        "status": "completed",
+                        "attempts": attempt,
+                        "message": latest_message or f"{agent_name} 已完成。",
+                        "gaps": [],
+                        "section_draft_paths": section_paths,
+                    }
+                },
+                "tier_results": {
+                    f"tier_{tier}": {
+                        "tier": tier,
+                        "agents": [agent_name],
+                        "status": "completed",
+                        "detail": latest_message or f"{agent_name} 已完成。",
+                        "gaps": [],
+                        "failed_agents": [],
+                    }
+                } if tier in {0, 5, 6} else {},
+            }
 
     _emit_event(
-        state.get("event_callback"),
+        runtime_deps.event_callback,
         {
-            "type": "graph.node.completed",
-            "phase": "interpret",
-            "agent": "retrieval_router",
-            "title": "retrieval_router 已完成",
-            "message": f"retrieval_router 完成，缺失文件：{len(gaps)}",
+            "type": "graph.node.failed",
+            "phase": phase,
+            "agent": agent_name,
+            "title": f"{agent_name} 失败",
+            "message": latest_message or f"{agent_name} 缺少必需产物。",
+            "payload": {"failed_node": agent_name, "gaps": latest_gaps},
         },
     )
-
+    if tier in {0, 5, 6}:
+        _emit_todo_update(
+            runtime_deps.event_callback,
+            state=state,
+            phase=phase,
+            title=f"{_TIER_TODO_SPECS[tier]['label']} 失败",
+            message=latest_message or f"{agent_name} 缺少必需产物。",
+            tier_overrides={
+                tier: {
+                    "status": "failed",
+                    "detail": latest_message or f"{agent_name} 缺少必需产物。",
+                    "agents": [agent_name],
+                }
+            },
+            agent=agent_name,
+        )
     return {
-        "files": result.get("files", {}),
-        "gaps": gaps,
-        "status": "running",
+        "files": latest_files,
+        "gaps": latest_gaps,
+        "section_draft_paths": section_paths,
+        "agent_attempts": {agent_name: 2},
+        "agent_statuses": {agent_name: "failed"},
+        "agent_messages": {agent_name: latest_message or f"{agent_name} 缺少必需产物。"},
+        "agent_results": {
+            agent_name: {
+                "status": "failed",
+                "attempts": 2,
+                "message": latest_message or f"{agent_name} 缺少必需产物。",
+                "gaps": latest_gaps,
+                "section_draft_paths": section_paths,
+            }
+        },
+        "tier_results": {
+            f"tier_{tier}": {
+                "tier": tier,
+                "agents": [agent_name],
+                "status": "failed",
+                "detail": latest_message or f"{agent_name} 缺少必需产物。",
+                "gaps": latest_gaps,
+                "failed_agents": [agent_name],
+            }
+        } if tier in {0, 5, 6} else {},
     }
 
 
-# Tier 1: 并行节点
+def _make_agent_node(
+    runtime_deps: _ExplorationRuntimeDeps,
+    *,
+    agent_name: str,
+    tier: int,
+    phase: str,
+) -> Callable[[ExplorationDeterministicState], Dict[str, Any]]:
+    def _run(state: ExplorationDeterministicState) -> Dict[str, Any]:
+        return _run_subagent_node(
+            state,
+            runtime_deps,
+            agent_name=agent_name,
+            tier=tier,
+            phase=phase,
+        )
+
+    return _run
+
+
+def _collect_tier_gaps(
+    state: ExplorationDeterministicState,
+    *,
+    tier: int,
+    agent_names: List[str],
+    common_context: Dict[str, Any] | None,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    files = state.get("files") if isinstance(state.get("files"), dict) else {}
+    tier_gaps: List[Dict[str, Any]] = []
+    tier_paths: List[str] = []
+    for agent_name in agent_names:
+        if _is_skipped_by_reuse(state, agent_name):
+            continue
+        tier_gaps = _dedupe_gaps(
+            tier_gaps,
+            _check_required_files(
+                files,
+                agent_name=agent_name,
+                tier=tier,
+                required_paths=_required_paths_for_agent(agent_name, tier, common_context),
+            ),
+        )
+        output_globs = _output_globs_for_agent(agent_name, common_context)
+        if output_globs:
+            matched_paths, glob_gaps = _validate_output_globs(
+                files,
+                agent_name=agent_name,
+                tier=tier,
+                output_globs=output_globs,
+            )
+            tier_paths = _merge_unique_strings(tier_paths, matched_paths)
+            tier_gaps = _dedupe_gaps(tier_gaps, glob_gaps)
+    return tier_gaps, tier_paths
+
+
+def _make_gather_node(
+    runtime_deps: _ExplorationRuntimeDeps,
+    *,
+    tier: int,
+    phase: str,
+    agent_names: List[str],
+) -> Callable[[ExplorationDeterministicState], Dict[str, Any]]:
+    tier_key = f"tier_{tier}"
+
+    def _run(state: ExplorationDeterministicState) -> Dict[str, Any]:
+        tier_gaps, tier_paths = _collect_tier_gaps(
+            state,
+            tier=tier,
+            agent_names=agent_names,
+            common_context=runtime_deps.common_context,
+        )
+        failed_agents = [
+            agent_name
+            for agent_name in agent_names
+            if str((state.get("agent_statuses") or {}).get(agent_name) or "").strip() == "failed"
+        ]
+        skipped_agents = [
+            agent_name
+            for agent_name in agent_names
+            if str((state.get("agent_statuses") or {}).get(agent_name) or "").strip() == "skipped"
+        ]
+        message = f"Tier {tier} 完成。"
+        if tier_gaps:
+            message = f"Tier {tier} 完成，但仍有 {len(tier_gaps)} 项产物缺口。"
+        elif failed_agents:
+            message = f"Tier {tier} 已结束，{len(failed_agents)} 个子代理降级返回。"
+        elif skipped_agents and len(skipped_agents) == len(agent_names):
+            message = f"Tier {tier} 已复用历史产物。"
+        todo_status = "failed" if failed_agents else "completed"
+        todo_detail = "带缺口完成。" if tier_gaps and not failed_agents else message
+        if failed_agents:
+            todo_detail = f"有 {len(failed_agents)} 个子代理失败。"
+        elif skipped_agents and len(skipped_agents) == len(agent_names):
+            todo_detail = "已复用历史产物。"
+        _emit_todo_update(
+            runtime_deps.event_callback,
+            state=state,
+            phase=phase,
+            title=f"{_TIER_TODO_SPECS[tier]['label']} 已完成",
+            message=message,
+            tier_overrides={
+                tier: {
+                    "status": todo_status,
+                    "detail": todo_detail,
+                    "agents": agent_names,
+                }
+            },
+        )
+        _emit_event(
+            runtime_deps.event_callback,
+            {
+                "type": "phase.progress",
+                "phase": phase,
+                "title": f"Tier {tier} 完成",
+                "message": message,
+                "payload": {
+                    "tier": tier,
+                    "agents": agent_names,
+                    "gaps": tier_gaps,
+                    "failed_agents": failed_agents,
+                    "skipped_agents": skipped_agents,
+                },
+            },
+        )
+        return {
+            "gaps": tier_gaps,
+            "section_draft_paths": tier_paths,
+            "tier_results": {
+                tier_key: {
+                    "tier": tier,
+                    "agents": agent_names,
+                    "status": "partial" if tier_gaps or failed_agents else "completed",
+                    "detail": todo_detail,
+                    "gaps": tier_gaps,
+                    "failed_agents": failed_agents,
+                    "skipped_agents": skipped_agents,
+                }
+            },
+        }
+
+    return _run
+
+
+def _make_tier_start_node(
+    runtime_deps: _ExplorationRuntimeDeps,
+    *,
+    tier: int,
+    phase: str,
+) -> Callable[[ExplorationDeterministicState], Dict[str, Any]]:
+    label = str(_TIER_TODO_SPECS[tier]["label"]).strip()
+
+    def _run(state: ExplorationDeterministicState) -> Dict[str, Any]:
+        _emit_todo_update(
+            runtime_deps.event_callback,
+            state=state,
+            phase=phase,
+            title=f"{label} 已启动",
+            message=f"{label} 正在执行。",
+            tier_overrides={
+                tier: {
+                    "status": "running",
+                    "detail": f"{label} 正在执行。",
+                }
+            },
+        )
+        _emit_event(
+            runtime_deps.event_callback,
+            {
+                "type": "phase.progress",
+                "phase": phase,
+                "title": f"Tier {tier} 启动",
+                "message": f"{label} 正在执行。",
+                "payload": {"tier": tier, "agents": list(_TIER_TODO_SPECS[tier]["agents"])},
+            },
+        )
+        return {}
+
+    return _run
+
+
 def dispatch_tier1(state: ExplorationDeterministicState) -> List[Send]:
-    """分发 Tier 1 并行任务。"""
-    return [
-        Send("archive_evidence_node", {"current_agent": "archive_evidence_organizer"}),
-        Send("bertopic_node", {"current_agent": "bertopic_evolution_analyst"}),
-    ]
+    return [Send(node_name, {}) for node_name, _agent_name in _TIER_NODE_AGENTS[1]]
 
 
-def archive_evidence_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 archive_evidence_organizer 子代理。"""
-    result = _invoke_subagent("archive_evidence_organizer", state)
-    return {
-        "files": result.get("files", {}),
-    }
-
-
-def bertopic_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 bertopic_evolution_analyst 子代理。"""
-    result = _invoke_subagent("bertopic_evolution_analyst", state)
-    return {
-        "files": result.get("files", {}),
-    }
-
-
-def gather_tier1(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """收集 Tier 1 结果并检查文件完整性。"""
-    gaps = _check_files(
-        state.get("files", {}),
-        _TIER_REQUIRED_FILES.get(1, []),
-        tier=1,
-    )
-
-    _emit_event(
-        state.get("event_callback"),
-        {
-            "type": "phase.progress",
-            "phase": "interpret",
-            "title": "Tier 1 完成",
-            "message": f"Tier 1 并行节点完成，缺失文件：{len(gaps)}",
-        },
-    )
-
-    return {
-        "gaps": gaps,
-        "status": "running",
-    }
-
-
-# Tier 2: 并行节点
 def dispatch_tier2(state: ExplorationDeterministicState) -> List[Send]:
-    """分发 Tier 2 并行任务。"""
-    return [
-        Send("timeline_node", {"current_agent": "timeline_analyst"}),
-        Send("stance_node", {"current_agent": "stance_conflict"}),
-    ]
+    return [Send(node_name, {}) for node_name, _agent_name in _TIER_NODE_AGENTS[2]]
 
 
-def timeline_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 timeline_analyst 子代理。"""
-    result = _invoke_subagent("timeline_analyst", state)
-    return {
-        "files": result.get("files", {}),
-    }
-
-
-def stance_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 stance_conflict 子代理。"""
-    result = _invoke_subagent("stance_conflict", state)
-    return {
-        "files": result.get("files", {}),
-    }
-
-
-def gather_tier2(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """收集 Tier 2 结果并检查文件完整性。"""
-    gaps = _check_files(
-        state.get("files", {}),
-        _TIER_REQUIRED_FILES.get(2, []),
-        tier=2,
-    )
-
-    _emit_event(
-        state.get("event_callback"),
-        {
-            "type": "phase.progress",
-            "phase": "interpret",
-            "title": "Tier 2 完成",
-            "message": f"Tier 2 并行节点完成，缺失文件：{len(gaps)}",
-        },
-    )
-
-    return {
-        "gaps": gaps,
-        "status": "running",
-    }
-
-
-# Tier 3: 并行节点
 def dispatch_tier3(state: ExplorationDeterministicState) -> List[Send]:
-    """分发 Tier 3 并行任务。"""
-    return [
-        Send("event_analyst_node", {"current_agent": "event_analyst"}),
-        Send("conflict_node", {"current_agent": "claim_actor_conflict"}),
-    ]
+    return [Send(node_name, {}) for node_name, _agent_name in _TIER_NODE_AGENTS[3]]
 
 
-def event_analyst_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 event_analyst 子代理。"""
-    result = _invoke_subagent("event_analyst", state)
-    return {
-        "files": result.get("files", {}),
-    }
-
-
-def conflict_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 claim_actor_conflict 子代理。"""
-    result = _invoke_subagent("claim_actor_conflict", state)
-    return {
-        "files": result.get("files", {}),
-    }
-
-
-def gather_tier3(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """收集 Tier 3 结果并检查文件完整性。"""
-    gaps = _check_files(
-        state.get("files", {}),
-        _TIER_REQUIRED_FILES.get(3, []),
-        tier=3,
-    )
-
-    _emit_event(
-        state.get("event_callback"),
-        {
-            "type": "phase.progress",
-            "phase": "interpret",
-            "title": "Tier 3 完成",
-            "message": f"Tier 3 并行节点完成，缺失文件：{len(gaps)}",
-        },
-    )
-
-    return {
-        "gaps": gaps,
-        "status": "running",
-    }
-
-
-# Tier 4: 并行节点
 def dispatch_tier4(state: ExplorationDeterministicState) -> List[Send]:
-    """分发 Tier 4 并行任务。"""
-    return [
-        Send("agenda_node", {"current_agent": "agenda_frame_builder"}),
-        Send("propagation_node", {"current_agent": "propagation_analyst"}),
-    ]
-
-
-def agenda_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 agenda_frame_builder 子代理。"""
-    result = _invoke_subagent("agenda_frame_builder", state)
-    return {
-        "files": result.get("files", {}),
-    }
-
-
-def propagation_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 propagation_analyst 子代理。"""
-    result = _invoke_subagent("propagation_analyst", state)
-    return {
-        "files": result.get("files", {}),
-    }
-
-
-def gather_tier4(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """收集 Tier 4 结果并检查文件完整性。"""
-    gaps = _check_files(
-        state.get("files", {}),
-        _TIER_REQUIRED_FILES.get(4, []),
-        tier=4,
-    )
-
-    _emit_event(
-        state.get("event_callback"),
-        {
-            "type": "phase.progress",
-            "phase": "interpret",
-            "title": "Tier 4 完成",
-            "message": f"Tier 4 并行节点完成，缺失文件：{len(gaps)}",
-        },
-    )
-
-    return {
-        "gaps": gaps,
-        "status": "running",
-    }
-
-
-# Tier 5: utility_node
-def utility_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 decision_utility_judge 子代理。"""
-    result = _invoke_subagent("decision_utility_judge", state)
-
-    # 检查必需文件
-    gaps = _check_files(
-        state.get("files", {}),
-        _TIER_REQUIRED_FILES.get(5, []),
-        agent="decision_utility_judge",
-        tier=5,
-    )
-
-    _emit_event(
-        state.get("event_callback"),
-        {
-            "type": "graph.node.completed",
-            "phase": "interpret",
-            "agent": "decision_utility_judge",
-            "title": "decision_utility_judge 已完成",
-            "message": f"决策可用性裁决完成，缺失文件：{len(gaps)}",
-        },
-    )
-
-    return {
-        "files": result.get("files", {}),
-        "gaps": gaps,
-        "status": "running",
-    }
+    return [Send(node_name, {}) for node_name, _agent_name in _TIER_NODE_AGENTS[4]]
 
 
 def route_after_utility(state: ExplorationDeterministicState) -> str:
-    """根据 utility_assessment.decision 决定是否执行 writer。"""
-    utility = _read_file(state.get("files", {}), "/workspace/state/utility_assessment.json")
+    utility = _read_runtime_json_file(
+        state.get("files") if isinstance(state.get("files"), dict) else {},
+        _state_path_from_state("utility_assessment.json", state),
+    )
     decision = str(utility.get("decision") or "").strip()
-
-    if decision in ("pass", "fallback_recompile"):
+    if not decision:
+        nested = utility.get("result") if isinstance(utility.get("result"), dict) else {}
+        decision = str(nested.get("decision") or "").strip()
+    if decision in {"pass", "fallback_recompile"}:
         return "writer_node"
     return "finalize_node"
 
 
-# Tier 6: writer_node
-def writer_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """执行 writer 子代理。"""
-    result = _invoke_subagent("writer", state)
+def finalize_node(
+    state: ExplorationDeterministicState,
+    runtime_deps: _ExplorationRuntimeDeps,
+) -> Dict[str, Any]:
+    from .service import (
+        _build_structured_seed_payload,
+        _finalize_structured_payload,
+        _merge_structured_payload,
+        _synthesize_structured_report_from_files,
+        _upsert_runtime_json_file,
+    )
 
-    _emit_event(
-        state.get("event_callback"),
-        {
-            "type": "graph.node.completed",
-            "phase": "write",
-            "agent": "writer",
-            "title": "writer 已完成",
-            "message": "深度报告写作完成。",
+    files = dict(state.get("files") or {}) if isinstance(state.get("files"), dict) else {}
+    seed_payload = _build_structured_seed_payload(
+        topic_identifier=str(state.get("topic_identifier") or "").strip(),
+        topic_label=str(state.get("topic_label") or state.get("topic_identifier") or "").strip(),
+        start_text=str(state.get("start") or "").strip(),
+        end_text=str(state.get("end") or state.get("start") or "").strip(),
+        mode=str(state.get("mode") or "fast").strip() or "fast",
+        thread_id=str(state.get("thread_id") or "").strip(),
+    )
+
+    structured_report_path = _state_path_from_state("structured_report.json", state)
+    preferred = _read_runtime_json_file(files, structured_report_path)
+    synthesis_error = ""
+    if not preferred:
+        try:
+            preferred = _synthesize_structured_report_from_files(
+                files=files,
+                topic_identifier=str(state.get("topic_identifier") or "").strip(),
+                topic_label=str(state.get("topic_label") or state.get("topic_identifier") or "").strip(),
+                start_text=str(state.get("start") or "").strip(),
+                end_text=str(state.get("end") or state.get("start") or "").strip(),
+                mode=str(state.get("mode") or "fast").strip() or "fast",
+                thread_id=str(state.get("thread_id") or "").strip(),
+            )
+        except Exception as exc:
+            synthesis_error = str(exc or "").strip()
+            preferred = {}
+
+    structured_payload = _finalize_structured_payload(
+        _merge_structured_payload(seed_payload, preferred if isinstance(preferred, dict) else {})
+    )
+    _upsert_runtime_json_file(files, structured_report_path, structured_payload)
+
+    gaps = state.get("gaps") if isinstance(state.get("gaps"), list) else []
+    failed_agents = [
+        agent_name
+        for agent_name, status in (state.get("agent_statuses") or {}).items()
+        if str(status or "").strip() == "failed"
+    ] if isinstance(state.get("agent_statuses"), dict) else []
+    partial = bool(gaps or failed_agents or synthesis_error)
+    status = "partial" if partial else "completed"
+    message = "确定性探索图已完成，并生成了结构化结果。"
+    if partial:
+        message = "确定性探索图已带缺口完成，并生成了可继续编译的结构化结果。"
+    if synthesis_error:
+        message = "探索图已生成兜底结构化结果，但自动综合阶段出现降级。"
+    tier_six_detail = "结构化结果已准备好。"
+    if state.get("tier_results") and isinstance((state.get("tier_results") or {}).get("tier_6"), dict):
+        tier_six_detail = str(((state.get("tier_results") or {}).get("tier_6") or {}).get("detail") or tier_six_detail).strip() or tier_six_detail
+    elif not _read_runtime_json_file(files, _state_path_from_state("utility_assessment.json", state)).get("decision"):
+        tier_six_detail = "文稿节点未执行，已直接交付结构化结果。"
+    todos = _build_tier_todos(
+        state,
+        tier_overrides={
+            6: {
+                "status": "failed" if status == "failed" else "completed",
+                "detail": tier_six_detail if status == "completed" else message,
+            }
+        },
+    )
+    structured_payload.setdefault("metadata", {})
+    structured_payload["metadata"]["todos"] = todos
+    structured_payload["meta"] = {
+        **(structured_payload.get("meta") if isinstance(structured_payload.get("meta"), dict) else {}),
+        "todos": todos,
+    }
+    _emit_todo_update(
+        runtime_deps.event_callback,
+        state=state,
+        phase="persist",
+        title="探索阶段清单已更新",
+        message=message,
+        tier_overrides={
+            6: {
+                "status": "completed",
+                "detail": tier_six_detail,
+            }
         },
     )
 
-    return {
-        "files": result.get("files", {}),
-        "status": "running",
-    }
-
-
-# Tier 7: finalize_node
-def finalize_node(state: ExplorationDeterministicState) -> Dict[str, Any]:
-    """汇总结果并生成结构化报告。"""
-    # TODO: 实现结构化汇总逻辑
-    # 1. 从 files 中读取所有中间结果
-    # 2. 合并成 structured_payload
-    # 3. 调用 save_structured_report
-
-    gaps = state.get("gaps", [])
-    status = "completed" if not gaps else "partial"
-
     _emit_event(
-        state.get("event_callback"),
+        runtime_deps.event_callback,
         {
             "type": "phase.progress",
             "phase": "persist",
             "title": "探索阶段完成",
-            "message": f"确定性调度完成。缺失项：{len(gaps)}",
+            "message": message,
             "payload": {
-                "gaps": gaps,
                 "status": status,
+                "gap_count": len(gaps),
+                "failed_agents": failed_agents,
+                "structured_ready": bool(structured_payload),
+                "synthesis_error": synthesis_error,
             },
         },
     )
 
     return {
+        "files": files,
         "status": status,
-        "message": f"确定性调度完成。缺失项：{len(gaps)}",
-        "structured_payload": {},  # TODO: 实际汇总
+        "message": message,
+        "structured_payload": structured_payload,
+        "todos": todos,
+        "tier_results": {
+            "tier_6": {
+                "tier": 6,
+                "agents": ["writer"],
+                "status": "partial" if partial else "completed",
+                "detail": tier_six_detail,
+                "gaps": gaps,
+                "failed_agents": [agent for agent in failed_agents if agent == "writer"],
+            },
+            "finalize": {
+                "status": status,
+                "gap_count": len(gaps),
+                "failed_agents": failed_agents,
+                "structured_ready": bool(structured_payload),
+                "synthesis_error": synthesis_error,
+            }
+        },
     }
 
 
-# ---------------------------------------------------------------------------
-# 图构建
-# ---------------------------------------------------------------------------
+def build_exploration_deterministic_graph(
+    runtime_deps: Optional[_ExplorationRuntimeDeps] = None,
+) -> StateGraph:
+    deps = runtime_deps or _ExplorationRuntimeDeps(
+        skill_assets={},
+        middleware_factory=lambda _name: [],
+        event_callback=None,
+        llm=None,
+        runtime_backend=None,
+        common_context={},
+        subagent_specs={},
+    )
 
-def build_exploration_deterministic_graph() -> StateGraph:
-    """构建确定性调度图。"""
     builder = StateGraph(ExplorationDeterministicState)
+    builder.add_node(
+        "retrieval_router_node",
+        _make_agent_node(deps, agent_name="retrieval_router", tier=0, phase=_TIER_PHASES[0]),
+    )
+    builder.add_node("start_tier1", _make_tier_start_node(deps, tier=1, phase=_TIER_PHASES[1]))
+    builder.add_node(
+        "archive_evidence_node",
+        _make_agent_node(deps, agent_name="archive_evidence_organizer", tier=1, phase=_TIER_PHASES[1]),
+    )
+    builder.add_node(
+        "bertopic_node",
+        _make_agent_node(deps, agent_name="bertopic_evolution_analyst", tier=1, phase=_TIER_PHASES[1]),
+    )
+    builder.add_node(
+        "gather_tier1",
+        _make_gather_node(
+            deps,
+            tier=1,
+            phase=_TIER_PHASES[1],
+            agent_names=[agent_name for _, agent_name in _TIER_NODE_AGENTS[1]],
+        ),
+    )
+    builder.add_node("start_tier2", _make_tier_start_node(deps, tier=2, phase=_TIER_PHASES[2]))
+    builder.add_node(
+        "timeline_node",
+        _make_agent_node(deps, agent_name="timeline_analyst", tier=2, phase=_TIER_PHASES[2]),
+    )
+    builder.add_node(
+        "stance_node",
+        _make_agent_node(deps, agent_name="stance_conflict", tier=2, phase=_TIER_PHASES[2]),
+    )
+    builder.add_node(
+        "gather_tier2",
+        _make_gather_node(
+            deps,
+            tier=2,
+            phase=_TIER_PHASES[2],
+            agent_names=[agent_name for _, agent_name in _TIER_NODE_AGENTS[2]],
+        ),
+    )
+    builder.add_node("start_tier3", _make_tier_start_node(deps, tier=3, phase=_TIER_PHASES[3]))
+    builder.add_node(
+        "event_analyst_node",
+        _make_agent_node(deps, agent_name="event_analyst", tier=3, phase=_TIER_PHASES[3]),
+    )
+    builder.add_node(
+        "conflict_node",
+        _make_agent_node(deps, agent_name="claim_actor_conflict", tier=3, phase=_TIER_PHASES[3]),
+    )
+    builder.add_node(
+        "gather_tier3",
+        _make_gather_node(
+            deps,
+            tier=3,
+            phase=_TIER_PHASES[3],
+            agent_names=[agent_name for _, agent_name in _TIER_NODE_AGENTS[3]],
+        ),
+    )
+    builder.add_node("start_tier4", _make_tier_start_node(deps, tier=4, phase=_TIER_PHASES[4]))
+    builder.add_node(
+        "agenda_node",
+        _make_agent_node(deps, agent_name="agenda_frame_builder", tier=4, phase=_TIER_PHASES[4]),
+    )
+    builder.add_node(
+        "propagation_node",
+        _make_agent_node(deps, agent_name="propagation_analyst", tier=4, phase=_TIER_PHASES[4]),
+    )
+    builder.add_node(
+        "gather_tier4",
+        _make_gather_node(
+            deps,
+            tier=4,
+            phase=_TIER_PHASES[4],
+            agent_names=[agent_name for _, agent_name in _TIER_NODE_AGENTS[4]],
+        ),
+    )
+    builder.add_node(
+        "utility_node",
+        _make_agent_node(deps, agent_name="decision_utility_judge", tier=5, phase=_TIER_PHASES[5]),
+    )
+    builder.add_node(
+        "writer_node",
+        _make_agent_node(deps, agent_name="writer", tier=6, phase=_TIER_PHASES[6]),
+    )
+    builder.add_node("finalize_node", lambda state: finalize_node(state, deps))
 
-    # Tier 0
-    builder.add_node("retrieval_router_node", retrieval_router_node)
     builder.add_edge(START, "retrieval_router_node")
-
-    # Tier 1: 并行
-    builder.add_node("archive_evidence_node", archive_evidence_node)
-    builder.add_node("bertopic_node", bertopic_node)
-    builder.add_node("gather_tier1", gather_tier1)
-    builder.add_conditional_edges("retrieval_router_node", dispatch_tier1)
+    builder.add_edge("retrieval_router_node", "start_tier1")
+    builder.add_conditional_edges("start_tier1", dispatch_tier1)
     builder.add_edge("archive_evidence_node", "gather_tier1")
     builder.add_edge("bertopic_node", "gather_tier1")
-
-    # Tier 2: 并行
-    builder.add_node("timeline_node", timeline_node)
-    builder.add_node("stance_node", stance_node)
-    builder.add_node("gather_tier2", gather_tier2)
-    builder.add_conditional_edges("gather_tier1", dispatch_tier2)
+    builder.add_edge("gather_tier1", "start_tier2")
+    builder.add_conditional_edges("start_tier2", dispatch_tier2)
     builder.add_edge("timeline_node", "gather_tier2")
     builder.add_edge("stance_node", "gather_tier2")
-
-    # Tier 3: 并行
-    builder.add_node("event_analyst_node", event_analyst_node)
-    builder.add_node("conflict_node", conflict_node)
-    builder.add_node("gather_tier3", gather_tier3)
-    builder.add_conditional_edges("gather_tier2", dispatch_tier3)
+    builder.add_edge("gather_tier2", "start_tier3")
+    builder.add_conditional_edges("start_tier3", dispatch_tier3)
     builder.add_edge("event_analyst_node", "gather_tier3")
     builder.add_edge("conflict_node", "gather_tier3")
-
-    # Tier 4: 并行
-    builder.add_node("agenda_node", agenda_node)
-    builder.add_node("propagation_node", propagation_node)
-    builder.add_node("gather_tier4", gather_tier4)
-    builder.add_conditional_edges("gather_tier3", dispatch_tier4)
+    builder.add_edge("gather_tier3", "start_tier4")
+    builder.add_conditional_edges("start_tier4", dispatch_tier4)
     builder.add_edge("agenda_node", "gather_tier4")
     builder.add_edge("propagation_node", "gather_tier4")
-
-    # Tier 5: utility
-    builder.add_node("utility_node", utility_node)
     builder.add_edge("gather_tier4", "utility_node")
-
-    # Tier 6: writer（条件执行）
-    builder.add_node("writer_node", writer_node)
     builder.add_conditional_edges(
         "utility_node",
         route_after_utility,
@@ -866,12 +1492,8 @@ def build_exploration_deterministic_graph() -> StateGraph:
             "finalize_node": "finalize_node",
         },
     )
-
-    # Tier 7: finalize
-    builder.add_node("finalize_node", finalize_node)
     builder.add_edge("writer_node", "finalize_node")
     builder.add_edge("finalize_node", END)
-
     return builder
 
 
@@ -883,70 +1505,73 @@ def run_exploration_deterministic_graph(
     event_callback: Callable[[Dict[str, Any]], None] | None = None,
     llm: Any,
     initial_files: Dict[str, Dict[str, Any]],
+    runtime_backend: Any = None,
+    common_context: Optional[Dict[str, Any]] = None,
+    lifecycle_tracker: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    执行确定性调度图。
-
-    Parameters
-    ----------
-    request : Dict[str, Any]
-        任务请求，包含 topic_identifier、start、end、mode 等。
-    skill_assets : Dict[str, Any]
-        技能资产包。
-    middleware_factory : Callable[[str], List[Any]]
-        中间件工厂函数。
-    event_callback : Callable[[Dict], None] | None
-        事件回调函数。
-    llm : Any
-        LangChain 语言模型实例。
-    initial_files : Dict[str, Dict[str, Any]]
-        初始文件内容（如 base_context.json）。
-
-    Returns
-    -------
-    Dict[str, Any]
-        包含 files、gaps、structured_payload、status 的结果字典。
-    """
-    builder = build_exploration_deterministic_graph()
-    checkpointer, runtime_profile = get_shared_report_checkpointer(
-        purpose="exploration-deterministic-graph"
+    runtime_deps = _ExplorationRuntimeDeps(
+        skill_assets=skill_assets if isinstance(skill_assets, dict) else {},
+        middleware_factory=middleware_factory,
+        event_callback=event_callback,
+        llm=llm,
+        runtime_backend=runtime_backend,
+        common_context=common_context if isinstance(common_context, dict) else {},
+        lifecycle_tracker=lifecycle_tracker if isinstance(lifecycle_tracker, dict) else None,
+        subagent_specs=_build_subagent_spec_map(
+            skill_assets=skill_assets if isinstance(skill_assets, dict) else {},
+            middleware_factory=middleware_factory,
+        ),
     )
+
+    builder = build_exploration_deterministic_graph(runtime_deps)
+    checkpointer, runtime_profile = get_shared_report_checkpointer(purpose="exploration-deterministic-graph")
     graph = builder.compile(checkpointer=checkpointer)
 
     thread_id = str(request.get("thread_id") or "").strip()
     task_id = str(request.get("task_id") or "").strip()
-
     config = build_report_runnable_config(
         thread_id=thread_id,
         purpose="exploration-deterministic-graph",
         task_id=task_id,
         tags=["deterministic", "exploration"],
-        metadata={
-            "topic_identifier": str(request.get("topic_identifier") or "").strip(),
-        },
+        metadata={"topic_identifier": str(request.get("topic_identifier") or "").strip()},
         locator_hint=runtime_profile.checkpoint_locator,
     )
 
     initial_state: ExplorationDeterministicState = {
-        "files": initial_files,
+        "files": initial_files if isinstance(initial_files, dict) else {},
         "task_id": task_id,
         "thread_id": thread_id,
         "topic_identifier": str(request.get("topic_identifier") or "").strip(),
+        "project_identifier": str((common_context or {}).get("project_identifier") or request.get("project_identifier") or "").strip(),
         "topic_label": str(request.get("topic_label") or "").strip(),
         "start": str(request.get("start") or "").strip(),
         "end": str(request.get("end") or "").strip(),
-        "mode": str(request.get("mode") or "fast").strip(),
+        "mode": str(request.get("mode") or "fast").strip() or "fast",
         "status": "running",
         "message": "",
         "gaps": [],
         "structured_payload": {},
-        "skill_assets": skill_assets,
-        "middleware_factory": middleware_factory,
-        "event_callback": event_callback or (lambda _: None),
-        "llm": llm,
+        "agent_attempts": {},
+        "agent_statuses": {},
+        "agent_messages": {},
+        "agent_results": {},
+        "tier_results": {},
+        "section_draft_paths": [],
+        "reuse_plan": (common_context or {}).get("reuse_decision") if isinstance((common_context or {}).get("reuse_decision"), dict) else {},
+        "execution_plan": (common_context or {}).get("execution_plan") if isinstance((common_context or {}).get("execution_plan"), dict) else {},
+        "reused_artifacts": (common_context or {}).get("reused_artifacts") if isinstance((common_context or {}).get("reused_artifacts"), dict) else {},
+        "supplement_candidates": (common_context or {}).get("supplement_candidates") if isinstance((common_context or {}).get("supplement_candidates"), dict) else {},
+        "skipped_agents": {},
     }
+    _emit_todo_update(
+        event_callback,
+        state=initial_state,
+        phase="prepare",
+        title="探索阶段清单已创建",
+        message="已建立 Tier 0-6 执行清单。",
+    )
 
-    # 执行图
     final_state: Dict[str, Any] = {}
     for chunk in graph.stream(
         initial_state,
@@ -961,19 +1586,28 @@ def run_exploration_deterministic_graph(
             continue
         for updates in data.values():
             if isinstance(updates, dict):
-                final_state.update(updates)
+                final_state = _merge_stream_update(final_state, updates)
 
     return {
-        "files": final_state.get("files", {}),
-        "gaps": final_state.get("gaps", []),
-        "structured_payload": final_state.get("structured_payload", {}),
+        "files": final_state.get("files") if isinstance(final_state.get("files"), dict) else {},
+        "gaps": final_state.get("gaps") if isinstance(final_state.get("gaps"), list) else [],
+        "structured_payload": final_state.get("structured_payload") if isinstance(final_state.get("structured_payload"), dict) else {},
         "status": str(final_state.get("status") or "").strip() or "failed",
         "message": str(final_state.get("message") or "").strip(),
+        "agent_statuses": final_state.get("agent_statuses") if isinstance(final_state.get("agent_statuses"), dict) else {},
+        "tier_results": final_state.get("tier_results") if isinstance(final_state.get("tier_results"), dict) else {},
+        "section_draft_paths": final_state.get("section_draft_paths") if isinstance(final_state.get("section_draft_paths"), list) else [],
+        "execution_plan": final_state.get("execution_plan") if isinstance(final_state.get("execution_plan"), dict) else initial_state.get("execution_plan") or {},
+        "reused_artifacts": final_state.get("reused_artifacts") if isinstance(final_state.get("reused_artifacts"), dict) else initial_state.get("reused_artifacts") or {},
+        "skipped_agents": final_state.get("skipped_agents") if isinstance(final_state.get("skipped_agents"), dict) else {},
+        "todos": final_state.get("todos") if isinstance(final_state.get("todos"), list) else _build_tier_todos(initial_state),
     }
 
 
 __all__ = [
     "ExplorationDeterministicState",
     "build_exploration_deterministic_graph",
+    "finalize_node",
+    "route_after_utility",
     "run_exploration_deterministic_graph",
 ]

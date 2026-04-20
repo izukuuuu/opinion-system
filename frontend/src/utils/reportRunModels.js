@@ -7,8 +7,29 @@ const PLAN_STEP_DESCRIPTIONS = {
   persist: '处理人工确认，并写入最终结果。'
 }
 
-export const RESEARCH_SUBAGENT_IDS = ['retrieval_router', 'archive_evidence_organizer', 'evidence_organizer', 'timeline_analyst', 'stance_conflict', 'propagation_analyst']
-export const SUBAGENT_DISPLAY_ORDER = ['report_coordinator', ...RESEARCH_SUBAGENT_IDS, 'writer', 'validator']
+const TIER_STEP_DESCRIPTIONS = {
+  'tier-0': '确认专题边界、冻结检索合同，并建立本轮探索约束。',
+  'tier-1': '并行整理证据卡与主题演化，形成基础调研底座。',
+  'tier-2': '输出时间线、主体立场与指标侧结构。',
+  'tier-3': '补齐事件分析、断言冲突与关系图谱。',
+  'tier-4': '整理议题框架、传播机制与风险信号。',
+  'tier-5': '进行效用裁决，决定是否进入文稿草拟。',
+  'tier-6': '草拟章节材料，并交付结构化结果。'
+}
+
+export const RESEARCH_SUBAGENT_IDS = [
+  'retrieval_router',
+  'archive_evidence_organizer',
+  'bertopic_evolution_analyst',
+  'evidence_organizer',
+  'timeline_analyst',
+  'stance_conflict',
+  'event_analyst',
+  'claim_actor_conflict',
+  'agenda_frame_builder',
+  'propagation_analyst'
+]
+export const SUBAGENT_DISPLAY_ORDER = ['report_coordinator', ...RESEARCH_SUBAGENT_IDS, 'decision_utility_judge', 'writer', 'validator']
 
 const TODO_PROGRESS_WEIGHT = {
   scope: 12,
@@ -16,7 +37,14 @@ const TODO_PROGRESS_WEIGHT = {
   synthesis: 20,
   writing: 16,
   validation: 12,
-  persist: 12
+  persist: 12,
+  'tier-0': 12,
+  'tier-1': 15,
+  'tier-2': 15,
+  'tier-3': 15,
+  'tier-4': 15,
+  'tier-5': 12,
+  'tier-6': 16
 }
 
 function clampPercent(value) {
@@ -91,10 +119,12 @@ export function subagentLabel(id) {
   const mapping = {
     retrieval_router: '检索路由',
     archive_evidence_organizer: '证据整理',
+    bertopic_evolution_analyst: '主题演化',
     agenda_frame_builder: '议题框架',
     evidence_organizer: '证据整理',
     timeline_analyst: '时间线与因果',
     stance_conflict: '主体与立场',
+    event_analyst: '事件分析',
     claim_actor_conflict: '冲突构建',
     propagation_analyst: '传播结构',
     decision_utility_judge: '效用裁决',
@@ -277,7 +307,7 @@ function toolDisplayName(toolName) {
     build_claim_actor_conflict: '构建冲突图谱',
     build_mechanism_summary: '生成传播机制',
     detect_risk_signals: '识别风险信号',
-    judge_decision_utility: '裁决决策可用性',
+    judge_decision_utility: '评估成稿条件',
     verify_claim_v2: '校验关键断言',
     build_section_packet: '组装章节材料包',
     read_file: '读取文件',
@@ -295,6 +325,63 @@ function toolDisplayName(toolName) {
     graph_interrupt: '语义边界确认'
   }
   return mapping[String(toolName || '').trim()] || String(toolName || '执行动作')
+}
+
+const UTILITY_DIMENSION_LABELS = {
+  empty_corpus: '当前时间范围内暂无可分析内容',
+  empty_evidence: '可直接引用的依据不足',
+  insufficient_structure: '关键分析结构还未成形',
+  object_scope: '结论对象还不够明确',
+  time_window: '时间范围还不够明确',
+  key_actors: '关键主体还不够完整',
+  primary_contradiction: '主要矛盾还不够清楚',
+  mechanism_explanation: '传播脉络还不够清楚',
+  issue_frame_context: '议题背景还不够完整',
+  conditional_risk: '风险触发条件还不够明确',
+  actionable_recommendations: '建议动作还不够具体',
+  uncertainty_boundary: '结果边界还需要说明',
+  recommendation_preconditions: '建议前提还不够完整',
+  recommendation_side_effects: '影响边界还需要补充'
+}
+
+function humanizeUtilityDimension(value) {
+  const normalized = String(value || '').trim()
+  return UTILITY_DIMENSION_LABELS[normalized] || normalized
+}
+
+function humanizeUtilityDecisionSummary(payload, fallback = '') {
+  const assessment = payload?.utility_assessment && typeof payload.utility_assessment === 'object'
+    ? payload.utility_assessment
+    : payload
+  const decision = String(assessment?.decision || '').trim()
+  const missingDimensions = Array.isArray(assessment?.missing_dimensions) ? assessment.missing_dimensions : []
+  if (decision === 'pass') return '当前内容已满足进入成稿的条件。'
+  if (decision === 'require_semantic_review') return '当前内容存在边界风险，需要先人工确认。'
+  if (decision === 'fallback_recompile') {
+    if (missingDimensions.length) return '当前内容还不够完整，系统会先补齐关键信息再继续生成。'
+    return '当前内容还不够完整，暂不直接进入成稿。'
+  }
+  return fallback
+}
+
+function humanizeUtilitySkipReason(value) {
+  const parts = String(value || '').split(/[；;]+/).map((item) => humanizeUtilityDimension(item)).filter(Boolean)
+  if (!parts.length) return ''
+  return parts.join('；')
+}
+
+function humanizeUtilityNextAction(value, payload = {}) {
+  const text = String(value || '').trim()
+  const decision = String(payload?.decision || payload?.utility_assessment?.decision || '').trim()
+  if (decision === 'pass') return '继续整理草稿并生成正式报告。'
+  if (decision === 'require_semantic_review') return '先确认结论边界，再决定是否继续生成正式报告。'
+  if (decision === 'fallback_recompile') {
+    if (/空样本报告|empty sample/i.test(text)) return '当前时间范围内可用内容不足，将转为空样本说明。'
+    if (/fan-out|空证据|空结构|重新编译/i.test(text)) return '当前证据不足，系统会保留缺失说明并重组结果。'
+    if (/micro-passes|对象|时点|动作|前提/i.test(text)) return '系统会先补齐对象、时间和建议等关键信息，再继续生成。'
+    return '系统会先补齐关键信息，再继续生成。'
+  }
+  return text
 }
 
 const LOW_SIGNAL_TOOL_NAMES = new Set(['read_file', 'write_file', 'edit_file', 'ls', 'grep'])
@@ -666,14 +753,57 @@ function buildResearchAgents(taskState) {
   })
 }
 
+function sourceTodoRows(taskState) {
+  const rawEvents = Array.isArray(taskState.events) ? taskState.events : []
+  const isTierTodoList = (items) => (Array.isArray(items) ? items : []).some((item) => {
+    if (!item || typeof item !== 'object') return false
+    if (Number.isInteger(Number(item.tier))) return true
+    return /^tier-\d+$/.test(String(item.id || '').trim())
+  })
+  const taskTodos = Array.isArray(taskState.todos) ? taskState.todos : []
+  if (isTierTodoList(taskTodos)) return taskTodos
+  const tierTodoEvent = [...rawEvents].reverse().find((item) => {
+    if (String(item?.type || '').trim() !== 'todo.updated') return false
+    return isTierTodoList(item?.payload?.todos)
+  })
+  if (Array.isArray(tierTodoEvent?.payload?.todos)) return tierTodoEvent.payload.todos
+  const latestTodoEvent = [...rawEvents].reverse().find((item) => String(item?.type || '').trim() === 'todo.updated')
+  const eventTodos = Array.isArray(latestTodoEvent?.payload?.todos) ? latestTodoEvent.payload.todos : []
+  return taskTodos.length ? taskTodos : eventTodos
+}
+
 function deriveStageCards(taskState, agents) {
+  const sourceTodos = sourceTodoRows(taskState)
+  const tierTodos = sourceTodos
+    .filter((item) => item && typeof item === 'object' && Number.isInteger(Number(item.tier)))
+    .map((item, index) => {
+      const tier = Number(item.tier)
+      const id = String(item.id || `tier-${tier}`).trim() || `tier-${tier}`
+      const status = normalizePrimaryTodoStatus(item.status)
+      const label = String(item.label || `Tier ${tier}`).trim() || `Tier ${tier}`
+      const detail = sanitizeRuntimeMessage(item.detail) || `等待${label}`
+      return {
+        id,
+        label,
+        description: TIER_STEP_DESCRIPTIONS[id] || TIER_STEP_DESCRIPTIONS[`tier-${tier}`] || '',
+        status,
+        detail,
+        order: Number.isFinite(tier) ? tier + 1 : index + 1,
+        statusText: todoStatusLabel(status),
+        isCurrent: status === 'running',
+        tier
+      }
+    })
+    .sort((a, b) => a.order - b.order)
+  if (tierTodos.length) return tierTodos
+
   const phase = String(taskState.phase || '').trim()
   const status = String(taskState.status || '').trim()
   const approvals = Array.isArray(taskState.approvals) ? taskState.approvals : []
   const pendingApprovals = approvals.filter((item) => String(item?.status || '').trim() !== 'resolved')
   const failed = status === 'failed'
-  const hasStructuredResult = Boolean(taskState.id && taskState.threadId && taskState.artifactManifest?.structured_projection?.status === 'ready')
-  const hasFullReport = Boolean(taskState.id && taskState.threadId && taskState.artifactManifest?.full_markdown?.status === 'ready')
+  const hasStructuredResult = Boolean(taskState.artifactManifest?.structured_projection?.status === 'ready')
+  const hasFullReport = Boolean(taskState.artifactManifest?.full_markdown?.status === 'ready')
   const researchAgents = agents.filter((item) => RESEARCH_SUBAGENT_IDS.includes(item.id))
   const researchDone = researchAgents.filter((item) => item.rawStatus === 'done').length
   const researchStarted = researchAgents.filter((item) => item.rawStatus !== 'idle').length
@@ -762,6 +892,7 @@ function calculateProgress(taskState, stageCards, agents) {
     if (stageId === 'writing') return 0.65
     if (stageId === 'validation') return 0.72
     if (stageId === 'persist') return 0.68
+    if (/^tier-\d+$/.test(String(stageId || ''))) return 0.58
     return 0.4
   }
   const totalWeight = stageCards.reduce((sum, item) => sum + (TODO_PROGRESS_WEIGHT[item.id] || 0), 0) || 100
@@ -783,7 +914,7 @@ function buildArtifactCards(taskState) {
       key: 'structured_projection',
       label: '语义报告',
       description: '由 Report IR 派生的结构化投影视图。',
-      ready: Boolean(taskState.id && taskState.threadId && manifest.structured_projection?.status === 'ready')
+      ready: Boolean(manifest.structured_projection?.status === 'ready')
     },
     {
       key: 'report_ir',
@@ -831,7 +962,7 @@ function buildArtifactCards(taskState) {
       key: 'full_markdown',
       label: '正式文稿',
       description: '由 Report IR 编译得到的正式 Markdown 文稿。',
-      ready: Boolean(taskState.id && taskState.threadId && manifest.full_markdown?.status === 'ready')
+      ready: Boolean(manifest.full_markdown?.status === 'ready')
     }
   ]
 }
@@ -1009,7 +1140,7 @@ function buildDecisionObservability(taskState, approvals) {
   let finalReason = ''
   if (hasPendingApproval) finalReason = summarizeApprovalReason(latestApproval) || '正式报告触发审核，等待人工确认。'
   else if (rawDecision === 'fallback_recompile' && fallbackTrace.length) finalReason = String(fallbackTrace[0]?.reason || '').trim() || '当前判断还不够完整，暂时不能生成报告。'
-  else if (missingDimensions.length) finalReason = `当前还缺少 ${missingDimensions.slice(0, 3).join('、')}。`
+  else if (missingDimensions.length) finalReason = `当前还缺少 ${missingDimensions.slice(0, 3).map(humanizeUtilityDimension).join('、')}。`
   else if (rawDecision === 'pass') finalReason = taskState.status === 'completed' ? '当前结果已满足输出条件。' : '当前判断已满足进入下一步的条件。'
   else finalReason = sanitizeRuntimeMessage(taskState.currentOperation || taskState.message) || '当前还没有状态说明。'
   let nextAction = String(utility.next_action || '').trim()
@@ -1019,15 +1150,15 @@ function buildDecisionObservability(taskState, approvals) {
   return {
     utilityDecision: rawDecision,
     utilityDecisionLabel: utilityDecisionLabel(rawDecision, approvals),
-    missingDimensions,
+    missingDimensions: missingDimensions.map(humanizeUtilityDimension),
     fallbackTrace,
     fallbackSummary: fallbackTrace.length
-      ? fallbackTrace.map((item) => String(item?.reason || item?.suggested_pass || item?.dimension || '').trim()).filter(Boolean).slice(0, 2).join('；')
+      ? fallbackTrace.map((item) => String(item?.reason || humanizeUtilityDimension(item?.dimension) || item?.suggested_pass || '').trim()).filter(Boolean).slice(0, 2).join('；')
       : '暂无调整记录',
     reviewReason: hasPendingApproval ? '需审核' : (latestApproval ? approvalDecisionLabel(latestApproval.decision) : '未触发审核'),
     approvalDecision: latestApproval?.decision ? approvalDecisionLabel(latestApproval.decision) : '暂未审核',
     finalReason,
-    nextAction,
+    nextAction: humanizeUtilityNextAction(nextAction, utility),
     hasPendingApproval
   }
 }
@@ -1065,21 +1196,30 @@ function buildApprovalObservability(taskState, approvals) {
 function buildTodoObservability(taskState) {
   const rawEvents = Array.isArray(taskState.events) ? taskState.events : []
   const latestTodoEvent = [...rawEvents].reverse().find((item) => String(item?.type || '').trim() === 'todo.updated')
-  const eventTodos = Array.isArray(latestTodoEvent?.payload?.todos) ? latestTodoEvent.payload.todos : []
-  const sourceTodos = Array.isArray(taskState.todos) && taskState.todos.length ? taskState.todos : eventTodos
+  const sourceTodos = sourceTodoRows(taskState)
   const items = sourceTodos
     .filter((item) => item && typeof item === 'object')
     .map((item, index) => {
       const status = normalizePrimaryTodoStatus(item.status)
+      const parsedTier = Number(item.tier)
+      const tier = Number.isInteger(parsedTier) ? parsedTier : null
+      const detail = sanitizeRuntimeMessage(item.detail)
+      const agents = Array.isArray(item.agents)
+        ? item.agents.map((agent) => displayAgentLabel(agent)).filter(Boolean)
+        : []
       return {
         id: String(item.id || `todo-${index + 1}`).trim() || `todo-${index + 1}`,
-        order: index + 1,
+        order: tier !== null ? tier + 1 : index + 1,
         label: String(item.label || item.content || `任务 ${index + 1}`).trim() || `任务 ${index + 1}`,
         status,
         statusText: todoStatusLabel(status),
-        isCurrent: status === 'running'
+        isCurrent: status === 'running',
+        detail,
+        agents,
+        tier
       }
     })
+    .sort((a, b) => a.order - b.order)
   const completedCount = items.filter((item) => item.status === 'completed').length
   const runningCount = items.filter((item) => item.status === 'running').length
   const failedCount = items.filter((item) => item.status === 'failed').length
@@ -1102,6 +1242,52 @@ function buildTodoObservability(taskState) {
     updatedAtLabel: formatTimestamp(latestTodoEvent?.ts || latestTodoEvent?.timestamp),
     updatedMessage: sanitizeRuntimeMessage(latestTodoEvent?.message) || '',
     updatedBy: displayAgentLabel(latestTodoEvent?.agent) || ''
+  }
+}
+
+function buildSubagentTodoObservability(taskState) {
+  const rawEvents = Array.isArray(taskState.events) ? taskState.events : []
+  const latestAgentTodoEvent = [...rawEvents].reverse().find((item) => {
+    if (String(item?.type || '').trim() !== 'agent.memo') return false
+    const payload = item?.payload && typeof item.payload === 'object' ? item.payload : {}
+    return String(payload.stage_id || '').trim() === 'agent_todo' && Array.isArray(payload.todos)
+  })
+  const sourceTodos = Array.isArray(latestAgentTodoEvent?.payload?.todos) ? latestAgentTodoEvent.payload.todos : []
+  const items = sourceTodos
+    .filter((item) => item && typeof item === 'object')
+    .map((item, index) => {
+      const status = normalizePrimaryTodoStatus(item.status)
+      return {
+        id: String(item.id || `subtodo-${index + 1}`).trim() || `subtodo-${index + 1}`,
+        order: index + 1,
+        label: String(item.label || item.content || `子任务 ${index + 1}`).trim() || `子任务 ${index + 1}`,
+        status,
+        statusText: todoStatusLabel(status),
+        isCurrent: status === 'running'
+      }
+    })
+  const completedCount = items.filter((item) => item.status === 'completed').length
+  const runningCount = items.filter((item) => item.status === 'running').length
+  const failedCount = items.filter((item) => item.status === 'failed').length
+  const pendingCount = items.filter((item) => item.status === 'pending').length
+  let summary = '当前没有子代理内部计划。'
+  if (items.length) {
+    if (failedCount) summary = `当前子代理共有 ${items.length} 项内部计划，其中 ${failedCount} 项失败。`
+    else if (runningCount) summary = `当前子代理共有 ${items.length} 项内部计划，正在推进 ${runningCount} 项。`
+    else if (completedCount === items.length) summary = `当前子代理共有 ${items.length} 项内部计划，已全部完成。`
+    else summary = `当前子代理共有 ${items.length} 项内部计划，待开始 ${pendingCount} 项。`
+  }
+  return {
+    items,
+    totalCount: items.length,
+    completedCount,
+    runningCount,
+    failedCount,
+    pendingCount,
+    summary,
+    updatedAtLabel: formatTimestamp(latestAgentTodoEvent?.ts || latestAgentTodoEvent?.timestamp),
+    updatedMessage: sanitizeRuntimeMessage(latestAgentTodoEvent?.message) || '',
+    updatedBy: displayAgentLabel(latestAgentTodoEvent?.agent) || ''
   }
 }
 
@@ -1186,8 +1372,10 @@ export function buildDebugEvent(event = {}) {
 
   if (type === 'agent.memo') {
     const receiptStage = String(payload.stage_id || '').trim()
-    const receiptSummary = sanitizeEventText(payload.decision_summary || event?.message)
     const receiptToolName = String(payload.tool_name || '').trim()
+    const receiptSummary = receiptToolName === 'judge_decision_utility'
+      ? humanizeUtilityDecisionSummary(payload, sanitizeEventText(payload.decision_summary || event?.message))
+      : sanitizeEventText(payload.decision_summary || event?.message)
     if (receiptStage && receiptSummary) {
       const diagnosticKind = String(payload.diagnostic_kind || '').trim()
       if (diagnosticKind === 'contract_violation') model.title = '任务边界异常已识别'
@@ -1198,7 +1386,9 @@ export function buildDebugEvent(event = {}) {
       else if (diagnosticKind === 'source_unavailable') model.title = '语料源未命中'
       else model.title = `${toolDisplayName(receiptToolName)} 已形成阶段判断`
       model.message = receiptSummary
-      model.nextStep = sanitizeEventText(payload.next_action)
+      model.nextStep = receiptToolName === 'judge_decision_utility'
+        ? humanizeUtilityNextAction(payload.next_action, payload)
+        : sanitizeEventText(payload.next_action)
       const countLines = formatReceiptCounts(payload.counts)
       if (shouldDisplayReceiptCounts(receiptToolName, payload.counts)) model.detailLines.push(`计数：${countLines.join('，')}`)
       const contractValue = formatExecutionValue(payload.contract_value)
@@ -1219,7 +1409,12 @@ export function buildDebugEvent(event = {}) {
       }
       if (payload.violation_origin) model.detailLines.push(`异常来源：${sanitizeEventText(payload.violation_origin)}`)
       if (payload.repair_action) model.detailLines.push(`修正动作：${sanitizeEventText(payload.repair_action)}`)
-      if (payload.skip_reason) model.detailLines.push(`跳过原因：${sanitizeEventText(payload.skip_reason)}`)
+      if (payload.skip_reason) {
+        const skipReason = receiptToolName === 'judge_decision_utility'
+          ? humanizeUtilitySkipReason(payload.skip_reason)
+          : sanitizeEventText(payload.skip_reason)
+        if (skipReason) model.detailLines.push(`跳过原因：${skipReason}`)
+      }
       return model
     }
     model.title = sanitizeEventText(event?.title) || '节点说明'
@@ -1420,6 +1615,7 @@ function buildTimelineEvents(events = []) {
  *   inspector: object,
  *   graphObservability: object,
  *   todoObservability: object,
+ *   subagentTodoObservability: object,
  *   artifactObservability: object,
  *   decisionObservability: object,
  *   approvalObservability: object,
@@ -1464,6 +1660,7 @@ export function buildRunConsoleViewModel(taskState = {}) {
   const latestFailure = debugEvents.find((item) => item.primaryStatus === 'failed') || null
   const graphObservability = buildGraphObservability(taskState, timelineEvents)
   const todoObservability = buildTodoObservability(taskState)
+  const subagentTodoObservability = buildSubagentTodoObservability(taskState)
   const artifactObservability = buildArtifactObservability(taskState)
   const decisionObservability = buildDecisionObservability(taskState, approvals)
   const approvalObservability = buildApprovalObservability(taskState, approvals)
@@ -1518,6 +1715,7 @@ export function buildRunConsoleViewModel(taskState = {}) {
     inspector,
     graphObservability,
     todoObservability,
+    subagentTodoObservability,
     artifactObservability,
     decisionObservability,
     approvalObservability,

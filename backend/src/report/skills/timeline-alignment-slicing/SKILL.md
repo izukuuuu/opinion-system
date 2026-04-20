@@ -27,13 +27,13 @@ metadata:
 ## Current Backend Contract
 
 - 当前 `timeline_analyst` 在后端只应读取：
-  - `/workspace/state/normalized_task.json`
-  - `/workspace/state/evidence_cards.json`
+  - `/workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json`
+  - `/workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json`
 - 当前 `timeline_analyst` 只应产出：
-  - `/workspace/state/timeline_nodes.json`
-  - `/workspace/state/metrics_bundle.json`
+  - `/workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json`
+  - `/workspace/projects/{project_identifier}/reports/{report_range}/state/metrics_bundle.json`
 - 后续章节写作不会直接读取你的自然语言总结，而是主要消费：
-  - `/workspace/state/section_packets/timeline.json`
+  - `/workspace/projects/{project_identifier}/reports/{report_range}/state/section_packets/timeline.json`
 
 ## Tool Surface
 
@@ -62,3 +62,4 @@ metadata:
 - 如果同一时间点同时存在支持与反证，保留 `conflict_evidence_ids`，不要强行消解冲突。
 - 如果证据只足够支持“讨论升温”，节点摘要应写传播变化，不要冒充事实更新。
 - 如果证据不足以切出多个阶段，就保守输出较少节点，不要为了“完整时间线”硬切阶段。
+

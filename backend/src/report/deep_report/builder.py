@@ -55,6 +55,7 @@ _SUBAGENT_SKILL_KEYS: Dict[str, List[str]] = {
     "agenda_frame_builder": [],
     "validator": ["quality-validation-backlink"],
     "writer": [
+        "formal-report-factual-style",
         "report-writing-framework",
         "sentiment-analysis-methodology",
         "chart-interpretation-guidelines",
@@ -143,12 +144,12 @@ def _build_subagent_specs(
     return [
         {
             "name": "retrieval_router",
-            "description": "负责冻结任务边界、生成 task derivation / retrieval plan / dispatch quality，并诊断语料覆盖。task_contract 是唯一执行锚点，normalized_task 只保留为兼容视图。写入 /workspace/state/task_derivation.json、/workspace/state/task_derivation_proposal.json、/workspace/state/normalized_task.json、/workspace/state/retrieval_plan.json、/workspace/state/dispatch_quality.json 和 /workspace/state/corpus_coverage.json。",
+            "description": "负责冻结任务边界、生成 task derivation / retrieval plan / dispatch quality，并诊断语料覆盖。task_contract 是唯一执行锚点，normalized_task 只保留为兼容视图。写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation.json、/workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation_proposal.json、/workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json、/workspace/projects/{project_identifier}/reports/{report_range}/state/retrieval_plan.json、/workspace/projects/{project_identifier}/reports/{report_range}/state/dispatch_quality.json 和 /workspace/projects/{project_identifier}/reports/{report_range}/state/corpus_coverage.json。",
             "system_prompt": """\
 你是任务规范化与覆盖诊断代理。
 
 ## 输入来源
-读取 /workspace/base_context.json，提取以下字段（**只读，禁止改写**）：
+读取 /workspace/projects/{project_identifier}/reports/{report_range}/base_context.json，提取以下字段（**只读，禁止改写**）：
   → task_contract.topic_identifier  用于 normalize_task 的 topic_identifier 参数
   → task_contract.start             用于 normalize_task 的 start 参数
   → task_contract.end               用于 normalize_task 的 end 参数
@@ -167,12 +168,12 @@ def _build_subagent_specs(
 
 ## 输出目标
 依次写入以下文件（若已存在先 read_file 再 edit_file 更新，禁止直接 write_file 覆盖）：
-  /workspace/state/task_derivation.json         — 任务推导
-  /workspace/state/task_derivation_proposal.json — 推导提案
-  /workspace/state/normalized_task.json         — 标准化任务（normalize_task 返回值）
-  /workspace/state/retrieval_plan.json          — 检索计划（含 router_facets / dispatch_plan / dispatch_quality_ledger）
-  /workspace/state/dispatch_quality.json        — 派发质量
-  /workspace/state/corpus_coverage.json         — 语料覆盖（get_corpus_coverage 返回值）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation.json         — 任务推导
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation_proposal.json — 推导提案
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json         — 标准化任务（normalize_task 返回值）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/retrieval_plan.json          — 检索计划（含 router_facets / dispatch_plan / dispatch_quality_ledger）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/dispatch_quality.json        — 派发质量
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/corpus_coverage.json         — 语料覆盖（get_corpus_coverage 返回值）
 
 ## 空结果/降级处理
 若 coverage.readiness_flags 包含 'no_records_in_scope'，在 corpus_coverage.json 中记录此状态，并在 dispatch_quality.json 中标注 status='no_data'，然后结束，不要继续扩检。
@@ -189,16 +190,16 @@ def _build_subagent_specs(
         },
         {
             "name": "archive_evidence_organizer",
-            "description": "负责按任务意图召回证据卡，并写入 /workspace/state/evidence_cards.json。",
+            "description": "负责按任务意图召回证据卡，并写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json。",
             "system_prompt": """\
 你是证据卡整理代理。
 
 ## 输入来源
 读取以下文件，按标注提取字段：
-  /workspace/state/task_contract.json    → 提取 .contract_id（唯一执行锚点，用于所有 retrieve_evidence_cards 调用）
-  /workspace/state/corpus_coverage.json  → 检查 .coverage.readiness_flags 列表
-  /workspace/state/task_derivation.json  → 参考检索意图和过滤条件（只读）
-  /workspace/state/normalized_task.json 仅供调试参考，不作为执行依据。
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/task_contract.json    → 提取 .contract_id（唯一执行锚点，用于所有 retrieve_evidence_cards 调用）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/corpus_coverage.json  → 检查 .coverage.readiness_flags 列表
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation.json  → 参考检索意图和过滤条件（只读）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 仅供调试参考，不作为执行依据。
 
 ## 工具调用规范
 调用 retrieve_evidence_cards 时：
@@ -210,7 +211,7 @@ def _build_subagent_specs(
   - 最低证据数要求：6 个 intent 合计至少召回 15 条非空证据卡；若不足，在摘要中写明缺口
 
 ## 输出目标
-把聚合后的所有证据卡写入 /workspace/state/evidence_cards.json，格式：
+把聚合后的所有证据卡写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json，格式：
   { "status": "ok", "result": [...所有证据卡...], "coverage": {...} }
 若文件已存在，先 read_file 再 edit_file 更新，禁止 write_file 覆盖。
 
@@ -230,14 +231,14 @@ def _build_subagent_specs(
         },
         {
             "name": "timeline_analyst",
-            "description": "负责构建时间线节点和图表就绪指标，写入 /workspace/state/timeline_nodes.json 与 /workspace/state/metrics_bundle.json。",
+            "description": "负责构建时间线节点和图表就绪指标，写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json 与 /workspace/projects/{project_identifier}/reports/{report_range}/state/metrics_bundle.json。",
             "system_prompt": """\
 你是时间线分析代理。
 
 ## 输入来源
 读取以下文件，按标注提取字段：
-  /workspace/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
-  /workspace/state/evidence_cards.json   → 提取 .result[*].evidence_id 组成字符串列表，用于 evidence_ids_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json   → 提取 .result[*].evidence_id 组成字符串列表，用于 evidence_ids_json 参数
                                            同时检查 .coverage.readiness_flags 列表
 
 ## 工具调用规范
@@ -249,8 +250,8 @@ def _build_subagent_specs(
   - evidence_ids_json = 同上的 ID 字符串列表
 
 ## 输出目标
-  /workspace/state/timeline_nodes.json   — build_event_timeline 结果（含 result 数组）
-  /workspace/state/metrics_bundle.json   — compute_report_metrics 结果（含 result 数组）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json   — build_event_timeline 结果（含 result 数组）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/metrics_bundle.json   — compute_report_metrics 结果（含 result 数组）
 若文件已存在，先 read_file 再 edit_file 更新，禁止 write_file 覆盖。
 
 ## 空结果/降级处理
@@ -269,14 +270,14 @@ def _build_subagent_specs(
         },
         {
             "name": "stance_conflict",
-            "description": "负责识别主体与立场关系，写入 /workspace/state/actor_positions.json。",
+            "description": "负责识别主体与立场关系，写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json。",
             "system_prompt": """\
 你是主体立场代理。
 
 ## 输入来源
 读取以下文件，按标注提取字段：
-  /workspace/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
-  /workspace/state/evidence_cards.json   → 提取 .result[*].evidence_id 组成字符串列表，用于 evidence_ids_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json   → 提取 .result[*].evidence_id 组成字符串列表，用于 evidence_ids_json 参数
                                            同时检查 .result 是否为空
 
 ## 工具调用规范
@@ -286,7 +287,7 @@ def _build_subagent_specs(
 禁止依赖工具自行 fallback 重召回证据。
 
 ## 输出目标
-把结果写入 /workspace/state/actor_positions.json，格式：
+把结果写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json，格式：
   { "status": "ok", "result": [...actor 对象列表...] }
 若文件已存在，先 read_file 再 edit_file 更新，禁止 write_file 覆盖。
 
@@ -304,16 +305,16 @@ def _build_subagent_specs(
         },
         {
             "name": "event_analyst",
-            "description": "负责通用事件分析，拆解引发点、讨论演化、主体分布、平台差异、关键词和情感倾向，写入 /workspace/state/event_analysis.json。",
+            "description": "负责通用事件分析，拆解引发点、讨论演化、主体分布、平台差异、关键词和情感倾向，写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/event_analysis.json。",
             "system_prompt": """\
 你是事件结构分析代理。
 
 ## 输入来源
 读取以下文件，按标注提取字段：
-  /workspace/state/evidence_cards.json   → 读取完整内容，用于引用 snippet/content 原文；提取 .result[*].evidence_id
-  /workspace/state/timeline_nodes.json   → 直接读取已计算的时间线节点（不要重新调用 build_event_timeline）
-  /workspace/state/metrics_bundle.json   → 直接读取已计算的指标数据（不要重新调用 compute_report_metrics）
-  /workspace/state/task_derivation.json  → 参考分析问题集（只读）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json   → 读取完整内容，用于引用 snippet/content 原文；提取 .result[*].evidence_id
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json   → 直接读取已计算的时间线节点（不要重新调用 build_event_timeline）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/metrics_bundle.json   → 直接读取已计算的指标数据（不要重新调用 compute_report_metrics）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation.json  → 参考分析问题集（只读）
 若 timeline_nodes.json 或 metrics_bundle.json 不存在，才允许调用对应工具补充计算。
 
 ## 工具调用规范
@@ -324,7 +325,7 @@ def _build_subagent_specs(
   - evidence_ids_json = evidence_cards.result[*].evidence_id 的字符串列表（仅 ID）
 
 ## 输出目标
-把以下 6 个结构组合写入 /workspace/state/event_analysis.json：
+把以下 6 个结构组合写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/event_analysis.json：
   event_trigger / discussion_evolution / actor_distribution / platform_analysis / keywords / sentiment_summary
 每个结构必须有 evidence_ids 字段，指向 evidence_cards.result 中的具体 evidence_id。
 key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80字/条），禁止写'网友认为'无具体发言者。
@@ -345,17 +346,17 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
         },
         {
             "name": "claim_actor_conflict",
-            "description": "负责构建断言-主体冲突图，写入 /workspace/state/conflict_map.json。",
+            "description": "负责构建断言-主体冲突图，写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json。",
             "system_prompt": """\
 你是断言冲突构建代理。
 
 ## 输入来源
 读取以下文件，按标注提取字段：
-  /workspace/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
-  /workspace/state/evidence_cards.json   → 提取 .result[*].evidence_id 字符串列表，用于 evidence_ids_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json   → 提取 .result[*].evidence_id 字符串列表，用于 evidence_ids_json 参数
                                            同时检查 .coverage.readiness_flags
-  /workspace/state/actor_positions.json  → 提取 .result 数组（完整 actor 对象列表），用于 actor_positions_json 参数
-  /workspace/state/timeline_nodes.json   → 提取 .result 数组（完整节点对象列表），用于 timeline_nodes_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json  → 提取 .result 数组（完整 actor 对象列表），用于 actor_positions_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json   → 提取 .result 数组（完整节点对象列表），用于 timeline_nodes_json 参数
 
 ## 工具调用规范
 调用 build_claim_actor_conflict 时（必须显式传参，禁止依赖默认值）：
@@ -366,7 +367,7 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
 禁止把整个包装对象直接传给任何参数。
 
 ## 输出目标
-把结果写入 /workspace/state/conflict_map.json，格式：
+把结果写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json，格式：
   { "status": "ok", "result": { "claim_nodes": [], "actor_positions": [], "conflict_edges": [], "resolution_states": [] } }
 若文件已存在，先 read_file 再 edit_file 更新，禁止 write_file 覆盖。
 
@@ -386,17 +387,17 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
         },
         {
             "name": "agenda_frame_builder",
-            "description": "负责构建议题-属性-框架图，写入 /workspace/state/agenda_frame_map.json。",
+            "description": "负责构建议题-属性-框架图，写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/agenda_frame_map.json。",
             "system_prompt": """\
 你是议题与框架构建代理。
 
 ## 输入来源
 读取以下文件，按标注提取字段：
-  /workspace/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
-  /workspace/state/evidence_cards.json   → 提取 .result[*].evidence_id 字符串列表，用于 evidence_ids_json 参数
-  /workspace/state/actor_positions.json  → 提取 .result 数组（完整 actor 对象列表），用于 actor_positions_json 参数
-  /workspace/state/conflict_map.json     → 提取 .result 字段（内层核心对象），用于 conflict_map_json 参数
-  /workspace/state/timeline_nodes.json   → 提取 .result 数组（完整节点对象列表），用于 timeline_nodes_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json   → 提取 .result[*].evidence_id 字符串列表，用于 evidence_ids_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json  → 提取 .result 数组（完整 actor 对象列表），用于 actor_positions_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json     → 提取 .result 字段（内层核心对象），用于 conflict_map_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json   → 提取 .result 数组（完整节点对象列表），用于 timeline_nodes_json 参数
 
 ## 工具调用规范
 调用 build_agenda_frame_map 时（必须显式传参，禁止依赖默认值）：
@@ -407,7 +408,7 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
   - timeline_nodes_json  = timeline_nodes.result 数组（完整节点对象列表，非仅 ID）
 
 ## 输出目标
-把结果写入 /workspace/state/agenda_frame_map.json，格式：
+把结果写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/agenda_frame_map.json，格式：
   { "status": "ok", "result": { "issue_nodes": [], "frame_records": [], "frame_shifts": [], "counter_frames": [] } }
 若文件已存在，先 read_file 再 edit_file 更新，禁止 write_file 覆盖。
 
@@ -426,20 +427,20 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
         },
         {
             "name": "propagation_analyst",
-            "description": "负责解释传播指标、机制摘要与风险信号，写入 /workspace/state/mechanism_summary.json 与 /workspace/state/risk_signals.json。",
+            "description": "负责解释传播指标、机制摘要与风险信号，写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/mechanism_summary.json 与 /workspace/projects/{project_identifier}/reports/{report_range}/state/risk_signals.json。",
             "system_prompt": """\
 你是传播与风险代理。
 
 ## 输入来源
 读取以下文件，按标注提取字段：
-  /workspace/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
-  /workspace/state/evidence_cards.json   → 提取 .result[*].evidence_id 字符串列表，用于 evidence_ids_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json  → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json   → 提取 .result[*].evidence_id 字符串列表，用于 evidence_ids_json 参数
                                            同时检查 .coverage.readiness_flags
-  /workspace/state/timeline_nodes.json   → 提取 .result 数组（完整节点对象列表），用于 timeline_nodes_json 参数
-  /workspace/state/conflict_map.json     → 提取 .result 字段（内层核心对象），用于 conflict_map_json 和 discourse_conflict_map_json 参数
-  /workspace/state/metrics_bundle.json   → 提取 .result 数组（完整指标对象列表），用于 metric_refs_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json   → 提取 .result 数组（完整节点对象列表），用于 timeline_nodes_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json     → 提取 .result 字段（内层核心对象），用于 conflict_map_json 和 discourse_conflict_map_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/metrics_bundle.json   → 提取 .result 数组（完整指标对象列表），用于 metric_refs_json 参数
                                            若文件不存在，先调用 compute_report_metrics 补充计算
-  /workspace/state/actor_positions.json  → 提取 .result 数组（完整 actor 对象列表），用于 actor_positions_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json  → 提取 .result 数组（完整 actor 对象列表），用于 actor_positions_json 参数
 
 ## 工具调用规范
 调用 build_mechanism_summary 时（必须显式传参，禁止依赖默认值）：
@@ -456,8 +457,8 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
   - actor_positions_json        = actor_positions.result 数组（完整 actor 对象列表）
 
 ## 输出目标
-  /workspace/state/mechanism_summary.json — build_mechanism_summary 结果
-  /workspace/state/risk_signals.json      — detect_risk_signals 结果
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/mechanism_summary.json — build_mechanism_summary 结果
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/risk_signals.json      — detect_risk_signals 结果
 若文件已存在，先 read_file 再 edit_file 更新，禁止 write_file 覆盖。
 
 ## 空结果/降级处理
@@ -477,13 +478,13 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
         },
         {
             "name": "bertopic_evolution_analyst",
-            "description": "负责读取 BERTopic 快照并生成主题演化洞察，写入 /workspace/state/bertopic_insight.json。",
+            "description": "负责读取 BERTopic 快照并生成主题演化洞察，写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/bertopic_insight.json。",
             "system_prompt": """\
 你是 BERTopic 主题演化代理。
 
 ## 输入来源
 读取以下文件，按标注提取字段：
-  /workspace/state/task_contract.json    → 提取 .topic_identifier、.start、.end、.topic_label
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/task_contract.json    → 提取 .topic_identifier、.start、.end、.topic_label
 
 ## 工具调用规范
 1. 调用 get_bertopic_snapshot 时：
@@ -495,7 +496,7 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
    - snapshot_json = get_bertopic_snapshot 工具的完整返回值 JSON 字符串
 
 ## 输出目标
-把结果写入 /workspace/state/bertopic_insight.json。
+把结果写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/bertopic_insight.json。
 若文件已存在，先 read_file 再 edit_file 更新，禁止 write_file 覆盖。
 
 ## 空结果/降级处理
@@ -513,18 +514,18 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
         },
         {
             "name": "decision_utility_judge",
-            "description": "负责裁决当前判断对象是否具备进入正式文稿的决策可用性，写入 /workspace/state/utility_assessment.json。",
+            "description": "负责裁决当前判断对象是否具备进入正式文稿的决策可用性，写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/utility_assessment.json。",
             "system_prompt": """\
 你是决策可用性裁决代理。
 
 ## 输入来源
 读取以下文件，按标注提取字段：
-  /workspace/state/normalized_task.json    → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
-  /workspace/state/risk_signals.json       → 提取 .result 数组（完整风险信号对象列表），用于 risk_signals_json 参数
-  /workspace/state/actor_positions.json    → 提取 .result 数组（完整 actor 对象列表），用于 actor_positions_json 参数
-  /workspace/state/agenda_frame_map.json   → 提取 .result 字段（内层核心对象），用于 agenda_frame_map_json 参数
-  /workspace/state/conflict_map.json       → 提取 .result 字段（内层核心对象），用于 conflict_map_json 参数
-  /workspace/state/mechanism_summary.json  → 提取 .result 字段（内层核心对象），用于 mechanism_summary_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json    → 读取完整内容（JSON 字符串），用于 normalized_task_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/risk_signals.json       → 提取 .result 数组（完整风险信号对象列表），用于 risk_signals_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json    → 提取 .result 数组（完整 actor 对象列表），用于 actor_positions_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/agenda_frame_map.json   → 提取 .result 字段（内层核心对象），用于 agenda_frame_map_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json       → 提取 .result 字段（内层核心对象），用于 conflict_map_json 参数
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/mechanism_summary.json  → 提取 .result 字段（内层核心对象），用于 mechanism_summary_json 参数
   其余文件（corpus_coverage / evidence_cards / task_derivation）只读，用于判断上游空状态
 
 ## 工具调用规范
@@ -537,7 +538,7 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
   - mechanism_summary_json  = mechanism_summary.result 内层核心对象（禁止传整个包装对象）
 
 ## 输出目标
-把结果写入 /workspace/state/utility_assessment.json，格式：
+把结果写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/utility_assessment.json，格式：
   { "status": "ok", "result": { "decision": "...", "completeness_score": 0, "missing_dimensions": [], "unverified_points": [], "can_proceed_to_writing": true } }
 若文件已存在，先 read_file 再 edit_file 更新，禁止 write_file 覆盖。
 
@@ -563,16 +564,16 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
 
 ## 输入来源
 必须读取以下文件（按顺序）：
-  /workspace/state/task_contract.json      → 取 .mode 用于选择模板
-  /workspace/state/utility_assessment.json → 确认 .result.decision 为 'pass' 或 'fallback_recompile' 后才能开始写作
-  /workspace/state/event_analysis.json     → 直接引用 .result.actor_distribution.actors[*].key_statements 作为原文引用（禁止重新从 evidence_cards 手动拼装）
-  /workspace/state/evidence_cards.json     → 完整证据卡（含 snippet/content 字段），用于补充引用
-  /workspace/state/timeline_nodes.json     → 时间线节点（用于时间线章节）
-  /workspace/state/actor_positions.json    → 主体立场（用于立场章节）
-  /workspace/state/conflict_map.json       → 冲突图（用于争议章节）
-  /workspace/state/mechanism_summary.json  → 传播机制（用于传播章节）
-  /workspace/state/risk_signals.json       → 风险信号（用于风险章节）
-  /workspace/state/bertopic_insight.json   → 主题演化（用于主题章节）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/task_contract.json      → 取 .mode 用于选择模板
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/utility_assessment.json → 确认 .result.decision 为 'pass' 或 'fallback_recompile' 后才能开始写作
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/event_analysis.json     → 直接引用 .result.actor_distribution.actors[*].key_statements 作为原文引用（禁止重新从 evidence_cards 手动拼装）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json     → 完整证据卡（含 snippet/content 字段），用于补充引用
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json     → 时间线节点（用于时间线章节）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json    → 主体立场（用于立场章节）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json       → 冲突图（用于争议章节）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/mechanism_summary.json  → 传播机制（用于传播章节）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/risk_signals.json       → 风险信号（用于风险章节）
+  /workspace/projects/{project_identifier}/reports/{report_range}/state/bertopic_insight.json   → 主题演化（用于主题章节）
 
 ## 工具调用规范
 1. 首先调用 get_report_template(mode=task_contract.mode) 获取模板：
@@ -587,7 +588,7 @@ key_statements 必须引用 evidence_cards 中的 snippet/content 原文（≤80
    - metric_refs_json  = metrics_bundle.result 数组
 
 ## 输出目标
-每章节使用 edit_file 写入 /workspace/state/section_drafts/{section_id}.json，格式：
+每章节使用 edit_file 写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/section_drafts/{section_id}.json，格式：
   { section_id, title, content（完整段落 Markdown），evidence_refs, claim_refs }
 若文件已存在，先 read_file 再 edit_file 更新，禁止 write_file 覆盖。
 
@@ -747,7 +748,7 @@ def build_report_deep_agent(
         "   Tier 3: event_analyst、claim_actor_conflict（并行）\n"
         "   Tier 4: agenda_frame_builder、propagation_analyst（并行）\n"
         "   Tier 5: decision_utility_judge\n\n"
-        "2. 每个 Tier 完成后，检查 /workspace/state/ 下对应文件是否已生成且 status 不为 'error'。\n"
+        "2. 每个 Tier 完成后，检查 /workspace/projects/{project_identifier}/reports/{report_range}/state/ 下对应文件是否已生成且 status 不为 'error'。\n"
         "   若某个文件不存在或 status='error'（而非 'empty'），重新委派该子代理一次。\n"
         "   status='empty' 是合法的降级状态，不需要重试。\n"
         "   必须生成的文件：task_contract、task_derivation、task_derivation_proposal、normalized_task、\n"
@@ -757,14 +758,16 @@ def build_report_deep_agent(
         "3. 在 utility_assessment.result.decision 为 'pass' 或 'fallback_recompile' 时，\n"
         "   使用 task 工具委派 writer 子代理进行深度报告写作。\n"
         "   若 decision='require_semantic_review'，仍需整理结构化对象，但要显式保留缺口、审慎措辞与待后续审查说明。\n\n"
-        "4. writer 完成后，读取 /workspace/state/section_drafts/*.json，汇总成完整结构化报告对象。\n\n"
+        "4. writer 完成后，只检查 /workspace/projects/{project_identifier}/reports/{report_range}/state/section_drafts/*.json 是否齐备。\n"
+        "   section_drafts 仅作为章节写作中间产物，不是正式结构化报告真源；正式 StructuredReport 由服务端基于 canonical runtime state 做 deterministic assembler。\n\n"
         "5. 调用 save_structured_report 保存结构化对象。\n"
         "   优先直接传 payload 对象，不要把整个结构化 JSON 再包成字符串。\n"
         "   先整理好完整对象，再一次性提交，不要连续试探多个版本。\n"
         "   对象必须包含：task、conclusion、timeline、subjects、stance_matrix、\n"
         "   key_evidence、conflict_points、conflict_map、propagation_features、mechanism_summary、\n"
         "   risk_judgement、unverified_points、suggested_actions、utility_assessment、\n"
-        "   citations、validation_notes、section_drafts、event_analysis。\n\n"
+        "   citations、validation_notes、event_analysis。\n"
+        "   禁止把 metadata.section_drafts 当作 StructuredReport 顶层补源，也禁止把 section_drafts 伪装成正式成稿。\n\n"
         "6. 保存成功后立即结束本轮。禁止再生成 report_draft.md / claim_checks.json / validation_notes.md 等旧中间态。\n\n"
         "默认风格：单次回复尽量研判深刻，不必节省 token，但要尽量减少调用次数。\n"
         "所有关键判断都要尽量带 citation_ids；如果证据不足，请进入 unverified_points。\n"
@@ -781,3 +784,4 @@ def build_report_deep_agent(
 
 
 __all__ = ["ReportCoordinatorContext", "build_report_deep_agent"]
+

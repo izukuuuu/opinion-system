@@ -137,10 +137,12 @@ def _guess_peak_from_trends(trends_payload: Any) -> Dict[str, Any]:
 
 
 def _guess_sentiment(attitude_payload: Any) -> Dict[str, int]:
-    if not isinstance(attitude_payload, dict):
-        return {"positive": 0, "neutral": 0, "negative": 0}
     out = {"positive": 0, "neutral": 0, "negative": 0}
-    for key, value in attitude_payload.items():
+    if isinstance(attitude_payload, dict):
+        iterable: Iterable[tuple[Any, Any]] = attitude_payload.items()
+    else:
+        iterable = []
+    for key, value in iterable:
         lowered = str(key or "").lower()
         total = max((int(num) for num in _iter_numbers(value)), default=0)
         if any(token in lowered for token in ("positive", "积极", "正向")):
@@ -148,6 +150,21 @@ def _guess_sentiment(attitude_payload: Any) -> Dict[str, int]:
         elif any(token in lowered for token in ("neutral", "中性")):
             out["neutral"] = max(out["neutral"], total)
         elif any(token in lowered for token in ("negative", "消极", "负向")):
+            out["negative"] = max(out["negative"], total)
+    for item in _iter_records(attitude_payload):
+        label = str(
+            item.get("name")
+            or item.get("label")
+            or item.get("sentiment")
+            or item.get("polarity")
+            or ""
+        ).strip().lower()
+        total = max((int(num) for num in _iter_numbers(item.get("value") if "value" in item else item.get("count") if "count" in item else item)), default=0)
+        if any(token in label for token in ("positive", "积极", "正向")):
+            out["positive"] = max(out["positive"], total)
+        elif any(token in label for token in ("neutral", "中性")):
+            out["neutral"] = max(out["neutral"], total)
+        elif any(token in label for token in ("negative", "消极", "负向")):
             out["negative"] = max(out["negative"], total)
     return out
 
@@ -238,6 +255,122 @@ def _bertopic_temporal_rows(temporal_payload: Any) -> List[Dict[str, Any]]:
                 continue
             bucket_counts[key] = bucket_counts.get(key, 0) + _safe_int(point.get("count") or point.get("value"))
     return [{"label": key, "value": bucket_counts[key]} for key in sorted(bucket_counts)]
+
+
+def _bertopic_temporal_nodes(temporal_payload: Any) -> List[Dict[str, Any]]:
+    if not isinstance(temporal_payload, dict):
+        return []
+    nodes = temporal_payload.get("time_nodes") if isinstance(temporal_payload.get("time_nodes"), list) else []
+    rows: List[Dict[str, Any]] = []
+    for item in nodes:
+        if not isinstance(item, dict):
+            continue
+        themes = item.get("themes") if isinstance(item.get("themes"), list) else []
+        cleaned_themes: List[Dict[str, Any]] = []
+        for theme in themes:
+            if not isinstance(theme, dict):
+                continue
+            name = str(theme.get("name") or "").strip()
+            if not name:
+                continue
+            cleaned_themes.append({"name": name, "value": _safe_int(theme.get("value") or theme.get("count"))})
+        cleaned_themes.sort(key=lambda theme: int(theme.get("value") or 0), reverse=True)
+        rows.append(
+            {
+                "date": str(item.get("date") or "").strip(),
+                "label": str(item.get("label") or item.get("date") or "").strip(),
+                "total": _safe_int(item.get("total") or item.get("count") or item.get("value")),
+                "top_theme": str(item.get("topTheme") or "").strip(),
+                "top_value": _safe_int(item.get("topValue") or 0),
+                "themes": cleaned_themes[:6],
+            }
+        )
+    return rows
+
+
+def _summarize_theme_profiles(llm_clusters: List[Dict[str, Any]], temporal_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    peak_map: Dict[str, List[Dict[str, Any]]] = {}
+    for node in temporal_nodes:
+        label = str(node.get("label") or "").strip()
+        for theme in node.get("themes") or []:
+            if not isinstance(theme, dict):
+                continue
+            name = str(theme.get("name") or "").strip()
+            if not name:
+                continue
+            peak_map.setdefault(name, []).append(
+                {"label": label, "value": _safe_int(theme.get("value") or 0), "date": str(node.get("date") or "").strip()}
+            )
+    profiles: List[Dict[str, Any]] = []
+    for item in llm_clusters[:5]:
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        peaks = sorted(peak_map.get(name) or [], key=lambda entry: int(entry.get("value") or 0), reverse=True)[:3]
+        profiles.append(
+            {
+                "name": name,
+                "count": _safe_int(item.get("count") or 0),
+                "description": str(item.get("description") or "").strip(),
+                "keywords": [str(token).strip() for token in (item.get("keywords") or []) if str(token or "").strip()][:6],
+                "peak_weeks": peaks,
+            }
+        )
+    return profiles
+
+
+def _summarize_temporal_highlights(temporal_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    highlights: List[Dict[str, Any]] = []
+    for node in sorted(temporal_nodes, key=lambda entry: int(entry.get("total") or 0), reverse=True)[:5]:
+        top_themes = []
+        for theme in (node.get("themes") or [])[:3]:
+            if not isinstance(theme, dict):
+                continue
+            name = str(theme.get("name") or "").strip()
+            if not name:
+                continue
+            top_themes.append({"name": name, "value": _safe_int(theme.get("value") or 0)})
+        highlights.append(
+            {
+                "label": str(node.get("label") or "").strip(),
+                "date": str(node.get("date") or "").strip(),
+                "total": _safe_int(node.get("total") or 0),
+                "top_theme": str(node.get("top_theme") or "").strip(),
+                "top_value": _safe_int(node.get("top_value") or 0),
+                "top_themes": top_themes,
+            }
+        )
+    return highlights
+
+
+def _summarize_dominant_phases(temporal_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    phases: List[Dict[str, Any]] = []
+    current: Dict[str, Any] | None = None
+    for node in temporal_nodes:
+        top_theme = str(node.get("top_theme") or "").strip()
+        if not top_theme:
+            continue
+        if current and current.get("top_theme") == top_theme:
+            current["end_label"] = str(node.get("label") or current.get("end_label") or "").strip()
+            current["end_date"] = str(node.get("date") or current.get("end_date") or "").strip()
+            current["weeks"] = int(current.get("weeks") or 0) + 1
+            current["max_total"] = max(int(current.get("max_total") or 0), _safe_int(node.get("total") or 0))
+            continue
+        if current:
+            phases.append(current)
+        current = {
+            "top_theme": top_theme,
+            "start_label": str(node.get("label") or "").strip(),
+            "end_label": str(node.get("label") or "").strip(),
+            "start_date": str(node.get("date") or "").strip(),
+            "end_date": str(node.get("date") or "").strip(),
+            "weeks": 1,
+            "max_total": _safe_int(node.get("total") or 0),
+        }
+    if current:
+        phases.append(current)
+    phases.sort(key=lambda item: (int(item.get("weeks") or 0), int(item.get("max_total") or 0)), reverse=True)
+    return phases[:5]
 
 
 def collect_basic_analysis_snapshot(
@@ -468,6 +601,7 @@ def collect_bertopic_snapshot(
     raw_topics = _bertopic_summary_rows(payloads.get("summary"))
     llm_clusters = _bertopic_cluster_rows(payloads.get("llm_clusters"), payloads.get("llm_keywords"))
     temporal_rows = _bertopic_temporal_rows(payloads.get("temporal"))
+    temporal_nodes = _bertopic_temporal_nodes(payloads.get("temporal"))
     availability_flags = ["archive_found" if root else "archive_missing"]
     if llm_clusters:
         availability_flags.append("cluster_ready")
@@ -495,6 +629,7 @@ def collect_bertopic_snapshot(
         "raw_topics": raw_topics,
         "llm_clusters": llm_clusters,
         "temporal_points": temporal_rows,
+        "temporal_nodes": temporal_nodes,
         "trace": trace,
     }
 
@@ -503,26 +638,49 @@ def build_bertopic_insight(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     raw_topics = snapshot.get("raw_topics") if isinstance(snapshot.get("raw_topics"), list) else []
     llm_clusters = snapshot.get("llm_clusters") if isinstance(snapshot.get("llm_clusters"), list) else []
     temporal_points = snapshot.get("temporal_points") if isinstance(snapshot.get("temporal_points"), list) else []
+    temporal_nodes = snapshot.get("temporal_nodes") if isinstance(snapshot.get("temporal_nodes"), list) else []
+    theme_profiles = _summarize_theme_profiles(llm_clusters, temporal_nodes)
+    temporal_highlights = _summarize_temporal_highlights(temporal_nodes)
+    dominant_phases = _summarize_dominant_phases(temporal_nodes)
     summary_parts: List[str] = []
     if llm_clusters:
         summary_parts.append(f"BERTopic 结果显示当前区间形成 {len(llm_clusters)} 个高层主题簇。")
         summary_parts.append(f"其中 {str(llm_clusters[0].get('name') or '').strip()} 是当前最主要的讨论主线。")
+        if len(llm_clusters) >= 2:
+            summary_parts.append(f"与之并行的高权重主题还包括 {str(llm_clusters[1].get('name') or '').strip()}。")
     elif raw_topics:
         summary_parts.append(f"BERTopic 原始主题统计显示当前共有 {len(raw_topics)} 个可识别主题。")
-    if temporal_points:
+    if temporal_highlights:
+        top_node = temporal_highlights[0]
+        summary_parts.append(
+            f"从时序上看，{str(top_node.get('label') or '').strip()}是最显著的热度峰值周，主导主题为{str(top_node.get('top_theme') or '').strip()}。"
+        )
+    elif temporal_points:
         summary_parts.append("主题热度在时间轴上存在明显迁移，可结合时序节点观察主线切换。")
     summary = "".join(summary_parts).strip() or "当前区间尚未形成完整的 BERTopic 主题演化结果，本章节仅保留缺口说明。"
-    findings = [
-        f"头部主题簇包括 {str(llm_clusters[0].get('name') or '').strip()}、{str(llm_clusters[1].get('name') or '').strip()}。"
-        if len(llm_clusters) >= 2
-        else (f"头部主题簇为 {str(llm_clusters[0].get('name') or '').strip()}。" if llm_clusters else ""),
-        f"原始主题中，{str(raw_topics[0].get('name') or '').strip()} 文档量最高。"
-        if raw_topics
-        else "",
-        f"时间序列共有 {len(temporal_points)} 个时序节点，可用于识别主题迁移节奏。"
-        if temporal_points
-        else "",
-    ]
+    findings: List[str] = []
+    if theme_profiles:
+        top_a = theme_profiles[0]
+        findings.append(
+            f"{str(top_a.get('name') or '').strip()}是最强主题簇，主要围绕{str(top_a.get('description') or '').strip() or '相关议题'}展开，关键词包括{'、'.join(top_a.get('keywords') or [])}。"
+        )
+    if len(theme_profiles) >= 2:
+        top_b = theme_profiles[1]
+        findings.append(
+            f"{str(top_b.get('name') or '').strip()}构成第二条主线，峰值周集中在{'、'.join(str(item.get('label') or '').strip() for item in (top_b.get('peak_weeks') or [])[:2])}。"
+        )
+    elif raw_topics:
+        findings.append(f"原始主题中，{str(raw_topics[0].get('name') or '').strip()} 文档量最高。")
+    if temporal_highlights:
+        highlight = temporal_highlights[0]
+        findings.append(
+            f"最强波峰出现在{str(highlight.get('label') or '').strip()}，当周总量为{int(highlight.get('total') or 0)}，并由{str(highlight.get('top_theme') or '').strip()}主导。"
+        )
+    if dominant_phases:
+        phase = dominant_phases[0]
+        findings.append(
+            f"持续性最强的阶段主线是{str(phase.get('top_theme') or '').strip()}，覆盖{str(phase.get('start_label') or '').strip()}至{str(phase.get('end_label') or '').strip()}。"
+        )
     uncertainty_notes = []
     available_files = {str(item) for item in snapshot.get("available_files") or []}
     if "llm_clusters" not in available_files:
@@ -541,6 +699,9 @@ def build_bertopic_insight(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "chart_refs": chart_refs,
         "evidence_refs": evidence_refs,
         "uncertainty_notes": uncertainty_notes or ["BERTopic 结果已就绪，可用于主题簇、迁移路径与时序切换分析。"],
+        "theme_profiles": theme_profiles,
+        "temporal_highlights": temporal_highlights,
+        "dominant_phases": dominant_phases,
         "trace": snapshot.get("trace") if isinstance(snapshot.get("trace"), dict) else {},
     }
 

@@ -166,6 +166,7 @@ def media_tagging_results():
     try:
         payload = read_media_tagging_result(ctx.identifier, start, end)
         payload["topic"] = ctx.display_name
+        payload["topic_identifier"] = ctx.identifier
         return success(payload)
     except FileNotFoundError as exc:
         return error(str(exc), status_code=404)
@@ -238,5 +239,47 @@ def media_tagging_labeled():
         return success({"data": build_labeled_media_payload(ctx.identifier, start, end_date=end, label=label)})
     except FileNotFoundError as exc:
         return error(str(exc), status_code=404)
+    except Exception as exc:
+        return error(str(exc), status_code=500)
+
+
+@media_tagging_bp.route("/results/candidates", methods=["DELETE"])
+def media_tagging_delete_candidates():
+    from src.media_tagging import delete_media_tagging_candidates
+
+    payload = request.get_json(silent=True) or {}
+    start = str(payload.get("start") or "").strip()
+    end = str(payload.get("end") or "").strip() or None
+    publisher_names = payload.get("publisher_names") if isinstance(payload.get("publisher_names"), list) else []
+    if not start:
+        return error("Missing required field(s): start", status_code=400)
+    if not publisher_names:
+        return error("Missing required field(s): publisher_names", status_code=400)
+    try:
+        ctx = resolve_context(payload, PROJECT_MANAGER)
+    except ValueError as exc:
+        return error(str(exc), status_code=400)
+    try:
+        refreshed = delete_media_tagging_candidates(ctx.identifier, start, end_date=end, publisher_names=publisher_names)
+        refreshed["topic"] = ctx.display_name
+        return success(refreshed)
+    except FileNotFoundError as exc:
+        return error(str(exc), status_code=404)
+    except Exception as exc:
+        return error(str(exc), status_code=500)
+
+
+@media_tagging_bp.route("/registry/<string:item_id>", methods=["DELETE"])
+def media_tagging_registry_delete(item_id: str):
+    from src.media_tagging import load_media_registry, save_media_registry
+
+    try:
+        current = load_media_registry()
+        items = current.get("items") if isinstance(current, dict) else []
+        remaining = [item for item in items if isinstance(item, dict) and str(item.get("id") or "") != item_id]
+        if len(remaining) == len(items):
+            return error("Registry item not found", status_code=404)
+        save_media_registry(remaining)
+        return success({"message": "Registry item deleted", "id": item_id})
     except Exception as exc:
         return error(str(exc), status_code=500)

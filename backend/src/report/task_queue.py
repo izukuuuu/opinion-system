@@ -18,6 +18,7 @@ from server_support.archive_locator import compose_folder_name
 
 from .deep_report import REPORT_CACHE_FILENAME
 from .deep_report.runtime_contract import RUNTIME_CONTRACT_VERSION
+from ..project import get_project_manager
 from ..utils.setting.paths import get_data_root
 from ..utils.setting.paths import bucket
 
@@ -83,6 +84,8 @@ PHASE_LABELS = {
     "failed": "已失败",
     "cancelled": "已取消",
 }
+
+PROJECT_MANAGER = get_project_manager()
 
 
 def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -236,7 +239,11 @@ def _structured_cache_path_for_task(task: Dict[str, Any]) -> Path:
     topic_identifier = str(task.get("topic_identifier") or "").strip()
     start = str(task.get("start") or "").strip()
     end = str(task.get("end") or "").strip() or start
-    return bucket("reports", topic_identifier, compose_folder_name(start, end)) / REPORT_CACHE_FILENAME
+    request = task.get("request") if isinstance(task.get("request"), dict) else {}
+    project_raw = str(request.get("project") or "").strip()
+    project_identifier = str(PROJECT_MANAGER.resolve_identifier(project_raw) or "").strip() if project_raw else ""
+    storage_topic = f"{project_identifier}-{topic_identifier}".strip("-") if project_identifier else topic_identifier
+    return bucket("reports", storage_topic, compose_folder_name(start, end)) / REPORT_CACHE_FILENAME
 
 
 def _current_runtime_version(task: Dict[str, Any]) -> str:

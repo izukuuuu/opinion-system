@@ -1,41 +1,14 @@
 <template>
-  <AnalysisChartPanel
-    :title="title"
-    :description="description"
-    :option="option"
-    :has-data="hasData"
-    :empty-message="emptyMessage"
-    :is-keywords="isKeywords"
-    :all-rows="allRows"
-  >
-    <template #default>
-      <div v-if="showTable" class="overflow-hidden rounded-2xl border border-soft">
-        <table class="min-w-full text-sm">
-          <thead class="bg-surface-muted text-xs uppercase tracking-wide text-muted">
-            <tr>
-              <th class="px-3 py-2 text-left">名称</th>
-              <th class="px-3 py-2 text-left">数值</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(row, index) in previewRows"
-              :key="`${figureId}-${index}`"
-              class="border-t border-soft text-secondary"
-            >
-              <td class="px-3 py-2">{{ row.displayName ?? row.name ?? row.label ?? row.key ?? row.source ?? '未命名' }}</td>
-              <td class="px-3 py-2">{{ row.displayValue ?? row.value ?? row.count ?? row.total ?? row.target ?? '--' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </template>
-  </AnalysisChartPanel>
+  <figure class="report-chart-figure">
+    <div v-if="hasData" ref="chartRef" class="report-chart-figure__canvas"></div>
+    <p v-else class="report-chart-figure__empty">{{ emptyMessage }}</p>
+    <figcaption v-if="caption" class="report-chart-figure__caption">{{ caption }}</figcaption>
+  </figure>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import AnalysisChartPanel from '../AnalysisChartPanel.vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { echarts } from '@/utils/echarts'
 
 const props = defineProps({
   contract: {
@@ -44,18 +17,79 @@ const props = defineProps({
   }
 })
 
-const figureId = computed(() => String(props.contract?.figure_id || '').trim())
-const title = computed(() => String(props.contract?.caption || props.contract?.title || '图表').trim() || '图表')
-const description = computed(() => String(props.contract?.description || props.contract?.subtitle || '').trim())
+const chartRef = ref(null)
+let chartInstance = null
+
+const caption = computed(() => String(props.contract?.caption || '图表').trim())
 const option = computed(() => (props.contract?.option && typeof props.contract.option === 'object' ? props.contract.option : {}))
-const hasData = computed(() => Boolean(props.contract?.hasData))
-const emptyMessage = computed(() => String(props.contract?.emptyMessage || '暂无可视化数据').trim() || '暂无可视化数据')
-const allRows = computed(() => (Array.isArray(props.contract?.allRows) ? props.contract.allRows : []))
-const previewRows = computed(() => (Array.isArray(props.contract?.previewRows) ? props.contract.previewRows : []))
-const isKeywords = computed(() => String(props.contract?.functionName || '').trim() === 'keywords')
-const showTable = computed(() => {
-  if (!hasData.value || !previewRows.value.length) return false
-  if (String(props.contract?.intent || '').trim() === 'network') return false
-  return true
+const hasData = computed(() => Boolean(props.contract?.hasData && Object.keys(option.value || {}).length))
+const emptyMessage = computed(() => String(props.contract?.emptyMessage || '暂无图表数据').trim() || '暂无图表数据')
+
+async function renderChart() {
+  await nextTick()
+  if (!chartRef.value || !hasData.value) {
+    if (chartInstance) {
+      chartInstance.dispose()
+      chartInstance = null
+    }
+    return
+  }
+  if (!chartInstance) {
+    chartInstance = echarts.init(chartRef.value)
+  }
+  chartInstance.setOption(option.value || {}, true)
+  chartInstance.resize()
+}
+
+function disposeChart() {
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
+}
+
+onMounted(() => {
+  renderChart()
+  window.addEventListener('resize', renderChart)
+})
+
+watch(option, () => {
+  renderChart()
+}, { deep: true })
+
+watch(hasData, () => {
+  renderChart()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', renderChart)
+  disposeChart()
 })
 </script>
+
+<style scoped>
+.report-chart-figure {
+  margin: 1.5rem auto;
+  max-width: 720px;
+  text-align: center;
+}
+
+.report-chart-figure__canvas {
+  width: 100%;
+  height: 360px;
+  margin: 0 auto;
+}
+
+.report-chart-figure__empty {
+  margin: 0;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.95rem;
+}
+
+.report-chart-figure__caption {
+  margin-top: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+</style>

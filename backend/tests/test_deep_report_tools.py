@@ -874,6 +874,42 @@ class DeepReportToolsTests(unittest.TestCase):
 
         self.assertEqual(mocked_retrieve.call_args.kwargs["intent"], "overview")
 
+    def test_build_section_packet_payload_resolves_chinese_template_alias_to_canonical_intent(self) -> None:
+        normalized = normalize_task_payload(
+            task_text="2025控烟舆情",
+            topic_identifier=self.topic_identifier,
+            start="2025-01-15",
+            end="2025-12-31",
+            mode="fast",
+        )
+        normalized["normalized_task"]["section_intent_alias_registry"] = {
+            "timeline": {
+                "canonical_intent": "timeline",
+                "aliases": ["timeline", "事件脉络与传播演变", "事件脉络与传播演化"],
+            }
+        }
+        evidence = EvidenceCardPage.model_validate(
+            retrieve_evidence_cards_payload(
+                normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+                intent="timeline",
+                limit=6,
+            )
+        )
+
+        packet_payload = build_section_packet_payload(
+            normalized_task_json=json.dumps(normalized["normalized_task"], ensure_ascii=False),
+            section_id="事件脉络与传播演变",
+            section_goal="梳理传播时间线与关键转折。",
+            evidence_ids_json=json.dumps([item.model_dump() for item in evidence.result], ensure_ascii=False),
+        )
+        packet = SectionPacketResult.model_validate(packet_payload)
+
+        self.assertEqual(packet_payload["status"], "ok")
+        self.assertEqual(packet_payload["degraded_reason"], "")
+        self.assertEqual(packet_payload["section_packet"]["canonical_intent"], "timeline")
+        self.assertEqual(packet_payload["section_packet"]["original_section_title"], "事件脉络与传播演变")
+        self.assertEqual(packet.section_packet.section_id, "事件脉络与传播演变")
+
 
 if __name__ == "__main__":
     unittest.main()

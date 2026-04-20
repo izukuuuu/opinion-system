@@ -27,14 +27,14 @@ metadata:
 ## Current Backend Contract
 
 **读取（只读，不可修改）：**
-- `/workspace/state/normalized_task.json` → 提取顶层对象，传给 `normalized_task_json`
-- `/workspace/state/evidence_cards.json` → 提取 `.result[*].evidence_id` 字符串列表，传给 `evidence_ids_json`
-- `/workspace/state/actor_positions.json` → 提取 `.result` 数组（完整 actor 对象列表），传给 `actor_positions_json`
-- `/workspace/state/conflict_map.json` → 提取 `.result` 内层核心对象，传给 `conflict_map_json`
-- `/workspace/state/timeline_nodes.json` → 提取 `.result` 数组（完整节点对象列表），传给 `timeline_nodes_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json` → 提取顶层对象，传给 `normalized_task_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json` → 提取 `.result[*].evidence_id` 字符串列表，传给 `evidence_ids_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json` → 提取 `.result` 数组（完整 actor 对象列表），传给 `actor_positions_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json` → 提取 `.result` 内层核心对象，传给 `conflict_map_json`
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json` → 提取 `.result` 数组（完整节点对象列表），传给 `timeline_nodes_json`
 
 **写入：**
-- `/workspace/state/agenda_frame_map.json`，格式：
+- `/workspace/projects/{project_identifier}/reports/{report_range}/state/agenda_frame_map.json`，格式：
   ```json
   {
     "status": "ok",
@@ -109,3 +109,4 @@ metadata:
   ]
 }
 ```
+

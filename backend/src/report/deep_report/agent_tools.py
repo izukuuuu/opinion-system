@@ -133,7 +133,7 @@ class BuildEventTimelineInput(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )
@@ -157,7 +157,7 @@ class ComputeReportMetricsInput(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )
@@ -179,7 +179,7 @@ class ExtractActorPositionsInput(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )
@@ -203,7 +203,7 @@ class BuildAgendaFrameMapInput(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )
@@ -243,7 +243,7 @@ class BuildClaimActorConflictInput(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )
@@ -276,7 +276,7 @@ class BuildMechanismSummaryInput(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )
@@ -316,7 +316,7 @@ class DetectRiskSignalsInput(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )
@@ -356,7 +356,7 @@ class JudgeDecisionUtilityInput(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )
@@ -411,7 +411,7 @@ class VerifyClaimV2Input(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )
@@ -488,7 +488,7 @@ class BuildSectionPacketInput(BaseModel):
     normalized_task_json: str = Field(
         ...,
         description=(
-            "来自 normalize_task 工具的返回值，或读取 /workspace/state/normalized_task.json 的完整内容（JSON 字符串）。"
+            "来自 normalize_task 工具的返回值，或读取 /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json 的完整内容（JSON 字符串）。"
             "工具内部只提取 contract_id、topic_identifier、start、end、mode 字段，可传顶层对象或 result 子字段。"
         )
     )

@@ -425,7 +425,7 @@
             <div class="rounded-3xl bg-base-soft px-4 py-4">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p class="text-sm font-semibold text-primary">当前任务清单</p>
+                  <p class="text-sm font-semibold text-primary">总控任务清单</p>
                   <p class="mt-2 text-sm leading-6 text-secondary">{{ runVm.todoObservability.summary }}</p>
                 </div>
                 <span class="rounded-full bg-surface px-3 py-1 text-xs font-semibold text-secondary">{{
@@ -455,7 +455,41 @@
               </div>
             </article>
             <div v-if="!runVm.todoObservability.items.length" class="rounded-3xl bg-base-soft px-4 py-5 text-sm text-secondary">
-              当前还没有任务清单。</div>
+              当前还没有总控任务清单。</div>
+            <div class="rounded-3xl bg-base-soft px-4 py-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-semibold text-primary">当前子代理计划</p>
+                  <p class="mt-2 text-sm leading-6 text-secondary">{{ runVm.subagentTodoObservability.summary }}</p>
+                </div>
+                <span class="rounded-full bg-surface px-3 py-1 text-xs font-semibold text-secondary">{{
+                  runVm.subagentTodoObservability.totalCount }} 项</span>
+              </div>
+              <div class="mt-3 grid gap-2 text-xs text-muted sm:grid-cols-2">
+                <p>最近更新：{{ runVm.subagentTodoObservability.updatedAtLabel }}</p>
+                <p v-if="runVm.subagentTodoObservability.updatedBy">更新节点：{{ runVm.subagentTodoObservability.updatedBy }}</p>
+                <p v-if="runVm.subagentTodoObservability.updatedMessage" class="sm:col-span-2">说明：{{ runVm.subagentTodoObservability.updatedMessage }}</p>
+              </div>
+            </div>
+            <article v-for="item in runVm.subagentTodoObservability.items" :key="`subagent-${item.id}`"
+              class="rounded-3xl border px-4 py-4"
+              :class="item.isCurrent ? 'border-brand-soft bg-brand-soft/20' : 'border-soft bg-base-soft'">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-3">
+                    <span
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-surface text-sm font-semibold text-primary">{{
+                      item.order }}</span>
+                    <p class="text-sm font-semibold text-primary">{{ item.label }}</p>
+                  </div>
+                  <p class="mt-3 text-xs text-muted">{{ item.isCurrent ? '当前子代理正在推进这一项。' : '子代理计划会随着最新节点事件自动刷新。' }}</p>
+                </div>
+                <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="badgeClass(item.status)">{{
+                  item.statusText }}</span>
+              </div>
+            </article>
+            <div v-if="!runVm.subagentTodoObservability.items.length" class="rounded-3xl bg-base-soft px-4 py-5 text-sm text-secondary">
+              当前没有子代理内部计划。</div>
           </div>
           <div v-else-if="debugTab === 'approvals'" class="space-y-4">
             <article v-for="approval in runVm.approvals" :key="approval.approval_id"
@@ -585,8 +619,8 @@ const resumeBeforeFailureCapability = computed(() => (
     : {}
 ))
 const canResumeBeforeFailure = computed(() => Boolean(taskState.id && ['failed', 'cancelled'].includes(taskState.status) && resumeBeforeFailureCapability.value?.enabled))
-const canOpenResults = computed(() => Boolean(taskState.id && taskState.threadId && taskState.artifactManifest?.structured_projection?.status === 'ready'))
-const canOpenAiResults = computed(() => Boolean(taskState.id && taskState.threadId && taskState.artifactManifest?.full_markdown?.status === 'ready'))
+const canOpenResults = computed(() => Boolean(taskState.artifactManifest?.structured_projection?.status === 'ready'))
+const canOpenAiResults = computed(() => Boolean(taskState.artifactManifest?.full_markdown?.status === 'ready'))
 const topicSelectOptions = computed(() => topicOptions.value.map((option) => ({ value: option, label: option })))
 const historySelectOptions = computed(() => reportHistory.value.map((record) => ({ value: record.id, label: `${record.start} → ${record.end}` })))
 const modeSelectOptions = [{ value: 'fast', label: '快速' }, { value: 'research', label: '深入（本地档案）' }]

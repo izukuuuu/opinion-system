@@ -9,20 +9,20 @@ subagents:
     skill_keys:
     - retrieval-router-rules
     output_files:
-    - /workspace/state/task_derivation.json
-    - /workspace/state/task_derivation_proposal.json
-    - /workspace/state/normalized_task.json
-    - /workspace/state/retrieval_plan.json
-    - /workspace/state/dispatch_quality.json
-    - /workspace/state/corpus_coverage.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/task_derivation_proposal.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/normalized_task.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/retrieval_plan.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/dispatch_quality.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/corpus_coverage.json
     tier: 0
   archive_evidence_organizer:
     name: archive_evidence_organizer
-    description: 负责按任务意图召回证据卡，并写入 /workspace/state/evidence_cards.json。
+    description: 负责按任务意图召回证据卡，并写入 /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json。
     skill_keys:
     - evidence-source-credibility
     output_files:
-    - /workspace/state/evidence_cards.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/evidence_cards.json
     tier: 1
   bertopic_evolution_analyst:
     name: bertopic_evolution_analyst
@@ -30,7 +30,7 @@ subagents:
     skill_keys:
     - bertopic-evolution-framework
     output_files:
-    - /workspace/state/bertopic_insight.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/bertopic_insight.json
     tier: 1
   timeline_analyst:
     name: timeline_analyst
@@ -38,8 +38,8 @@ subagents:
     skill_keys:
     - timeline-alignment-slicing
     output_files:
-    - /workspace/state/timeline_nodes.json
-    - /workspace/state/metrics_bundle.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/timeline_nodes.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/metrics_bundle.json
     tier: 2
   stance_conflict:
     name: stance_conflict
@@ -48,7 +48,7 @@ subagents:
     - subject-stance-merging
     - media-analysis-framework
     output_files:
-    - /workspace/state/actor_positions.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/actor_positions.json
     tier: 2
   event_analyst:
     name: event_analyst
@@ -57,7 +57,7 @@ subagents:
     - sentiment-analysis-methodology
     - propagation-explanation-framework
     output_files:
-    - /workspace/state/event_analysis.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/event_analysis.json
     tier: 3
   claim_actor_conflict:
     name: claim_actor_conflict
@@ -65,7 +65,7 @@ subagents:
     skill_keys:
     - subject-stance-merging
     output_files:
-    - /workspace/state/conflict_map.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/conflict_map.json
     tier: 3
   agenda_frame_builder:
     name: agenda_frame_builder
@@ -73,7 +73,7 @@ subagents:
     skill_keys:
     - agenda-frame-builder
     output_files:
-    - /workspace/state/agenda_frame_map.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/agenda_frame_map.json
     tier: 4
   propagation_analyst:
     name: propagation_analyst
@@ -83,8 +83,8 @@ subagents:
     - chart-interpretation-guidelines
     - media-analysis-framework
     output_files:
-    - /workspace/state/mechanism_summary.json
-    - /workspace/state/risk_signals.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/mechanism_summary.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/risk_signals.json
     tier: 4
   decision_utility_judge:
     name: decision_utility_judge
@@ -92,15 +92,18 @@ subagents:
     skill_keys:
     - quality-validation-backlink
     output_files:
-    - /workspace/state/utility_assessment.json
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/utility_assessment.json
     tier: 5
   writer:
     name: writer
     description: 负责按模板章节进行深度舆情报告写作。
     skill_keys:
+    - formal-report-factual-style
     - report-writing-framework
     - sentiment-analysis-methodology
     - chart-interpretation-guidelines
     - propagation-explanation-framework
     output_files: []
+    output_globs:
+    - /workspace/projects/{project_identifier}/reports/{report_range}/state/section_drafts/*.json
     tier: 6

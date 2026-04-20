@@ -1176,6 +1176,11 @@ class CompilerWriterContext(BaseModel):
     layout_plan: CompilerLayoutPlan = Field(default_factory=CompilerLayoutPlan)
     section_budget: CompilerSectionBudget = Field(default_factory=CompilerSectionBudget)
     counts: Dict[str, int] = Field(default_factory=dict)
+    basic_analysis_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    basic_analysis_insight: Dict[str, Any] = Field(default_factory=dict)
+    bertopic_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    bertopic_insight: Dict[str, Any] = Field(default_factory=dict)
+    section_figure_refs: Dict[str, List[Dict[str, str]]] = Field(default_factory=dict)
 
 
 class CompilerCriticResult(BaseModel):
@@ -1255,7 +1260,8 @@ class DraftBundleV2(BaseModel):
 class ValidationFailure(BaseModel):
     failure_id: str = Field(...)
     target_unit_id: str = Field(default="")
-    failure_type: Literal["missing_trace", "dangling_derived_from", "unsupported_inference", "text_outside_ir", "schema_violation"] = Field(default="schema_violation")
+    failure_type: Literal["missing_trace", "degraded_trace", "dangling_derived_from", "unsupported_inference", "text_outside_ir", "schema_violation"] = Field(default="schema_violation")
+    severity: Literal["warning", "error"] = Field(default="error")
     message: str = Field(default="")
     candidate_trace_refs: List[TraceRef] = Field(default_factory=list)
     candidate_derived_from: List[str] = Field(default_factory=list)
@@ -1267,7 +1273,7 @@ class ValidationFailure(BaseModel):
 class RepairPatch(BaseModel):
     patch_id: str = Field(...)
     target_unit_id: str = Field(default="")
-    failure_type: Literal["missing_trace", "dangling_derived_from", "unsupported_inference", "text_outside_ir", "schema_violation"] = Field(default="schema_violation")
+    failure_type: Literal["missing_trace", "degraded_trace", "dangling_derived_from", "unsupported_inference", "text_outside_ir", "schema_violation"] = Field(default="schema_violation")
     operation: Literal["attach_trace", "replace_unit", "downgrade_support", "mark_blocked"] = Field(default="attach_trace")
     replacement_unit: Optional[DraftUnitV2] = Field(default=None)
     candidate_trace_refs: List[TraceRef] = Field(default_factory=list)
@@ -1288,6 +1294,7 @@ class ValidationResultV2(BaseModel):
     passed: bool = Field(default=True)
     failures: List[ValidationFailure] = Field(default_factory=list)
     patchable_failures: List[ValidationFailure] = Field(default_factory=list)
+    warnings: List[ValidationFailure] = Field(default_factory=list)
     gate: Literal["pass", "repair", "human_review", "blocked"] = Field(default="pass")
     repair_count: int = Field(default=0)
     next_node: str = Field(default="markdown_compiler")
@@ -1355,6 +1362,12 @@ class DeepReportGraphState(BaseModel):
     section_budget: Dict[str, Any] = Field(default_factory=dict)
     writer_context: Dict[str, Any] = Field(default_factory=dict)
     section_plan: Dict[str, Any] = Field(default_factory=dict)
+    section_markdowns: Dict[str, str] = Field(default_factory=dict)
+    section_markdown_manifest: Dict[str, Any] = Field(default_factory=dict)
+    section_write_receipts: List[Dict[str, Any]] = Field(default_factory=list)
+    section_trace_annotations: List[Dict[str, Any]] = Field(default_factory=list)
+    compile_quality: str = Field(default="healthy")
+    degraded_sections: List[Dict[str, Any]] = Field(default_factory=list)
     draft_bundle: Dict[str, Any] = Field(default_factory=dict)
     draft_bundle_v2: Dict[str, Any] = Field(default_factory=dict)
     validation_result_v2: Dict[str, Any] = Field(default_factory=dict)
@@ -1541,7 +1554,7 @@ class RouterDispatch(BaseModel):
 class ExplorationArtifactStatus(BaseModel):
     path: str = Field(default="")
     owner: str = Field(default="")
-    status: Literal["ready", "missing", "degraded"] = Field(default="ready")
+    status: Literal["ready", "empty", "missing", "invalid_json", "invalid_shape", "error"] = Field(default="ready")
     summary: str = Field(default="")
 
 
@@ -1669,6 +1682,7 @@ class BertopicSnapshot(BaseModel):
     raw_topics: List[Dict[str, Any]] = Field(default_factory=list)
     llm_clusters: List[Dict[str, Any]] = Field(default_factory=list)
     temporal_points: List[Dict[str, Any]] = Field(default_factory=list)
+    temporal_nodes: List[Dict[str, Any]] = Field(default_factory=list)
     trace: CapabilityTrace = Field(default_factory=CapabilityTrace)
 
 
@@ -1680,6 +1694,9 @@ class BertopicInsight(BaseModel):
     chart_refs: List[str] = Field(default_factory=list)
     evidence_refs: List[str] = Field(default_factory=list)
     uncertainty_notes: List[str] = Field(default_factory=list)
+    theme_profiles: List[Dict[str, Any]] = Field(default_factory=list)
+    temporal_highlights: List[Dict[str, Any]] = Field(default_factory=list)
+    dominant_phases: List[Dict[str, Any]] = Field(default_factory=list)
     trace: CapabilityTrace = Field(default_factory=CapabilityTrace)
 
 
@@ -2057,6 +2074,22 @@ class SectionPacket(BaseModel):
     chart_data_refs: List[Dict[str, Any]] = Field(default_factory=list, description="图表引用")
 
 
+class AttitudeSample(BaseModel):
+    sample_id: str = Field(..., description="样本唯一键")
+    evidence_id: str = Field(default="", description="关联证据ID")
+    issue_hint: str = Field(default="", description="争议问题或召回主题")
+    sentiment_label: str = Field(default="", description="情感标签")
+    quote: str = Field(default="", description="优先供引摘的短句")
+    snippet: str = Field(default="", description="辅助摘要")
+    platform: str = Field(default="", description="平台")
+    author: str = Field(default="", description="作者或账号")
+    published_at: str = Field(default="", description="发布时间")
+    title: str = Field(default="", description="来源标题")
+    url: str = Field(default="", description="来源链接")
+    relevance: float = Field(default=0.0, description="相关度")
+    hotness_score: float = Field(default=0.0, description="热度评分")
+
+
 class ConflictAxis(BaseModel):
     axis_id: str = Field(..., description="争议轴唯一键")
     title: str = Field(default="", description="争议轴标题")
@@ -2248,6 +2281,19 @@ class SectionPacketResult(BaseModel):
     section_packet: SectionPacket = Field(default_factory=lambda: SectionPacket(section_id=""))
     result: SectionPacket = Field(default_factory=lambda: SectionPacket(section_id=""))
     counterevidence: List[EvidenceCard] = Field(default_factory=list)
+    applied_scope: AppliedScope = Field(default_factory=AppliedScope)
+    coverage: CoverageSnapshot = Field(default_factory=CoverageSnapshot)
+    confidence: float = Field(default=0.0)
+    trace: ResultTrace = Field(default_factory=ResultTrace)
+    error_hint: Optional[str] = Field(default=None)
+
+
+class AttitudeSampleResult(BaseModel):
+    schema_version: str = Field(default=V2_SCHEMA_VERSION)
+    tool_name: str = Field(default="retrieve_attitude_samples")
+    generated_at: str = Field(default_factory=_utc_now)
+    result: List[AttitudeSample] = Field(default_factory=list)
+    grouped: Dict[str, List[AttitudeSample]] = Field(default_factory=dict)
     applied_scope: AppliedScope = Field(default_factory=AppliedScope)
     coverage: CoverageSnapshot = Field(default_factory=CoverageSnapshot)
     confidence: float = Field(default=0.0)

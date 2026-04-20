@@ -676,47 +676,43 @@ async function loadReport(rangeOverride = null) {
     return null
   }
   await resumeLastReportTask(resolvedRange)
-  const hasStructuredArtifact = Boolean(taskState?.id && taskState?.threadId && taskState?.artifactManifest?.structured_projection?.status === 'ready')
-  if (!hasStructuredArtifact) {
-    reportState.error = '请先在运行页进入对应任务，等语义报告产物就绪后再查看。'
-    return null
-  }
-  const taskRange = {
+  const apiRange = {
     topic: String(taskState?.topicIdentifier || resolvedRange.topic || '').trim(),
     start: String(taskState?.start || resolvedRange.start || '').trim(),
     end: String(taskState?.end || resolvedRange.end || '').trim(),
     mode: String(taskState?.mode || resolvedRange.mode || 'fast').trim() || 'fast'
   }
+  const formTopic = String(resolvedRange.topic || taskState?.topic || taskState?.topicIdentifier || '').trim()
   reportState.loading = true
   reportState.error = ''
   analysisState.error = ''
   analysisState.loading = true
   try {
-    const params = new URLSearchParams({ topic: taskRange.topic, start: taskRange.start, end: taskRange.end })
+    const params = new URLSearchParams({ topic: apiRange.topic, start: apiRange.start, end: apiRange.end })
     const [reportResponse] = await Promise.all([
       callApi(`/api/report?${params.toString()}`, { method: 'GET' }),
-      loadAnalyzeResults(taskRange, { silent: true })
+      loadAnalyzeResults(apiRange, { silent: true })
     ])
     const payload = reportResponse?.data || null
     if (!payload || typeof payload !== 'object') throw new Error('报告接口返回为空')
     reportData.value = payload
     reportState.lastLoaded = currentTimeString()
-    reportForm.topic = taskRange.topic
-    reportForm.start = taskRange.start
-    reportForm.end = taskRange.end
-    await loadHistory(taskRange.topic)
-    const matched = reportHistory.value.find((item) => item.start === taskRange.start && item.end === taskRange.end)
+    reportForm.topic = formTopic
+    reportForm.start = apiRange.start
+    reportForm.end = apiRange.end
+    await loadHistory(formTopic)
+    const matched = reportHistory.value.find((item) => item.start === apiRange.start && item.end === apiRange.end)
     if (matched) selectedHistoryId.value = matched.id
-    await loadProgress(taskRange, { silent: true })
+    await loadProgress(apiRange, { silent: true })
     return payload
   } catch (error) {
     reportData.value = null
     analysisData.value = null
     const message = error instanceof Error ? error.message : String(error)
     reportState.error = message.includes('未找到分析结果目录')
-      ? '当前专题暂无基础分析结果，请前往“运行报告”，系统会先自动补跑基础分析再生成报告。'
+      ? '当前专题暂无基础分析结果，请前往运行页补跑后再查看语义报告。'
       : message
-    await loadProgress(taskRange, { silent: true })
+    await loadProgress(apiRange, { silent: true })
     return null
   } finally {
     reportState.loading = false
@@ -731,25 +727,21 @@ async function loadFullReport(rangeOverride = null, { regenerate = false } = {})
     return null
   }
   await resumeLastReportTask(resolvedRange)
-  const hasFullArtifact = Boolean(taskState?.id && taskState?.threadId && taskState?.artifactManifest?.full_markdown?.status === 'ready')
-  if (!hasFullArtifact && !regenerate) {
-    fullReportState.error = '请先在运行页进入对应任务，等正式文稿产物就绪后再查看。'
-    return null
-  }
-  const taskRange = {
+  const apiRange = {
     topic: String(taskState?.topicIdentifier || resolvedRange.topic || '').trim(),
     start: String(taskState?.start || resolvedRange.start || '').trim(),
     end: String(taskState?.end || resolvedRange.end || '').trim(),
     mode: String(taskState?.mode || resolvedRange.mode || 'fast').trim() || 'fast'
   }
+  const formTopic = String(resolvedRange.topic || taskState?.topic || taskState?.topicIdentifier || '').trim()
   fullReportState.loading = !regenerate
   fullReportState.regenerating = regenerate
   fullReportState.error = ''
   try {
     const params = new URLSearchParams({
-      topic: taskRange.topic,
-      start: taskRange.start,
-      end: taskRange.end
+      topic: apiRange.topic,
+      start: apiRange.start,
+      end: apiRange.end
     })
     if (regenerate) params.set('regenerate', '1')
     const response = await callApi(`/api/report/full?${params.toString()}`, { method: 'GET' })
@@ -757,18 +749,18 @@ async function loadFullReport(rangeOverride = null, { regenerate = false } = {})
     if (!payload || typeof payload !== 'object') throw new Error('AI 完整报告接口返回为空')
     fullReportData.value = payload
     fullReportState.lastLoaded = currentTimeString()
-    reportForm.topic = taskRange.topic
-    reportForm.start = taskRange.start
-    reportForm.end = taskRange.end
-    await loadHistory(taskRange.topic)
-    const matched = reportHistory.value.find((item) => item.start === taskRange.start && item.end === taskRange.end)
+    reportForm.topic = formTopic
+    reportForm.start = apiRange.start
+    reportForm.end = apiRange.end
+    await loadHistory(formTopic)
+    const matched = reportHistory.value.find((item) => item.start === apiRange.start && item.end === apiRange.end)
     if (matched) selectedHistoryId.value = matched.id
-    await loadProgress(taskRange, { silent: true })
+    await loadProgress(apiRange, { silent: true })
     return payload
   } catch (error) {
     fullReportData.value = null
     fullReportState.error = error instanceof Error ? error.message : String(error)
-    await loadProgress(taskRange, { silent: true })
+    await loadProgress(apiRange, { silent: true })
     return null
   } finally {
     fullReportState.loading = false

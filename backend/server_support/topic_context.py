@@ -22,6 +22,7 @@ class TopicContext:
     """Canonical representation of a "topic" across the entire system.
 
     Attributes:
+        project_identifier: Canonical project id (used for project-scoped storage).
         identifier:   Resolved local directory name (the canonical truth).
         display_name: User-facing label for UI and logs.
         db_topic:     Remote database name used for SQL queries.
@@ -32,6 +33,7 @@ class TopicContext:
     """
 
     identifier: str
+    project_identifier: str = ""
     display_name: str = ""
     db_topic: str = ""
     log_project: str = ""
@@ -66,12 +68,23 @@ def resolve_context(
             if isinstance(value, str) and value.strip():
                 candidates.append(value.strip())
 
+    resolved_project_identifier = ""
     if project_name:
         resolved_id = project_manager.resolve_identifier(project_name)
         if resolved_id:
-            candidates.append(resolved_id)
+            resolved_project_identifier = str(resolved_id).strip()
+            candidates.append(resolved_project_identifier)
         candidates.append(normalise_project_name(project_name))
         candidates.append(project_name)
+
+    if not resolved_project_identifier and dataset_meta:
+        for key in ("project_id", "project_slug", "project"):
+            value = dataset_meta.get(key)
+            if isinstance(value, str) and value.strip():
+                candidate = str(project_manager.resolve_identifier(value) or value).strip()
+                if candidate:
+                    resolved_project_identifier = candidate
+                    break
 
     if topic_value:
         candidates.append(topic_value)
@@ -84,10 +97,23 @@ def resolve_context(
         raise ValueError("Missing required field(s): topic or project")
 
     # ── Resolve to an existing directory ──
+    # 1. Direct match
     resolved_topic = next(
         (c for c in ordered_candidates if (DATA_PROJECTS_ROOT / c).exists()),
         None,
     )
+
+    # 2. Suffix match: find directories ending with any candidate
+    if not resolved_topic and DATA_PROJECTS_ROOT.exists():
+        for candidate in ordered_candidates:
+            suffix = f"-{candidate}"
+            for dir_name in DATA_PROJECTS_ROOT.iterdir():
+                if dir_name.is_dir() and dir_name.name.endswith(suffix):
+                    resolved_topic = dir_name.name
+                    break
+            if resolved_topic:
+                break
+
     if not resolved_topic:
         resolved_topic = ordered_candidates[0]
 
@@ -122,6 +148,7 @@ def resolve_context(
     full_aliases = iter_unique_strings(alias_seeds + normalised_extras)
 
     return TopicContext(
+        project_identifier=resolved_project_identifier,
         identifier=resolved_topic,
         display_name=display_name,
         db_topic=db_topic,

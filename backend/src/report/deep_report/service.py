@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -31,7 +32,16 @@ from ..runtime_infra import (
 from ..skills import select_report_skill_sources
 from ..tools import select_report_tools
 from .assets import RUNTIME_STORE, build_artifacts_root, build_runtime_assets, ensure_memory_seed
-from .deterministic import build_analyze_results_payload, build_base_context, build_workspace_files, ensure_cache_dir
+from .deterministic import (
+    RuntimeWorkspaceLayout,
+    build_analyze_results_payload,
+    build_base_context,
+    build_runtime_workspace_layout,
+    build_workspace_files,
+    ensure_cache_dir,
+    ensure_cache_dir_v2,
+    resolve_report_storage_topic,
+)
 from .document import (
     assemble_report_document,
     build_data_summary_for_composer,
@@ -105,39 +115,53 @@ RUN_STATE_VERSION = "run-state.v1"
 RESUME_PAYLOAD_VERSION = "resume-payload.v1"
 SEMANTIC_REVIEW_FILENAME = "full_report_semantic_review.json"
 _NAMESPACE_COMPONENT = re.compile(r"[^A-Za-z0-9._@:+~-]+")
+_WORKSPACE_STATE_DIRNAME = "state"
+_REUSE_MANIFEST_FILENAME = "reuse_manifest.json"
+_MIGRATED_POINTER_FILENAME = "MIGRATED_TO.json"
 
 EXPLORATION_ARTIFACT_OWNERS = {
-    "/workspace/state/normalized_task.json": "retrieval_router",
-    "/workspace/state/corpus_coverage.json": "retrieval_router",
-    "/workspace/state/evidence_cards.json": "archive_evidence_organizer",
-    "/workspace/state/timeline_nodes.json": "timeline_analyst",
-    "/workspace/state/actor_positions.json": "stance_conflict",
-    "/workspace/state/conflict_map.json": "claim_actor_conflict",
-    "/workspace/state/mechanism_summary.json": "propagation_analyst",
-    "/workspace/state/risk_signals.json": "propagation_analyst",
-    "/workspace/state/bertopic_insight.json": "bertopic_evolution_analyst",
-    "/workspace/state/utility_assessment.json": "decision_utility_judge",
-    "/workspace/state/section_packets/overview.json": "report_coordinator",
-    "/workspace/state/section_packets/timeline.json": "report_coordinator",
-    "/workspace/state/section_packets/risk.json": "report_coordinator",
+    "normalized_task.json": "retrieval_router",
+    "corpus_coverage.json": "retrieval_router",
+    "evidence_cards.json": "archive_evidence_organizer",
+    "timeline_nodes.json": "timeline_analyst",
+    "actor_positions.json": "stance_conflict",
+    "conflict_map.json": "claim_actor_conflict",
+    "mechanism_summary.json": "propagation_analyst",
+    "risk_signals.json": "propagation_analyst",
+    "bertopic_insight.json": "bertopic_evolution_analyst",
+    "utility_assessment.json": "decision_utility_judge",
+    "section_packets/overview.json": "report_coordinator",
+    "section_packets/timeline.json": "report_coordinator",
+    "section_packets/risk.json": "report_coordinator",
 }
-
+_REPAIR_AGENT_TIERS = {
+    "retrieval_router": 0,
+    "archive_evidence_organizer": 1,
+    "bertopic_evolution_analyst": 1,
+    "timeline_analyst": 2,
+    "stance_conflict": 2,
+    "event_analyst": 3,
+    "claim_actor_conflict": 3,
+    "agenda_frame_builder": 4,
+    "propagation_analyst": 4,
+    "decision_utility_judge": 5,
+}
 FAST_EXPLORATION_ARTIFACTS = [
-    "/workspace/state/normalized_task.json",
-    "/workspace/state/corpus_coverage.json",
-    "/workspace/state/evidence_cards.json",
-    "/workspace/state/timeline_nodes.json",
-    "/workspace/state/actor_positions.json",
-    "/workspace/state/conflict_map.json",
-    "/workspace/state/mechanism_summary.json",
-    "/workspace/state/risk_signals.json",
-    "/workspace/state/utility_assessment.json",
-    "/workspace/state/section_packets/overview.json",
-    "/workspace/state/section_packets/timeline.json",
-    "/workspace/state/section_packets/risk.json",
+    "normalized_task.json",
+    "corpus_coverage.json",
+    "evidence_cards.json",
+    "timeline_nodes.json",
+    "actor_positions.json",
+    "conflict_map.json",
+    "mechanism_summary.json",
+    "risk_signals.json",
+    "utility_assessment.json",
+    "section_packets/overview.json",
+    "section_packets/timeline.json",
+    "section_packets/risk.json",
 ]
 
-RESEARCH_EXPLORATION_ARTIFACTS = [*FAST_EXPLORATION_ARTIFACTS, "/workspace/state/bertopic_insight.json"]
+RESEARCH_EXPLORATION_ARTIFACTS = [*FAST_EXPLORATION_ARTIFACTS, "bertopic_insight.json"]
 
 
 class ReportRuntimeFailure(RuntimeError):
@@ -589,7 +613,40 @@ def _emit_runtime_event(
 
 
 def _runtime_file_exists(files: Dict[str, Dict[str, Any]], path: str) -> bool:
-    return bool(isinstance(files, dict) and isinstance(files.get(path), dict))
+    if not isinstance(files, dict):
+        return False
+    path_text = str(path or "").strip()
+    if not path_text:
+        return False
+    if isinstance(files.get(path_text), dict):
+        return True
+    for candidate in files.keys():
+        candidate_text = str(candidate or "").strip()
+        if not candidate_text:
+            continue
+        if _state_relative_path(candidate_text) == path_text and isinstance(files.get(candidate_text), dict):
+            return True
+    return False
+
+
+def _runtime_file_content(files: Dict[str, Dict[str, Any]], path: str) -> str:
+    if not isinstance(files, dict):
+        return ""
+    path_text = str(path or "").strip()
+    if not path_text:
+        return ""
+    direct = _read_runtime_file(files, path_text).strip()
+    if direct:
+        return direct
+    for candidate in files.keys():
+        candidate_text = str(candidate or "").strip()
+        if not candidate_text:
+            continue
+        if _state_relative_path(candidate_text) == path_text:
+            text = _read_runtime_file(files, candidate_text).strip()
+            if text:
+                return text
+    return ""
 
 
 def _bundle_exploration_outputs(
@@ -602,21 +659,28 @@ def _bundle_exploration_outputs(
     compile_thread_id: str,
     message: str,
 ) -> Dict[str, Any]:
+    from .exploration_deterministic_graph import _output_state
+
     required_paths = _required_exploration_artifacts(mode)
     manifest: Dict[str, ExplorationArtifactStatus] = {}
     gaps: List[str] = []
     for path in required_paths:
         owner = str(EXPLORATION_ARTIFACT_OWNERS.get(path) or "report_coordinator").strip()
-        ready = _runtime_file_exists(runtime_files, path)
-        status = "ready" if ready else "missing"
-        if not ready:
+        raw = _runtime_file_content(runtime_files, path).strip()
+        if not raw:
+            status = "missing"
             gaps.append(f"{owner} 未产出 {Path(path).name}")
-        manifest[path] = ExplorationArtifactStatus(
-            path=path,
-            owner=owner,
-            status=status,
-            summary="ready" if ready else "missing",
-        )
+        else:
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                status = "invalid_json"
+                gaps.append(f"{owner} 产出 {Path(path).name} 但内容不是合法 JSON")
+            else:
+                status = _output_state(parsed) if isinstance(parsed, dict) else "invalid_shape"
+                if status != "ready":
+                    gaps.append(f"{owner} 产出 {Path(path).name} 但状态为 {status}")
+        manifest[path] = ExplorationArtifactStatus(path=path, owner=owner, status=status, summary=status)
     metadata = _payload_meta(structured_payload)
     todos = metadata.get("todos") if isinstance(metadata.get("todos"), list) else []
     bundle = ExplorationBundle(
@@ -635,6 +699,238 @@ def _bundle_exploration_outputs(
         },
     )
     return bundle.model_dump()
+
+
+def _core_readiness_artifacts(mode: str) -> List[str]:
+    return [path for path in _required_exploration_artifacts(mode) if not str(path).startswith("section_packets/")]
+
+
+def _artifact_semantic_status(
+    runtime_files: Dict[str, Dict[str, Any]],
+    path: str,
+) -> Dict[str, str]:
+    from .exploration_deterministic_graph import _output_state
+
+    owner = str(EXPLORATION_ARTIFACT_OWNERS.get(path) or "report_coordinator").strip()
+    raw = _runtime_file_content(runtime_files, path).strip()
+    if not raw:
+        status = "missing"
+    else:
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            status = "invalid_json"
+        else:
+            if not isinstance(parsed, dict):
+                status = "invalid_shape"
+            else:
+                status = _output_state(parsed)
+    return {
+        "path": path,
+        "owner": owner,
+        "status": status,
+        "summary": status,
+    }
+
+
+def _collect_artifact_semantic_statuses(
+    runtime_files: Dict[str, Dict[str, Any]],
+    paths: List[str],
+) -> Dict[str, Dict[str, str]]:
+    return {
+        path: _artifact_semantic_status(runtime_files, path)
+        for path in paths
+        if str(path or "").strip()
+    }
+
+
+def _ready_runtime_input_paths(runtime_files: Dict[str, Dict[str, Any]], *, exclude_paths: List[str]) -> List[str]:
+    excluded = {str(item).strip() for item in exclude_paths if str(item or "").strip()}
+    ready_paths: List[str] = []
+    for path in _required_exploration_artifacts("research"):
+        normalized = str(path or "").strip()
+        if not normalized or normalized in excluded:
+            continue
+        artifact_status = _artifact_semantic_status(runtime_files, normalized)
+        if artifact_status.get("status") == "ready":
+            ready_paths.append(normalized)
+    return ready_paths
+
+
+def _run_readiness_repair_loop(
+    *,
+    runtime_files: Dict[str, Dict[str, Any]],
+    request: Dict[str, Any],
+    common_context: Dict[str, Any],
+    skill_assets: Dict[str, Any],
+    middleware_factory: Callable[[str], List[Any]],
+    event_callback: Optional[Callable[[Dict[str, Any]], None]],
+    llm: Any,
+    runtime_backend: Any,
+    lifecycle_tracker: Dict[str, Any],
+    max_rounds: int = 2,
+) -> Dict[str, Any]:
+    from .exploration_deterministic_graph import (
+        _ExplorationRuntimeDeps,
+        _build_subagent_spec_map,
+        _invoke_subagent_once,
+    )
+
+    current_files = dict(runtime_files or {})
+    target_paths = _core_readiness_artifacts(str(request.get("mode") or "fast").strip() or "fast")
+    repair_trace: List[Dict[str, Any]] = []
+    repair_attempts = 0
+    runtime_deps = _ExplorationRuntimeDeps(
+        skill_assets=skill_assets if isinstance(skill_assets, dict) else {},
+        middleware_factory=middleware_factory,
+        event_callback=event_callback,
+        llm=llm,
+        runtime_backend=runtime_backend,
+        common_context=common_context if isinstance(common_context, dict) else {},
+        lifecycle_tracker=lifecycle_tracker if isinstance(lifecycle_tracker, dict) else None,
+        subagent_specs=_build_subagent_spec_map(
+            skill_assets=skill_assets if isinstance(skill_assets, dict) else {},
+            middleware_factory=middleware_factory,
+        ),
+    )
+
+    for round_idx in range(1, max_rounds + 1):
+        semantic_status = _collect_artifact_semantic_statuses(current_files, target_paths)
+        pending = {
+            path: payload
+            for path, payload in semantic_status.items()
+            if str(payload.get("status") or "").strip() != "ready"
+        }
+        if not pending:
+            return {
+                "runtime_files": current_files,
+                "artifact_semantic_status": semantic_status,
+                "readiness_gate_passed": True,
+                "repair_attempts": repair_attempts,
+                "repair_trace": repair_trace,
+                "blocked_stage": "",
+            }
+
+        grouped: Dict[str, List[str]] = {}
+        for artifact_path, payload in pending.items():
+            agent_name = str(payload.get("owner") or "").strip()
+            if not agent_name or agent_name not in _REPAIR_AGENT_TIERS:
+                repair_trace.append(
+                    {
+                        "round": round_idx,
+                        "target_artifact": artifact_path,
+                        "target_agent": agent_name,
+                        "status": "blocked",
+                        "reason": "no_repairable_owner",
+                    }
+                )
+                continue
+            grouped.setdefault(agent_name, []).append(artifact_path)
+
+        if not grouped:
+            break
+
+        for agent_name, artifact_paths in grouped.items():
+            repair_attempts += 1
+            repair_context = {
+                "target_agent": agent_name,
+                "target_artifact": artifact_paths[0],
+                "reason": "artifact_not_ready",
+                "expected_output_paths": artifact_paths,
+                "success_criteria": "all_expected_output_paths_ready",
+                "previous_semantic_status": {
+                    path: semantic_status.get(path, {}).get("status", "missing")
+                    for path in artifact_paths
+                },
+                "ready_input_paths": _ready_runtime_input_paths(current_files, exclude_paths=artifact_paths),
+                "topic_identifier": str(request.get("topic_identifier") or "").strip(),
+                "topic_label": str(request.get("topic_label") or "").strip(),
+                "project_identifier": str(common_context.get("project_identifier") or request.get("project_identifier") or "").strip(),
+                "start": str(request.get("start") or "").strip(),
+                "end": str(request.get("end") or "").strip(),
+                "mode": str(request.get("mode") or "fast").strip() or "fast",
+                "thread_id": str(request.get("thread_id") or "").strip(),
+                "runtime_task_id": str(request.get("task_id") or "").strip(),
+                "workspace_root": str(common_context.get("workspace_root") or "").strip(),
+                "state_root": str(common_context.get("state_root") or "").strip(),
+            }
+            _emit_runtime_event(
+                event_callback,
+                {
+                    "type": "phase.progress",
+                    "phase": "exploration",
+                    "agent": agent_name,
+                    "title": f"{agent_name} 定向补救",
+                    "message": f"正在补齐 {', '.join(Path(path).name for path in artifact_paths)}。",
+                    "payload": {
+                        "target_agent": agent_name,
+                        "target_artifacts": artifact_paths,
+                        "repair_round": round_idx,
+                    },
+                },
+                normalize_exploration=True,
+            )
+            rerun_state = {
+                "files": current_files,
+                "task_id": str(request.get("task_id") or "").strip(),
+                "thread_id": str(request.get("thread_id") or "").strip(),
+                "topic_identifier": str(request.get("topic_identifier") or "").strip(),
+                "project_identifier": str(common_context.get("project_identifier") or request.get("project_identifier") or "").strip(),
+                "topic_label": str(request.get("topic_label") or "").strip(),
+                "start": str(request.get("start") or "").strip(),
+                "end": str(request.get("end") or "").strip(),
+                "mode": str(request.get("mode") or "fast").strip() or "fast",
+                "repair_context": repair_context,
+            }
+            try:
+                result = _invoke_subagent_once(
+                    agent_name,
+                    rerun_state,
+                    runtime_deps,
+                    tier=_REPAIR_AGENT_TIERS[agent_name],
+                )
+                current_files = result.get("files") if isinstance(result.get("files"), dict) else current_files
+                after_status = {
+                    path: _artifact_semantic_status(current_files, path).get("status", "missing")
+                    for path in artifact_paths
+                }
+                succeeded = all(status == "ready" for status in after_status.values())
+                repair_trace.append(
+                    {
+                        "round": round_idx,
+                        "target_agent": agent_name,
+                        "target_artifacts": artifact_paths,
+                        "status": "ready" if succeeded else "partial",
+                        "reason": "rerun_completed",
+                        "after_status": after_status,
+                        "message": str(result.get("message") or "").strip(),
+                    }
+                )
+            except Exception as exc:
+                repair_trace.append(
+                    {
+                        "round": round_idx,
+                        "target_agent": agent_name,
+                        "target_artifacts": artifact_paths,
+                        "status": "error",
+                        "reason": "rerun_exception",
+                        "message": str(exc or "").strip() or "rerun_exception",
+                    }
+                )
+
+    final_status = _collect_artifact_semantic_statuses(current_files, target_paths)
+    readiness_gate_passed = all(
+        str(payload.get("status") or "").strip() == "ready"
+        for payload in final_status.values()
+    )
+    return {
+        "runtime_files": current_files,
+        "artifact_semantic_status": final_status,
+        "readiness_gate_passed": readiness_gate_passed,
+        "repair_attempts": repair_attempts,
+        "repair_trace": repair_trace,
+        "blocked_stage": "" if readiness_gate_passed else "exploration_readiness",
+    }
 
 
 def _parse_json_object(raw_value: Any) -> Dict[str, Any]:
@@ -1129,7 +1425,31 @@ def _attach_ir_layers(
         figure_artifacts=payload.get("figure_artifacts") if isinstance(payload.get("figure_artifacts"), list) else [],
         previous_manifest=previous_manifest,
     )
-    enriched = attach_report_ir(payload, artifact_manifest=manifest, task_id=task_id)
+    enriched = dict(payload or {})
+    enriched.setdefault("metadata", {})
+    core_validation = validate_structured_payload_core(enriched)
+    structured_valid = bool(core_validation.get("valid"))
+    structured_invalid_reason = str(core_validation.get("reason") or "").strip()
+    exploration_blocked_before_compile = not structured_valid
+    enriched["structured_valid"] = structured_valid
+    enriched["structured_invalid_reason"] = structured_invalid_reason
+    enriched["exploration_blocked_before_compile"] = exploration_blocked_before_compile
+    enriched["metadata"]["structured_valid"] = structured_valid
+    enriched["metadata"]["structured_invalid_reason"] = structured_invalid_reason
+    enriched["metadata"]["exploration_blocked_before_compile"] = exploration_blocked_before_compile
+    enriched["metadata"]["structured_core_counts"] = core_validation.get("counts") if isinstance(core_validation.get("counts"), dict) else {}
+    if not structured_valid:
+        enriched["artifact_manifest"] = manifest.model_dump()
+        enriched.setdefault("report_ir", {})
+        enriched["metadata"]["artifact_manifest"] = manifest.model_dump()
+        enriched["metadata"]["report_ir_summary"] = summarize_report_ir({})
+        enriched["meta"] = {**(enriched.get("meta") or {}), **enriched["metadata"]}
+        return enriched
+
+    enriched = attach_report_ir(enriched, artifact_manifest=manifest, task_id=task_id)
+    enriched["structured_valid"] = structured_valid
+    enriched["structured_invalid_reason"] = structured_invalid_reason
+    enriched["exploration_blocked_before_compile"] = exploration_blocked_before_compile
     if isinstance(enriched.get("basic_analysis_insight"), dict):
         _write_json(cache_dir / "basic_analysis_insight.json", enriched.get("basic_analysis_insight") or {})
     if isinstance(enriched.get("bertopic_insight"), dict):
@@ -1146,10 +1466,603 @@ def _attach_ir_layers(
     if isinstance(report_ir.get("utility_assessment"), dict):
         _write_json(cache_dir / "utility_assessment.json", report_ir.get("utility_assessment") or {})
     enriched.setdefault("metadata", {})
+    enriched["metadata"]["structured_valid"] = structured_valid
+    enriched["metadata"]["structured_invalid_reason"] = structured_invalid_reason
+    enriched["metadata"]["exploration_blocked_before_compile"] = exploration_blocked_before_compile
+    enriched["metadata"]["structured_core_counts"] = core_validation.get("counts") if isinstance(core_validation.get("counts"), dict) else {}
     enriched["metadata"]["artifact_manifest"] = manifest.model_dump()
     enriched["metadata"]["report_ir_summary"] = summarize_report_ir(enriched.get("report_ir") or {})
     enriched["meta"] = {**(enriched.get("meta") or {}), **enriched["metadata"]}
     return enriched
+
+
+def _extract_model_payload(payload: Dict[str, Any], *keys: str) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    for key in keys:
+        candidate = payload.get(key)
+        if isinstance(candidate, dict):
+            return candidate
+    return payload if isinstance(payload, dict) else {}
+
+
+def _extract_model_list(payload: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    for key in keys:
+        candidate = payload.get(key)
+        if isinstance(candidate, list):
+            return [item for item in candidate if isinstance(item, dict)]
+    return []
+
+
+def _load_runtime_json_object(files: Dict[str, Dict[str, Any]], path: str) -> Dict[str, Any]:
+    raw = _read_runtime_file(files, path).strip()
+    return _parse_json_object(raw) if raw else {}
+
+
+def _iter_runtime_json_objects(files: Dict[str, Dict[str, Any]], prefix: str) -> List[Tuple[str, Dict[str, Any]]]:
+    if not isinstance(files, dict):
+        return []
+    output: List[Tuple[str, Dict[str, Any]]] = []
+    prefix_text = str(prefix or "").rstrip("/")
+    for path in sorted(files.keys()):
+        path_text = str(path or "").strip()
+        if not path_text.startswith(prefix_text) or not path_text.endswith(".json"):
+            continue
+        payload = _load_runtime_json_object(files, path_text)
+        if payload:
+            output.append((path_text, payload))
+    return output
+
+
+def _confidence_label(value: Any) -> str:
+    try:
+        numeric = float(value or 0.0)
+    except Exception:
+        numeric = 0.0
+    if numeric >= 0.75:
+        return "high"
+    if numeric >= 0.4:
+        return "medium"
+    return "low"
+
+
+def _dedupe_records(records: List[Dict[str, Any]], *, key: str) -> List[Dict[str, Any]]:
+    output: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        record_key = str(item.get(key) or "").strip()
+        if not record_key or record_key in seen:
+            continue
+        seen.add(record_key)
+        output.append(item)
+    return output
+
+
+def _assemble_structured_report_from_runtime_files(
+    *,
+    files: Dict[str, Dict[str, Any]],
+    topic_identifier: str,
+    topic_label: str,
+    start_text: str,
+    end_text: str,
+    mode: str,
+    thread_id: str,
+) -> Dict[str, Any]:
+    base_context_path = next(
+        (
+            str(path or "").strip()
+            for path in files.keys()
+            if str(path or "").strip().endswith("/base_context.json")
+        ),
+        "",
+    )
+    base_context = _load_runtime_json_object(files, base_context_path) if base_context_path else {}
+    layout = _runtime_workspace_layout_for(
+        topic_identifier=topic_identifier,
+        project_identifier=str(base_context.get("project_identifier") or "").strip(),
+        start_text=start_text,
+        end_text=end_text,
+    )
+    seed = _build_structured_seed_payload(
+        topic_identifier=topic_identifier,
+        topic_label=topic_label,
+        start_text=start_text,
+        end_text=end_text,
+        mode=mode,
+        thread_id=thread_id,
+    )
+    assembled = dict(seed)
+    metadata = dict(assembled.get("metadata") or {})
+    metadata["producer"] = "deterministic_assembler.v1"
+    metadata["workspace_root"] = layout.workspace_root
+    metadata["state_root"] = layout.state_root
+    metadata["artifact_adapter_status"] = {}
+
+    def _mark_adapter(name: str, *, status: str, detail: str = "", counts: Optional[Dict[str, Any]] = None) -> None:
+        metadata["artifact_adapter_status"][name] = {
+            "status": status,
+            "detail": str(detail or "").strip(),
+            "counts": counts if isinstance(counts, dict) else {},
+        }
+
+    normalized_payload = _load_runtime_json_object(files, layout.state_file("normalized_task.json"))
+    normalized_model = None
+    if normalized_payload:
+        try:
+            normalized_model = NormalizedTaskResult.model_validate(normalized_payload)
+        except ValidationError:
+            normalized_model = None
+    normalized_task = {}
+    if normalized_model is not None:
+        normalized_task = normalized_model.normalized_task.model_dump()
+    elif normalized_payload:
+        normalized_task = _extract_model_payload(normalized_payload, "normalized_task", "result")
+    task_payload = {
+        **dict(assembled.get("task") or {}),
+        "topic_identifier": str(normalized_task.get("topic_identifier") or topic_identifier).strip() or topic_identifier,
+        "topic_label": str(normalized_task.get("topic_label") or topic_label).strip() or topic_label,
+        "start": str((normalized_task.get("time_range") or {}).get("start") or start_text).strip() or start_text,
+        "end": str((normalized_task.get("time_range") or {}).get("end") or end_text).strip() or end_text,
+        "mode": str(normalized_task.get("mode") or mode).strip() or mode,
+        "thread_id": thread_id,
+    }
+    assembled["task"] = task_payload
+    metadata["normalized_task"] = normalized_task
+    _mark_adapter(
+        "task",
+        status="ready" if task_payload.get("topic_identifier") and task_payload.get("start") and task_payload.get("end") else "degraded",
+        counts={"entities": len(normalized_task.get("entities") or []), "keywords": len(normalized_task.get("keywords") or [])},
+    )
+
+    evidence_payload = _load_runtime_json_object(files, layout.state_file("evidence_cards.json"))
+    evidence_model = None
+    evidence_entries: List[Dict[str, Any]] = []
+    if evidence_payload:
+        try:
+            evidence_model = EvidenceCardPage.model_validate(evidence_payload)
+        except ValidationError:
+            evidence_model = None
+    if evidence_model is not None:
+        evidence_entries = [item.model_dump() for item in evidence_model.result]
+    elif evidence_payload:
+        evidence_entries = _extract_model_list(evidence_payload, "result")
+    citations: List[Dict[str, Any]] = []
+    key_evidence: List[Dict[str, Any]] = []
+    for index, item in enumerate(evidence_entries):
+        citation_id = (
+            str(item.get("evidence_id") or "").strip()
+            or str(item.get("source_id") or "").strip()
+            or f"E{index + 1:03d}"
+        )
+        citations.append(
+            {
+                "citation_id": citation_id,
+                "title": str(item.get("title") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+                "published_at": str(item.get("published_at") or "").strip(),
+                "platform": str(item.get("platform") or "").strip(),
+                "snippet": str(item.get("snippet") or item.get("content") or "").strip(),
+                "source_type": str(item.get("source_kind_hint") or item.get("author_type") or "document").strip() or "document",
+                "author": str(item.get("author") or "").strip(),
+                "sentiment_label": str(item.get("sentiment_label") or "").strip(),
+                "raw_content": str(item.get("content") or item.get("raw_contents") or "").strip()[:300],
+            }
+        )
+        key_evidence.append(
+            {
+                "evidence_id": str(item.get("evidence_id") or citation_id).strip() or citation_id,
+                "source_id": str(item.get("source_id") or "").strip(),
+                "finding": str(item.get("snippet") or item.get("title") or item.get("content") or "").strip()[:240],
+                "subject": str((item.get("entity_tags") or [""])[0] or item.get("author") or "").strip(),
+                "stance": str(item.get("stance_hint") or item.get("sentiment_label") or "").strip(),
+                "time_label": str(item.get("published_at") or "").strip(),
+                "source_summary": str(item.get("title") or item.get("platform") or "").strip(),
+                "citation_ids": [citation_id],
+                "confidence": _confidence_label(item.get("confidence") or item.get("relevance")),
+            }
+        )
+    assembled["citations"] = _dedupe_records(citations, key="citation_id")
+    assembled["key_evidence"] = [item for item in key_evidence if str(item.get("finding") or "").strip()]
+    _mark_adapter(
+        "evidence_cards",
+        status="ready" if assembled["key_evidence"] else "empty",
+        counts={"key_evidence": len(assembled["key_evidence"]), "citations": len(assembled["citations"])},
+    )
+
+    timeline_payload = _load_runtime_json_object(files, layout.state_file("timeline_nodes.json"))
+    timeline_model = None
+    timeline_entries: List[Dict[str, Any]] = []
+    if timeline_payload:
+        try:
+            timeline_model = TimelineBuildResult.model_validate(timeline_payload)
+        except ValidationError:
+            timeline_model = None
+    if timeline_model is not None:
+        timeline_entries = [item.model_dump() for item in timeline_model.result]
+    elif timeline_payload:
+        timeline_entries = _extract_model_list(timeline_payload, "result")
+    assembled["timeline"] = [
+        {
+            "event_id": str(item.get("node_id") or f"timeline-{index + 1}").strip() or f"timeline-{index + 1}",
+            "date": str(item.get("time_label") or "").strip(),
+            "title": str(item.get("summary") or item.get("event_type") or f"时间节点 {index + 1}").strip() or f"时间节点 {index + 1}",
+            "description": str(item.get("summary") or "").strip(),
+            "trigger": str(item.get("event_type") or "").strip(),
+            "impact": "",
+            "citation_ids": [str(ref).strip() for ref in (item.get("support_evidence_ids") or []) if str(ref or "").strip()],
+            "causal_links": [],
+        }
+        for index, item in enumerate(timeline_entries)
+        if str(item.get("summary") or "").strip()
+    ]
+    _mark_adapter("timeline_nodes", status="ready" if assembled["timeline"] else "empty", counts={"timeline": len(assembled["timeline"])})
+
+    actor_payload = _load_runtime_json_object(files, layout.state_file("actor_positions.json"))
+    actor_model = None
+    actor_entries: List[Dict[str, Any]] = []
+    if actor_payload:
+        try:
+            actor_model = ActorPositionResult.model_validate(actor_payload)
+        except ValidationError:
+            actor_model = None
+    if actor_model is not None:
+        actor_entries = [item.model_dump() for item in (actor_model.actors or actor_model.result)]
+    elif actor_payload:
+        actor_entries = _extract_model_list(actor_payload, "actors", "result")
+    assembled["subjects"] = [
+        {
+            "subject_id": str(item.get("actor_id") or f"subject-{index + 1}").strip() or f"subject-{index + 1}",
+            "name": str(item.get("name") or f"主体 {index + 1}").strip() or f"主体 {index + 1}",
+            "category": str(item.get("organization_type") or item.get("role_type") or "").strip(),
+            "role": str(item.get("speaker_role") or item.get("role_type") or "").strip(),
+            "summary": str(item.get("stance_shift") or item.get("stance") or "").strip(),
+            "citation_ids": [str(ref).strip() for ref in (item.get("representative_evidence_ids") or []) if str(ref or "").strip()],
+        }
+        for index, item in enumerate(actor_entries)
+        if str(item.get("name") or "").strip()
+    ]
+    assembled["stance_matrix"] = [
+        {
+            "subject": str(item.get("name") or "").strip(),
+            "stance": str(item.get("stance") or "待判断").strip() or "待判断",
+            "summary": str(item.get("stance_shift") or item.get("role_type") or "").strip(),
+            "conflict_with": [str(ref).strip() for ref in (item.get("conflict_actor_ids") or []) if str(ref or "").strip()],
+            "citation_ids": [str(ref).strip() for ref in (item.get("representative_evidence_ids") or []) if str(ref or "").strip()],
+        }
+        for item in actor_entries
+        if str(item.get("name") or "").strip()
+    ]
+    _mark_adapter("actor_positions", status="ready" if assembled["subjects"] else "empty", counts={"subjects": len(assembled["subjects"]), "stance_matrix": len(assembled["stance_matrix"])})
+
+    conflict_payload = _load_runtime_json_object(files, layout.state_file("conflict_map.json"))
+    conflict_model = None
+    conflict_map: Dict[str, Any] = {}
+    if conflict_payload:
+        try:
+            conflict_model = ClaimActorConflictResult.model_validate(conflict_payload)
+        except ValidationError:
+            conflict_model = None
+    if conflict_model is not None:
+        conflict_map = conflict_model.result.model_dump()
+    elif conflict_payload:
+        conflict_map = _extract_model_payload(conflict_payload, "conflict_map", "result")
+    claims_by_id = {str(item.get("claim_id") or "").strip(): item for item in (conflict_map.get("claims") or []) if isinstance(item, dict)}
+    conflict_points: List[Dict[str, Any]] = []
+    for index, edge in enumerate(conflict_map.get("edges") or []):
+        if not isinstance(edge, dict):
+            continue
+        claim_a = claims_by_id.get(str(edge.get("claim_a_id") or "").strip()) or {}
+        claim_b = claims_by_id.get(str(edge.get("claim_b_id") or "").strip()) or {}
+        conflict_points.append(
+            {
+                "conflict_id": str(edge.get("edge_id") or f"conflict-{index + 1}").strip() or f"conflict-{index + 1}",
+                "title": str(edge.get("conflict_type") or "观点冲突").strip() or "观点冲突",
+                "description": " / ".join(
+                    part
+                    for part in [
+                        str(claim_a.get("proposition") or "").strip(),
+                        str(claim_b.get("proposition") or "").strip(),
+                    ]
+                    if part
+                ),
+                "subjects": [str(ref).strip() for ref in (edge.get("actor_scope") or []) if str(ref or "").strip()],
+                "citation_ids": [str(ref).strip() for ref in (edge.get("evidence_refs") or []) if str(ref or "").strip()],
+            }
+        )
+    if not conflict_points:
+        for index, item in enumerate(conflict_map.get("resolution_summary") or []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "").strip() != "sustained_conflict":
+                continue
+            conflict_points.append(
+                {
+                    "conflict_id": str(item.get("claim_id") or f"conflict-{index + 1}").strip() or f"conflict-{index + 1}",
+                    "title": "持续争议",
+                    "description": str(item.get("reason") or item.get("unresolved_reason") or "").strip(),
+                    "subjects": [],
+                    "citation_ids": [],
+                }
+            )
+    assembled["conflict_map"] = conflict_map or {}
+    assembled["conflict_points"] = [item for item in conflict_points if str(item.get("title") or "").strip()]
+    _mark_adapter("conflict_map", status="ready" if assembled["conflict_points"] else "empty", counts={"conflict_points": len(assembled["conflict_points"])})
+
+    agenda_payload = _load_runtime_json_object(files, layout.state_file("agenda_frame_map.json"))
+    mechanism_payload = _load_runtime_json_object(files, layout.state_file("mechanism_summary.json"))
+    agenda_model = None
+    mechanism_model = None
+    agenda_map: Dict[str, Any] = {}
+    mechanism_summary: Dict[str, Any] = {}
+    if agenda_payload:
+        try:
+            agenda_model = AgendaFrameMapResult.model_validate(agenda_payload)
+        except ValidationError:
+            agenda_model = None
+    if mechanism_payload:
+        try:
+            mechanism_model = MechanismSummaryResult.model_validate(mechanism_payload)
+        except ValidationError:
+            mechanism_model = None
+    if agenda_model is not None:
+        agenda_map = agenda_model.result.model_dump()
+    elif agenda_payload:
+        agenda_map = _extract_model_payload(agenda_payload, "agenda_frame_map", "result")
+    if mechanism_model is not None:
+        mechanism_summary = mechanism_model.result.model_dump()
+    elif mechanism_payload:
+        mechanism_summary = _extract_model_payload(mechanism_payload, "mechanism_summary", "result")
+    propagation_features: List[Dict[str, Any]] = []
+    for index, item in enumerate(mechanism_summary.get("amplification_paths") or []):
+        if not isinstance(item, dict):
+            continue
+        propagation_features.append(
+            {
+                "feature_id": str(item.get("path_id") or f"feature-{index + 1}").strip() or f"feature-{index + 1}",
+                "dimension": str(item.get("amplifier_type") or "amplification_path").strip() or "amplification_path",
+                "finding": " -> ".join(str(part).strip() for part in (item.get("platform_sequence") or []) if str(part or "").strip()) or "传播路径已识别",
+                "explanation": str(item.get("amplifier_type") or "").strip(),
+                "citation_ids": [str(ref).strip() for ref in (item.get("evidence_refs") or []) if str(ref or "").strip()],
+            }
+        )
+    for index, item in enumerate(agenda_map.get("frames") or []):
+        if not isinstance(item, dict):
+            continue
+        propagation_features.append(
+            {
+                "feature_id": str(item.get("frame_id") or f"agenda-{index + 1}").strip() or f"agenda-{index + 1}",
+                "dimension": "agenda_frame",
+                "finding": str(item.get("label") or item.get("frame_title") or "议程框架").strip() or "议程框架",
+                "explanation": str(item.get("summary") or "").strip(),
+                "citation_ids": [str(ref).strip() for ref in (item.get("support_refs") or []) if str(ref or "").strip()],
+            }
+        )
+    assembled["agenda_frame_map"] = agenda_map or {}
+    assembled["mechanism_summary"] = mechanism_summary or {}
+    assembled["propagation_features"] = _dedupe_records(propagation_features, key="feature_id")
+    _mark_adapter(
+        "mechanism_agenda",
+        status="ready" if assembled["propagation_features"] else "empty",
+        counts={"propagation_features": len(assembled["propagation_features"])},
+    )
+
+    risk_payload = _load_runtime_json_object(files, layout.state_file("risk_signals.json"))
+    risk_model = None
+    risk_entries: List[Dict[str, Any]] = []
+    discourse_conflict_map: Dict[str, Any] = {}
+    if risk_payload:
+        try:
+            risk_model = RiskSignalResult.model_validate(risk_payload)
+        except ValidationError:
+            risk_model = None
+    if risk_model is not None:
+        risk_entries = [item.model_dump() for item in (risk_model.risks or risk_model.result)]
+        discourse_conflict_map = risk_model.discourse_conflict_map.model_dump()
+    elif risk_payload:
+        risk_entries = _extract_model_list(risk_payload, "risks", "result")
+        discourse_conflict_map = _extract_model_payload(risk_payload, "discourse_conflict_map")
+    assembled["risk_judgement"] = [
+        {
+            "risk_id": str(item.get("risk_id") or f"risk-{index + 1}").strip() or f"risk-{index + 1}",
+            "label": str(item.get("risk_type") or f"风险 {index + 1}").strip() or f"风险 {index + 1}",
+            "level": str(item.get("severity") or "medium").strip() or "medium",
+            "summary": str(item.get("spread_condition") or "").strip(),
+            "citation_ids": [str(ref).strip() for ref in (item.get("trigger_evidence_ids") or []) if str(ref or "").strip()],
+        }
+        for index, item in enumerate(risk_entries)
+    ]
+    if discourse_conflict_map:
+        metadata["discourse_conflict_map"] = discourse_conflict_map
+    _mark_adapter("risk_signals", status="ready" if assembled["risk_judgement"] else "empty", counts={"risk_judgement": len(assembled["risk_judgement"])})
+
+    utility_payload = _load_runtime_json_object(files, layout.state_file("utility_assessment.json"))
+    utility_model = None
+    utility_assessment: Dict[str, Any] = {}
+    if utility_payload:
+        try:
+            utility_model = UtilityAssessmentResult.model_validate(utility_payload)
+        except ValidationError:
+            utility_model = None
+    if utility_model is not None:
+        utility_assessment = utility_model.result.model_dump()
+    elif utility_payload:
+        utility_assessment = _extract_model_payload(utility_payload, "utility_assessment", "result")
+    packet_rows = _iter_runtime_json_objects(files, layout.section_packets_root)
+    packet_payloads: List[Dict[str, Any]] = []
+    for _path, raw_payload in packet_rows:
+        try:
+            packet_payloads.append(SectionPacketResult.model_validate(raw_payload).result.model_dump())
+        except ValidationError:
+            packet_payloads.append(_extract_model_payload(raw_payload, "section_packet", "result"))
+    suggested_actions: List[Dict[str, Any]] = []
+    next_action = str(utility_assessment.get("next_action") or "").strip()
+    if next_action:
+        suggested_actions.append(
+            {
+                "action_id": "utility-next-action",
+                "action": next_action,
+                "rationale": str(utility_assessment.get("decision") or "").strip(),
+                "priority": "high" if str(utility_assessment.get("decision") or "").strip() == "pass" else "medium",
+                "citation_ids": [],
+            }
+        )
+    unverified_points: List[Dict[str, Any]] = []
+    validation_notes: List[Dict[str, Any]] = []
+    for packet in packet_payloads:
+        for note in packet.get("uncertainty_notes") or []:
+            note_text = str(note or "").strip()
+            if not note_text:
+                continue
+            note_id = f"packet-{str(packet.get('section_id') or 'section').strip() or 'section'}-{len(unverified_points) + 1}"
+            unverified_points.append(
+                {
+                    "item_id": note_id,
+                    "statement": note_text,
+                    "reason": str(packet.get("section_goal") or "").strip(),
+                    "citation_ids": [],
+                }
+            )
+        for verified in packet.get("verified_claims") or []:
+            if not isinstance(verified, dict):
+                continue
+            status = str(verified.get("status") or "").strip()
+            if status in {"unsupported", "contradicted"}:
+                unverified_points.append(
+                    {
+                        "item_id": str(verified.get("claim_id") or f"claim-{len(unverified_points) + 1}").strip() or f"claim-{len(unverified_points) + 1}",
+                        "statement": str(verified.get("claim_text") or "").strip(),
+                        "reason": str(verified.get("gap_note") or status).strip(),
+                        "citation_ids": [str(ref).strip() for ref in (verified.get("support_ids") or []) if str(ref or "").strip()],
+                    }
+                )
+    for index, missing in enumerate(utility_assessment.get("missing_dimensions") or []):
+        missing_text = str(missing or "").strip()
+        if not missing_text:
+            continue
+        validation_notes.append(
+            {
+                "note_id": f"utility-missing-{index + 1}",
+                "category": "coverage",
+                "severity": "medium",
+                "message": f"缺失维度：{missing_text}",
+                "related_ids": [],
+            }
+        )
+    assembled["utility_assessment"] = utility_assessment or {}
+    assembled["suggested_actions"] = _dedupe_records(suggested_actions, key="action_id")
+    assembled["unverified_points"] = _dedupe_records(unverified_points, key="item_id")
+    assembled["validation_notes"] = _dedupe_records(validation_notes, key="note_id")
+    _mark_adapter(
+        "utility_and_packets",
+        status="ready" if utility_assessment or assembled["suggested_actions"] or assembled["validation_notes"] else "empty",
+        counts={
+            "suggested_actions": len(assembled["suggested_actions"]),
+            "unverified_points": len(assembled["unverified_points"]),
+            "validation_notes": len(assembled["validation_notes"]),
+        },
+    )
+
+    basic_snapshot_payload = _load_runtime_json_object(files, layout.state_file("basic_analysis_snapshot.json"))
+    basic_insight_payload = _load_runtime_json_object(files, layout.state_file("basic_analysis_insight.json"))
+    bertopic_snapshot_payload = _load_runtime_json_object(files, layout.state_file("bertopic_snapshot.json"))
+    bertopic_insight_payload = _load_runtime_json_object(files, layout.state_file("bertopic_insight.json"))
+    if basic_snapshot_payload:
+        try:
+            assembled["basic_analysis_snapshot"] = BasicAnalysisSnapshotResult.model_validate(basic_snapshot_payload).result.model_dump()
+        except ValidationError:
+            assembled["basic_analysis_snapshot"] = _extract_model_payload(basic_snapshot_payload, "snapshot", "result")
+    if basic_insight_payload:
+        try:
+            assembled["basic_analysis_insight"] = BasicAnalysisInsightResult.model_validate(basic_insight_payload).result.model_dump()
+        except ValidationError:
+            assembled["basic_analysis_insight"] = _extract_model_payload(basic_insight_payload, "insight", "result")
+    if bertopic_snapshot_payload:
+        try:
+            assembled["bertopic_snapshot"] = BertopicSnapshotResult.model_validate(bertopic_snapshot_payload).result.model_dump()
+        except ValidationError:
+            assembled["bertopic_snapshot"] = _extract_model_payload(bertopic_snapshot_payload, "snapshot", "result")
+    if bertopic_insight_payload:
+        try:
+            assembled["bertopic_insight"] = BertopicInsightResult.model_validate(bertopic_insight_payload).result.model_dump()
+        except ValidationError:
+            assembled["bertopic_insight"] = _extract_model_payload(bertopic_insight_payload, "insight", "result")
+
+    metric_payload = _load_runtime_json_object(files, layout.state_file("metrics_bundle.json"))
+    if metric_payload:
+        try:
+            metric_model = MetricBundleResult.model_validate(metric_payload)
+            assembled["metric_bundle"] = {"metrics": [item.model_dump() for item in metric_model.result]}
+        except ValidationError:
+            assembled["metric_bundle"] = metric_payload
+
+    event_analysis_payload = _load_runtime_json_object(files, layout.state_file("event_analysis.json"))
+    if event_analysis_payload:
+        assembled["event_analysis"] = event_analysis_payload
+
+    conclusion = dict(assembled.get("conclusion") or {})
+    if not str(conclusion.get("executive_summary") or "").strip():
+        summary_candidates = [
+            str((assembled.get("key_evidence") or [{}])[0].get("finding") or "").strip() if assembled.get("key_evidence") else "",
+            str((assembled.get("timeline") or [{}])[0].get("description") or (assembled.get("timeline") or [{}])[0].get("title") or "").strip() if assembled.get("timeline") else "",
+            next_action,
+        ]
+        conclusion["executive_summary"] = next((item for item in summary_candidates if item), "")
+    if not conclusion.get("key_findings"):
+        conclusion["key_findings"] = [
+            str(item.get("finding") or "").strip()
+            for item in (assembled.get("key_evidence") or [])[:3]
+            if str(item.get("finding") or "").strip()
+        ]
+    if not conclusion.get("key_risks"):
+        conclusion["key_risks"] = [
+            str(item.get("label") or item.get("summary") or "").strip()
+            for item in (assembled.get("risk_judgement") or [])[:3]
+            if str(item.get("label") or item.get("summary") or "").strip()
+        ]
+    confidence_source = utility_assessment.get("confidence") or utility_assessment.get("utility_confidence") or 0.0
+    confidence_text = _confidence_label(confidence_source)
+    conclusion["confidence_label"] = {"high": "高", "medium": "中", "low": "低"}.get(confidence_text, "待评估")
+    assembled["conclusion"] = conclusion
+
+    assembled["metadata"] = metadata
+    finalized = _finalize_structured_payload(assembled)
+    validated = StructuredReport.model_validate(finalized)
+    return validated.model_dump()
+
+
+def validate_structured_payload_core(payload: Dict[str, Any]) -> Dict[str, Any]:
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    counts = {
+        "key_evidence": len(payload.get("key_evidence") or []),
+        "citations": len(payload.get("citations") or []),
+        "timeline": len(payload.get("timeline") or []),
+        "subjects": len(payload.get("subjects") or []),
+    }
+    missing: List[str] = []
+    if not str(task.get("topic_identifier") or "").strip():
+        missing.append("task.topic_identifier")
+    if not str(task.get("start") or "").strip():
+        missing.append("task.start")
+    if not str(task.get("end") or "").strip():
+        missing.append("task.end")
+    if counts["key_evidence"] < 3:
+        missing.append("key_evidence>=3")
+    if counts["citations"] < 3:
+        missing.append("citations>=3")
+    if counts["timeline"] < 1:
+        missing.append("timeline>=1")
+    if counts["subjects"] < 1:
+        missing.append("subjects>=1")
+    return {
+        "valid": not missing,
+        "reason": "" if not missing else "core producer fields insufficient: " + ", ".join(missing),
+        "counts": counts,
+        "missing": missing,
+    }
 
 
 def _summarize_validation_error(exc: Exception) -> str:
@@ -1206,10 +2119,85 @@ def _repair_payload_from_validation_error(
     return repaired, repaired_keys
 
 
+def _is_structured_payload_valid(payload: Dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("structured_valid") is False:
+        return False
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    if metadata.get("structured_valid") is False:
+        return False
+    return True
+
+
 def _upsert_runtime_json_file(files: Optional[Dict[str, Dict[str, Any]]], path: str, payload: Dict[str, Any]) -> None:
     if not isinstance(files, dict) or not path:
         return
     files[path] = create_file_data(json.dumps(payload or {}, ensure_ascii=False, indent=2))
+
+
+def _state_relative_path(path: str) -> str:
+    text = str(path or "").strip()
+    if not text:
+        return ""
+    marker = "/state/"
+    if marker in text:
+        return text.split(marker, 1)[1].lstrip("/")
+    return ""
+
+
+def _state_workspace_path(layout: RuntimeWorkspaceLayout, relative_path: str) -> str:
+    return layout.state_file(relative_path)
+
+
+def _runtime_workspace_path_tokens(layout: RuntimeWorkspaceLayout) -> Dict[str, str]:
+    return {
+        "project_identifier": layout.project_component,
+        "report_range": layout.range_component,
+        "workspace_root": layout.workspace_root,
+        "state_root": layout.state_root,
+    }
+
+
+def _runtime_workspace_layout_for(
+    *,
+    topic_identifier: str,
+    project_identifier: str,
+    start_text: str,
+    end_text: str,
+) -> RuntimeWorkspaceLayout:
+    return build_runtime_workspace_layout(
+        project_identifier=project_identifier,
+        topic_identifier=topic_identifier,
+        start=start_text,
+        end=end_text,
+    )
+
+
+def _find_state_file_path(files: Optional[Dict[str, Dict[str, Any]]], relative_path: str) -> str:
+    if not isinstance(files, dict):
+        return ""
+    rel = str(relative_path or "").strip().lstrip("/")
+    if not rel:
+        return ""
+    suffix = f"/state/{rel}"
+    for path in files.keys():
+        path_text = str(path or "").strip()
+        if path_text.endswith(suffix):
+            return path_text
+    return ""
+
+
+def _upsert_state_json_file(
+    files: Optional[Dict[str, Dict[str, Any]]],
+    layout: RuntimeWorkspaceLayout,
+    relative_path: str,
+    payload: Dict[str, Any],
+) -> None:
+    rel = str(relative_path or "").strip().lstrip("/")
+    if not rel:
+        return
+    _upsert_runtime_json_file(files, _state_workspace_path(layout, rel), payload)
 
 
 def _build_todos() -> List[Dict[str, Any]]:
@@ -1550,12 +2538,80 @@ def _upsert_runtime_text_file(files: Optional[Dict[str, Dict[str, Any]]], path: 
     files[path] = create_file_data(str(content or "").strip())
 
 
+def _tool_file_path(args: Dict[str, Any]) -> str:
+    if not isinstance(args, dict):
+        return ""
+    for key in ("file_path", "path", "target_file", "target_path"):
+        value = str(args.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _tracker_runtime_files(tracker: Optional[Dict[str, Any]]) -> Optional[Dict[str, Dict[str, Any]]]:
+    if not isinstance(tracker, dict):
+        return None
+    runtime_files = tracker.get("runtime_files")
+    return runtime_files if isinstance(runtime_files, dict) else None
+
+
+def _tracker_workspace_layout(tracker: Optional[Dict[str, Any]]) -> Optional[RuntimeWorkspaceLayout]:
+    if not isinstance(tracker, dict):
+        return None
+    layout = tracker.get("workspace_layout")
+    return layout if isinstance(layout, RuntimeWorkspaceLayout) else None
+
+
+def _is_workspace_runtime_path(path: str, tracker: Optional[Dict[str, Any]]) -> bool:
+    path_text = str(path or "").strip()
+    if not path_text.startswith("/workspace/"):
+        return False
+    layout = _tracker_workspace_layout(tracker)
+    if layout is None:
+        return False
+    return path_text == layout.base_context_path or path_text.startswith(f"{layout.workspace_root}/")
+
+
+def _sync_runtime_file_write_from_tool(
+    tracker: Optional[Dict[str, Any]],
+    *,
+    tool_name: str,
+    args: Dict[str, Any],
+    result_text: str,
+) -> None:
+    runtime_files = _tracker_runtime_files(tracker)
+    path = _tool_file_path(args)
+    if runtime_files is None or not _is_workspace_runtime_path(path, tracker):
+        return
+    if tool_name == "write_file":
+        runtime_files[path] = create_file_data(str(args.get("content") or ""))
+        return
+    if tool_name == "edit_file":
+        current = _read_runtime_file(runtime_files, path)
+        old_string = str(args.get("old_string") or "")
+        new_string = str(args.get("new_string") or "")
+        replace_all = bool(args.get("replace_all"))
+        if old_string:
+            updated = current.replace(old_string, new_string) if replace_all else current.replace(old_string, new_string, 1)
+        elif new_string:
+            updated = new_string
+        else:
+            updated = current
+        runtime_files[path] = create_file_data(updated)
+        return
+    if tool_name == "delete_file":
+        runtime_files.pop(path, None)
+
+
 def _ensure_validation_notes_from_claim_checks(
     files: Optional[Dict[str, Dict[str, Any]]],
     *,
     topic_label: str,
 ) -> Dict[str, int]:
-    raw = _read_runtime_file(files if isinstance(files, dict) else {}, "/workspace/state/claim_checks.json")
+    claim_checks_path = _find_state_file_path(files, "claim_checks.json")
+    if not claim_checks_path:
+        return {}
+    raw = _read_runtime_file(files if isinstance(files, dict) else {}, claim_checks_path)
     if not raw.strip():
         return {}
     try:
@@ -1570,7 +2626,8 @@ def _ensure_validation_notes_from_claim_checks(
         return {}
     counts = _claim_verification_counts(records)
     markdown = _build_validation_notes_markdown(topic_label=topic_label, claim_checks=parsed)
-    _upsert_runtime_text_file(files, "/workspace/state/validation_notes.md", markdown)
+    validation_notes_path = claim_checks_path.rsplit("/", 1)[0] + "/validation_notes.md"
+    _upsert_runtime_text_file(files, validation_notes_path, markdown)
     return counts
 
 
@@ -1579,6 +2636,7 @@ def _update_tool_tracker(shared: Dict[str, Any], tool_name: str, payload: Dict[s
         return
     flags = set(_tool_coverage_flags(payload))
     runtime_files = shared.get("runtime_files") if isinstance(shared.get("runtime_files"), dict) else None
+    workspace_layout = shared.get("workspace_layout") if isinstance(shared.get("workspace_layout"), RuntimeWorkspaceLayout) else None
     if bool(payload.get("legacy_adapter_hit")):
         shared["legacy_adapter_hit_count"] = int(shared.get("legacy_adapter_hit_count") or 0) + 1
         legacy_hits = shared.get("legacy_adapter_hits") if isinstance(shared.get("legacy_adapter_hits"), list) else []
@@ -1601,13 +2659,14 @@ def _update_tool_tracker(shared: Dict[str, Any], tool_name: str, payload: Dict[s
                 task_derivation=task_derivation,
                 proposal_snapshot=proposal_snapshot,
             )
-        if task_contract:
-            _upsert_runtime_json_file(runtime_files, "/workspace/state/task_contract.json", task_contract)
-        if task_derivation:
-            _upsert_runtime_json_file(runtime_files, "/workspace/state/task_derivation.json", task_derivation)
-        if proposal_snapshot:
-            _upsert_runtime_json_file(runtime_files, "/workspace/state/task_derivation_proposal.json", proposal_snapshot)
-        _upsert_runtime_json_file(runtime_files, "/workspace/state/normalized_task.json", payload)
+        if workspace_layout is not None:
+            if task_contract:
+                _upsert_state_json_file(runtime_files, workspace_layout, "task_contract.json", task_contract)
+            if task_derivation:
+                _upsert_state_json_file(runtime_files, workspace_layout, "task_derivation.json", task_derivation)
+            if proposal_snapshot:
+                _upsert_state_json_file(runtime_files, workspace_layout, "task_derivation_proposal.json", proposal_snapshot)
+            _upsert_state_json_file(runtime_files, workspace_layout, "normalized_task.json", payload)
     elif tool_name == "get_corpus_coverage":
         if "contract_binding_failed" in flags:
             shared["coverage_state"] = "contract_binding_failed"
@@ -2033,20 +3092,63 @@ def _build_lifecycle_middleware(
                     },
                 )
                 return ToolMessage(content=cached_result, tool_call_id=tool_call_id)
+            if tool_name == "read_file" and shared is not None:
+                read_path = _tool_file_path(args)
+                if _is_workspace_runtime_path(read_path, shared):
+                    runtime_files = _tracker_runtime_files(shared)
+                    cached_content = _read_runtime_file(runtime_files or {}, read_path).strip()
+                    if cached_content:
+                        _emit(
+                            event_callback,
+                            {
+                                "type": "tool.result",
+                                "phase": default_phase,
+                                "agent": actor_name,
+                                "title": f"工具返回：{tool_name}",
+                                "message": "已从共享运行态返回文件内容。",
+                                "payload": {
+                                    "tool_name": tool_name,
+                                    "tool_call_id": tool_call_id,
+                                    "result_preview": cached_content[:300],
+                                    "result_source": "shared_runtime_files",
+                                },
+                            },
+                        )
+                        return ToolMessage(content=cached_content, tool_call_id=tool_call_id)
 
         if tool_name == "write_todos":
             todos = _normalize_deep_todos(args.get("todos"))
             if todos:
-                _emit(
-                    event_callback,
-                    {
-                        "type": "todo.updated",
-                        "phase": default_phase,
-                        "title": "任务清单已更新",
-                        "message": f"总控代理更新了任务清单（{len(todos)} 项）。",
-                        "payload": {"todos": todos},
-                    },
-                )
+                if actor_name == "report_coordinator":
+                    _emit(
+                        event_callback,
+                        {
+                            "type": "todo.updated",
+                            "phase": default_phase,
+                            "title": "任务清单已更新",
+                            "message": f"总控代理更新了任务清单（{len(todos)} 项）。",
+                            "payload": {"todos": todos},
+                        },
+                    )
+                else:
+                    _emit(
+                        event_callback,
+                        {
+                            "type": "agent.memo",
+                            "phase": default_phase,
+                            "agent": actor_name,
+                            "title": "子任务计划已更新",
+                            "message": f"{actor_name} 更新了内部执行计划，但不会覆盖主流程清单。",
+                            "payload": {
+                                "stage_id": "agent_todo",
+                                "tool_name": tool_name,
+                                "outcome_kind": "planning",
+                                "decision_summary": f"{actor_name} 更新了 {len(todos)} 项内部执行计划。",
+                                "next_action": "继续按主流程 Tier 清单观察整体进度。",
+                                "todos": todos,
+                            },
+                        },
+                    )
 
         subagent_type = ""
         subagent_phase = default_phase
@@ -2114,6 +3216,13 @@ def _build_lifecycle_middleware(
         result_preview = _tool_result_preview(result)
         raw_text = _tool_result_text(result)
         parsed_payload = _parse_tool_result_payload(result)
+        if shared is not None and tool_name in {"write_file", "edit_file", "delete_file"}:
+            _sync_runtime_file_write_from_tool(
+                shared,
+                tool_name=tool_name,
+                args=args,
+                result_text=raw_text or result_preview,
+            )
         if tool_name == "normalize_task" and parsed_payload:
             corrected_payload, violations = _normalized_task_contract_violation(parsed_payload, shared)
             raw_text = json.dumps(corrected_payload, ensure_ascii=False)
@@ -2169,7 +3278,7 @@ def _build_lifecycle_middleware(
 def _read_runtime_file(files: Dict[str, Any], path: str) -> str:
     if not isinstance(files, dict):
         return ""
-    payload = files.get(path)
+    payload = files.get(str(path or "").strip())
     if not isinstance(payload, dict):
         return ""
     content = payload.get("content")
@@ -2178,32 +3287,181 @@ def _read_runtime_file(files: Dict[str, Any], path: str) -> str:
     return str(content or "")
 
 
+def _collect_section_drafts_from_files(files: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(files, dict):
+        return {}
+    output: Dict[str, Dict[str, Any]] = {}
+    for path in sorted(files.keys()):
+        path_text = str(path or "").strip()
+        rel = _state_relative_path(path_text)
+        if not rel.startswith("section_drafts/") or not path_text.endswith(".json"):
+            continue
+        raw = _read_runtime_file(files, path_text).strip()
+        if not raw:
+            continue
+        parsed = _parse_json_object(raw)
+        output[path_text] = parsed if parsed else {"content": raw}
+    return output
+
+
+def _sha256_text(text: str) -> str:
+    payload = str(text or "").encode("utf-8", errors="ignore")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _persist_workspace_state(
+    *,
+    cache_dir: Path,
+    runtime_files: Dict[str, Dict[str, Any]],
+    identity: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Persist runtime state files into the report cache directory."""
+    if not isinstance(runtime_files, dict) or not cache_dir:
+        return {}
+    state_root = cache_dir / _WORKSPACE_STATE_DIRNAME
+    state_root.mkdir(parents=True, exist_ok=True)
+
+    artifact_rows: List[Dict[str, Any]] = []
+    persisted_rel_paths: set[str] = set()
+    for path, payload in runtime_files.items():
+        path_text = str(path or "").strip()
+        rel = _state_relative_path(path_text)
+        if not rel:
+            continue
+        if rel.endswith(".keep"):
+            continue
+        content = _read_runtime_file(runtime_files, path_text)
+        if not str(content or "").strip():
+            continue
+        if rel in persisted_rel_paths:
+            continue
+        persisted_rel_paths.add(rel)
+        target = state_root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(content), encoding="utf-8")
+        owner = str(EXPLORATION_ARTIFACT_OWNERS.get(rel) or "").strip()
+        status = "ready"
+        empty_reason = ""
+        invalidated_reason = ""
+        parsed = _parse_json_object(content)
+        if isinstance(parsed, dict):
+            state_value = str(parsed.get("status") or "").strip().lower()
+            if state_value in {"empty", "failed", "stale"}:
+                status = state_value
+            elif not str(content or "").strip():
+                status = "empty"
+            empty_reason = str(parsed.get("empty_reason") or parsed.get("reason") or "").strip()
+            invalidated_reason = str(parsed.get("invalidated_reason") or "").strip()
+        artifact_rows.append(
+            {
+                "artifact_key": rel.replace("/", ".").removesuffix(".json"),
+                "kind": "workspace_state",
+                "workspace_path": path_text,
+                "relative_path": f"{_WORKSPACE_STATE_DIRNAME}/{rel}".replace("\\", "/"),
+                "producer": owner or "report_runtime",
+                "owner": owner,
+                "status": status,
+                "identity": dict(identity or {}),
+                "input_fingerprints": {},
+                "content_hash": _sha256_text(content),
+                "generated_at": _utc_now(),
+                "reusable_scope": "exact_range" if rel.startswith("section_packets/") else "project_level",
+                "chars": len(content),
+                "sha256": _sha256_text(content),
+                "empty_reason": empty_reason,
+                "invalidated_reason": invalidated_reason,
+            }
+        )
+
+    core_files = [
+        REPORT_CACHE_FILENAME,
+        "report_ir.json",
+        "agenda_frame_map.json",
+        "conflict_map.json",
+        "mechanism_summary.json",
+        "utility_assessment.json",
+        "basic_analysis_insight.json",
+        "bertopic_insight.json",
+        AI_FULL_REPORT_CACHE_FILENAME,
+    ]
+    for name in core_files:
+        path = cache_dir / name
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        if not str(content or "").strip():
+            continue
+        artifact_rows.append(
+            {
+                "artifact_key": Path(name).stem,
+                "kind": "report_cache",
+                "workspace_path": "",
+                "relative_path": str(name),
+                "producer": "report_runtime",
+                "owner": "report_runtime",
+                "status": "ready",
+                "identity": dict(identity or {}),
+                "input_fingerprints": {},
+                "content_hash": _sha256_text(content),
+                "generated_at": _utc_now(),
+                "reusable_scope": "exact_range",
+                "chars": len(content),
+                "sha256": _sha256_text(content),
+                "empty_reason": "",
+                "invalidated_reason": "",
+            }
+        )
+
+    manifest = {
+        "schema_version": "reuse-manifest.v2",
+        "generated_at": _utc_now(),
+        "identity": dict(identity or {}),
+        "artifacts": artifact_rows,
+    }
+    (cache_dir / _REUSE_MANIFEST_FILENAME).write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return manifest
+
+
 def _state_file_diagnostics(files: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     targets = (
-        "/workspace/state/task_contract.json",
-        "/workspace/state/task_derivation.json",
-        "/workspace/state/task_derivation_proposal.json",
-        "/workspace/state/normalized_task.json",
-        "/workspace/state/retrieval_plan.json",
-        "/workspace/state/dispatch_quality.json",
-        "/workspace/state/corpus_coverage.json",
-        "/workspace/state/evidence_cards.json",
-        "/workspace/state/timeline_nodes.json",
-        "/workspace/state/metrics_bundle.json",
-        "/workspace/state/actor_positions.json",
-        "/workspace/state/agenda_frame_map.json",
-        "/workspace/state/conflict_map.json",
-        "/workspace/state/mechanism_summary.json",
-        "/workspace/state/risk_signals.json",
-        "/workspace/state/utility_assessment.json",
-        "/workspace/base_context.json",
+        "task_contract.json",
+        "task_derivation.json",
+        "task_derivation_proposal.json",
+        "normalized_task.json",
+        "retrieval_plan.json",
+        "dispatch_quality.json",
+        "corpus_coverage.json",
+        "evidence_cards.json",
+        "timeline_nodes.json",
+        "metrics_bundle.json",
+        "actor_positions.json",
+        "agenda_frame_map.json",
+        "conflict_map.json",
+        "mechanism_summary.json",
+        "risk_signals.json",
+        "utility_assessment.json",
+        "base_context.json",
     )
     output: Dict[str, Dict[str, Any]] = {}
     for path in targets:
-        payload = files.get(path) if isinstance(files, dict) else None
-        content = _read_runtime_file(files, path)
+        candidate = _find_state_file_path(files, path) if path != "base_context.json" else next(
+            (
+                str(item)
+                for item in (files or {}).keys()
+                if str(item or "").strip().endswith("/base_context.json")
+            ),
+            "",
+        )
+        payload = files.get(candidate) if isinstance(files, dict) and candidate else None
+        content = _read_runtime_file(files, candidate)
         output[path] = {
-            "exists": isinstance(payload, dict),
+            "exists": isinstance(payload, dict) or bool(content),
             "chars": len(content),
             "empty": not bool(content.strip()),
         }
@@ -2211,15 +3469,371 @@ def _state_file_diagnostics(files: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def _runtime_file_ready(files: Dict[str, Any], path: str) -> bool:
-    payload = files.get(path) if isinstance(files, dict) else None
-    if not isinstance(payload, dict):
-        return False
     return bool(_read_runtime_file(files, path).strip())
 
 
+_EXACT_RANGE_REUSE_KEYS = {
+    "full_markdown",
+    "draft_bundle",
+    "draft_bundle.v2",
+    "utility_assessment",
+    "report_ir",
+}
+_TIER_RULES = {
+    "evidence_cards": 1,
+    "timeline_nodes": 2,
+    "metrics_bundle": 2,
+    "actor_positions": 2,
+    "event_analysis": 3,
+    "conflict_map": 3,
+    "agenda_frame_map": 4,
+    "mechanism_summary": 4,
+    "risk_signals": 4,
+}
+_ARTIFACT_TARGET_AGENTS = {
+    "task_contract": "retrieval_router",
+    "task_derivation": "retrieval_router",
+    "task_derivation_proposal": "retrieval_router",
+    "normalized_task": "retrieval_router",
+    "retrieval_plan": "retrieval_router",
+    "dispatch_quality": "retrieval_router",
+    "corpus_coverage": "retrieval_router",
+    "evidence_cards": "archive_evidence_organizer",
+    "bertopic_insight": "bertopic_evolution_analyst",
+    "timeline_nodes": "timeline_analyst",
+    "metrics_bundle": "timeline_analyst",
+    "actor_positions": "stance_conflict",
+    "event_analysis": "event_analyst",
+    "conflict_map": "claim_actor_conflict",
+    "agenda_frame_map": "agenda_frame_builder",
+    "mechanism_summary": "propagation_analyst",
+    "risk_signals": "propagation_analyst",
+    "utility_assessment": "decision_utility_judge",
+}
+_ARTIFACT_RELATIVE_PATHS = {
+    "task_contract": "task_contract.json",
+    "task_derivation": "task_derivation.json",
+    "task_derivation_proposal": "task_derivation_proposal.json",
+    "normalized_task": "normalized_task.json",
+    "retrieval_plan": "retrieval_plan.json",
+    "dispatch_quality": "dispatch_quality.json",
+    "corpus_coverage": "corpus_coverage.json",
+    "evidence_cards": "evidence_cards.json",
+    "bertopic_insight": "bertopic_insight.json",
+    "timeline_nodes": "timeline_nodes.json",
+    "metrics_bundle": "metrics_bundle.json",
+    "actor_positions": "actor_positions.json",
+    "event_analysis": "event_analysis.json",
+    "conflict_map": "conflict_map.json",
+    "agenda_frame_map": "agenda_frame_map.json",
+    "mechanism_summary": "mechanism_summary.json",
+    "risk_signals": "risk_signals.json",
+    "utility_assessment": "utility_assessment.json",
+}
+_SUPPLEMENT_DISALLOWED_KEYS = {
+    "utility_assessment",
+    "report_ir",
+    "draft_bundle",
+    "draft_bundle.v2",
+    "full_markdown",
+    "section_packets",
+}
+
+
+def _reuse_artifact_key(relative_path: str) -> str:
+    rel = str(relative_path or "").strip().replace("\\", "/")
+    if rel.startswith("state/"):
+        rel = rel[len("state/") :]
+    return Path(rel).stem if rel else ""
+
+
+def _load_reuse_manifest(cache_dir: Path) -> Dict[str, Any]:
+    path = cache_dir / _REUSE_MANIFEST_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _collect_project_report_dirs(project_identifier: str) -> List[Path]:
+    project_text = str(project_identifier or "").strip()
+    if not project_text:
+        return []
+    reports_root = get_data_root() / "projects" / project_text / "reports"
+    if not reports_root.exists():
+        return []
+    return sorted((path for path in reports_root.iterdir() if path.is_dir()), key=lambda path: path.name, reverse=True)
+
+
+def _build_reuse_planning(*, cache_dir: Path, identity: Dict[str, Any]) -> Dict[str, Any]:
+    project_identifier = str(identity.get("project_identifier") or "").strip()
+    start = str(identity.get("start") or "").strip()
+    end = str(identity.get("end") or "").strip()
+    mode = str(identity.get("mode") or "").strip()
+    current_range = f"{start}_{end}"
+    candidates: List[Dict[str, Any]] = []
+    decisions: Dict[str, Dict[str, Any]] = {}
+    best_exact: Dict[str, Dict[str, Any]] = {}
+    best_project_level: Dict[str, Dict[str, Any]] = {}
+
+    for report_dir in _collect_project_report_dirs(project_identifier):
+        if report_dir.resolve() == cache_dir.resolve():
+            continue
+        manifest = _load_reuse_manifest(report_dir)
+        manifest_identity = manifest.get("identity") if isinstance(manifest.get("identity"), dict) else {}
+        if str(manifest_identity.get("project_identifier") or "").strip() != project_identifier:
+            continue
+        report_range = f"{manifest_identity.get('start')}_{manifest_identity.get('end')}"
+        for item in manifest.get("artifacts") or []:
+            if not isinstance(item, dict):
+                continue
+            status = str(item.get("status") or "").strip()
+            if status in {"empty", "failed", "stale"}:
+                continue
+            artifact_key = str(item.get("artifact_key") or _reuse_artifact_key(item.get("relative_path") or "")).strip()
+            if not artifact_key:
+                continue
+            row = {
+                "artifact_key": artifact_key,
+                "status": status or "ready",
+                "relative_path": str(item.get("relative_path") or "").strip(),
+                "workspace_path": str(item.get("workspace_path") or "").strip(),
+                "source_report_range": report_range,
+                "source_mode": str(manifest_identity.get("mode") or "").strip(),
+                "content_hash": str(item.get("content_hash") or item.get("sha256") or "").strip(),
+                "reusable_scope": str(item.get("reusable_scope") or "").strip() or "project_level",
+            }
+            exact_match = report_range == current_range and row["source_mode"] == mode
+            if exact_match:
+                best_exact.setdefault(artifact_key, row)
+            elif artifact_key in _TIER_RULES:
+                best_project_level.setdefault(artifact_key, row)
+            candidates.append(row)
+
+    for artifact_key in sorted({*best_exact.keys(), *best_project_level.keys(), *_TIER_RULES.keys(), *_EXACT_RANGE_REUSE_KEYS}):
+        decision = {
+            "artifact_key": artifact_key,
+            "decision": "rerun",
+            "reason": "no_eligible_reuse_candidate",
+            "source_report_range": "",
+            "required_inputs": [],
+            "blocked_by": [],
+            "runtime_action": "run_fresh",
+            "target_agent": str(_ARTIFACT_TARGET_AGENTS.get(artifact_key) or "").strip(),
+        }
+        exact = best_exact.get(artifact_key)
+        if exact:
+            decision.update(
+                {
+                    "decision": "reuse",
+                    "reason": "exact_range_match",
+                    "source_report_range": exact["source_report_range"],
+                    "runtime_action": "hydrate_and_skip" if artifact_key != "evidence_cards" else "hydrate_and_run",
+                }
+            )
+        elif artifact_key in _TIER_RULES:
+            project_level = best_project_level.get(artifact_key)
+            if project_level:
+                decision.update(
+                    {
+                        "decision": "supplement" if artifact_key == "evidence_cards" else "rerun",
+                        "reason": "project_level_reference_available" if artifact_key == "evidence_cards" else "fixed_tier_requires_fresh_upstream",
+                        "source_report_range": project_level["source_report_range"],
+                        "runtime_action": "hydrate_and_run" if artifact_key == "evidence_cards" else "run_fresh",
+                    }
+                )
+        if artifact_key in _SUPPLEMENT_DISALLOWED_KEYS and decision["decision"] == "supplement":
+            decision.update(
+                {
+                    "decision": "rerun",
+                    "reason": "supplement_not_allowed_for_artifact",
+                    "runtime_action": "run_fresh",
+                }
+            )
+        decisions[artifact_key] = decision
+
+    if decisions.get("evidence_cards", {}).get("decision") == "rerun":
+        for artifact_key, tier in _TIER_RULES.items():
+            if tier >= 2:
+                decisions[artifact_key] = {
+                    **decisions.get(artifact_key, {"artifact_key": artifact_key}),
+                    "artifact_key": artifact_key,
+                    "decision": "rerun",
+                    "reason": "fixed_tier_invalidation_from_evidence_cards",
+                    "blocked_by": ["evidence_cards"],
+                    "required_inputs": [],
+                    "source_report_range": str(decisions.get(artifact_key, {}).get("source_report_range") or ""),
+                    "runtime_action": "run_fresh",
+                    "target_agent": str(_ARTIFACT_TARGET_AGENTS.get(artifact_key) or "").strip(),
+                }
+
+    return {
+        "schema_version": "reuse-decision.v1",
+        "generated_at": _utc_now(),
+        "identity": dict(identity or {}),
+        "candidates_summary": {
+            "project_identifier": project_identifier,
+            "current_report_range": current_range,
+            "candidate_count": len(candidates),
+            "exact_match_count": len(best_exact),
+            "project_level_count": len(best_project_level),
+            "items": candidates[:200],
+        },
+        "artifacts": [decisions[key] for key in sorted(decisions.keys())],
+    }
+
+
+def _report_dir_for_range(*, project_identifier: str, start: str, end: str) -> Path:
+    project_component = str(project_identifier or "").strip()
+    if not project_component:
+        raise ValueError("project_identifier is required for project-scoped report storage")
+    return get_data_root() / "projects" / project_component / "reports" / compose_folder_name(start, end)
+
+
+def _load_historical_reuse_artifact(
+    *,
+    project_identifier: str,
+    source_report_range: str,
+    artifact_key: str,
+) -> Tuple[str, Dict[str, Any]]:
+    start_text, _, end_text = str(source_report_range or "").partition("_")
+    end_value = end_text or start_text
+    report_dir = _report_dir_for_range(project_identifier=project_identifier, start=start_text, end=end_value)
+    rel = _ARTIFACT_RELATIVE_PATHS.get(artifact_key)
+    if not rel:
+        return "", {}
+    artifact_path = report_dir / "state" / rel
+    if not artifact_path.exists():
+        return "", {}
+    try:
+        content = artifact_path.read_text(encoding="utf-8")
+    except Exception:
+        return "", {}
+    parsed = _parse_json_object(content)
+    return str(artifact_path), parsed if isinstance(parsed, dict) else {}
+
+
+def _build_reuse_execution_plan(
+    *,
+    reuse_decision: Dict[str, Any],
+) -> Dict[str, Any]:
+    artifacts = reuse_decision.get("artifacts") if isinstance(reuse_decision.get("artifacts"), list) else []
+    artifact_plan: Dict[str, Dict[str, Any]] = {}
+    node_plan: Dict[str, Dict[str, Any]] = {}
+    for item in artifacts:
+        if not isinstance(item, dict):
+            continue
+        artifact_key = str(item.get("artifact_key") or "").strip()
+        if not artifact_key:
+            continue
+        target_agent = str(item.get("target_agent") or _ARTIFACT_TARGET_AGENTS.get(artifact_key) or "").strip()
+        runtime_action = str(item.get("runtime_action") or "run_fresh").strip() or "run_fresh"
+        row = {
+            "artifact_key": artifact_key,
+            "decision": str(item.get("decision") or "rerun").strip() or "rerun",
+            "runtime_action": runtime_action,
+            "source_report_range": str(item.get("source_report_range") or "").strip(),
+            "target_agent": target_agent,
+            "blocked_by": [str(value).strip() for value in (item.get("blocked_by") or []) if str(value or "").strip()],
+        }
+        artifact_plan[artifact_key] = row
+        if not target_agent:
+            continue
+        agent_row = node_plan.setdefault(
+            target_agent,
+            {
+                "agent_name": target_agent,
+                "artifact_keys": [],
+                "runtime_actions": [],
+                "skip": True,
+                "supplement": False,
+                "source_report_ranges": [],
+            },
+        )
+        agent_row["artifact_keys"].append(artifact_key)
+        agent_row["runtime_actions"].append(runtime_action)
+        if runtime_action != "hydrate_and_skip":
+            agent_row["skip"] = False
+        if runtime_action == "hydrate_and_run":
+            agent_row["supplement"] = True
+        source_report_range = str(item.get("source_report_range") or "").strip()
+        if source_report_range and source_report_range not in agent_row["source_report_ranges"]:
+            agent_row["source_report_ranges"].append(source_report_range)
+
+    node_plan.setdefault(
+        "writer",
+        {
+            "agent_name": "writer",
+            "artifact_keys": [],
+            "runtime_actions": ["run_fresh"],
+            "skip": False,
+            "supplement": False,
+            "source_report_ranges": [],
+        },
+    )
+    return {
+        "schema_version": "reuse-execution-plan.v1",
+        "artifacts": artifact_plan,
+        "nodes": node_plan,
+    }
+
+
+def _hydrate_reuse_candidates_into_runtime(
+    *,
+    runtime_files: Dict[str, Dict[str, Any]],
+    layout: RuntimeWorkspaceLayout,
+    project_identifier: str,
+    reuse_decision: Dict[str, Any],
+    execution_plan: Dict[str, Any],
+) -> Dict[str, Any]:
+    reused_artifacts: Dict[str, Dict[str, Any]] = {}
+    supplement_candidates: Dict[str, Dict[str, Any]] = {}
+    artifact_rows = execution_plan.get("artifacts") if isinstance(execution_plan.get("artifacts"), dict) else {}
+    for artifact_key, row in artifact_rows.items():
+        if not isinstance(row, dict):
+            continue
+        runtime_action = str(row.get("runtime_action") or "").strip()
+        source_report_range = str(row.get("source_report_range") or "").strip()
+        if runtime_action not in {"hydrate_and_skip", "hydrate_and_run"} or not source_report_range:
+            continue
+        source_path, payload = _load_historical_reuse_artifact(
+            project_identifier=project_identifier,
+            source_report_range=source_report_range,
+            artifact_key=str(artifact_key),
+        )
+        if not payload:
+            continue
+        rel = _ARTIFACT_RELATIVE_PATHS.get(str(artifact_key))
+        if not rel:
+            continue
+        _upsert_state_json_file(runtime_files, layout, rel, payload)
+        entry = {
+            "artifact_key": str(artifact_key),
+            "source_report_range": source_report_range,
+            "source_path": source_path,
+            "target_path": layout.state_file(rel),
+            "runtime_path": layout.state_file(rel),
+            "runtime_action": runtime_action,
+            "target_agent": str(row.get("target_agent") or "").strip(),
+        }
+        if runtime_action == "hydrate_and_skip":
+            reused_artifacts[str(artifact_key)] = entry
+        else:
+            supplement_candidates[str(artifact_key)] = entry
+    return {
+        "reused_artifacts": reused_artifacts,
+        "supplement_candidates": supplement_candidates,
+        "reuse_decision": reuse_decision,
+        "execution_plan": execution_plan,
+    }
+
+
 def _ready_for_deterministic_finalize(files: Dict[str, Any]) -> bool:
-    required_paths = ("/workspace/state/structured_report.json",)
-    return all(_runtime_file_ready(files, path) for path in required_paths)
+    structured_path = _find_state_file_path(files, "structured_report.json")
+    return bool(structured_path and _runtime_file_ready(files, structured_path))
 
 
 def _extend_closure_diagnostic(
@@ -2285,65 +3899,15 @@ def _synthesize_structured_report_from_files(
     mode: str,
     thread_id: str,
 ) -> Dict[str, Any]:
-    prompt_parts = [
-        "你是报告结构化汇总代理。请根据工作区中的中间产物生成完整 StructuredReport JSON。",
-        "必须返回一个合法 JSON 对象，不要输出 Markdown，不要解释。",
-        "缺失信息允许谨慎留空，但必须保证字段完整并通过结构校验。",
-        f"topic_identifier={topic_identifier}",
-        f"topic_label={topic_label}",
-        f"start={start_text}",
-        f"end={end_text}",
-        f"mode={mode}",
-        f"thread_id={thread_id}",
-    ]
-    for path in (
-        "/workspace/state/task_contract.json",
-        "/workspace/state/task_derivation.json",
-        "/workspace/state/task_derivation_proposal.json",
-        "/workspace/state/normalized_task.json",
-        "/workspace/state/retrieval_plan.json",
-        "/workspace/state/dispatch_quality.json",
-        "/workspace/state/corpus_coverage.json",
-        "/workspace/state/evidence_cards.json",
-        "/workspace/state/timeline_nodes.json",
-        "/workspace/state/metrics_bundle.json",
-        "/workspace/state/actor_positions.json",
-        "/workspace/state/agenda_frame_map.json",
-        "/workspace/state/conflict_map.json",
-        "/workspace/state/mechanism_summary.json",
-        "/workspace/state/risk_signals.json",
-        "/workspace/state/utility_assessment.json",
-        "/workspace/state/discourse_conflict_map.json",
-        "/workspace/state/section_packets/overview.json",
-        "/workspace/state/section_packets/timeline.json",
-        "/workspace/state/section_packets/risk.json",
-        "/workspace/state/structured_report.json",
-        "/workspace/base_context.json",
-    ):
-        text = _read_runtime_file(files, path).strip()
-        if text:
-            prompt_parts.append(f"\n## {path}\n{text[:12000]}")
-    raw = _safe_async(
-        call_langchain_chat(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "你负责生成结构化舆情报告 JSON。"
-                        "输出必须是单个 JSON 对象，字段必须匹配 StructuredReport。"
-                        "conclusion 必须是对象；timeline 必须是数组，不能返回 {nodes:[...]} 之外的包裹结构。"
-                        "不需要节省 token，优先一次性补齐完整字段，减少反复试探。"
-                    ),
-                },
-                {"role": "user", "content": "\n".join(prompt_parts)},
-            ],
-            task="report",
-            model_role="report",
-            temperature=0.1,
-            max_tokens=6200,
-        )
+    return _assemble_structured_report_from_runtime_files(
+        files=files,
+        topic_identifier=topic_identifier,
+        topic_label=topic_label,
+        start_text=start_text,
+        end_text=end_text,
+        mode=mode,
+        thread_id=thread_id,
     )
-    return _parse_json_object(raw)
 
 
 def _prepare_runtime(
@@ -2351,6 +3915,7 @@ def _prepare_runtime(
     start_text: str,
     end_text: str,
     *,
+    project_identifier: str,
     topic_label: str,
     mode: str,
     thread_id: str,
@@ -2364,12 +3929,47 @@ def _prepare_runtime(
         mode=mode,
         thread_id=thread_id,
     )
-    workspace_files = build_workspace_files(base_context)
+    layout = _runtime_workspace_layout_for(
+        topic_identifier=topic_identifier,
+        project_identifier=project_identifier,
+        start_text=start_text,
+        end_text=end_text,
+    )
+    base_context["project_identifier"] = str(project_identifier or "").strip()
+    base_context["runtime_workspace"] = {
+        "workspace_root": layout.workspace_root,
+        "state_root": layout.state_root,
+        "report_range": layout.range_component,
+    }
+    workspace_files = build_workspace_files(base_context, layout=layout)
+    reuse_identity = {
+        "project_identifier": str(project_identifier or "").strip(),
+        "topic_identifier": str(topic_identifier or "").strip(),
+        "start": start_text,
+        "end": end_text,
+        "mode": mode,
+        "thread_id": thread_id,
+        "runtime_task_id": task_id,
+        "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
+    }
+    reuse_planning = _build_reuse_planning(
+        cache_dir=ensure_cache_dir_v2(topic_identifier, start_text, end_text, project_identifier=str(project_identifier or "").strip()),
+        identity=reuse_identity,
+    )
+    _upsert_state_json_file(workspace_files, layout, "reuse_decision.json", reuse_planning)
     runtime_backend, runtime_files, skill_assets, memory_paths = _build_runtime_backends(
         task_id=task_id,
         topic_identifier=topic_identifier,
         topic_label=topic_label,
         seed_files=workspace_files,
+    )
+    execution_plan = _build_reuse_execution_plan(reuse_decision=reuse_planning)
+    reuse_runtime = _hydrate_reuse_candidates_into_runtime(
+        runtime_files=runtime_files,
+        layout=layout,
+        project_identifier=str(project_identifier or "").strip(),
+        reuse_decision=reuse_planning,
+        execution_plan=execution_plan,
     )
     common_context = {
         "topic_identifier": topic_identifier,
@@ -2380,8 +3980,17 @@ def _prepare_runtime(
         "thread_id": thread_id,
         "task_id": task_id,
         "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
-        "base_context_path": "/workspace/base_context.json",
+        "project_identifier": str(project_identifier or "").strip(),
+        "workspace_root": layout.workspace_root,
+        "state_root": layout.state_root,
+        "workspace_path_tokens": _runtime_workspace_path_tokens(layout),
+        "base_context_path": layout.base_context_path,
         "task_contract": base_context.get("task_contract") if isinstance(base_context.get("task_contract"), dict) else {},
+        "reuse_decision": reuse_planning,
+        "reuse_candidates_summary": reuse_planning.get("candidates_summary") if isinstance(reuse_planning.get("candidates_summary"), dict) else {},
+        "execution_plan": execution_plan,
+        "reused_artifacts": reuse_runtime.get("reused_artifacts") if isinstance(reuse_runtime.get("reused_artifacts"), dict) else {},
+        "supplement_candidates": reuse_runtime.get("supplement_candidates") if isinstance(reuse_runtime.get("supplement_candidates"), dict) else {},
     }
     return common_context, runtime_files, runtime_backend, skill_assets, memory_paths
 
@@ -2402,6 +4011,7 @@ def _run_deep_report_exploration_task(
     end: Optional[str] = None,
     *,
     topic_label: Optional[str] = None,
+    project_identifier: str = "",
     mode: str = "fast",
     thread_id: Optional[str] = None,
     task_id: str = "",
@@ -2418,7 +4028,18 @@ def _run_deep_report_exploration_task(
     active_thread_id = str(thread_id or _default_thread_id(topic_identifier, start_text, end_text)).strip()
     runtime_task_id = str(task_id or f"rp-runtime-{uuid.uuid4().hex[:8]}").strip()
     coordinator_runtime_thread_id = _runtime_thread_id(task_id=runtime_task_id, role="coordinator")
-    cache_dir = ensure_cache_dir(topic_identifier, start_text, end_text)
+    layout = _runtime_workspace_layout_for(
+        topic_identifier=topic_identifier,
+        project_identifier=str(project_identifier or "").strip(),
+        start_text=start_text,
+        end_text=end_text,
+    )
+    cache_dir = ensure_cache_dir_v2(
+        topic_identifier,
+        start_text,
+        end_text,
+        project_identifier=str(project_identifier or "").strip(),
+    )
     cache_path = cache_dir / REPORT_CACHE_FILENAME
     full_cache_path = cache_dir / AI_FULL_REPORT_CACHE_FILENAME
     review_path = _semantic_review_path(cache_dir)
@@ -2427,6 +4048,7 @@ def _run_deep_report_exploration_task(
         topic_identifier,
         start_text,
         end_text,
+        project_identifier=str(project_identifier or "").strip(),
         topic_label=display_name,
         mode=mode,
         thread_id=active_thread_id,
@@ -2455,6 +4077,7 @@ def _run_deep_report_exploration_task(
             **task_payload,
             "topic_identifier": topic_identifier,
             "topic_label": display_name,
+            "project_identifier": str(project_identifier or "").strip(),
             "start": start_text,
             "end": end_text,
             "mode": mode,
@@ -2468,6 +4091,7 @@ def _run_deep_report_exploration_task(
                 "generated_at": _utc_now(),
                 "thread_id": active_thread_id,
                 "runtime_task_id": runtime_task_id,
+                "project_identifier": str(project_identifier or "").strip(),
             }
         )
         output = _hydrate_render_layers(
@@ -2486,9 +4110,30 @@ def _run_deep_report_exploration_task(
             full_cache_exists=full_cache_path.exists(),
             runtime_path=str(runtime_artifact_path),
         )
+        if not _is_structured_payload_valid(output):
+            output.setdefault("metadata", {})
+            output["metadata"]["closure_stage"] = "structured_validation_failed"
         if persist_cache:
             _write_json(cache_path, output)
-        _upsert_runtime_json_file(runtime_files, "/workspace/state/structured_report.json", output)
+        _upsert_state_json_file(runtime_files, layout, "structured_report.json", output)
+        _persist_workspace_state(
+            cache_dir=Path(cache_dir),
+            runtime_files=runtime_files if isinstance(runtime_files, dict) else {},
+            identity={
+                "project_identifier": str(project_identifier or "").strip(),
+                "topic_identifier": str(topic_identifier or "").strip(),
+                "report_storage_topic": resolve_report_storage_topic(
+                    topic_identifier=str(topic_identifier or "").strip(),
+                    project_identifier=str(project_identifier or "").strip(),
+                ),
+                "start": start_text,
+                "end": end_text,
+                "mode": mode,
+                "thread_id": active_thread_id,
+                "runtime_task_id": runtime_task_id,
+                "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
+            },
+        )
         _emit(
             event_callback,
             {
@@ -2709,6 +4354,10 @@ def _run_deep_report_exploration_task(
             full_cache_exists=True,
             runtime_path=str(runtime_artifact_path),
         )
+        if not _is_structured_payload_valid(structured_payload):
+            raise ValueError(
+                str(structured_payload.get("structured_invalid_reason") or "StructuredReport producer admission gate rejected compile.")
+            )
         compiled = compile_markdown_artifacts(
             structured_payload,
             allow_review_pending=True,
@@ -2767,7 +4416,23 @@ def _run_deep_report_exploration_task(
             {
                 "thread_id": active_thread_id,
                 "runtime_task_id": runtime_task_id,
+                "has_markdown_output": bool(str(markdown or "").strip()),
+                "compile_quality": str(compiled.get("compile_quality") or final_payload["meta"].get("compile_quality") or "healthy"),
+                "publish_status": str(compiled.get("publish_status") or ("pending_review" if compiled.get("review_required") else "ready")),
+                "section_write_receipts": (
+                    list(compiled.get("section_write_receipts") or [])
+                    if isinstance(compiled.get("section_write_receipts"), list)
+                    else list(final_payload["meta"].get("section_write_receipts") or [])
+                ),
             }
+        )
+        final_payload["has_markdown_output"] = bool(str(markdown or "").strip())
+        final_payload["compile_quality"] = str(compiled.get("compile_quality") or final_payload.get("compile_quality") or final_payload["meta"].get("compile_quality") or "healthy")
+        final_payload["publish_status"] = str(compiled.get("publish_status") or ("pending_review" if compiled.get("review_required") else "ready"))
+        final_payload["section_write_receipts"] = (
+            list(compiled.get("section_write_receipts") or [])
+            if isinstance(compiled.get("section_write_receipts"), list)
+            else list(final_payload.get("section_write_receipts") or [])
         )
         final_payload["draft_bundle_v2"] = compiled.get("draft_bundle_v2") if isinstance(compiled.get("draft_bundle_v2"), dict) else {}
         final_payload["validation_result_v2"] = compiled.get("validation_result_v2") if isinstance(compiled.get("validation_result_v2"), dict) else {}
@@ -2802,6 +4467,7 @@ def _run_deep_report_exploration_task(
         "tool_round_limits": {},
         "topic_label": display_name,
         "runtime_files": runtime_files,
+        "workspace_layout": layout,
         "task_contract": {
             "topic_identifier": topic_identifier,
             "topic_label": display_name,
@@ -2974,7 +4640,13 @@ def _run_deep_report_exploration_task(
                         validation_error=exc,
                     )
         if structured_payload:
-            _upsert_runtime_json_file(latest_runtime_files, "/workspace/state/structured_report.json", structured_payload)
+            layout = _runtime_workspace_layout_for(
+                topic_identifier=topic_identifier,
+                project_identifier=str(project_identifier or "").strip(),
+                start_text=start_text,
+                end_text=end_text,
+            )
+            _upsert_state_json_file(latest_runtime_files, layout, "structured_report.json", structured_payload)
         _ensure_validation_notes_from_claim_checks(latest_runtime_files, topic_label=display_name)
         full_payload = _load_current_full_payload()
         if not structured_payload:
@@ -3186,6 +4858,7 @@ def run_or_resume_deep_report_task(
     end: Optional[str] = None,
     *,
     topic_label: Optional[str] = None,
+    project_identifier: str = "",
     mode: str = "fast",
     thread_id: Optional[str] = None,
     task_id: str = "",
@@ -3206,8 +4879,15 @@ def run_or_resume_deep_report_task(
     root_thread_id = f"{runtime_task_id}:root"
     exploration_thread_id = f"{runtime_task_id}:explore"
     compile_thread_id = f"{runtime_task_id}:compile"
-    cache_dir = ensure_cache_dir(topic_identifier, start_text, end_text)
+    cache_dir = ensure_cache_dir_v2(
+        topic_identifier,
+        start_text,
+        end_text,
+        project_identifier=str(project_identifier or "").strip(),
+    )
     structured_cache_path = cache_dir / REPORT_CACHE_FILENAME
+    full_cache_path = cache_dir / AI_FULL_REPORT_CACHE_FILENAME
+    runtime_artifact_path = build_artifacts_root(runtime_task_id, get_data_root()) / "report.md"
     failure_resume = failure_resume_context if isinstance(failure_resume_context, dict) else {}
 
     def _attach_exploration_bundle(
@@ -3361,11 +5041,12 @@ def run_or_resume_deep_report_task(
                 }
             # No cache: coordinator itself did not complete; fall through to re-run.
 
-        # 检查是否使用确定性调度图
-        use_deterministic = os.environ.get("REPORT_USE_DETERMINISTIC_GRAPH", "false").lower() in ("true", "1", "yes")
+        # 默认使用确定性调度图；设置 REPORT_USE_DETERMINISTIC_GRAPH=false|0|no|off 则回退 Deep Agents coordinator。
+        _det_raw = os.environ.get("REPORT_USE_DETERMINISTIC_GRAPH", "true").strip().lower()
+        use_deterministic = _det_raw not in ("false", "0", "no", "off")
 
         if use_deterministic:
-            # 使用确定性调度图模式
+            # 使用确定性调度图模式（默认）
             from .exploration_deterministic_graph import run_exploration_deterministic_graph
 
             # 准备运行时资产
@@ -3373,6 +5054,7 @@ def run_or_resume_deep_report_task(
                 req_topic_id,
                 req_start,
                 req_end,
+                project_identifier=str(request.get("project_identifier") or "").strip(),
                 topic_label=req_label,
                 mode=req_mode,
                 thread_id=req_thread_id,
@@ -3381,6 +5063,30 @@ def run_or_resume_deep_report_task(
             llm, _client_cfg = build_langchain_chat_model(task="report", model_role="report", temperature=0.15, max_tokens=4200)
             if llm is None:
                 raise ValueError("未找到可用的 LangChain 模型配置")
+            layout = _runtime_workspace_layout_for(
+                topic_identifier=req_topic_id,
+                project_identifier=str((common_context or {}).get("project_identifier") or request.get("project_identifier") or "").strip(),
+                start_text=req_start,
+                end_text=req_end,
+            )
+            lifecycle_tracker: Dict[str, Any] = {
+                "tool_calls": [],
+                "subagents_started": [],
+                "subagents_completed": [],
+                "tool_round_counts": {},
+                "tool_round_limits": {},
+                "topic_label": req_label,
+                "runtime_files": runtime_files,
+                "workspace_layout": layout,
+                "task_contract": {
+                    "topic_identifier": req_topic_id,
+                    "topic_label": req_label,
+                    "start": req_start,
+                    "end": req_end,
+                    "mode": req_mode,
+                    "thread_id": req_thread_id,
+                },
+            }
 
             def _coordinator_middleware_factory(agent_name: str) -> List[Any]:
                 return [
@@ -3388,12 +5094,7 @@ def run_or_resume_deep_report_task(
                         event_callback=event_callback,
                         actor_name=agent_name,
                         default_phase=_phase_for_subagent(agent_name),
-                        tracker={
-                            "tool_calls": [],
-                            "subagents_started": [],
-                            "subagents_completed": [],
-                            "topic_label": req_label,
-                        },
+                        tracker=lifecycle_tracker,
                         task_tool_mode=False,
                     )
                 ]
@@ -3413,11 +5114,60 @@ def run_or_resume_deep_report_task(
                 event_callback=lambda event: _emit_runtime_event(event_callback, event, normalize_exploration=True),
                 llm=llm,
                 initial_files=runtime_files,
+                runtime_backend=runtime_backend,
+                common_context=common_context,
+                lifecycle_tracker=lifecycle_tracker,
             )
 
             structured_payload = deterministic_result.get("structured_payload") if isinstance(deterministic_result.get("structured_payload"), dict) else {}
             runtime_files_from_graph = deterministic_result.get("files") if isinstance(deterministic_result.get("files"), dict) else {}
             gaps = deterministic_result.get("gaps") if isinstance(deterministic_result.get("gaps"), list) else []
+            repair_result = _run_readiness_repair_loop(
+                runtime_files=runtime_files_from_graph,
+                request={
+                    "task_id": req_task_id,
+                    "thread_id": req_thread_id,
+                    "topic_identifier": req_topic_id,
+                    "topic_label": req_label,
+                    "project_identifier": str(request.get("project_identifier") or "").strip(),
+                    "start": req_start,
+                    "end": req_end,
+                    "mode": req_mode,
+                },
+                common_context=common_context,
+                skill_assets=skill_assets,
+                middleware_factory=_coordinator_middleware_factory,
+                event_callback=lambda event: _emit_runtime_event(event_callback, event, normalize_exploration=True),
+                llm=llm,
+                runtime_backend=runtime_backend,
+                lifecycle_tracker=lifecycle_tracker,
+            )
+            runtime_files_from_graph = (
+                repair_result.get("runtime_files")
+                if isinstance(repair_result.get("runtime_files"), dict)
+                else runtime_files_from_graph
+            )
+            artifact_semantic_status = (
+                repair_result.get("artifact_semantic_status")
+                if isinstance(repair_result.get("artifact_semantic_status"), dict)
+                else {}
+            )
+            readiness_gate_passed = bool(repair_result.get("readiness_gate_passed"))
+            repair_attempts = int(repair_result.get("repair_attempts") or 0)
+            repair_trace = repair_result.get("repair_trace") if isinstance(repair_result.get("repair_trace"), list) else []
+            blocked_stage = str(repair_result.get("blocked_stage") or "").strip()
+            if readiness_gate_passed:
+                structured_payload = _synthesize_structured_report_from_files(
+                    files=runtime_files_from_graph,
+                    topic_identifier=req_topic_id,
+                    topic_label=req_label,
+                    start_text=req_start,
+                    end_text=req_end,
+                    mode=req_mode,
+                    thread_id=req_thread_id,
+                )
+            else:
+                structured_payload = {}
 
             exploration_bundle: Dict[str, Any] = {}
             if structured_payload:
@@ -3426,23 +5176,43 @@ def run_or_resume_deep_report_task(
                     runtime_files_from_graph,
                     message=str(deterministic_result.get("message") or "确定性调度完成。").strip(),
                 )
+            else:
+                exploration_bundle = _bundle_exploration_outputs(
+                    runtime_files=runtime_files_from_graph,
+                    structured_payload={},
+                    mode=req_mode,
+                    root_thread_id=req_thread_id,
+                    exploration_thread_id=req_thread_id,
+                    compile_thread_id=req_thread_id,
+                    message=str(deterministic_result.get("message") or "确定性调度完成。").strip(),
+                )
             exploration_bundle["gap_summary"] = gaps
+            exploration_bundle["artifact_semantic_status"] = artifact_semantic_status
+            exploration_bundle["readiness_gate_passed"] = readiness_gate_passed
+            exploration_bundle["repair_attempts"] = repair_attempts
+            exploration_bundle["repair_trace"] = repair_trace
+            exploration_bundle["blocked_stage"] = blocked_stage
 
             return {
-                "status": str(deterministic_result.get("status") or "").strip() or "completed",
-                "message": str(deterministic_result.get("message") or "").strip(),
+                "status": ("completed" if readiness_gate_passed else "failed"),
+                "message": (
+                    str(deterministic_result.get("message") or "").strip()
+                    if readiness_gate_passed
+                    else "探索阶段未通过 readiness gate，已阻断 compile。"
+                ),
                 "approvals": [],
                 "structured_payload": structured_payload,
                 "full_payload": {},
                 "exploration_bundle": exploration_bundle,
             }
 
-        # 使用旧的 Deep Agents coordinator 模式
+        # Deep Agents coordinator（仅当 REPORT_USE_DETERMINISTIC_GRAPH 显式关闭确定性图时）
         result = _run_deep_report_exploration_task(
             req_topic_id,
             req_start,
             req_end,
             topic_label=req_label,
+            project_identifier=str(request.get("project_identifier") or request.get("project_id") or "").strip(),
             mode=req_mode,
             thread_id=req_thread_id,
             task_id=req_task_id,
@@ -3468,13 +5238,24 @@ def run_or_resume_deep_report_task(
 
     def _run_compile(structured_payload: Dict[str, Any], exploration_bundle: Dict[str, Any]) -> Dict[str, Any]:
         _semantic_review = {"decision": "approve"} if skip_validation else (resume_payload if isinstance(resume_payload, dict) else None)
+        compile_ready_structured = dict(structured_payload or {})
+        if not isinstance(compile_ready_structured.get("report_ir"), dict):
+            compile_ready_structured = _attach_ir_layers(
+                compile_ready_structured,
+                topic_identifier=topic_identifier,
+                cache_dir=cache_dir,
+                thread_id=active_thread_id,
+                task_id=runtime_task_id,
+                full_cache_exists=full_cache_path.exists(),
+                runtime_path=str(runtime_artifact_path),
+            )
         compile_result = generate_full_report_payload(
             topic_identifier,
             start_text,
             end_text,
             topic_label=display_name,
             regenerate=True,
-            structured_payload=structured_payload,
+            structured_payload=compile_ready_structured,
             mode=mode,
             thread_id=active_thread_id,
             task_id=runtime_task_id,
@@ -3486,6 +5267,11 @@ def run_or_resume_deep_report_task(
         payload["exploration_manifest"] = exploration_bundle.get("exploration_manifest") if isinstance(exploration_bundle.get("exploration_manifest"), dict) else {}
         payload["gap_summary"] = exploration_bundle.get("gap_summary") if isinstance(exploration_bundle.get("gap_summary"), list) else []
         payload["todos"] = exploration_bundle.get("todos") if isinstance(exploration_bundle.get("todos"), list) else []
+        payload["artifact_semantic_status"] = exploration_bundle.get("artifact_semantic_status") if isinstance(exploration_bundle.get("artifact_semantic_status"), dict) else {}
+        payload["readiness_gate_passed"] = bool(exploration_bundle.get("readiness_gate_passed"))
+        payload["repair_attempts"] = int(exploration_bundle.get("repair_attempts") or 0)
+        payload["repair_trace"] = exploration_bundle.get("repair_trace") if isinstance(exploration_bundle.get("repair_trace"), list) else []
+        payload["blocked_stage"] = str(exploration_bundle.get("blocked_stage") or "").strip()
         if isinstance(payload.get("meta"), dict):
             payload["meta"].update(
                 {
@@ -3493,6 +5279,11 @@ def run_or_resume_deep_report_task(
                     "exploration_manifest": payload["exploration_manifest"],
                     "gap_summary": payload["gap_summary"],
                     "todos": payload["todos"],
+                    "artifact_semantic_status": payload["artifact_semantic_status"],
+                    "readiness_gate_passed": payload["readiness_gate_passed"],
+                    "repair_attempts": payload["repair_attempts"],
+                    "repair_trace": payload["repair_trace"],
+                    "blocked_stage": payload["blocked_stage"],
                 }
             )
         if isinstance(payload.get("metadata"), dict):
@@ -3502,6 +5293,11 @@ def run_or_resume_deep_report_task(
                     "exploration_manifest": payload["exploration_manifest"],
                     "gap_summary": payload["gap_summary"],
                     "todos": payload["todos"],
+                    "artifact_semantic_status": payload["artifact_semantic_status"],
+                    "readiness_gate_passed": payload["readiness_gate_passed"],
+                    "repair_attempts": payload["repair_attempts"],
+                    "repair_trace": payload["repair_trace"],
+                    "blocked_stage": payload["blocked_stage"],
                 }
             )
         return payload
@@ -3515,6 +5311,11 @@ def run_or_resume_deep_report_task(
             "thread_id": active_thread_id,
             "topic_identifier": topic_identifier,
             "topic_label": display_name,
+            "project_identifier": str(project_identifier or "").strip(),
+            "report_storage_topic": resolve_report_storage_topic(
+                topic_identifier=topic_identifier,
+                project_identifier=str(project_identifier or "").strip(),
+            ),
             "start": start_text,
             "end": end_text,
             "mode": mode,
@@ -3535,6 +5336,7 @@ def generate_report_payload(
     end: Optional[str] = None,
     *,
     topic_label: Optional[str] = None,
+    project_identifier: str = "",
     regenerate: bool = False,
     mode: str = "fast",
     thread_id: Optional[str] = None,
@@ -3546,7 +5348,14 @@ def generate_report_payload(
     if not start_text:
         raise ValueError("Missing required field(s): start")
     display_name = str(topic_label or topic_identifier).strip() or topic_identifier
-    cache_dir = ensure_cache_dir(topic_identifier, start_text, end_text)
+    project_identifier_text = str(project_identifier or "").strip()
+    layout = _runtime_workspace_layout_for(
+        topic_identifier=topic_identifier,
+        project_identifier=project_identifier_text,
+        start_text=start_text,
+        end_text=end_text,
+    )
+    cache_dir = ensure_cache_dir_v2(topic_identifier, start_text, end_text, project_identifier=project_identifier_text)
     cache_path = cache_dir / REPORT_CACHE_FILENAME
     if cache_path.exists() and not regenerate:
         cached = _load_json(cache_path)
@@ -3561,6 +5370,7 @@ def generate_report_payload(
                     "cache_version": REPORT_CACHE_VERSION,
                     "generated_at": upgraded["metadata"].get("generated_at") or _utc_now(),
                     "thread_id": str(((upgraded.get("task") or {}).get("thread_id")) or thread_id or _default_thread_id(topic_identifier, start_text, end_text)).strip(),
+                    "project_identifier": project_identifier_text,
                 }
             )
             upgraded = _hydrate_render_layers(
@@ -3577,6 +5387,9 @@ def generate_report_payload(
                 thread_id=str(((upgraded.get("task") or {}).get("thread_id")) or thread_id or _default_thread_id(topic_identifier, start_text, end_text)).strip(),
                 task_id=str(task_id or ((upgraded.get("metadata") or {}).get("runtime_task_id")) or f"rp-runtime-{uuid.uuid4().hex[:8]}").strip(),
             )
+            upgraded_task = upgraded.get("task") if isinstance(upgraded.get("task"), dict) else {}
+            upgraded_task.setdefault("project_identifier", project_identifier_text)
+            upgraded["task"] = upgraded_task
             _write_json(cache_path, upgraded)
             return upgraded
 
@@ -3586,6 +5399,7 @@ def generate_report_payload(
         topic_identifier,
         start_text,
         end_text,
+        project_identifier=project_identifier_text,
         topic_label=display_name,
         mode=mode,
         thread_id=active_thread_id,
@@ -3617,10 +5431,10 @@ def generate_report_payload(
             ),
         )
     )
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/task_contract.json", normalized_result.task_contract.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/task_derivation.json", normalized_result.task_derivation.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/task_derivation_proposal.json", normalized_result.proposal_snapshot)
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/normalized_task.json", normalized_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "task_contract.json", normalized_result.task_contract.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "task_derivation.json", normalized_result.task_derivation.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "task_derivation_proposal.json", normalized_result.proposal_snapshot)
+    _upsert_state_json_file(runtime_files, layout, "normalized_task.json", normalized_result.model_dump())
     persist_task_contract_bundle(
         task_contract=normalized_result.task_contract.model_dump(),
         task_derivation=normalized_result.task_derivation.model_dump(),
@@ -3630,10 +5444,11 @@ def generate_report_payload(
         normalized_task_json=json.dumps(normalized_result.normalized_task.model_dump(), ensure_ascii=False),
         intent="overview",
     )
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/retrieval_plan.json", retrieval_plan)
-    _upsert_runtime_json_file(
+    _upsert_state_json_file(runtime_files, layout, "retrieval_plan.json", retrieval_plan)
+    _upsert_state_json_file(
         runtime_files,
-        "/workspace/state/dispatch_quality.json",
+        layout,
+        "dispatch_quality.json",
         {"quality_ledger": ((retrieval_plan.get("result") or {}) if isinstance(retrieval_plan.get("result"), dict) else {}).get("dispatch_quality_ledger") or []},
     )
     retrieval_result = (retrieval_plan.get("result") or {}) if isinstance(retrieval_plan.get("result"), dict) else {}
@@ -3677,7 +5492,7 @@ def generate_report_payload(
             limit=12,
         )
     )
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/corpus_coverage.json", coverage_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "corpus_coverage.json", coverage_result.model_dump())
 
     evidence_result = EvidenceCardPage.model_validate(
         retrieve_evidence_cards_payload(
@@ -3686,7 +5501,7 @@ def generate_report_payload(
             limit=12,
         )
     )
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/evidence_cards.json", evidence_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "evidence_cards.json", evidence_result.model_dump())
     todos = _set_todo_status(todos, "retrieval", "completed")
 
     todos = _set_todo_status(todos, "evidence", "completed")
@@ -3752,14 +5567,14 @@ def generate_report_payload(
             actor_positions_json=json.dumps([item.model_dump() for item in actor_result.result], ensure_ascii=False),
         )
     )
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/timeline_nodes.json", timeline_result.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/metrics_bundle.json", metric_result.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/actor_positions.json", actor_result.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/agenda_frame_map.json", agenda_result.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/conflict_map.json", conflict_result.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/discourse_conflict_map.json", discourse_conflict_map)
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/mechanism_summary.json", mechanism_result.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/risk_signals.json", risk_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "timeline_nodes.json", timeline_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "metrics_bundle.json", metric_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "actor_positions.json", actor_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "agenda_frame_map.json", agenda_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "conflict_map.json", conflict_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "discourse_conflict_map.json", discourse_conflict_map)
+    _upsert_state_json_file(runtime_files, layout, "mechanism_summary.json", mechanism_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "risk_signals.json", risk_result.model_dump())
 
     # 提前序列化一次，三个 packet 共享，避免重复 model_dump() 和 json.dumps()
     _normalized_task_json = json.dumps(normalized_result.normalized_task.model_dump(), ensure_ascii=False)
@@ -3794,9 +5609,9 @@ def generate_report_payload(
             claim_ids_json=json.dumps([risk.risk_type for risk in risk_result.result], ensure_ascii=False),
         )
     )
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/section_packets/overview.json", overview_packet.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/section_packets/timeline.json", timeline_packet.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/section_packets/risk.json", risk_packet.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "section_packets/overview.json", overview_packet.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "section_packets/timeline.json", timeline_packet.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "section_packets/risk.json", risk_packet.model_dump())
 
     # 复用 overview packet 内部已完成的 claim 核验结果，构造 ClaimVerificationPage 对象
     # 避免重复触发向量检索（build_section_packet_payload 内部已调用 verify_claim_payload）
@@ -3853,16 +5668,16 @@ def generate_report_payload(
             actor_positions_json=json.dumps([item.model_dump() for item in actor_result.result], ensure_ascii=False),
         )
     )
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/claim_checks.json", claim_checks.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "claim_checks.json", claim_checks.model_dump())
     _upsert_runtime_text_file(
         runtime_files,
-        "/workspace/state/validation_notes.md",
+        layout.state_file("validation_notes.md"),
         _build_validation_notes_markdown(
             topic_label=display_name,
             claim_checks=claim_checks.model_dump(),
         ),
     )
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/utility_assessment.json", utility_result.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "utility_assessment.json", utility_result.model_dump())
     basic_analysis_snapshot = BasicAnalysisSnapshotResult.model_validate(
         get_basic_analysis_snapshot_payload(
             topic_identifier=topic_identifier,
@@ -3889,10 +5704,10 @@ def generate_report_payload(
             snapshot_json=json.dumps(bertopic_snapshot.result.model_dump(), ensure_ascii=False),
         )
     )
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/basic_analysis_snapshot.json", basic_analysis_snapshot.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/basic_analysis_insight.json", basic_analysis_insight.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/bertopic_snapshot.json", bertopic_snapshot.model_dump())
-    _upsert_runtime_json_file(runtime_files, "/workspace/state/bertopic_insight.json", bertopic_insight.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "basic_analysis_snapshot.json", basic_analysis_snapshot.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "basic_analysis_insight.json", basic_analysis_insight.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "bertopic_snapshot.json", bertopic_snapshot.model_dump())
+    _upsert_state_json_file(runtime_files, layout, "bertopic_insight.json", bertopic_insight.model_dump())
     _emit(
         event_callback,
         {
@@ -4083,33 +5898,39 @@ def generate_report_payload(
             "generated_at": _utc_now(),
             "thread_id": active_thread_id,
             "runtime_task_id": runtime_task_id,
+            "project_identifier": project_identifier_text,
+            "workspace_root": layout.workspace_root,
+            "state_root": layout.state_root,
+            "reuse_decision": common_context.get("reuse_decision") if isinstance(common_context.get("reuse_decision"), dict) else {},
+            "reuse_candidates_summary": common_context.get("reuse_candidates_summary") if isinstance(common_context.get("reuse_candidates_summary"), dict) else {},
             "todos": todos,
             "tool_contract_version": "deep-report-v2",
             "state_files": [
-        "/workspace/state/task_contract.json",
-        "/workspace/state/task_derivation.json",
-        "/workspace/state/task_derivation_proposal.json",
-        "/workspace/state/normalized_task.json",
-                "/workspace/state/retrieval_plan.json",
-                "/workspace/state/dispatch_quality.json",
-                "/workspace/state/corpus_coverage.json",
-                "/workspace/state/evidence_cards.json",
-                "/workspace/state/timeline_nodes.json",
-                "/workspace/state/metrics_bundle.json",
-                "/workspace/state/actor_positions.json",
-                "/workspace/state/agenda_frame_map.json",
-                "/workspace/state/conflict_map.json",
-                "/workspace/state/risk_signals.json",
-                "/workspace/state/mechanism_summary.json",
-                "/workspace/state/utility_assessment.json",
-                "/workspace/state/basic_analysis_snapshot.json",
-                "/workspace/state/basic_analysis_insight.json",
-                "/workspace/state/bertopic_snapshot.json",
-                "/workspace/state/bertopic_insight.json",
-                "/workspace/state/discourse_conflict_map.json",
-                "/workspace/state/section_packets/overview.json",
-                "/workspace/state/section_packets/timeline.json",
-                "/workspace/state/section_packets/risk.json",
+                layout.state_file("task_contract.json"),
+                layout.state_file("task_derivation.json"),
+                layout.state_file("task_derivation_proposal.json"),
+                layout.state_file("normalized_task.json"),
+                layout.state_file("retrieval_plan.json"),
+                layout.state_file("dispatch_quality.json"),
+                layout.state_file("corpus_coverage.json"),
+                layout.state_file("evidence_cards.json"),
+                layout.state_file("timeline_nodes.json"),
+                layout.state_file("metrics_bundle.json"),
+                layout.state_file("actor_positions.json"),
+                layout.state_file("agenda_frame_map.json"),
+                layout.state_file("conflict_map.json"),
+                layout.state_file("risk_signals.json"),
+                layout.state_file("mechanism_summary.json"),
+                layout.state_file("utility_assessment.json"),
+                layout.state_file("basic_analysis_snapshot.json"),
+                layout.state_file("basic_analysis_insight.json"),
+                layout.state_file("bertopic_snapshot.json"),
+                layout.state_file("bertopic_insight.json"),
+                layout.state_file("discourse_conflict_map.json"),
+                layout.state_file("section_packets/overview.json"),
+                layout.state_file("section_packets/timeline.json"),
+                layout.state_file("section_packets/risk.json"),
+                layout.state_file("reuse_decision.json"),
             ],
         },
     }
@@ -4141,6 +5962,7 @@ def generate_full_report_payload(
     end: Optional[str] = None,
     *,
     topic_label: Optional[str] = None,
+    project_identifier: str = "",
     regenerate: bool = False,
     structured_payload: Optional[Dict[str, Any]] = None,
     mode: str = "fast",
@@ -4151,7 +5973,13 @@ def generate_full_report_payload(
 ) -> Dict[str, Any]:
     start_text = str(start or "").strip()
     end_text = str(end or "").strip() or start_text
-    cache_dir = ensure_cache_dir(topic_identifier, start_text, end_text)
+    project_identifier_text = str(project_identifier or "").strip()
+    cache_dir = ensure_cache_dir_v2(
+        topic_identifier,
+        start_text,
+        end_text,
+        project_identifier=project_identifier_text,
+    )
     cache_path = cache_dir / AI_FULL_REPORT_CACHE_FILENAME
     draft_path = cache_dir / "full_report_draft_bundle.json"
     draft_v2_path = cache_dir / "draft_bundle.v2.json"
@@ -4167,9 +5995,14 @@ def generate_full_report_payload(
             int(((cached.get("meta") or {}).get("cache_version") or 0)) == AI_FULL_REPORT_CACHE_VERSION
             and isinstance(cached.get("report_ir"), dict)
             and isinstance(cached.get("artifact_manifest"), dict)
+            and _is_structured_payload_valid(cached)
         ):
             return cached
     if isinstance(structured_payload, dict):
+        if not _is_structured_payload_valid(structured_payload):
+            raise ValueError(
+                str(structured_payload.get("structured_invalid_reason") or "generate_full_report_payload blocked before compile because StructuredReport core fields are insufficient.")
+            )
         if not isinstance(structured_payload.get("report_ir"), dict):
             raise ValueError("generate_full_report_payload requires structured_payload carrying ReportIR.")
         structured = structured_payload
@@ -4179,6 +6012,7 @@ def generate_full_report_payload(
         start_text,
         end_text,
         topic_label=topic_label,
+        project_identifier=project_identifier_text,
         regenerate=regenerate,
         mode=mode,
         thread_id=thread_id,
@@ -4193,6 +6027,10 @@ def generate_full_report_payload(
         task_id=runtime_task_id,
         full_cache_exists=True,
     )
+    if not _is_structured_payload_valid(structured):
+        raise ValueError(
+            str(structured.get("structured_invalid_reason") or "generate_full_report_payload blocked before compile because StructuredReport core fields are insufficient.")
+        )
     structured.setdefault("task", {})
     if isinstance(structured.get("task"), dict):
         structured["task"] = {
@@ -4205,6 +6043,8 @@ def generate_full_report_payload(
                 "validation_result_v2": str(validation_path),
                 "repair_plan_v2": str(repair_plan_path),
                 "graph_state_v2": str(graph_state_path),
+                "section_markdown_manifest": str(cache_dir / "section_markdown_manifest.json"),
+                "section_trace_annotations": str(cache_dir / "section_trace_annotations.json"),
                 "approval_records": str(review_path),
                 "full_markdown": str(cache_path),
             },
@@ -4388,7 +6228,48 @@ def generate_full_report_payload(
             "report_ir_summary": summarize_report_ir(structured.get("report_ir") or {}),
             "semantic_interrupt": approvals[0]["action"]["semantic_interrupt"] if approvals else {},
             "graph_interrupts": graph_interrupts,
-            "approval_records": list(compiled.get("semantic_review_records") or []),
+            "approval_records": (
+                list(compiled.get("semantic_review_records") or [])
+                if list(compiled.get("semantic_review_records") or [])
+                else _append_approval_record(
+                    [],
+                    approval_id=f"semantic-review:{runtime_task_id}",
+                    interrupt_id=str(approvals[0]["interrupt_id"] or "").strip() if approvals else f"semantic-review:{runtime_task_id}",
+                    decision="pending",
+                    policy_version=str(factual_conformance.get("policy_version") or "policy.v2").strip() or "policy.v2",
+                    artifact_refs=[],
+                    offending_unit_ids=[
+                        str(item).strip()
+                        for item in (
+                            approvals[0]["action"]["semantic_interrupt"].get("offending_unit_ids")
+                            if approvals and isinstance(approvals[0].get("action"), dict) and isinstance(approvals[0]["action"].get("semantic_interrupt"), dict)
+                            else []
+                        )
+                        if str(item or "").strip()
+                    ],
+                    approved_deltas=[
+                        item
+                        for item in (
+                            approvals[0]["action"]["semantic_interrupt"].get("semantic_deltas")
+                            if approvals and isinstance(approvals[0].get("action"), dict) and isinstance(approvals[0]["action"].get("semantic_interrupt"), dict)
+                            else []
+                        )
+                        if isinstance(item, dict)
+                    ],
+                    approved_rewrite_ops=[
+                        str(item).strip()
+                        for item in (
+                            approvals[0]["action"]["semantic_interrupt"].get("allowed_rewrite_ops")
+                            if approvals and isinstance(approvals[0].get("action"), dict) and isinstance(approvals[0]["action"].get("semantic_interrupt"), dict)
+                            else []
+                        )
+                        if str(item or "").strip()
+                    ],
+                    reason="waiting_for_human_review",
+                )
+                if approvals
+                else []
+            ),
             "review_mode": "annotation",
             "execution_phase": str(compiled.get("execution_phase") or "human_review"),
             "rewrite_round": int(compiled.get("rewrite_round") or 0),
@@ -4448,6 +6329,14 @@ def generate_full_report_payload(
         {
             "thread_id": active_thread_id,
             "runtime_task_id": runtime_task_id,
+            "has_markdown_output": bool(markdown),
+            "compile_quality": str(compiled.get("compile_quality") or full_payload["meta"].get("compile_quality") or "healthy"),
+            "publish_status": str(compiled.get("publish_status") or ("pending_review" if compiled.get("review_required") else "ready")),
+            "section_write_receipts": (
+                list(compiled.get("section_write_receipts") or [])
+                if isinstance(compiled.get("section_write_receipts"), list)
+                else list(full_payload["meta"].get("section_write_receipts") or [])
+            ),
             **(
                 {
                     "semantic_review": {
@@ -4463,6 +6352,14 @@ def generate_full_report_payload(
                 else {}
             ),
         }
+    )
+    full_payload["has_markdown_output"] = bool(markdown)
+    full_payload["compile_quality"] = str(compiled.get("compile_quality") or full_payload.get("compile_quality") or full_payload["meta"].get("compile_quality") or "healthy")
+    full_payload["publish_status"] = str(compiled.get("publish_status") or ("pending_review" if compiled.get("review_required") else "ready"))
+    full_payload["section_write_receipts"] = (
+        list(compiled.get("section_write_receipts") or [])
+        if isinstance(compiled.get("section_write_receipts"), list)
+        else list(full_payload.get("section_write_receipts") or [])
     )
     full_payload["artifact_manifest"] = manifest.model_dump()
     if semantic_review and str(semantic_review.get("decision") or "").strip().lower() == "approve":

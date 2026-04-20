@@ -17,7 +17,8 @@ from src.report.deep_report.graph_runtime import (
     run_report_compilation_graph,
     validate_draft_bundle_v2,
 )
-from src.report.deep_report.schemas import DraftBundle, DraftBundleV2, DraftUnit, DraftUnitV2, TraceRef, ValidationResultV2
+from src.report.deep_report.deep_writer import DeepWriterError, SectionMarkdownResult
+from src.report.deep_report.schemas import DraftBundle, DraftBundleV2, DraftUnit, DraftUnitV2, FactualConformanceIssue, FactualConformanceResult, TraceRef, ValidationResultV2
 
 
 class _Dumpable(dict):
@@ -96,6 +97,40 @@ def _invalid_draft_bundle(*_args, **_kwargs) -> DraftBundle:
                 confidence="medium",
                 is_unresolved=False,
             )
+        ],
+        metadata={},
+    )
+
+
+def _invalid_draft_bundle_v2(*_args, **_kwargs) -> DraftBundleV2:
+    return DraftBundleV2(
+        source_artifact_id="draft_bundle.llm.v2",
+        policy_version="policy.v2",
+        schema_version="draft-bundle.llm.v2",
+        section_order=["claims"],
+        units=[
+            DraftUnitV2(
+                unit_id="unit:claims:heading",
+                section_id="claims",
+                unit_type="heading",
+                text="## 事实断言",
+                trace_refs=[TraceRef(trace_id="claims", trace_kind="section_context", support_level="structural")],
+                derived_from=[],
+                support_level="structural",
+                render_template_id="claims:heading",
+                metadata={},
+            ),
+            DraftUnitV2(
+                unit_id="unit:claims:1",
+                section_id="claims",
+                unit_type="finding",
+                text="- 当前判断仍需要人工边界确认。",
+                trace_refs=[TraceRef(trace_id="claims", trace_kind="section_context", support_level="structural")],
+                derived_from=[],
+                support_level="structural",
+                render_template_id="claims:finding",
+                metadata={},
+            ),
         ],
         metadata={},
     )
@@ -228,6 +263,50 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
         self.assertEqual(result.gate, "human_review")
         self.assertEqual(result.next_node, "compile_blocked")
 
+    def test_validate_draft_bundle_v2_treats_degraded_trace_as_warning(self) -> None:
+        bundle = DraftBundleV2(
+            units=[
+                DraftUnitV2(
+                    unit_id="unit:claims:heading",
+                    section_id="claims",
+                    unit_type="heading",
+                    text="## 主体判断",
+                    trace_refs=[TraceRef(trace_id="claims", trace_kind="section_context", support_level="structural")],
+                    derived_from=[],
+                    support_level="structural",
+                    render_template_id="claims:heading",
+                    metadata={},
+                ),
+                DraftUnitV2(
+                    unit_id="unit:claims:finding",
+                    section_id="claims",
+                    unit_type="finding",
+                    text="当前主体判断仍需保守表述。",
+                    trace_refs=[],
+                    derived_from=[],
+                    support_level="aggregated",
+                    render_template_id="claims:finding",
+                    metadata={
+                        "trace_binding_mode": "provisional",
+                        "provisional_claim_refs": ["claim-1"],
+                        "provisional_evidence_refs": ["ev-1"],
+                    },
+                ),
+            ],
+            section_order=["claims"],
+            metadata={},
+        )
+
+        result = validate_draft_bundle_v2(_minimal_payload()["report_ir"], bundle, repair_count=0, max_repairs=2)
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.gate, "pass")
+        self.assertEqual(result.next_node, "markdown_compiler")
+        self.assertFalse(result.failures)
+        self.assertEqual(len(result.warnings), 1)
+        self.assertEqual(result.warnings[0].failure_type, "degraded_trace")
+        self.assertEqual(result.warnings[0].severity, "warning")
+
     def test_stream_graph_events_supports_v2_updates_shape(self) -> None:
         events: list[dict] = []
 
@@ -282,8 +361,92 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
                 ),
             )
         )
-        stack.enter_context(patch("src.report.deep_report.graph_runtime.compile_draft_units", side_effect=_invalid_draft_bundle))
+        stack.enter_context(
+            patch(
+                "src.report.deep_report.deep_writer.write_section_markdown",
+                return_value=SectionMarkdownResult(
+                    section_id="claims",
+                    title="事实断言",
+                    markdown_body="当前判断仍需要人工边界确认。",
+                    artifact_search_receipts=[],
+                    evidence_search_receipts=[],
+                    packet_receipts=[],
+                    degraded_reason="",
+                ),
+            )
+        )
+        stack.enter_context(patch("src.report.deep_report.deep_writer.compose_bundle_from_section_markdowns", side_effect=_invalid_draft_bundle_v2))
+        stack.enter_context(
+            patch(
+                "src.report.deep_report.deep_writer.extract_section_trace_annotations",
+                return_value=[{"section_id": "claims", "claim_refs": [], "evidence_refs": [], "notes": "", "confidence": 0.0, "status": "ready"}],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "src.report.deep_report.graph_runtime.run_factual_conformance",
+                return_value=FactualConformanceResult(
+                    passed=False,
+                    policy_version="policy.v2",
+                    stage="final_markdown",
+                    can_auto_recover=False,
+                    requires_human_review=True,
+                    issues=[],
+                    metadata={},
+                ),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "src.report.deep_report.deep_writer.apply_section_trace_annotations",
+                side_effect=lambda bundle, *_args, **_kwargs: DraftBundleV2.model_validate(bundle or {}),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "src.report.deep_report.deep_writer.light_edit_draft_bundle",
+                side_effect=lambda bundle, *_args, **_kwargs: DraftBundleV2.model_validate(bundle or {}),
+            )
+        )
         return stack
+
+    def test_graph_section_writer_failure_raises_and_emits_failed_event(self) -> None:
+        events: list[dict] = []
+        with self._patched_runtime():
+            with patch(
+                "src.report.deep_report.deep_writer.write_section_markdown",
+                side_effect=DeepWriterError("section writer failed"),
+            ):
+                with self.assertRaises(DeepWriterError):
+                    run_report_compilation_graph(
+                        _minimal_payload(),
+                        event_callback=events.append,
+                        max_repairs=1,
+                        graph_thread_id="graph-thread-free-writer-failed",
+                    )
+
+        failed_events = [event for event in events if str(event.get("type") or "") == "graph.node.failed"]
+        self.assertTrue(failed_events)
+        self.assertTrue(any(str(event.get("agent") or "") == "section_writer" for event in failed_events))
+
+    def test_graph_bundle_from_sections_failure_raises_without_fallback(self) -> None:
+        events: list[dict] = []
+        with self._patched_runtime():
+            with patch(
+                "src.report.deep_report.deep_writer.compose_bundle_from_section_markdowns",
+                side_effect=DeepWriterError("bundle failed"),
+            ):
+                with self.assertRaises(DeepWriterError):
+                    run_report_compilation_graph(
+                        _minimal_payload(),
+                        event_callback=events.append,
+                        max_repairs=1,
+                        graph_thread_id="graph-thread-section-split-failed",
+                    )
+
+        failed_events = [event for event in events if str(event.get("type") or "") == "graph.node.failed"]
+        self.assertTrue(failed_events)
+        self.assertTrue(any(str(event.get("agent") or "") == "bundle_from_sections" for event in failed_events))
 
     def test_graph_interrupt_resume_with_sqlite_checkpoint_and_annotation(self) -> None:
         events: list[dict] = []
@@ -452,7 +615,7 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
         self.assertEqual(resumed["checkpoint_locator"], checkpoint_path)
         self.assertIn("review_feedback_rounds", resumed)
 
-    def test_graph_send_fanout_emits_section_and_repair_worker_nodes(self) -> None:
+    def test_graph_emits_section_markdown_first_nodes(self) -> None:
         events: list[dict] = []
         base_dir = Path(__file__).resolve().parents[1] / "data" / "_tmp"
         base_dir.mkdir(parents=True, exist_ok=True)
@@ -477,10 +640,10 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
             for event in events
             if str(event.get("type") or "").strip() == "graph.node.started"
         ]
-        self.assertIn("section_realizer_worker", started_nodes)
-        self.assertIn("section_realizer_finalize", started_nodes)
-        self.assertIn("repair_worker", started_nodes)
-        self.assertIn("repair_finalize", started_nodes)
+        self.assertIn("section_writer", started_nodes)
+        self.assertIn("bundle_from_sections", started_nodes)
+        self.assertIn("trace_extractor", started_nodes)
+        self.assertIn("light_editor", started_nodes)
 
 
 if __name__ == "__main__":

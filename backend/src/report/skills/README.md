@@ -24,6 +24,7 @@
 - `sentiment-analysis-methodology`
 - `basic-analysis-framework`
 - `bertopic-evolution-framework`
+- `formal-report-factual-style`
 
 兼容目标：
 

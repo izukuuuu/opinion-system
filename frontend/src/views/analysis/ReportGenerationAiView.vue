@@ -125,7 +125,7 @@
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">正式文稿</p>
         </div>
 
-        <div v-if="reportHtml" class="ai-report-markdown mt-6" v-html="reportHtml" />
+        <div v-if="reportHtml" ref="markdownRootRef" class="ai-report-markdown mt-6" v-html="reportHtml" />
         <div v-else class="mt-6 rounded-3xl bg-base-soft px-4 py-6 text-sm text-secondary">当前没有可展示的正式文稿。</div>
       </article>
     </section>
@@ -137,7 +137,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowDownTrayIcon,
@@ -151,6 +151,7 @@ import AppSelect from '../../components/AppSelect.vue'
 import { useReportGeneration } from '../../composables/useReportGeneration'
 import { buildStandaloneAiReportHtml } from '../../utils/aiReportHtml'
 import { exportableAiMarkdown, extractMarkdownToc, renderAiReportMarkdown } from '../../utils/aiReportMarkdown'
+import { buildFigureContractMap, destroyFigurePlaceholders, hydrateFigurePlaceholders } from '../../utils/reportFigures'
 
 const router = useRouter()
 
@@ -188,6 +189,8 @@ const reportHtml = computed(() => renderAiReportMarkdown(markdown.value, {
   artifactManifest: artifactManifest.value
 }))
 const tocItems = computed(() => extractMarkdownToc(markdown.value))
+const figureContractMap = computed(() => buildFigureContractMap(reportIr.value, artifactManifest.value))
+const markdownRootRef = ref(null)
 
 const topicSelectOptions = computed(() => topicOptions.value.map((option) => ({ value: option, label: option })))
 const historySelectOptions = computed(() =>
@@ -242,6 +245,28 @@ function downloadBlob(blob, filename) {
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
 }
+
+async function syncFigureHydration() {
+  await nextTick()
+  const root = markdownRootRef.value
+  if (!root) return
+  destroyFigurePlaceholders(root)
+  await hydrateFigurePlaceholders(root, figureContractMap.value)
+}
+
+watch(
+  [reportHtml, figureContractMap],
+  () => {
+    syncFigureHydration()
+  },
+  { immediate: true, deep: true }
+)
+
+onBeforeUnmount(() => {
+  if (markdownRootRef.value) {
+    destroyFigurePlaceholders(markdownRootRef.value)
+  }
+})
 </script>
 
 <style scoped>
