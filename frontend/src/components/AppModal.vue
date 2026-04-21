@@ -10,7 +10,10 @@
     >
       <div
         v-if="modelValue"
-        class="modal-backdrop fixed inset-0 z-40 flex items-center justify-center px-4 py-6"
+        class="modal-backdrop fixed inset-0 z-[90] flex items-center justify-center px-4 py-6"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="title"
         @click.self="handleBackdrop"
       >
         <div
@@ -83,7 +86,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { XMarkIcon } from '@heroicons/vue/24/outline'
 
 const props = defineProps({
@@ -150,6 +153,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue', 'cancel', 'confirm'])
+const isClient = typeof window !== 'undefined'
+let previousBodyOverflow = ''
 
 const confirmButtonClass = computed(() => {
   if (props.confirmTone === 'danger') {
@@ -183,11 +188,30 @@ const handleKeydown = (event) => {
   }
 }
 
+const syncBodyScrollLock = (open) => {
+  if (!isClient) return
+  if (open) {
+    previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return
+  }
+  document.body.style.overflow = previousBodyOverflow
+}
+
+watch(
+  () => props.modelValue,
+  (open) => {
+    syncBodyScrollLock(open)
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
+  syncBodyScrollLock(false)
 })
 </script>

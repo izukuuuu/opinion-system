@@ -554,7 +554,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import TabSwitch from '../../components/TabSwitch.vue'
 import {
@@ -623,6 +623,7 @@ const downloadingTaskId = ref('')
 const activeTab = ref('all')
 const expandedTaskId = ref(null)
 const showAdvanced = ref(false)
+let openCreateModalFrame = null
 const loginState = ref({ status: 'idle', logged_in_at: null, error: null, username: '' })
 const loginPollTimer = ref(null)
 
@@ -726,10 +727,20 @@ const taskSummary = computed(() => {
   )
 })
 
-function openCreateModal() {
-  resetTaskForm()
-  showAdvanced.value = false
-  createModalOpen.value = true
+async function openCreateModal() {
+  if (openCreateModalFrame !== null) {
+    window.cancelAnimationFrame(openCreateModalFrame)
+    openCreateModalFrame = null
+  }
+
+  createModalOpen.value = false
+  await nextTick()
+
+  openCreateModalFrame = window.requestAnimationFrame(() => {
+    showAdvanced.value = false
+    createModalOpen.value = true
+    openCreateModalFrame = null
+  })
 }
 
 function resetTaskForm() {
@@ -1103,7 +1114,17 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (openCreateModalFrame !== null) {
+    window.cancelAnimationFrame(openCreateModalFrame)
+    openCreateModalFrame = null
+  }
   stopRefreshLoop()
   stopLoginPoll()
+})
+
+watch(createModalOpen, (open) => {
+  if (!open) return
+  resetTaskForm()
+  showAdvanced.value = false
 })
 </script>
