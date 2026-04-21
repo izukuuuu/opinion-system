@@ -17,7 +17,7 @@
       <header class="space-y-1">
         <h2 class="text-lg font-bold text-primary">入库配置</h2>
         <p class="text-xs text-secondary">
-          配置目标项目与数据集信息，系统将自动识别待入库的处理存档。
+          配置本地项目与数据集信息，系统将自动识别待入库的处理存档。
         </p>
       </header>
 
@@ -78,14 +78,15 @@
             placeholder="例如：控烟政策-12月第1周" />
         </label>
 
-        <!-- 4. Storage ID (Read-only) -->
+        <!-- 4. Local Source (Read-only) -->
         <div class="space-y-2">
-          <span class="text-xs font-bold text-primary ml-1">云端存储路径 (Storage Identifier)</span>
+          <span class="text-xs font-bold text-primary ml-1">当前本地数据源</span>
           <div
             class="w-full rounded-2xl border border-dashed border-black/10 bg-brand-50/10 px-4 py-4 text-xs text-secondary font-mono flex items-center gap-2">
             <ArchiveBoxIcon class="h-4 w-4 opacity-50" />
-            {{ bucketName || '项目未加载...' }}
+            {{ localSourceName || '项目未加载...' }}
           </div>
+          <p class="text-[10px] text-muted pl-1 opacity-70">上传到目标数据库前，这里始终展示当前本地项目的数据源名称。</p>
         </div>
       </div>
 
@@ -98,7 +99,7 @@
               <FolderIcon class="h-5 w-5" />
             </div>
             <div class="space-y-2">
-              <p class="text-xs font-black text-brand-800 tracking-wider">PREVIEW SOURCE PATH</p>
+              <p class="text-xs font-black text-brand-800 tracking-wider">本地存档路径预览</p>
               <code class="block text-[11px] font-mono text-brand-600/80 break-all leading-relaxed">{{
                 inferredFilterPath }}</code>
             </div>
@@ -351,6 +352,15 @@ const fetchDateSelectOptions = computed(() =>
 )
 
 const bucketName = computed(() => activeProjectBucket.value || '')
+const localSourceName = computed(() => {
+  const displayName =
+    typeof activeProject.value?.display_name === 'string' ? activeProject.value.display_name.trim() : ''
+  if (displayName) return displayName
+  const projectName =
+    typeof activeProjectName.value === 'string' ? activeProjectName.value.trim() : ''
+  if (projectName) return projectName
+  return bucketName.value
+})
 
 const inferredFilterBase = computed(() => {
   const storagePath = normaliseStoragePath(activeProject.value?.storage_path)
@@ -530,7 +540,7 @@ const historyModeLabel = (mode) => {
 const ensureParameters = () => {
   const topic = bucketName.value
   if (!topic) {
-    parameterError.value = '未找到对应的数据库标识，请先选择项目。'
+    parameterError.value = '未找到对应的本地项目标识，请先选择项目。'
     return null
   }
   if (!processingDate.value) {

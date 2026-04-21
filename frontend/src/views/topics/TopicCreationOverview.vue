@@ -21,7 +21,7 @@
                 启动新的专题
               </h1>
               <p class="max-w-xl text-base font-medium leading-relaxed text-brand-50/80">
-                通过上传、清洗、筛选和入库四个环节，把原始舆情数据整理成后续分析可直接使用的专题存档。
+                通过上传、清洗、筛选和入库四个环节，把本地原始数据整理成后续分析可直接使用的专题存档。
               </p>
             </div>
 
@@ -56,15 +56,15 @@
                 <ul class="space-y-2.5 text-[13px] text-white/70">
                   <li class="flex items-start gap-3">
                     <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
-                    <span>上传原始数据文件，建立专题的初始数据池</span>
+                    <span>上传本地原始数据文件，建立专题的初始数据池</span>
                   </li>
                   <li class="flex items-start gap-3">
                     <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
-                    <span>执行清洗与筛选，排除噪音内容并保留有效样本</span>
+                    <span>围绕本地项目数据执行清洗与筛选，排除噪音内容并保留有效样本</span>
                   </li>
                   <li class="flex items-start gap-3">
                     <div class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400"></div>
-                    <span>完成入库归档，为后续基础分析和主题聚类准备标准输入</span>
+                    <span>确认本地结果无误后再完成入库，为后续分析准备标准输入</span>
                   </li>
                 </ul>
               </div>

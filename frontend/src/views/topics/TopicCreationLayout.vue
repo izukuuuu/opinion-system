@@ -61,28 +61,28 @@ const steps = [
     label: '上传',
     to: { name: 'topic-create-upload' },
     icon: CloudArrowUpIcon,
-    description: '导入原始数据文件'
+    description: '导入本地原始数据文件'
   },
   {
     key: 'preprocess',
     label: '数据预处理',
     to: { name: 'topic-create-preprocess' },
     icon: FunnelIcon,
-    description: '数据合并与数据清洗'
+    description: '基于本地数据执行合并与清洗'
   },
   {
     key: 'filter',
     label: '筛选',
     to: { name: 'topic-create-filter' },
     icon: AdjustmentsHorizontalIcon,
-    description: '预清洗 / AI筛选 / 后清洗'
+    description: '基于本地数据执行预清洗 / AI筛选 / 后清洗'
   },
   {
     key: 'ingest',
     label: '入库',
     to: { name: 'topic-create-ingest' },
     icon: ArrowTrendingUpIcon,
-    description: '写入远程舆情数据库'
+    description: '将本地处理结果写入目标数据库'
   },
   // 基本分析迁移到项目数据模块，此处保留核心四个操作步骤
 ]
