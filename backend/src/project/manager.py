@@ -247,6 +247,7 @@ class ProjectManager:
                 loaded = False
         if not loaded:
             self._projects = {}
+        self._prune_transient_query_projects()
         self._ensure_all_projects_have_storage()
 
     def _coerce_project(self, payload: Any) -> ProjectRecord:
@@ -255,6 +256,33 @@ class ProjectManager:
         if isinstance(payload, dict):
             return ProjectRecord.from_dict(payload)
         raise TypeError(f"Unsupported project payload: {type(payload)!r}")
+
+    def _is_transient_query_project(self, record: ProjectRecord) -> bool:
+        """Return True for legacy pseudo-projects created only by query operations."""
+        if not record or not record.name:
+            return False
+        if record.description.strip():
+            return False
+        if record.metadata:
+            return False
+        if record.dates:
+            return False
+        if not record.operations:
+            return False
+        return all(str(item.operation or "").strip() == "query" for item in record.operations)
+
+    def _prune_transient_query_projects(self) -> None:
+        """Drop historical query-only records from the persisted project registry."""
+        removable = [
+            name
+            for name, record in self._projects.items()
+            if self._is_transient_query_project(record)
+        ]
+        if not removable:
+            return
+        for name in removable:
+            self._projects.pop(name, None)
+        self._save_to_disk()
 
     def _reindex(self) -> None:
         self._projects_by_id = {}
@@ -553,6 +581,8 @@ class ProjectManager:
         params = _serialise_mapping(params or {})
         project = self.get_project_record(name)
         if not project:
+            if str(operation or "").strip() == "query":
+                raise LookupError(f"Project '{name}' was not found")
             project = ProjectRecord(name=name)
             self._projects[name] = project
         record = OperationRecord(operation=operation, params=params, success=success)
