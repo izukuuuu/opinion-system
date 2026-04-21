@@ -1,5 +1,9 @@
 # Report Skills
 
+全模块 prompt / skill / registry 关系说明见：
+
+- `backend/src/report/REPORT_MODULE_PROMPTS_SKILLS_REGISTRIES.md`
+
 生产环境报告技能默认放在 `backend/src/report/skills/` 下，运行时优先走 Deep Agents 的 skills 机制。
 
 约定：

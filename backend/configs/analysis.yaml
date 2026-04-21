@@ -1,0 +1,31 @@
+# 分析函数配置
+functions:
+  # 总体分析函数
+  - name: volume
+    target: 总体
+  - name: attitude
+    target: 总体
+  - name: trends
+    target: 总体
+  - name: keywords
+    target: 总体
+  - name: geography
+    target: 总体
+  - name: publishers
+    target: 总体
+  - name: classification
+    target: 总体
+
+  # 渠道分析函数
+  - name: attitude
+    target: 渠道
+  - name: trends
+    target: 渠道
+  - name: keywords
+    target: 渠道
+  - name: geography
+    target: 渠道
+  - name: publishers
+    target: 渠道
+  - name: classification
+    target: 渠道

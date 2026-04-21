@@ -55,6 +55,12 @@ from .builder import build_report_deep_agent
 from .orchestrator_graph import run_report_orchestrator_graph
 from .report_ir import attach_report_ir, build_artifact_manifest, summarize_report_ir
 from .runtime_contract import RUNTIME_CONTRACT_VERSION
+from .compat import extract_legacy_interrupts, parse_structured_report_tool_input
+from .subagent_registry import (
+    get_exploration_artifact_owners,
+    get_repair_agent_tiers,
+    get_required_exploration_artifacts,
+)
 from .payloads import (
     build_basic_analysis_insight_payload,
     build_bertopic_insight_payload,
@@ -119,50 +125,6 @@ _NAMESPACE_COMPONENT = re.compile(r"[^A-Za-z0-9._@:+~-]+")
 _WORKSPACE_STATE_DIRNAME = "state"
 _REUSE_MANIFEST_FILENAME = "reuse_manifest.json"
 _MIGRATED_POINTER_FILENAME = "MIGRATED_TO.json"
-
-EXPLORATION_ARTIFACT_OWNERS = {
-    "normalized_task.json": "retrieval_router",
-    "corpus_coverage.json": "retrieval_router",
-    "evidence_cards.json": "archive_evidence_organizer",
-    "timeline_nodes.json": "timeline_analyst",
-    "actor_positions.json": "stance_conflict",
-    "conflict_map.json": "claim_actor_conflict",
-    "mechanism_summary.json": "propagation_analyst",
-    "risk_signals.json": "propagation_analyst",
-    "bertopic_insight.json": "bertopic_evolution_analyst",
-    "utility_assessment.json": "decision_utility_judge",
-    "section_packets/overview.json": "report_coordinator",
-    "section_packets/timeline.json": "report_coordinator",
-    "section_packets/risk.json": "report_coordinator",
-}
-_REPAIR_AGENT_TIERS = {
-    "retrieval_router": 0,
-    "archive_evidence_organizer": 1,
-    "bertopic_evolution_analyst": 1,
-    "timeline_analyst": 2,
-    "stance_conflict": 2,
-    "event_analyst": 3,
-    "claim_actor_conflict": 3,
-    "agenda_frame_builder": 4,
-    "propagation_analyst": 4,
-    "decision_utility_judge": 5,
-}
-FAST_EXPLORATION_ARTIFACTS = [
-    "normalized_task.json",
-    "corpus_coverage.json",
-    "evidence_cards.json",
-    "timeline_nodes.json",
-    "actor_positions.json",
-    "conflict_map.json",
-    "mechanism_summary.json",
-    "risk_signals.json",
-    "utility_assessment.json",
-    "section_packets/overview.json",
-    "section_packets/timeline.json",
-    "section_packets/risk.json",
-]
-
-RESEARCH_EXPLORATION_ARTIFACTS = [*FAST_EXPLORATION_ARTIFACTS, "bertopic_insight.json"]
 
 
 class ReportRuntimeFailure(RuntimeError):
@@ -506,10 +468,7 @@ def _result_interrupts(result: Any) -> List[Any]:
     if isinstance(interrupts, (list, tuple)):
         return list(interrupts)
     payload = _result_payload(result)
-    legacy_interrupts = payload.get("__interrupt__") if isinstance(payload, dict) else None
-    if isinstance(legacy_interrupts, (list, tuple)):
-        return list(legacy_interrupts)
-    return []
+    return extract_legacy_interrupts(payload)
 
 
 def _extract_structured_response(result: Any) -> Dict[str, Any]:
@@ -576,7 +535,7 @@ def _matches_resume_source(payload: Dict[str, Any], *, source_task_id: str, thre
 
 
 def _required_exploration_artifacts(mode: str) -> List[str]:
-    return list(RESEARCH_EXPLORATION_ARTIFACTS if str(mode or "").strip().lower() == "research" else FAST_EXPLORATION_ARTIFACTS)
+    return list(get_required_exploration_artifacts(mode))
 
 
 def _normalize_exploration_event(event: Dict[str, Any]) -> Dict[str, Any] | None:
@@ -666,7 +625,7 @@ def _bundle_exploration_outputs(
     manifest: Dict[str, ExplorationArtifactStatus] = {}
     gaps: List[str] = []
     for path in required_paths:
-        owner = str(EXPLORATION_ARTIFACT_OWNERS.get(path) or "report_coordinator").strip()
+        owner = str(get_exploration_artifact_owners().get(path) or "report_coordinator").strip()
         raw = _runtime_file_content(runtime_files, path).strip()
         if not raw:
             status = "missing"
@@ -712,7 +671,7 @@ def _artifact_semantic_status(
 ) -> Dict[str, str]:
     from .exploration_deterministic_graph import _output_state
 
-    owner = str(EXPLORATION_ARTIFACT_OWNERS.get(path) or "report_coordinator").strip()
+    owner = str(get_exploration_artifact_owners().get(path) or "report_coordinator").strip()
     raw = _runtime_file_content(runtime_files, path).strip()
     if not raw:
         status = "missing"
@@ -779,6 +738,7 @@ def _run_readiness_repair_loop(
 
     current_files = dict(runtime_files or {})
     target_paths = _core_readiness_artifacts(str(request.get("mode") or "fast").strip() or "fast")
+    repair_agent_tiers = get_repair_agent_tiers()
     repair_trace: List[Dict[str, Any]] = []
     repair_attempts = 0
     runtime_deps = _ExplorationRuntimeDeps(
@@ -815,7 +775,7 @@ def _run_readiness_repair_loop(
         grouped: Dict[str, List[str]] = {}
         for artifact_path, payload in pending.items():
             agent_name = str(payload.get("owner") or "").strip()
-            if not agent_name or agent_name not in _REPAIR_AGENT_TIERS:
+            if not agent_name or agent_name not in repair_agent_tiers:
                 repair_trace.append(
                     {
                         "round": round_idx,
@@ -888,7 +848,7 @@ def _run_readiness_repair_loop(
                     agent_name,
                     rerun_state,
                     runtime_deps,
-                    tier=_REPAIR_AGENT_TIERS[agent_name],
+                    tier=repair_agent_tiers[agent_name],
                 )
                 current_files = result.get("files") if isinstance(result.get("files"), dict) else current_files
                 after_status = {
@@ -3352,7 +3312,7 @@ def _persist_workspace_state(
         target = state_root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(content), encoding="utf-8")
-        owner = str(EXPLORATION_ARTIFACT_OWNERS.get(rel) or "").strip()
+        owner = str(get_exploration_artifact_owners().get(rel) or "").strip()
         status = "ready"
         empty_reason = ""
         invalidated_reason = ""
@@ -4247,9 +4207,21 @@ def _run_deep_report_exploration_task(
     @tool
     def save_structured_report(payload: Optional[Dict[str, Any]] = None, payload_json: str = "") -> str:
         """验证并写入结构化报告对象。优先直接传 payload 对象；payload_json 仅兼容旧调用。"""
-        raw_payload = payload if isinstance(payload, dict) else _parse_json_object(payload) or _parse_json_object(payload_json)
+        raw_payload, compat_info = parse_structured_report_tool_input(payload, payload_json)
         if not raw_payload:
             raise ValueError("结构化结果不是有效 JSON 对象。优先直接传 payload 对象，不要把整个 JSON 再包成字符串。")
+        if bool(compat_info.get("compat_mode")):
+            _emit(
+                event_callback,
+                {
+                    "type": "agent.memo",
+                    "phase": "interpret",
+                    "agent": "report_coordinator",
+                    "title": "结构化保存命中兼容入口",
+                    "message": "当前调用使用了 legacy JSON 兼容入口，系统已映射到新 payload ABI。",
+                    "payload": {"compat_source": str(compat_info.get("source") or "").strip()},
+                },
+            )
         seed_payload = _build_structured_seed_payload(
             topic_identifier=topic_identifier,
             topic_label=display_name,

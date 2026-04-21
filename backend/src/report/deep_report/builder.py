@@ -6,9 +6,8 @@ Deep Agents coordinator + subagents 配置的唯一 builder。
 职责边界
 --------
 - 集中定义 coordinator 和所有 custom subagents 的 tools / skills / middleware / interrupt_on。
-- subagent skills 通过显式 _SUBAGENT_SKILL_KEYS 映射附加，不再依赖 capability_manifest 的
-  运行时投影（select_runtime_skill_ids / select_runtime_capability_ids）。
-- coordinator skills 通过显式 preferred_skill_keys 列表附加。
+- subagent 元数据来自 subagents.yaml，执行细节（prompt / tools / middleware）仍由代码定义。
+- coordinator skills 通过 registry 解析，不再保留 builder 内 fallback 常量。
 - 不参与 LangGraph 拓扑决策；不包含任何 orchestrator_graph 的 state 类型。
 - 闭包工具（save_structured_report / write_final_report / overwrite_report_cache）由
   service.py 构造后作为 extra_coordinator_tools 传入。
@@ -21,50 +20,11 @@ from deepagents import create_deep_agent
 
 from ..capability_manifest import RUNTIME_COORDINATOR, RUNTIME_SUBAGENT
 from ..runtime_infra import get_shared_report_checkpointer
-from ..skills import select_report_skill_sources
 from ..tools import select_report_tools
 from ..tools.registry import READ_ONLY, get_report_tool_spec
 from .assets import RUNTIME_STORE
-from ..configs import get_subagent_skill_keys, get_coordinator_skill_keys
-
-
-# ---------------------------------------------------------------------------
-# 每个 subagent 的 preferred_skill_keys（从 YAML 配置文件加载）
-# ---------------------------------------------------------------------------
-def _get_subagent_skill_keys(agent_name: str) -> List[str]:
-    """获取子代理的 skill_keys（从 YAML 配置加载）。"""
-    return get_subagent_skill_keys(agent_name)
-
-
-def _get_coordinator_skill_keys() -> List[str]:
-    """获取 coordinator 的 skill_keys（从 YAML 配置加载）。"""
-    return get_coordinator_skill_keys()
-
-
-# 保留旧常量作为 fallback（兼容旧代码）
-_SUBAGENT_SKILL_KEYS: Dict[str, List[str]] = {
-    "retrieval_router": ["retrieval-router-rules"],
-    "archive_evidence_organizer": ["evidence-source-credibility"],
-    "timeline_analyst": ["timeline-alignment-slicing"],
-    "stance_conflict": ["subject-stance-merging"],
-    "event_analyst": ["sentiment-analysis-methodology", "propagation-explanation-framework"],
-    "claim_actor_conflict": ["subject-stance-merging"],
-    "propagation_analyst": ["propagation-explanation-framework", "chart-interpretation-guidelines"],
-    "bertopic_evolution_analyst": ["bertopic-evolution-framework"],
-    "decision_utility_judge": ["quality-validation-backlink"],
-    "agenda_frame_builder": [],
-    "validator": ["quality-validation-backlink"],
-    "writer": [
-        "formal-report-factual-style",
-        "report-writing-framework",
-        "sentiment-analysis-methodology",
-        "chart-interpretation-guidelines",
-        "propagation-explanation-framework",
-    ],
-}
-
-# coordinator 的 preferred_skill_keys
-_COORDINATOR_SKILL_KEYS: List[str] = ["basic-analysis-framework", "sentiment-analysis-methodology"]
+from .subagent_registry import build_coordinator_skills, build_tier_prompt_lines
+from ..configs import get_subagent_skill_keys
 
 
 class ReportCoordinatorContext(TypedDict, total=False):
@@ -107,20 +67,19 @@ def _build_subagent_specs(
     """
     构建所有 custom subagent 规范列表（Deep Agents 官方 spec 格式）。
 
-    每个 subagent 的 tools 来自 SUBAGENT_TOOL_ID_MAP（静态常量，已在 registry.py 中硬编码），
-    每个 subagent 的 skills 来自 _SUBAGENT_SKILL_KEYS（显式映射，不经过 capability_manifest 投影）。
+    每个 subagent 的 tools 仍由代码选择；
+    每个 subagent 的 skills 来自 subagents.yaml。
     """
 
     def _tools_for(agent_name: str) -> List[Any]:
         return select_report_tools(runtime_target=RUNTIME_SUBAGENT, agent_name=agent_name)
 
     def _skills_for(agent_name: str, toolset: List[Any]) -> List[str]:
-        # 从 YAML 配置加载 skill_keys，fallback 到旧常量
-        preferred = _get_subagent_skill_keys(agent_name)
-        if not preferred:
-            preferred = _SUBAGENT_SKILL_KEYS.get(agent_name, [])
+        preferred = get_subagent_skill_keys(agent_name)
         if not preferred:
             return []
+        from ..skills import select_report_skill_sources
+
         return select_report_skill_sources(
             skill_assets,
             available_tool_ids=[t.name for t in toolset if str(getattr(t, "name", "") or "").strip()],
@@ -676,15 +635,7 @@ def build_report_deep_agent(
     agent_tools = [*core_tools, *(extra_coordinator_tools or [])]
 
     # --- coordinator skills --------------------------------------------------
-    coordinator_skill_keys = _get_coordinator_skill_keys()
-    if not coordinator_skill_keys:
-        coordinator_skill_keys = _COORDINATOR_SKILL_KEYS
-    coordinator_skills = select_report_skill_sources(
-        skill_assets,
-        available_tool_ids=[t.name for t in core_tools if str(getattr(t, "name", "") or "").strip()],
-        preferred_skill_keys=coordinator_skill_keys,
-        runtime_target=RUNTIME_COORDINATOR,
-    ) or None
+    coordinator_skills = build_coordinator_skills(skill_assets=skill_assets, core_tools=core_tools) or None
 
     # --- subagents -----------------------------------------------------------
     subagents = _build_subagent_specs(
@@ -739,15 +690,11 @@ def build_report_deep_agent(
     )
 
     # --- initial prompt ------------------------------------------------------
+    tier_lines = "\n".join(build_tier_prompt_lines())
     prompt = (
         "请先使用 write_todos 建立总计划，再严格按以下流程执行，不要跳步，也不要在未调用工具的情况下直接结束：\n\n"
         "1. 使用 task 工具按 Tier 顺序委派子代理：\n"
-        "   Tier 0: retrieval_router\n"
-        "   Tier 1: archive_evidence_organizer、bertopic_evolution_analyst（并行）\n"
-        "   Tier 2: timeline_analyst、stance_conflict（并行）\n"
-        "   Tier 3: event_analyst、claim_actor_conflict（并行）\n"
-        "   Tier 4: agenda_frame_builder、propagation_analyst（并行）\n"
-        "   Tier 5: decision_utility_judge\n\n"
+        f"{tier_lines}\n\n"
         "2. 每个 Tier 完成后，检查 /workspace/projects/{project_identifier}/reports/{report_range}/state/ 下对应文件是否已生成且 status 不为 'error'。\n"
         "   若某个文件不存在或 status='error'（而非 'empty'），重新委派该子代理一次。\n"
         "   status='empty' 是合法的降级状态，不需要重试。\n"

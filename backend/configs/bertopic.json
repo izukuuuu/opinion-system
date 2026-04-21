@@ -1,0 +1,17 @@
+{
+  "embedding": {
+    "model_name": "moka-ai/m3e-base",
+    "device": "auto",
+    "batch_size": 32
+  },
+  "custom_filters": [
+    {
+      "category": "明星八卦",
+      "description": "包含明星、网红、娱乐圈等与专题无关的八卦内容"
+    },
+    {
+      "category": "广告推广",
+      "description": "包含广告、营销推广、品牌植入等商业推广内容"
+    }
+  ]
+}

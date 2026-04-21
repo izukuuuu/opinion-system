@@ -111,7 +111,7 @@ class FullReportPipelineTests(unittest.TestCase):
         middleware_sentinel = object()
 
         with patch("src.report.deep_report.builder.select_report_tools", return_value=[]), patch(
-            "src.report.deep_report.builder.select_report_skill_sources",
+            "src.report.deep_report.builder.build_coordinator_skills",
             return_value=[],
         ), patch(
             "src.report.deep_report.builder._build_subagent_specs",
@@ -142,6 +142,41 @@ class FullReportPipelineTests(unittest.TestCase):
         self.assertEqual(bundle["agent"], "agent")
         self.assertEqual(create_mock.call_args.kwargs["middleware"], [middleware_sentinel])
         self.assertIs(create_mock.call_args.kwargs["context_schema"], ReportCoordinatorContext)
+
+    def test_build_report_deep_agent_prompt_uses_registry_tier_lines(self):
+        with patch("src.report.deep_report.builder.select_report_tools", return_value=[]), patch(
+            "src.report.deep_report.builder.build_coordinator_skills",
+            return_value=[],
+        ), patch(
+            "src.report.deep_report.builder._build_subagent_specs",
+            return_value=[],
+        ), patch(
+            "src.report.deep_report.builder.get_shared_report_checkpointer",
+            return_value=("checkpointer", SimpleNamespace(checkpoint_locator="ok")),
+        ), patch(
+            "src.report.deep_report.builder.create_deep_agent",
+            return_value="agent",
+        ), patch(
+            "src.report.deep_report.builder.build_tier_prompt_lines",
+            return_value=["   Tier 0: retrieval_router", "   Tier 1: alpha、beta（并行）"],
+        ):
+            bundle = build_report_deep_agent(
+                llm=object(),
+                topic_identifier="demo-topic",
+                topic_label="示例专题",
+                start_text="2025-01-01",
+                end_text="2025-01-31",
+                mode="fast",
+                thread_id="thread-1",
+                task_id="task-1",
+                skill_assets={},
+                memory_paths=[],
+                runtime_backend=object(),
+                extra_coordinator_tools=[],
+                middleware_factory=lambda _name: [],
+            )
+
+        self.assertIn("Tier 1: alpha、beta（并行）", bundle["prompt"])
 
     def test_run_report_agent_step_supports_graph_output_v2_shape(self):
         agent = DummyAgent(
@@ -1125,6 +1160,15 @@ class FullReportPipelineTests(unittest.TestCase):
         client = app.test_client()
 
         with patch("src.report.api._resolve_topic", return_value=("demo-topic", "示例专题")), patch(
+            "src.report.api.ensure_cache_dir_v2",
+            return_value=Path("F:/opinion-system/.tmp_pytest/full-route"),
+        ), patch(
+            "src.report.api.Path.exists",
+            return_value=True,
+        ), patch(
+            "src.report.api._load_report_cache_payload",
+            return_value={"markdown": "# cached"},
+        ), patch(
             "src.report.api.generate_full_report_payload",
             return_value={"title": "示例专题", "markdown": "# 示例专题", "meta": {"report_mode": "markdown_full_report"}},
         ) as full_mock:

@@ -16,11 +16,16 @@ from deepagents import create_deep_agent
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from ..configs import get_subagent_output_files, get_subagent_output_globs
 from ..runtime_infra import build_report_runnable_config, get_shared_report_checkpointer
 from .assets import RUNTIME_STORE
 from .builder import ReportCoordinatorContext, _build_subagent_specs
 from .deterministic import build_runtime_workspace_layout
+from .subagent_registry import (
+    build_tier_todo_specs,
+    get_subagent_metadata_by_name,
+    get_subagent_node_name,
+    get_tier_groups,
+)
 
 _TIER_PHASES: Dict[int, str] = {
     0: "interpret",
@@ -33,68 +38,12 @@ _TIER_PHASES: Dict[int, str] = {
 }
 
 _TIER_NODE_AGENTS: Dict[int, List[Tuple[str, str]]] = {
-    1: [
-        ("archive_evidence_node", "archive_evidence_organizer"),
-        ("bertopic_node", "bertopic_evolution_analyst"),
-    ],
-    2: [
-        ("timeline_node", "timeline_analyst"),
-        ("stance_node", "stance_conflict"),
-    ],
-    3: [
-        ("event_analyst_node", "event_analyst"),
-        ("conflict_node", "claim_actor_conflict"),
-    ],
-    4: [
-        ("agenda_node", "agenda_frame_builder"),
-        ("propagation_node", "propagation_analyst"),
-    ],
+    tier: [(get_subagent_node_name(agent_name), agent_name) for agent_name in agent_names]
+    for tier, agent_names in get_tier_groups().items()
+    if 1 <= int(tier) <= 4
 }
 
-_TIER_TODO_SPECS: Dict[int, Dict[str, Any]] = {
-    0: {
-        "id": "tier-0",
-        "label": "范围确认与检索冻结",
-        "detail": "等待开始。",
-        "agents": ["retrieval_router"],
-    },
-    1: {
-        "id": "tier-1",
-        "label": "证据与主题演化",
-        "detail": "等待并行证据整理与主题演化。",
-        "agents": ["archive_evidence_organizer", "bertopic_evolution_analyst"],
-    },
-    2: {
-        "id": "tier-2",
-        "label": "时间线与立场",
-        "detail": "等待时间线与主体立场分析。",
-        "agents": ["timeline_analyst", "stance_conflict"],
-    },
-    3: {
-        "id": "tier-3",
-        "label": "事件分析与冲突图",
-        "detail": "等待事件分析与冲突图整理。",
-        "agents": ["event_analyst", "claim_actor_conflict"],
-    },
-    4: {
-        "id": "tier-4",
-        "label": "议题框架与传播机制",
-        "detail": "等待议题框架与传播机制分析。",
-        "agents": ["agenda_frame_builder", "propagation_analyst"],
-    },
-    5: {
-        "id": "tier-5",
-        "label": "效用裁决",
-        "detail": "等待效用裁决结果。",
-        "agents": ["decision_utility_judge"],
-    },
-    6: {
-        "id": "tier-6",
-        "label": "文稿生成与结构化交付",
-        "detail": "等待文稿草拟与结构化交付。",
-        "agents": ["writer"],
-    },
-}
+_TIER_TODO_SPECS: Dict[int, Dict[str, Any]] = build_tier_todo_specs()
 
 
 def _merge_files(existing: Dict[str, Any], update: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -184,40 +133,6 @@ class _ExplorationRuntimeDeps:
     common_context: Dict[str, Any] | None = None
     subagent_specs: Dict[str, Dict[str, Any]] | None = None
     lifecycle_tracker: Dict[str, Any] | None = None
-
-
-_TIER_REQUIRED_FILES: Dict[int, List[str]] = {
-    0: [
-        "task_contract.json",
-        "task_derivation.json",
-        "task_derivation_proposal.json",
-        "normalized_task.json",
-        "retrieval_plan.json",
-        "dispatch_quality.json",
-        "corpus_coverage.json",
-    ],
-    1: [
-        "evidence_cards.json",
-        "bertopic_insight.json",
-    ],
-    2: [
-        "timeline_nodes.json",
-        "metrics_bundle.json",
-        "actor_positions.json",
-    ],
-    3: [
-        "event_analysis.json",
-        "conflict_map.json",
-    ],
-    4: [
-        "agenda_frame_map.json",
-        "mechanism_summary.json",
-        "risk_signals.json",
-    ],
-    5: [
-        "utility_assessment.json",
-    ],
-}
 
 
 def _path_tokens(common_context: Dict[str, Any] | None) -> Dict[str, str]:
@@ -452,26 +367,21 @@ def _result_summary(result: Any) -> str:
 
 
 def _required_paths_for_agent(agent_name: str, tier: int, common_context: Dict[str, Any] | None) -> List[str]:
-    configured = [
-        str(item).strip()
-        for item in get_subagent_output_files(agent_name, path_tokens=_path_tokens(common_context))
+    metadata = get_subagent_metadata_by_name(agent_name)
+    return [
+        str(item).format(**_path_tokens(common_context))
+        for item in (metadata.get("output_files") or [])
         if str(item or "").strip()
     ]
-    if configured:
-        return configured
-    return [_state_path(item, common_context) for item in _TIER_REQUIRED_FILES.get(tier, [])]
 
 
 def _output_globs_for_agent(agent_name: str, common_context: Dict[str, Any] | None) -> List[str]:
-    globs = [
-        str(item).strip()
-        for item in get_subagent_output_globs(agent_name, path_tokens=_path_tokens(common_context))
+    metadata = get_subagent_metadata_by_name(agent_name)
+    return [
+        str(item).format(**_path_tokens(common_context))
+        for item in (metadata.get("output_globs") or [])
         if str(item or "").strip()
     ]
-    writer_glob = _state_path("section_drafts/*.json", common_context)
-    if agent_name == "writer" and writer_glob not in globs:
-        globs.append(writer_glob)
-    return globs
 
 
 def _output_state(content: Dict[str, Any]) -> str:
@@ -1380,119 +1290,53 @@ def build_exploration_deterministic_graph(
     )
 
     builder = StateGraph(ExplorationDeterministicState)
+    builder.add_node(get_subagent_node_name("retrieval_router"), _make_agent_node(deps, agent_name="retrieval_router", tier=0, phase=_TIER_PHASES[0]))
+    for tier in sorted(_TIER_NODE_AGENTS.keys()):
+        builder.add_node(f"start_tier{tier}", _make_tier_start_node(deps, tier=tier, phase=_TIER_PHASES[tier]))
+        for node_name, agent_name in _TIER_NODE_AGENTS[tier]:
+            builder.add_node(node_name, _make_agent_node(deps, agent_name=agent_name, tier=tier, phase=_TIER_PHASES[tier]))
+        builder.add_node(
+            f"gather_tier{tier}",
+            _make_gather_node(
+                deps,
+                tier=tier,
+                phase=_TIER_PHASES[tier],
+                agent_names=[agent_name for _, agent_name in _TIER_NODE_AGENTS[tier]],
+            ),
+        )
     builder.add_node(
-        "retrieval_router_node",
-        _make_agent_node(deps, agent_name="retrieval_router", tier=0, phase=_TIER_PHASES[0]),
-    )
-    builder.add_node("start_tier1", _make_tier_start_node(deps, tier=1, phase=_TIER_PHASES[1]))
-    builder.add_node(
-        "archive_evidence_node",
-        _make_agent_node(deps, agent_name="archive_evidence_organizer", tier=1, phase=_TIER_PHASES[1]),
-    )
-    builder.add_node(
-        "bertopic_node",
-        _make_agent_node(deps, agent_name="bertopic_evolution_analyst", tier=1, phase=_TIER_PHASES[1]),
-    )
-    builder.add_node(
-        "gather_tier1",
-        _make_gather_node(
-            deps,
-            tier=1,
-            phase=_TIER_PHASES[1],
-            agent_names=[agent_name for _, agent_name in _TIER_NODE_AGENTS[1]],
-        ),
-    )
-    builder.add_node("start_tier2", _make_tier_start_node(deps, tier=2, phase=_TIER_PHASES[2]))
-    builder.add_node(
-        "timeline_node",
-        _make_agent_node(deps, agent_name="timeline_analyst", tier=2, phase=_TIER_PHASES[2]),
-    )
-    builder.add_node(
-        "stance_node",
-        _make_agent_node(deps, agent_name="stance_conflict", tier=2, phase=_TIER_PHASES[2]),
-    )
-    builder.add_node(
-        "gather_tier2",
-        _make_gather_node(
-            deps,
-            tier=2,
-            phase=_TIER_PHASES[2],
-            agent_names=[agent_name for _, agent_name in _TIER_NODE_AGENTS[2]],
-        ),
-    )
-    builder.add_node("start_tier3", _make_tier_start_node(deps, tier=3, phase=_TIER_PHASES[3]))
-    builder.add_node(
-        "event_analyst_node",
-        _make_agent_node(deps, agent_name="event_analyst", tier=3, phase=_TIER_PHASES[3]),
-    )
-    builder.add_node(
-        "conflict_node",
-        _make_agent_node(deps, agent_name="claim_actor_conflict", tier=3, phase=_TIER_PHASES[3]),
-    )
-    builder.add_node(
-        "gather_tier3",
-        _make_gather_node(
-            deps,
-            tier=3,
-            phase=_TIER_PHASES[3],
-            agent_names=[agent_name for _, agent_name in _TIER_NODE_AGENTS[3]],
-        ),
-    )
-    builder.add_node("start_tier4", _make_tier_start_node(deps, tier=4, phase=_TIER_PHASES[4]))
-    builder.add_node(
-        "agenda_node",
-        _make_agent_node(deps, agent_name="agenda_frame_builder", tier=4, phase=_TIER_PHASES[4]),
-    )
-    builder.add_node(
-        "propagation_node",
-        _make_agent_node(deps, agent_name="propagation_analyst", tier=4, phase=_TIER_PHASES[4]),
-    )
-    builder.add_node(
-        "gather_tier4",
-        _make_gather_node(
-            deps,
-            tier=4,
-            phase=_TIER_PHASES[4],
-            agent_names=[agent_name for _, agent_name in _TIER_NODE_AGENTS[4]],
-        ),
-    )
-    builder.add_node(
-        "utility_node",
+        get_subagent_node_name("decision_utility_judge"),
         _make_agent_node(deps, agent_name="decision_utility_judge", tier=5, phase=_TIER_PHASES[5]),
     )
     builder.add_node(
-        "writer_node",
+        get_subagent_node_name("writer"),
         _make_agent_node(deps, agent_name="writer", tier=6, phase=_TIER_PHASES[6]),
     )
     builder.add_node("finalize_node", lambda state: finalize_node(state, deps))
 
-    builder.add_edge(START, "retrieval_router_node")
-    builder.add_edge("retrieval_router_node", "start_tier1")
-    builder.add_conditional_edges("start_tier1", dispatch_tier1)
-    builder.add_edge("archive_evidence_node", "gather_tier1")
-    builder.add_edge("bertopic_node", "gather_tier1")
-    builder.add_edge("gather_tier1", "start_tier2")
-    builder.add_conditional_edges("start_tier2", dispatch_tier2)
-    builder.add_edge("timeline_node", "gather_tier2")
-    builder.add_edge("stance_node", "gather_tier2")
-    builder.add_edge("gather_tier2", "start_tier3")
-    builder.add_conditional_edges("start_tier3", dispatch_tier3)
-    builder.add_edge("event_analyst_node", "gather_tier3")
-    builder.add_edge("conflict_node", "gather_tier3")
-    builder.add_edge("gather_tier3", "start_tier4")
-    builder.add_conditional_edges("start_tier4", dispatch_tier4)
-    builder.add_edge("agenda_node", "gather_tier4")
-    builder.add_edge("propagation_node", "gather_tier4")
-    builder.add_edge("gather_tier4", "utility_node")
+    builder.add_edge(START, get_subagent_node_name("retrieval_router"))
+    previous = get_subagent_node_name("retrieval_router")
+    for tier in sorted(_TIER_NODE_AGENTS.keys()):
+        start_node = f"start_tier{tier}"
+        gather_node = f"gather_tier{tier}"
+        builder.add_edge(previous, start_node)
+        builder.add_conditional_edges(
+            start_node,
+            (dispatch_tier1 if tier == 1 else dispatch_tier2 if tier == 2 else dispatch_tier3 if tier == 3 else dispatch_tier4),
+        )
+        for node_name, _agent_name in _TIER_NODE_AGENTS[tier]:
+            builder.add_edge(node_name, gather_node)
+        previous = gather_node
+    builder.add_edge(previous, get_subagent_node_name("decision_utility_judge"))
     builder.add_conditional_edges(
-        "utility_node",
+        get_subagent_node_name("decision_utility_judge"),
         route_after_utility,
         {
             "writer_node": "writer_node",
             "finalize_node": "finalize_node",
         },
     )
-    builder.add_edge("writer_node", "finalize_node")
+    builder.add_edge(get_subagent_node_name("writer"), "finalize_node")
     builder.add_edge("finalize_node", END)
     return builder
 

@@ -4,6 +4,12 @@ backend/configs/*
 !backend/configs/llm.yaml
 !backend/configs/llm.local.example.yaml
 !backend/configs/chart_aliases.yaml
+!backend/configs/stopwords.txt
+!backend/configs/hot_overview_filters.yaml
+!backend/configs/channels.yaml
+!backend/configs/explain.yaml
+!backend/configs/bertopic.json
+!backend/configs/analysis.yaml
 !backend/configs/report_blueprints/
 backend/configs/report_blueprints/*
 !backend/configs/report_blueprints/analysis_report.yaml
@@ -54,6 +60,7 @@ scripts/
 # Temp
 .tmp/
 .tmp-*/
+.tmp_pytest/
 
 # Logs
 *.log
