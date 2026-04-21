@@ -22,13 +22,17 @@ field_alias:
   summary: ["摘要"]
   ocr: ["OCR", "图片文字"]
   content: ["正文", "内容"]
-  platform: ["发布平台","app名称","网站名称"]
+  platform: ["平台", "发布平台", "app名称", "网站名称", "来源"]
   author: ["作者", "账号","公众号名称","博主"]
   published_at: ["发布时间", "时间"]
   url: ["链接", "URL"]
   region: ["发文IP属地","命中属地"]
   hit_words: ["命中词", "关键词"]
   polarity: ["倾向性", "情感"]
+  like_count: ["点赞数", "点赞量", "点赞", "likecount", "likes", "like_count", "IR_COUNT1"]
+  comment_count: ["评论数", "评论量", "评论", "comments", "comment_count", "IR_COUNT2"]
+  favorite_count: ["收藏数", "收藏量", "收藏", "favorites", "favorite_count", "IR_COUNT3"]
+  share_count: ["转发数", "转发量", "转发", "shares", "share_count", "IR_COUNT4"]
 
 # 分析时对渠道进行的合并
 merge_for_analysis:

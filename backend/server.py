@@ -46,6 +46,8 @@ from src.project import (  # type: ignore
     update_dataset_column_mapping,
     store_uploaded_dataset,
 )
+from src.utils.setting.editor import load_config as load_yaml_config, save_config as save_yaml_config
+from src.utils.setting.settings import settings
 from src.utils.setting.paths import bucket, get_data_root, _normalise_topic  # type: ignore
 
 
@@ -1264,6 +1266,81 @@ def system_delete_background_task(task_id: str):
 @app.get("/api/config")
 def get_config():
     return jsonify(CONFIG)
+
+
+@app.get("/api/settings/channels/aliases")
+def get_channel_alias_settings():
+    try:
+        config = load_yaml_config("channels")
+        field_alias = config.get("field_alias") or config.get("field_aliases") or {}
+        if not isinstance(field_alias, dict):
+            field_alias = {}
+        standard_fields = [
+            {"key": "title", "label": "标题", "description": "文章或帖文标题"},
+            {"key": "summary", "label": "摘要", "description": "摘要、导语、简述"},
+            {"key": "ocr", "label": "图片文字", "description": "OCR 或图片提取文字"},
+            {"key": "content", "label": "正文", "description": "正文、内容主体"},
+            {"key": "platform", "label": "平台", "description": "发布平台、站点或 App 名称"},
+            {"key": "author", "label": "作者", "description": "作者、账号、博主、公众号"},
+            {"key": "published_at", "label": "发布时间", "description": "发布时间或原始时间字段"},
+            {"key": "url", "label": "链接", "description": "原文链接、URL"},
+            {"key": "region", "label": "地域", "description": "属地、发文 IP、命中地域"},
+            {"key": "hit_words", "label": "命中词", "description": "关键词、命中词"},
+            {"key": "polarity", "label": "情感倾向", "description": "倾向性、情感"},
+            {"key": "like_count", "label": "点赞数", "description": "点赞、点赞量"},
+            {"key": "comment_count", "label": "评论数", "description": "评论、评论量"},
+            {"key": "favorite_count", "label": "收藏数", "description": "收藏、收藏量"},
+            {"key": "share_count", "label": "转发数", "description": "转发、分享、转发量"},
+        ]
+        return success({
+            "data": {
+                "field_alias": field_alias,
+                "standard_fields": standard_fields,
+            }
+        })
+    except Exception as exc:
+        LOGGER.exception("Failed to load channel alias settings")
+        return error(f"读取列名映射配置失败: {str(exc)}", 500)
+
+
+@app.put("/api/settings/channels/aliases")
+def update_channel_alias_settings():
+    payload = request.get_json(silent=True) or {}
+    raw_field_alias = payload.get("field_alias")
+    if not isinstance(raw_field_alias, dict):
+        return error("field_alias 必须是对象", 400)
+
+    try:
+        config = load_yaml_config("channels")
+        next_aliases: Dict[str, List[str]] = {}
+        for canonical, aliases in raw_field_alias.items():
+            canonical_name = str(canonical or "").strip()
+            if not canonical_name:
+                continue
+            if not isinstance(aliases, list):
+                return error(f"{canonical_name} 的别名必须是数组", 400)
+            cleaned_aliases: List[str] = []
+            seen = set()
+            for alias in aliases:
+                alias_name = str(alias or "").strip()
+                if not alias_name:
+                    continue
+                normalized = alias_name.casefold()
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                cleaned_aliases.append(alias_name)
+            next_aliases[canonical_name] = cleaned_aliases
+
+        config["field_alias"] = next_aliases
+        if "field_aliases" in config:
+            config.pop("field_aliases", None)
+        save_yaml_config("channels", config)
+        settings.reload()
+        return success({"message": "列名映射已保存"})
+    except Exception as exc:
+        LOGGER.exception("Failed to save channel alias settings")
+        return error(f"保存列名映射配置失败: {str(exc)}", 500)
 
 
 @app.get("/api/home/today-hot-overview")

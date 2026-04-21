@@ -36,6 +36,7 @@ const SettingsLayout = () => import('../views/settings/SettingsLayout.vue')
 const SettingsDatabasesView = () => import('../views/settings/SettingsDatabasesView.vue')
 const SettingsAiView = () => import('../views/settings/SettingsAiView.vue')
 const SettingsNetInsightView = () => import('../views/settings/SettingsNetInsightView.vue')
+const SettingsChannelAliasesView = () => import('../views/settings/SettingsChannelAliasesView.vue')
 const SettingsThemeView = () => import('../views/settings/SettingsThemeView.vue')
 const SettingsBackendView = () => import('../views/settings/SettingsBackendView.vue')
 const SettingsArchivesView = () => import('../views/settings/SettingsArchivesView.vue')
@@ -487,6 +488,15 @@ export const routes = [
         meta: {
           title: 'AI 服务配置',
           breadcrumb: 'AI 服务配置'
+        }
+      },
+      {
+        path: 'channels',
+        name: 'settings-channels',
+        component: SettingsChannelAliasesView,
+        meta: {
+          title: '列名映射',
+          breadcrumb: '列名映射'
         }
       },
       {

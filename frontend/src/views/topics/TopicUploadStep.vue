@@ -26,15 +26,12 @@
           <div class="space-y-5">
             <div class="space-y-2">
               <label class="text-sm font-bold text-primary ml-1">专题名称</label>
-              <input v-model.trim="topicName" type="text" required
-                class="input"
-                placeholder="例如：2024-两会舆情专项" />
+              <input v-model.trim="topicName" type="text" required class="input" placeholder="例如：2024-两会舆情专项" />
             </div>
 
             <div class="space-y-2">
               <label class="text-sm font-bold text-primary ml-1">专题说明</label>
-              <textarea v-model.trim="topicDescription" rows="4"
-                class="form-textarea resize-none"
+              <textarea v-model.trim="topicDescription" rows="4" class="form-textarea resize-none"
                 :placeholder="selectedTags.length ? '补充更多背景信息...' : '简要描述专题背景、抓取渠道等信息...'"></textarea>
             </div>
 
@@ -88,7 +85,7 @@
         </header>
 
         <template v-if="canUpload">
-          <form class="flex-1 flex flex-col gap-6" @submit.prevent="uploadDataset">
+          <form class="flex flex-col gap-6" @submit.prevent="uploadDataset">
             <!-- Drop Zone -->
             <div
               class="relative flex min-h-[240px] cursor-pointer flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed transition-all duration-300"
@@ -137,99 +134,74 @@
               </button>
             </div>
 
-            <!-- Upload Progress -->
-            <div v-if="uploadStatuses.length" class="space-y-3 rounded-2xl bg-surface-variant/30 p-4">
-              <div class="flex justify-between items-center text-xs font-bold text-secondary uppercase tracking-wider">
-                <span>Batch Progress</span>
-                <span>{{ uploadProgress.percent }}%</span>
+            <div v-if="uploadFiles.length || uploading || uploadError || uploadSuccess || uploadStatuses.length"
+              class="space-y-4 rounded-3xl border border-brand-100 bg-brand-50/50 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0 space-y-1">
+                  <p class="text-sm font-bold text-primary">上传操作</p>
+                  <p class="text-xs text-secondary">
+                    {{ uploadFiles.length ? `当前待上传：${selectedFileSummary}` : '选择文件后即可开始上传并生成存档。' }}
+                  </p>
+                </div>
+                <button type="submit"
+                  class="inline-flex shrink-0 items-center justify-center rounded-full bg-brand-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-brand-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-brand-300"
+                  :disabled="uploading || !uploadFiles.length">
+                  {{ uploading ? '正在上传...' : '上传并生成存档' }}
+                </button>
               </div>
-              <div class="h-3 w-full overflow-hidden rounded-full bg-base-soft">
-                <div class="h-full rounded-full bg-brand-500 transition-all duration-500 ease-out"
-                  :style="{ width: `${uploadProgress.percent}%` }"></div>
+
+              <div v-if="uploading || uploadError || uploadSuccess || uploadHelper" class="rounded-2xl border px-4 py-3"
+                :class="uploadError
+                  ? 'border-rose-200 bg-rose-50/90'
+                  : uploadSuccess
+                    ? 'border-emerald-200 bg-emerald-50/90'
+                    : uploading
+                      ? 'border-brand-200 bg-brand-50/80'
+                      : 'border-gray-200 bg-white/80'">
+                <div v-if="uploading" class="flex items-start gap-3 text-sm text-brand-800">
+                  <span
+                    class="mt-0.5 h-4 w-4 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600"></span>
+                  <div class="space-y-1">
+                    <p class="font-semibold">{{ uploadActiveMessage }}</p>
+                    <p class="text-xs text-brand-700/80">{{ uploadProgressMessage }}</p>
+                  </div>
+                </div>
+                <div v-else-if="uploadError" class="space-y-1 text-sm text-rose-700">
+                  <p class="font-semibold">上传未全部完成</p>
+                  <p>{{ uploadError }}</p>
+                </div>
+                <div v-else-if="uploadSuccess" class="space-y-1 text-sm text-emerald-700">
+                  <p class="font-semibold">上传结果已生成</p>
+                  <p>{{ uploadSuccess }}</p>
+                </div>
+                <p v-else class="text-sm text-secondary">{{ uploadHelper }}</p>
               </div>
-              <div class="space-y-1 max-h-32 overflow-y-auto pr-2 sidebar-scroll">
-                <div v-for="status in uploadStatuses" :key="status.key"
-                  class="flex items-center justify-between text-xs py-1">
-                  <span class="truncate text-secondary max-w-[70%]">{{ status.name }}</span>
-                  <span class="px-2 py-0.5 rounded-full font-medium"
-                    :class="status.status === 'success' ? 'bg-emerald-100 text-emerald-700' : status.status === 'error' ? 'bg-rose-100 text-rose-700' : 'text-muted'">
-                    {{ status.message }}
-                  </span>
+
+              <!-- Upload Progress -->
+              <div v-if="uploadStatuses.length" class="space-y-3 rounded-2xl bg-surface-variant/30 p-4">
+                <div
+                  class="flex justify-between items-center text-xs font-bold text-secondary uppercase tracking-wider">
+                  <span>Batch Progress</span>
+                  <span>{{ uploadProgress.percent }}%</span>
+                </div>
+                <div class="h-3 w-full overflow-hidden rounded-full bg-base-soft">
+                  <div class="h-full rounded-full bg-brand-500 transition-all duration-500 ease-out"
+                    :style="{ width: `${uploadProgress.percent}%` }"></div>
+                </div>
+                <div class="space-y-1 max-h-32 overflow-y-auto pr-2 sidebar-scroll">
+                  <div v-for="status in uploadStatuses" :key="status.key"
+                    class="flex items-center justify-between text-xs py-1">
+                    <span class="truncate text-secondary max-w-[70%]">{{ status.name }}</span>
+                    <span class="px-2 py-0.5 rounded-full font-medium"
+                      :class="status.status === 'success' ? 'bg-emerald-100 text-emerald-700' : status.status === 'error' ? 'bg-rose-100 text-rose-700' : 'text-muted'">
+                      {{ status.message }}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-
-            <!-- Action Button -->
-            <button type="submit"
-              class="mt-auto w-full rounded-full bg-primary-900 py-4 text-sm font-bold text-white transition-all hover:bg-primary-800 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="uploading">
-              {{ uploading ? '正在上传...' : '上传并生成存档' }}
-            </button>
           </form>
 
-          <!-- Success Card -->
-          <transition name="fade" mode="out-in">
-            <article v-if="latestDataset" key="dataset-success"
-              class="mt-6 rounded-3xl bg-emerald-50/80 p-6 border border-emerald-100">
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <p class="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1">SUCCESS</p>
-                  <h3 class="text-lg font-bold text-emerald-900">{{ latestDataset.display_name }}</h3>
-                  <div class="mt-2 flex flex-wrap gap-2 text-xs">
-                    <span class="rounded-full bg-emerald-100/50 px-2 py-0.5 text-emerald-800 font-medium">{{
-                      formatFileSize(latestDataset.file_size) }}</span>
-                    <span class="rounded-full bg-emerald-100/50 px-2 py-0.5 text-emerald-800 font-medium">{{
-                      latestDataset.rows }} 行</span>
-                  </div>
-                </div>
-                <div class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
-                    <path fill-rule="evenodd"
-                      d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"
-                      clip-rule="evenodd" />
-                  </svg>
-                </div>
-              </div>
-
-              <!-- Mapping Section -->
-              <div class="mt-6 border-t border-emerald-200/50 pt-4">
-                <h4 class="text-sm font-bold text-emerald-900 mb-2">字段映射</h4>
-                <div class="grid grid-cols-2 gap-3">
-                  <AppSelect
-                    :options="columnSelectOptions"
-                    :value="columnMappingForm.date"
-                    placeholder="日期列 (未指定)"
-                    @change="columnMappingForm.date = $event"
-                  />
-                  <AppSelect
-                    :options="columnSelectOptions"
-                    :value="columnMappingForm.title"
-                    placeholder="标题列 (未指定)"
-                    @change="columnMappingForm.title = $event"
-                  />
-                  <AppSelect
-                    :options="columnSelectOptions"
-                    :value="columnMappingForm.content"
-                    placeholder="正文列 (未指定)"
-                    @change="columnMappingForm.content = $event"
-                  />
-                  <AppSelect
-                    :options="columnSelectOptions"
-                    :value="columnMappingForm.author"
-                    placeholder="作者列 (未指定)"
-                    @change="columnMappingForm.author = $event"
-                  />
-                </div>
-                <div class="mt-4 flex justify-end">
-                  <button type="button"
-                    class="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
-                    @click="saveColumnMapping" :disabled="mappingSaving">
-                    {{ mappingSaving ? '保存中' : '保存映射' }}
-                  </button>
-                </div>
-              </div>
-            </article>
-          </transition>
         </template>
 
         <div v-else
@@ -242,6 +214,71 @@
         </div>
       </section>
     </div>
+
+    <transition name="fade" mode="out-in">
+      <section v-if="latestDataset" key="dataset-column-setup" class="card-surface p-8">
+        <div class="grid gap-8 xl:grid-cols-[minmax(260px,360px),1fr] xl:items-start">
+          <aside class="space-y-3">
+            <p class="text-xs font-bold uppercase tracking-wider text-secondary">Column Setup</p>
+            <h2 class="text-xl font-bold text-primary">字段映射设置</h2>
+            <p class="text-sm leading-6 text-secondary">
+              请从刚上传的表格里选出发布时间、标题、正文和作者所在的列。
+            </p>
+            <div class="flex flex-wrap gap-2 text-xs">
+              <span class="rounded-full bg-white px-3 py-1 text-secondary ring-1 ring-black/5">{{
+                latestDataset.display_name
+              }}</span>
+              <span class="rounded-full bg-white px-3 py-1 text-secondary ring-1 ring-black/5">{{
+                formatFileSize(latestDataset.file_size) }}</span>
+              <span class="rounded-full bg-white px-3 py-1 text-secondary ring-1 ring-black/5">{{ latestDataset.rows }}
+                行</span>
+            </div>
+          </aside>
+
+          <div class="rounded-3xl border border-gray-200 bg-white p-6">
+            <div class="grid gap-4 md:grid-cols-2">
+              <label class="space-y-2">
+                <span class="block text-xs font-semibold text-primary/80">哪一列是发布时间</span>
+                <AppSelect :options="columnSelectOptions" :value="columnMappingForm.date" placeholder="选择表里的时间列"
+                  @change="columnMappingForm.date = $event" />
+              </label>
+              <label class="space-y-2">
+                <span class="block text-xs font-semibold text-primary/80">哪一列是标题</span>
+                <AppSelect :options="columnSelectOptions" :value="columnMappingForm.title" placeholder="选择表里的标题列"
+                  @change="columnMappingForm.title = $event" />
+              </label>
+              <label class="space-y-2">
+                <span class="block text-xs font-semibold text-primary/80">哪一列是正文</span>
+                <AppSelect :options="columnSelectOptions" :value="columnMappingForm.content" placeholder="选择表里的正文列"
+                  @change="columnMappingForm.content = $event" />
+              </label>
+              <label class="space-y-2">
+                <span class="block text-xs font-semibold text-primary/80">哪一列是作者</span>
+                <AppSelect :options="columnSelectOptions" :value="columnMappingForm.author" placeholder="没有作者列可以先不选"
+                  @change="columnMappingForm.author = $event" />
+              </label>
+            </div>
+
+            <div v-if="mappingError || mappingSuccess" class="mt-4 rounded-2xl border px-4 py-3 text-sm" :class="mappingError
+              ? 'border-rose-200 bg-rose-50 text-rose-700'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700'">
+              {{ mappingError || mappingSuccess }}
+            </div>
+
+            <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
+              <p class="text-xs text-secondary">
+                保存后，后续清洗和入库会按你这里选的列来识别内容。
+              </p>
+              <button type="button"
+                class="rounded-full bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                @click="saveColumnMapping" :disabled="mappingSaving">
+                {{ mappingSaving ? '正在保存...' : '保存字段映射' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </transition>
   </div>
 </template>
 
@@ -250,8 +287,10 @@ import { computed, reactive, ref, watch } from 'vue'
 import { CloudArrowUpIcon, DocumentArrowUpIcon, TagIcon } from '@heroicons/vue/24/outline'
 import AppSelect from '../../components/AppSelect.vue'
 import { useApiBase } from '../../composables/useApiBase'
+import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
 
 const { ensureApiBase } = useApiBase()
+const { setSelectedProjectName, refreshProjects } = useTopicCreationProject()
 
 const topicName = ref('')
 const topicDescription = ref('')
@@ -318,6 +357,22 @@ const uploadProgress = computed(() => {
   const running = uploadStatuses.value.some((item) => item.status === 'uploading')
   const percent = Math.round((completed / total) * 100)
   return { total, completed, percent, running }
+})
+
+const uploadActiveMessage = computed(() => {
+  const total = uploadProgress.value.total
+  if (!total) return '正在准备上传文件'
+  return total === 1
+    ? `正在上传 1 个文件，请稍候`
+    : `正在上传 ${total} 个文件，请稍候`
+})
+
+const uploadProgressMessage = computed(() => {
+  const { completed, total } = uploadProgress.value
+  if (!total) return '上传开始后，这里会持续显示处理结果。'
+  if (completed >= total) return '文件已传输完成，正在整理结果。'
+  const remaining = Math.max(total - completed, 0)
+  return `已完成 ${completed} / ${total}，剩余 ${remaining} 个文件。每个文件的结果会显示在上方进度列表中。`
 })
 
 const hasMultipleDatasets = computed(() => uploadedDatasets.value.length > 1)
@@ -534,6 +589,12 @@ const createTopic = async () => {
     if (!response.ok || result.status !== 'ok') {
       throw new Error(result.message || '专题创建失败')
     }
+    const createdProjectName =
+      typeof result.project?.name === 'string' && result.project.name.trim()
+        ? result.project.name.trim()
+        : topicName.value.trim()
+    setSelectedProjectName(createdProjectName)
+    await refreshProjects()
     createSuccess.value = '专题创建成功，可以继续上传数据。'
   } catch (err) {
     createError.value = err instanceof Error ? err.message : '专题创建失败'
@@ -713,6 +774,15 @@ const uploadDataset = async () => {
   uploadedDatasets.value = succeededDatasets
 
   if (successes.length) {
+    const latestProjectName =
+      typeof succeededDatasets[succeededDatasets.length - 1]?.project === 'string' &&
+      succeededDatasets[succeededDatasets.length - 1].project.trim()
+        ? succeededDatasets[succeededDatasets.length - 1].project.trim()
+        : topicName.value.trim()
+    if (latestProjectName) {
+      setSelectedProjectName(latestProjectName)
+      await refreshProjects()
+    }
     const successMessage =
       successes.length === 1
         ? `已成功上传 ${successes[0].file.name}`

@@ -247,7 +247,24 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
             df['title'] = df['content']
 
         # 补全并保留列（保留 title；缺失统一填充"未知"）
-        keep_cols = ['id', 'title', 'contents', 'platform', 'author', 'published_at', 'url', 'region', 'hit_words', 'polarity', 'likecount']
+        keep_cols = [
+            'id',
+            'title',
+            'contents',
+            'platform',
+            'author',
+            'published_at',
+            'url',
+            'region',
+            'hit_words',
+            'polarity',
+            'like_count',
+            'comment_count',
+            'favorite_count',
+            'share_count',
+            # 兼容旧链路：部分分析代码仍读取 likecount
+            'likecount',
+        ]
         missing_cols = []
         for col in ['title', 'author', 'url', 'hit_words', 'polarity']:
             if col not in df.columns:
@@ -257,11 +274,19 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
                 # 将空字符串/NaN 填充为 "未知"
                 df[col] = df[col].replace('', '未知').fillna('未知')
         
-        # 数值列处理
-        if 'likecount' not in df.columns:
-            df['likecount'] = 0
-        else:
-            df['likecount'] = pd.to_numeric(df['likecount'], errors='coerce').fillna(0).astype(int)
+        # 数值列处理：统一保留互动指标，并兼容旧字段 likecount
+        numeric_metric_defaults = {
+            'like_count': 0,
+            'comment_count': 0,
+            'favorite_count': 0,
+            'share_count': 0,
+        }
+        for metric_name, default_value in numeric_metric_defaults.items():
+            if metric_name not in df.columns:
+                df[metric_name] = default_value
+            else:
+                df[metric_name] = pd.to_numeric(df[metric_name], errors='coerce').fillna(default_value).astype(int)
+        df['likecount'] = df['like_count']
 
         # 重编号（每表独立）
         df = df.reset_index(drop=True)

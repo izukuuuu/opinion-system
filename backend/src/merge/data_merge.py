@@ -125,15 +125,15 @@ def _iter_channel_frames(
                 yield channel_name, df
         elif suffix == ".csv":
             df = pd.read_csv(file_path, encoding="utf-8-sig")
+            if field_alias_map:
+                df = df.rename(columns=field_alias_map)
             for channel_name, channel_df in _split_dataframe_by_channel(df, file_path, keep_lookup, logger):
-                if field_alias_map:
-                    channel_df = channel_df.rename(columns=field_alias_map)
                 yield channel_name, channel_df
         elif suffix == ".jsonl":
             df = pd.read_json(file_path, lines=True)
+            if field_alias_map:
+                df = df.rename(columns=field_alias_map)
             for channel_name, channel_df in _split_dataframe_by_channel(df, file_path, keep_lookup, logger):
-                if field_alias_map:
-                    channel_df = channel_df.rename(columns=field_alias_map)
                 yield channel_name, channel_df
         else:
             log_error(logger, f"不支持的文件类型: {file_path.suffix}", "Merge")

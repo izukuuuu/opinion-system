@@ -911,7 +911,7 @@ const tabOptions = [
 ]
 
 onMounted(async () => {
-  await loadProjects()
+  await refreshProjects()
   if (currentProjectName.value) {
     await refreshProjectContext()
   }

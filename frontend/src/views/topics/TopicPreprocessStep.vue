@@ -712,7 +712,7 @@ const useMergeDateSuggestion = () => {
 }
 
 onMounted(() => {
-  loadProjects()
+  refreshProjects()
 })
 
 watch(selectedProjectName, (newVal) => {

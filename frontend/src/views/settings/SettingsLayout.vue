@@ -39,7 +39,8 @@ import {
   SwatchIcon,
   DocumentMagnifyingGlassIcon,
   BeakerIcon,
-  HashtagIcon
+  HashtagIcon,
+  TableCellsIcon
 } from '@heroicons/vue/24/outline'
 import CollapsibleSidebar from '../../components/navigation/CollapsibleSidebar.vue'
 
@@ -55,6 +56,12 @@ const navigationItems = [
     label: 'AI 服务配置',
     to: { name: 'settings-ai' },
     icon: CpuChipIcon
+  },
+  {
+    key: 'settings-channels',
+    label: '列名映射',
+    to: { name: 'settings-channels' },
+    icon: TableCellsIcon
   },
   {
     key: 'settings-netinsight',

@@ -379,7 +379,7 @@ const inferredFilterPath = computed(() => {
 })
 
 onMounted(() => {
-  loadProjects()
+  refreshProjects()
 })
 
 watch(
