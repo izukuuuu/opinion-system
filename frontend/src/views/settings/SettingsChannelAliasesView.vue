@@ -4,7 +4,7 @@
       <p class="settings-page-eyebrow">数据导入</p>
       <h2 class="settings-page-title">列名映射</h2>
       <p class="settings-page-desc">
-        维护系统识别列名时使用的统一别名字典。每个标准字段下面都可以添加多个原始列名，后端会按这份映射继续做识别。
+        维护统一别名字典。把同一个字段可能出现的列名加进来，后端会按这份映射继续识别。
       </p>
     </header>
 
@@ -15,46 +15,50 @@
       {{ feedback.success }}
     </div>
 
-    <section class="settings-section settings-section-split">
+    <section class="settings-section settings-section-split space-y-5">
       <header class="settings-toolbar">
         <div class="settings-section-header">
           <h3 class="settings-section-title">标准字段与别名</h3>
-          <p class="settings-section-desc">不区分数据源，不区分模板，只维护统一别名。真正的识别逻辑由后端继续处理。</p>
+          <p class="settings-section-desc">只维护统一别名，不区分数据源。</p>
         </div>
       </header>
+
+      <div class="rounded-2xl border border-soft bg-surface-muted/50 px-4 py-3 text-sm text-secondary">
+        每张小卡代表一个系统字段。卡片里的标签是当前已识别的别名，下面输入框用于继续补充。
+      </div>
 
       <div v-if="state.loading && !rows.length" class="settings-empty-state py-10">
         正在加载列名映射...
       </div>
 
-      <div v-else class="space-y-4">
+      <div v-else class="grid gap-4 lg:grid-cols-2">
         <article
           v-for="(row, index) in rows"
           :key="row.key"
-          class="rounded-3xl border border-soft bg-surface-muted/50 p-5"
+          class="rounded-3xl border border-soft bg-surface-muted/50 p-4"
         >
-          <div class="space-y-4">
-            <div class="space-y-1">
-              <div class="flex flex-wrap items-center gap-3">
-                <h3 class="text-base font-semibold text-primary">{{ row.label }}</h3>
-                <code class="rounded-full bg-white px-2.5 py-0.5 text-xs text-secondary ring-1 ring-black/5">
+          <div class="space-y-3">
+            <div class="space-y-1.5">
+              <div class="flex flex-wrap items-center gap-2">
+                <h3 class="text-sm font-semibold text-primary">{{ row.label }}</h3>
+                <code class="rounded-full bg-white px-2.5 py-0.5 text-[11px] text-secondary ring-1 ring-black/5">
                   {{ row.name }}
                 </code>
               </div>
-              <p class="text-sm text-secondary">{{ row.description }}</p>
+              <p class="text-xs leading-5 text-secondary">{{ row.description }}</p>
             </div>
 
-            <div class="space-y-2">
+            <div class="space-y-2.5">
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="font-medium text-secondary">可识别的原始列名</span>
-                <span class="text-xs text-muted">例如：{{ exampleText(row.name) }}</span>
+                <span class="text-xs font-semibold text-secondary">已收录别名</span>
+                <span class="text-[11px] text-muted">例如：{{ exampleText(row.name) }}</span>
               </div>
 
               <div v-if="row.aliases.length" class="flex flex-wrap gap-2">
                 <span
                   v-for="alias in row.aliases"
                   :key="`${row.key}-${alias}`"
-                  class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700"
+                  class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-[11px] font-medium text-brand-700"
                 >
                   {{ alias }}
                   <button
@@ -66,14 +70,14 @@
                   </button>
                 </span>
               </div>
-              <p v-else class="text-xs text-muted">当前还没有设置别名。</p>
+              <p v-else class="text-[11px] text-muted">当前还没有设置别名。</p>
 
               <div class="flex flex-wrap gap-2">
                 <input
                   v-model.trim="row.draftAlias"
                   type="text"
-                  class="input flex-1 min-w-[220px]"
-                  placeholder="输入一个原始列名后回车或点击添加"
+                  class="input h-11 flex-1 min-w-[180px]"
+                  placeholder="输入列名后回车"
                   @keyup.enter="addAlias(index)"
                 />
                 <button
@@ -81,7 +85,7 @@
                   class="btn-secondary px-4 py-2 text-sm"
                   @click="addAlias(index)"
                 >
-                  添加别名
+                  添加
                 </button>
               </div>
             </div>
@@ -92,7 +96,7 @@
 
     <div class="settings-action-row">
       <p class="text-xs text-muted">
-        保存后，新的 CSV / JSONL / Excel 导入会使用这份统一别名字典；无需在这里区分数据源。
+        保存后，新导入文件会直接使用这份统一别名字典。
       </p>
       <div class="flex flex-wrap gap-3">
         <button
