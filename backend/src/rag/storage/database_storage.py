@@ -107,7 +107,7 @@ class DatabaseStorage(BaseStorage):
             Base.metadata.create_all(self.engine)
 
         except ImportError:
-            raise ImportError("SQLAlchemy and psycopg2 required. Install with: pip install sqlalchemy psycopg2-binary")
+            raise ImportError("SQLAlchemy and psycopg required. Install with: pip install sqlalchemy psycopg-binary")
 
     def _init_mysql(self):
         """Initialize MySQL connection."""

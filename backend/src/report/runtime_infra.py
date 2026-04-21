@@ -43,6 +43,15 @@ _SHARED_CHECKPOINTERS: Dict[str, tuple[Any, Any, ReportRuntimeProfile]] = {}
 SOURCE_REUSE_ACTIVE = "reuse_active"
 
 
+def _normalise_postgres_driver_url(url: str) -> str:
+    text = str(url or "").strip()
+    if text.startswith("postgresql+psycopg2://"):
+        return "postgresql+psycopg://" + text[len("postgresql+psycopg2://"):]
+    if text.startswith("postgresql://"):
+        return "postgresql+psycopg://" + text[len("postgresql://"):]
+    return text
+
+
 def _read_setting(path: str, default: Any = None) -> Any:
     try:
         settings.reload()
@@ -159,7 +168,7 @@ def _build_postgres_runtime_connection(*, purpose: str, locator_hint: str = "") 
     engine = str(active.get("engine") or "").strip().lower()
     if engine != "postgresql":
         raise RuntimeError("Report runtime persistence requires the active database connection to be PostgreSQL.")
-    raw_url = str(active.get("url") or "").strip()
+    raw_url = _normalise_postgres_driver_url(str(active.get("url") or "").strip())
     if not raw_url:
         raise RuntimeError("The active PostgreSQL connection is missing its URL.")
     parsed = make_url(raw_url)
@@ -170,7 +179,7 @@ def _build_postgres_runtime_connection(*, purpose: str, locator_hint: str = "") 
     query = dict(parsed.query) if isinstance(parsed.query, dict) else {}
     query["application_name"] = "opinion-system-report-runtime"
     query["options"] = options_value
-    runtime_url = parsed.set(drivername="postgresql", query=query)
+    runtime_url = parsed.set(drivername="postgresql+psycopg", query=query)
     locator = str(locator_hint or f"postgres://{active.get('id') or 'active'}/{database_name or 'postgres'}?schema={schema_name}&purpose={purpose}").strip()
     redacted = runtime_url.render_as_string(hide_password=True)
     dsn = runtime_url.render_as_string(hide_password=False)

@@ -33,7 +33,7 @@ class ReportRuntimeSettingsApiTests(unittest.TestCase):
         }
         databases = {
             "active": "primary",
-            "connections": [{"id": "primary", "name": "本地 PostgreSQL", "engine": "postgresql", "url": "postgresql+psycopg2://postgres:secret@localhost:5432/postgres"}],
+            "connections": [{"id": "primary", "name": "本地 PostgreSQL", "engine": "postgresql", "url": "postgresql+psycopg://postgres:secret@localhost:5432/postgres"}],
         }
         client = self._client()
         with patch("server_support.settings_config.load_llm_config", return_value=llm_config), patch(
@@ -54,7 +54,7 @@ class ReportRuntimeSettingsApiTests(unittest.TestCase):
         stored = {"langchain": {"report": {"runtime": {"persistence": {"enabled": False, "source_mode": "reuse_active", "schema_name": "report_runtime"}}}}}
         databases = {
             "active": "primary",
-            "connections": [{"id": "primary", "name": "本地 PostgreSQL", "engine": "postgresql", "url": "postgresql+psycopg2://postgres:secret@localhost:5432/postgres"}],
+            "connections": [{"id": "primary", "name": "本地 PostgreSQL", "engine": "postgresql", "url": "postgresql+psycopg://postgres:secret@localhost:5432/postgres"}],
         }
         persisted = {}
 

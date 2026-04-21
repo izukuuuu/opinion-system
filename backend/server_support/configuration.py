@@ -54,6 +54,33 @@ _SECRET_CREDENTIAL_FIELDS = {
 }
 
 
+def _normalise_postgres_driver_url(url: Any) -> Any:
+    if not isinstance(url, str):
+        return url
+    text = url.strip()
+    if not text:
+        return url
+    if text.startswith("postgresql+psycopg2://"):
+        return "postgresql+psycopg://" + text[len("postgresql+psycopg2://"):]
+    if text.startswith("postgresql://"):
+        return "postgresql+psycopg://" + text[len("postgresql://"):]
+    return url
+
+
+def _normalise_databases_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    normalised = deepcopy(config)
+    normalised["db_url"] = _normalise_postgres_driver_url(normalised.get("db_url"))
+    connections = normalised.get("connections")
+    if isinstance(connections, list):
+        for connection in connections:
+            if not isinstance(connection, dict):
+                continue
+            engine = str(connection.get("engine") or "").strip().lower()
+            if engine == "postgresql":
+                connection["url"] = _normalise_postgres_driver_url(connection.get("url"))
+    return normalised
+
+
 def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     merged: Dict[str, Any] = deepcopy(base)
     for key, value in override.items():
@@ -202,7 +229,7 @@ def reload_settings() -> None:
 def load_databases_config() -> Dict[str, Any]:
     """Return the structured settings payload for database connections."""
 
-    config = load_settings_config(DATABASES_CONFIG_NAME)
+    config = _normalise_databases_config(load_settings_config(DATABASES_CONFIG_NAME))
     connections = config.get("connections") or []
     if not isinstance(connections, list):
         connections = []
@@ -225,7 +252,7 @@ def get_active_database_connection(config: Dict[str, Any] | None = None) -> Dict
 def persist_databases_config(config: Dict[str, Any]) -> None:
     """Persist and reload database configuration settings."""
 
-    save_settings_config(DATABASES_CONFIG_NAME, config)
+    save_settings_config(DATABASES_CONFIG_NAME, _normalise_databases_config(config))
     reload_settings()
 
 

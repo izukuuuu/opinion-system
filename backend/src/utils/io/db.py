@@ -13,6 +13,19 @@ from ..logging.logging import setup_logger, log_success, log_error, log_module_s
 
 class DatabaseManager:
     """数据库管理类"""
+
+    @staticmethod
+    def _normalise_postgres_driver_url(url: Optional[str]) -> Optional[str]:
+        if not isinstance(url, str):
+            return url
+        text = url.strip()
+        if not text:
+            return url
+        if text.startswith("postgresql+psycopg2://"):
+            return "postgresql+psycopg://" + text[len("postgresql+psycopg2://"):]
+        if text.startswith("postgresql://"):
+            return "postgresql+psycopg://" + text[len("postgresql://"):]
+        return url
     
     def __init__(self, db_url: Optional[str] = None):
         """
@@ -58,7 +71,9 @@ class DatabaseManager:
              if isinstance(first_conn, dict):
                  databases_url = first_conn.get('url')
 
-        self.db_url = db_url or env_url or databases_url or settings.get('defaults.db_url')
+        self.db_url = self._normalise_postgres_driver_url(
+            db_url or env_url or databases_url or settings.get('defaults.db_url')
+        )
         self.engine: Optional[Engine] = None
 
     @staticmethod

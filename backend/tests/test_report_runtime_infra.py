@@ -18,7 +18,7 @@ POSTGRES_DATABASES = {
             "id": "primary",
             "name": "本地 PostgreSQL",
             "engine": "postgresql",
-            "url": "postgresql+psycopg2://postgres:secret@localhost:5432/postgres",
+            "url": "postgresql+psycopg://postgres:secret@localhost:5432/postgres",
         }
     ],
 }

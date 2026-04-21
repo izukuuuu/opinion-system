@@ -384,12 +384,12 @@ cd OpinionSystem
 编辑 `backend/configs/databases.yaml`：
 
 ```yaml
-db_url: postgresql+psycopg2://postgres:your_password@localhost:5432/postgres
+db_url: postgresql+psycopg://postgres:your_password@localhost:5432/postgres
 connections:
   - id: primary
     name: 本地PostgreSQL
     engine: postgresql
-    url: postgresql+psycopg2://postgres:your_password@localhost:5432/postgres
+    url: postgresql+psycopg://postgres:your_password@localhost:5432/postgres
     description: 本地开发数据库
 active: primary
 ```

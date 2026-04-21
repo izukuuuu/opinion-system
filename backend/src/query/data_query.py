@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+from sqlalchemy.engine.url import make_url
 
 from ..utils.io.db import DatabaseManager
 from ..utils.setting.settings import settings
@@ -70,6 +71,48 @@ def _serialise_preview(df: pd.DataFrame, max_rows: int = PREVIEW_ROW_LIMIT) -> D
 
 
 MAX_TABLE_WORKERS = 6
+
+
+def _resolve_query_db_url() -> str:
+    """Prefer a dedicated direct Postgres admin connection for metadata queries."""
+    db_config = settings.get("databases", {}) or {}
+    connections = db_config.get("connections") if isinstance(db_config.get("connections"), list) else []
+
+    preferred_order = ["supabase_admin"]
+    for preferred_id in preferred_order:
+        for conn in connections:
+            if not isinstance(conn, dict):
+                continue
+            if str(conn.get("id") or "").strip() != preferred_id:
+                continue
+            url = str(conn.get("url") or "").strip()
+            if url:
+                try:
+                    parsed = make_url(url)
+                    return parsed.set(database="postgres").render_as_string(hide_password=False)
+                except Exception:
+                    return url
+
+    active_url = ""
+    active_id = str(db_config.get("active") or "").strip()
+    for conn in connections:
+        if not isinstance(conn, dict):
+            continue
+        if str(conn.get("id") or "").strip() == active_id:
+            active_url = str(conn.get("url") or "").strip()
+            break
+
+    active_url = active_url or str(db_config.get("db_url") or "").strip()
+    if not active_url:
+        return ""
+
+    try:
+        parsed = make_url(active_url)
+        if parsed.get_backend_name() == "postgresql":
+            return parsed.set(database="postgres").render_as_string(hide_password=False)
+    except Exception:
+        pass
+    return active_url
 
 
 def _fetch_table_info(
@@ -296,8 +339,9 @@ def query_database_info(logger=None, include_counts: bool = True) -> Optional[Di
     db_manager: Optional[DatabaseManager] = None
 
     try:
-        # 创建数据库管理器 (让 DatabaseManager 自动解析 active 连接)
-        db_manager = DatabaseManager()
+        # 查询模块固定优先走直连管理连接，并直接连接到 postgres 做枚举。
+        query_db_url = _resolve_query_db_url()
+        db_manager = DatabaseManager(query_db_url or None)
         
         if not db_manager.db_url:
             log_error(logger, "未找到数据库连接配置 (active or db_url)", "Query")
@@ -311,8 +355,6 @@ def query_database_info(logger=None, include_counts: bool = True) -> Optional[Di
         }
 
         try:
-            from sqlalchemy.engine.url import make_url
-
             parsed_url = make_url(db_manager.db_url)
             overview["connection"] = {
                 "driver": parsed_url.drivername,
@@ -325,35 +367,11 @@ def query_database_info(logger=None, include_counts: bool = True) -> Optional[Di
         except Exception:
             overview["connection"] = {"driver": "unknown"}
 
-        try:
-            # 获取所有数据库（屏蔽系统库）
-            engine = db_manager.connect()
-            # Force a connection check because create_engine is lazy
-            with engine.connect() as check_conn:
-                pass
-        except Exception as e:
-            # If default connection fails (e.g. database deleted), try fallback to 'postgres'
-            log_error(logger, f"Primary database connection failed ({e}). Attempting fallback to 'postgres'...", "Query")
-            try:
-                from sqlalchemy import create_engine
-                from sqlalchemy.engine.url import make_url
-                base_url = make_url(db_manager.db_url)
-                # Try 'postgres' first (common for PostgreSQL)
-                fallback_url = base_url.set(database='postgres')
-                db_manager.engine = create_engine(fallback_url)
-                engine = db_manager.engine
-                
-                # Verify fallback also works
-                with engine.connect() as check_conn:
-                    pass
-                    
-                # Update db_url to valid one so subsequent calls work
-                db_manager.db_url = fallback_url.render_as_string(hide_password=False)
-            except Exception as fallback_err:
-                 log_error(logger, f"Fallback connection also failed: {fallback_err}", "Query")
-                 # Re-raise the original or fallback error? 
-                 # If fallback fails, we can't do anything.
-                 raise fallback_err from e 
+        # 获取所有数据库（屏蔽系统库）
+        engine = db_manager.connect()
+        # Force a connection check because create_engine is lazy
+        with engine.connect() as check_conn:
+            pass
 
         dialect_name = engine.dialect.name
         
