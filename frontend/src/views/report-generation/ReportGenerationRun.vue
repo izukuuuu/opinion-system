@@ -314,6 +314,33 @@
               </article>
             </div>
           </section>
+          <section v-if="runVm.scorecardObservability.available" class="rounded-[1.75rem] bg-surface p-5">
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">质量结算</p>
+            <div class="mt-4 grid gap-2 sm:grid-cols-2">
+              <article class="rounded-3xl bg-base-soft px-4 py-3">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">耗时</p>
+                <p class="mt-2 text-sm text-secondary">{{ runVm.scorecardObservability.runtimeLabel }}</p>
+              </article>
+              <article class="rounded-3xl bg-base-soft px-4 py-3">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">异常数</p>
+                <p class="mt-2 text-sm text-secondary">{{ runVm.scorecardObservability.errorCount }}</p>
+              </article>
+              <article class="rounded-3xl bg-base-soft px-4 py-3">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">事件数</p>
+                <p class="mt-2 text-sm text-secondary">{{ runVm.scorecardObservability.eventCount }}</p>
+              </article>
+              <article class="rounded-3xl bg-base-soft px-4 py-3">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">运行状态</p>
+                <p class="mt-2 text-sm text-secondary">{{ runVm.scorecardObservability.status || '--' }}</p>
+              </article>
+            </div>
+            <div v-if="runVm.scorecardObservability.topPhases.length" class="mt-4 rounded-3xl bg-base-soft px-4 py-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">高频阶段</p>
+              <p class="mt-2 text-sm text-secondary">
+                {{ runVm.scorecardObservability.topPhases.map((item) => `${item.key}(${item.count})`).join('、') }}
+              </p>
+            </div>
+          </section>
           <section class="rounded-[1.75rem] bg-surface p-5">
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">人工确认</p>
             <div class="mt-4 rounded-3xl bg-base-soft px-4 py-4">

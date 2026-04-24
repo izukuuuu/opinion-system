@@ -171,6 +171,8 @@ function createTaskStreamController() {
     'task.completed',
     'task.failed',
     'task.cancelled',
+    'scorecard.ready',
+    'contract.violation',
     'todo.updated',
     'exploration.todo.updated',
     'subagent.started',

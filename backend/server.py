@@ -119,6 +119,7 @@ from server_support.router_prompts.utils import (
 )
 from server_support.settings_config import register_settings_endpoints
 from server_support.hot_overview import (
+    build_hot_overview_timeout_fallback,
     get_today_hot_overview,
     list_hot_overview_history,
     rollback_hot_overview_revision,
@@ -1368,12 +1369,18 @@ def home_today_hot_overview():
         request.remote_addr,
     )
 
+    executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
     try:
-        payload = get_today_hot_overview(
+        # Hot overview may trigger multi-source fetch and AI summarization.
+        # Guard the request to avoid blocking homepage indefinitely.
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(
+            get_today_hot_overview,
             limit=limit,
             force_refresh=force_refresh,
             mode=mode,
         )
+        payload = future.result(timeout=35)
         LOGGER.info(
             "API /api/home/today-hot-overview success | total_items=%s summary_source=%s revision_id=%s",
             int(payload.get("total_items") or 0),
@@ -1381,9 +1388,30 @@ def home_today_hot_overview():
             payload.get("revision_id"),
         )
         return success({"data": payload})
+    except concurrent.futures.TimeoutError:
+        LOGGER.warning(
+            "API /api/home/today-hot-overview timeout | limit=%s force_refresh=%s mode=%s",
+            limit,
+            force_refresh,
+            mode,
+        )
+        payload = build_hot_overview_timeout_fallback(
+            limit=limit,
+            mode=mode,
+            reason="api_timeout_35s",
+        )
+        return success(
+            {
+                "data": payload,
+                "message": payload.get("fallback_notice") or "热点刷新超时，已返回降级结果。",
+            }
+        )
     except Exception as exc:
         LOGGER.exception("Failed to build today's hot overview")
         return error(f"Failed to build today's hot overview: {str(exc)}", 500)
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
 
 
 @app.get("/api/home/today-hot-overview/history")

@@ -22,6 +22,8 @@ from ..project import get_project_manager
 from ..utils.setting.paths import get_data_root
 from ..utils.setting.paths import bucket
 
+from .workflow.telemetry import append_ndjson_log, resolve_telemetry_path
+
 LOGGER = logging.getLogger(__name__)
 
 STATE_ROOT = get_data_root() / "_report"
@@ -877,7 +879,7 @@ def mark_artifact_ready(task_id: str, *, message: str, payload: Dict[str, Any]) 
 
 
 def mark_task_completed(task_id: str, *, message: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    return _mutate_task_with_event(
+    task = _mutate_task_with_event(
         task_id,
         mutate=lambda task: _apply_terminal_state(
             task,
@@ -893,6 +895,8 @@ def mark_task_completed(task_id: str, *, message: str, payload: Optional[Dict[st
         message=message,
         payload=payload or {},
     )
+    _best_effort_write_scorecard(task_id)
+    return task
 
 
 def mark_task_failed(task_id: str, message: str, *, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -907,7 +911,7 @@ def mark_task_failed(task_id: str, message: str, *, payload: Optional[Dict[str, 
         )
         _sync_failed_todos(task, failed_phase=failed_phase)
 
-    return _mutate_task_with_event(
+    task = _mutate_task_with_event(
         task_id,
         mutate=_mutate,
         event_type="task.failed",
@@ -916,10 +920,12 @@ def mark_task_failed(task_id: str, message: str, *, payload: Optional[Dict[str, 
         message=message,
         payload=payload or {},
     )
+    _best_effort_write_scorecard(task_id)
+    return task
 
 
 def mark_task_cancelled(task_id: str, message: str) -> Dict[str, Any]:
-    return _mutate_task_with_event(
+    task = _mutate_task_with_event(
         task_id,
         mutate=lambda task: _apply_terminal_state(
             task,
@@ -933,6 +939,8 @@ def mark_task_cancelled(task_id: str, message: str) -> Dict[str, Any]:
         title="任务已取消",
         message=message,
     )
+    _best_effort_write_scorecard(task_id)
+    return task
 
 
 def append_event(
@@ -1215,7 +1223,54 @@ def _mutate_task_with_event(
         }
         _atomic_write_json(state_path, task)
         _append_jsonl_line(event_path, event)
+        telemetry_path = resolve_telemetry_path(default_dir=STATE_ROOT)
+        if telemetry_path is not None:
+            append_ndjson_log(
+                telemetry_path,
+                event,
+                envelope={
+                    "source": "report.task_queue",
+                    "task_id": task_id,
+                },
+            )
         return attach_recent_events(task, limit=80)
+
+
+def _best_effort_write_scorecard(task_id: str) -> None:
+    try:
+        from .workflow.runtime_harness import write_scorecard_for_task
+
+        scorecard = write_scorecard_for_task(task_id)
+        digest = {}
+        if isinstance(scorecard, dict):
+            timing = scorecard.get("timing") if isinstance(scorecard.get("timing"), dict) else {}
+            counts = scorecard.get("counts") if isinstance(scorecard.get("counts"), dict) else {}
+            digest = {
+                "schema": str(scorecard.get("schema") or "report.scorecard.v1").strip(),
+                "status": str(scorecard.get("status") or "").strip(),
+                "runtime_seconds": timing.get("runtime_seconds"),
+                "event_count": int(counts.get("events") or 0),
+                "error_count": int(counts.get("errors") or 0),
+                "by_phase": counts.get("by_phase") if isinstance(counts.get("by_phase"), dict) else {},
+                "by_agent": counts.get("by_agent") if isinstance(counts.get("by_agent"), dict) else {},
+            }
+        scorecard_path = str((STATE_ROOT / "tasks") / f"{task_id}.scorecard.json")
+        _mutate_task_with_event(
+            task_id,
+            mutate=lambda task: task.setdefault("artifacts", {}).update(
+                {
+                    "scorecard_path": scorecard_path,
+                    "scorecard_digest": digest,
+                }
+            ),
+            event_type="scorecard.ready",
+            phase=str(get_task(task_id).get("phase") or "").strip(),
+            title="质量结算已生成",
+            message="已生成本轮运行的 scorecard，用于稳定性量化与对比。",
+            payload={"scorecard_path": scorecard_path, "scorecard_digest": digest},
+        )
+    except Exception:
+        return
 
 
 def _apply_runtime_observability(

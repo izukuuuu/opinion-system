@@ -58,7 +58,7 @@ const steps = [
   },
   {
     key: 'upload',
-    label: '上传',
+    label: '创建专题',
     to: { name: 'topic-create-upload' },
     icon: CloudArrowUpIcon,
     description: '导入本地原始数据文件'
