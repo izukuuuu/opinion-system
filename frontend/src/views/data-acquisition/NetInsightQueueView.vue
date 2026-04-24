@@ -547,6 +547,13 @@
             >
               自动过滤重复内容
             </AppCheckbox>
+            <AppCheckbox
+              v-model="taskForm.allocateByPlatform"
+              label-class="gap-2 text-sm text-slate-600"
+              input-class="shadow-none"
+            >
+              多平台时按各平台可见数据量分配抓取上限
+            </AppCheckbox>
           </div>
         </div>
       </div>
@@ -657,6 +664,7 @@ const taskForm = reactive({
   sort: 'comments_desc',
   infoType: '2',
   dedupeByContent: true,
+  allocateByPlatform: false,
 })
 
 const canSubmit = computed(() => {
@@ -759,6 +767,7 @@ function resetTaskForm() {
   taskForm.sort = String(settingsState.runtime.sort || 'comments_desc')
   taskForm.infoType = String(settingsState.runtime.info_type || '2')
   taskForm.dedupeByContent = true
+  taskForm.allocateByPlatform = Boolean(settingsState.planner.default_allocate_by_platform)
 }
 
 async function fetchLoginState() {
@@ -877,6 +886,7 @@ async function planTask() {
     taskForm.sort = String(plan.sort || taskForm.sort || 'comments_desc')
     taskForm.infoType = String(plan.info_type || taskForm.infoType || '2')
     taskForm.dedupeByContent = Boolean(plan.dedupe_by_content ?? taskForm.dedupeByContent)
+    taskForm.allocateByPlatform = Boolean(plan.allocate_by_platform ?? taskForm.allocateByPlatform)
     feedback.type = 'success'
     feedback.message = `已根据任务说明生成建议配置（来源：${plan.planner_source || 'heuristic'}）`
   } catch (err) {
@@ -909,6 +919,7 @@ async function submitTask() {
         sort: taskForm.sort,
         info_type: taskForm.infoType,
         dedupe_by_content: taskForm.dedupeByContent,
+        allocate_by_platform: taskForm.allocateByPlatform,
       }),
     })
     createModalOpen.value = false

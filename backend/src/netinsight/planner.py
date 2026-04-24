@@ -143,6 +143,9 @@ def plan_task_from_brief(brief: str) -> Dict[str, Any]:
     heuristic["sort"] = str(heuristic.get("sort") or runtime_cfg.get("sort") or "comments_desc").strip()
     heuristic["info_type"] = str(heuristic.get("info_type") or runtime_cfg.get("info_type") or "2").strip()
     heuristic["dedupe_by_content"] = bool(heuristic.get("dedupe_by_content", True))
+    heuristic["allocate_by_platform"] = bool(
+        heuristic.get("allocate_by_platform", planner_cfg.get("default_allocate_by_platform", False))
+    )
     heuristic["title"] = str(heuristic.get("title") or _default_title(brief, heuristic["keywords"])).strip()
     heuristic["summary"] = str(heuristic.get("summary") or brief or heuristic["title"]).strip()
     return heuristic
@@ -168,6 +171,7 @@ def _heuristic_plan(
         "sort": str(runtime_cfg.get("sort") or "comments_desc"),
         "info_type": str(runtime_cfg.get("info_type") or "2"),
         "dedupe_by_content": True,
+        "allocate_by_platform": bool(planner_cfg.get("default_allocate_by_platform", False)),
     }
 
 

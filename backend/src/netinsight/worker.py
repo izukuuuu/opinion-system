@@ -18,6 +18,7 @@ for path in (BACKEND_DIR, SRC_DIR):
 
 from src.netinsight.client import NetInsightError  # type: ignore
 from src.netinsight.client import RequestContext  # type: ignore
+from src.netinsight.client import allocate_platform_limits  # type: ignore
 from src.netinsight.client import collect_platform_records  # type: ignore
 from src.netinsight.client import deduplicate_records  # type: ignore
 from src.netinsight.client import login_and_capture  # type: ignore
@@ -148,6 +149,7 @@ def _run_task(task_id: str) -> None:
     page_size = max(10, int(config.get("page_size") or 50))
     sort = str(config.get("sort") or "comments_desc")
     info_type = str(config.get("info_type") or "2")
+    allocate_by_platform = bool(config.get("allocate_by_platform", False))
     per_platform_limit = max(1, total_limit // max(len(platforms), 1))
 
     context_source = "cached"
@@ -221,6 +223,33 @@ def _run_task(task_id: str) -> None:
             message=f"{platform} 计数完成",
             percentage=5 + int((counts_completed / counts_total) * 15),
             current_platform=platform,
+            counts_completed=counts_completed,
+            counts_total=counts_total,
+            planned_total=planned_total,
+        )
+
+    if allocate_by_platform and len(platforms) > 1:
+        platform_totals = {
+            platform: int((aggregated_plan.get(platform) or {}).get("total_available") or 0)
+            for platform in platforms
+        }
+        platform_limits = allocate_platform_limits(platform_totals, total_limit)
+        planned_total = 0
+        for platform in platforms:
+            plan = aggregated_plan.get(platform) or {}
+            raw_counts = plan.get("raw_counts") or {}
+            platform_limit = max(0, int(platform_limits.get(platform) or 0))
+            search_matrix = allocate_platform_limits(raw_counts, platform_limit)
+            plan["allocated_limit"] = platform_limit
+            plan["search_matrix"] = search_matrix
+            plan["planned_total"] = sum(search_matrix.values())
+            aggregated_plan[platform] = plan
+            planned_total += int(plan["planned_total"] or 0)
+        mark_task_progress(
+            task_id,
+            phase="count",
+            message="已按各平台可见数据量重新分配抓取配额",
+            percentage=20,
             counts_completed=counts_completed,
             counts_total=counts_total,
             planned_total=planned_total,
