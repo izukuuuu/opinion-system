@@ -10,7 +10,7 @@
     >
       <div
         v-if="modelValue"
-        class="modal-backdrop fixed inset-0 z-[90] flex items-center justify-center px-4 py-6"
+        class="modal-backdrop fixed inset-0 z-[9999] flex items-center justify-center px-4 py-6"
         role="dialog"
         aria-modal="true"
         :aria-label="title"

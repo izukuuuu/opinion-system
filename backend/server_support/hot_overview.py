@@ -4073,6 +4073,68 @@ def get_today_hot_overview(
     return payload
 
 
+def build_hot_overview_timeout_fallback(
+    *,
+    limit: int = DEFAULT_LIMIT,
+    mode: str = "fast",
+    include_research: Optional[bool] = None,
+    reason: str = "",
+) -> Dict[str, Any]:
+    """Return a safe payload when realtime refresh/build times out."""
+    cache_key = _resolve_mode(mode=mode, include_research=include_research)
+    today = _today_snapshot_date()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cache_slot = _CACHE.setdefault(cache_key, {"data": None, "expires_at": 0.0})
+
+    # Prefer in-memory/archive payload even if stale; UX beats hard failure on timeout.
+    candidate = cache_slot.get("data")
+    if not isinstance(candidate, dict):
+        candidate = _load_archive_payload(cache_key)
+
+    if isinstance(candidate, dict):
+        payload = _apply_limit_to_payload(candidate, limit)
+        payload["generated_at"] = now_iso
+        payload["summary_source"] = "timeout_fallback_cache"
+        payload["fallback_notice"] = "热点实时刷新超时，已回退到可用缓存。"
+        payload.setdefault("diagnostics", {})
+        if isinstance(payload.get("diagnostics"), dict):
+            payload["diagnostics"]["fallback"] = {
+                "kind": "timeout_cache",
+                "reason": reason or "build_timeout",
+            }
+        return payload
+
+    # First open and no cache: return a render-safe empty payload with a friendly notice.
+    return {
+        "revision_id": _new_revision_id(),
+        "generated_at": now_iso,
+        "snapshot_date": today,
+        "mode": cache_key,
+        "summary_source": "timeout_fallback_empty",
+        "overview": "热点服务暂时繁忙，已为你保留页面结构，请稍后重试刷新。",
+        "detailed_overview": "",
+        "bullet_points": [],
+        "watch_points": [],
+        "keyword_pool": [],
+        "sections": [],
+        "other_hotspot_review": {"cluster_count": 0, "clusters": [], "item_count": 0},
+        "items": [],
+        "total_items": 0,
+        "sources": [],
+        "research": None,
+        "evidence": {},
+        "diagnostics": {
+            "fallback": {
+                "kind": "timeout_empty",
+                "reason": reason or "build_timeout",
+            }
+        },
+        "fallback_notice": "热点实时刷新超时，当前暂无可用缓存，请稍后再试。",
+        "_backgrounds": {},
+        "_merged_items": [],
+    }
+
+
 def reclassify_hot_overview(
     *,
     target_title: str,

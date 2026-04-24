@@ -38,7 +38,15 @@ describe('reportRunModels', () => {
         langsmith_enabled: true,
         langsmith_project: 'opinion-system-report'
       },
-      artifacts: {},
+      artifacts: {
+        scorecard_digest: {
+          status: 'completed',
+          runtime_seconds: 42.2,
+          event_count: 120,
+          error_count: 0,
+          by_phase: { planning: 4, exploration: 32 }
+        }
+      },
       artifactManifest: {
         structured_projection: { status: 'ready', created_at: '2026-04-10T10:01:00Z', policy_version: 'policy.v2' },
         utility_assessment: { status: 'pending' },
@@ -78,6 +86,8 @@ describe('reportRunModels', () => {
     expect(vm.runtimeDiagnostics.runtimeModeLabel).toBe('深度分析主控')
     expect(vm.runtimeDiagnostics.checkpointBackendLabel).toBe('SQLITE')
     expect(vm.runtimeDiagnostics.tracingLabel).toContain('已开启')
+    expect(vm.scorecardObservability.available).toBe(true)
+    expect(vm.scorecardObservability.eventCount).toBeGreaterThan(0)
   })
 
   it('keeps intelligence tool events visible while filtering low-signal file io noise', () => {

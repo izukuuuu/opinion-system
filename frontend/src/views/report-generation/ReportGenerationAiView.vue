@@ -137,6 +137,7 @@ import { useReportGeneration } from '../../composables/useReportGeneration'
 import { buildStandaloneAiReportHtml } from '../../utils/aiReportHtml'
 import { exportableAiMarkdown, extractMarkdownToc, renderAiReportMarkdown } from '../../utils/aiReportMarkdown'
 import { buildFigureContractMap, destroyFigurePlaceholders, hydrateFigurePlaceholders } from '../../utils/reportFigures'
+import { extractReportMetaFromHtml } from '../../utils/reportMeta'
 
 const router = useRouter()
 
@@ -212,6 +213,13 @@ const exportHtml = () => {
   const html = buildStandaloneAiReportHtml(fullReport.value, { lastLoaded: fullReportState.lastLoaded })
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   downloadBlob(blob, `${reportTitle.value || 'ai-report'}.html`)
+  try {
+    const meta = extractReportMetaFromHtml(html)
+    const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json;charset=utf-8' })
+    downloadBlob(metaBlob, `${reportTitle.value || 'ai-report'}.meta.json`)
+  } catch (e) {
+    // best-effort post-processing; exporting HTML should never fail
+  }
 }
 
 function downloadBlob(blob, filename) {

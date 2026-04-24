@@ -2,12 +2,13 @@
   <div class="flex h-full flex-col overflow-hidden bg-white">
 
     <!-- Top toolbar -->
-    <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+    <div class="relative z-10 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
       <!-- Actions -->
       <button
         type="button"
-        class="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700"
-        @click="openCreateModal"
+        class="relative z-20 inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700"
+        @pointerdown.stop.prevent="handleCreateTaskClick"
+        @click="handleCreateTaskClick"
       >
         <PlusIcon class="h-3.5 w-3.5" />
         新建任务
@@ -158,7 +159,7 @@
           v-if="activeTab === 'all'"
           type="button"
           class="mt-3 text-xs text-sky-600 hover:underline"
-          @click="openCreateModal"
+          @click="handleCreateTaskClick"
         >
           新建第一个任务 →
         </button>
@@ -391,6 +392,7 @@
       title="新建数据采集任务"
       eyebrow="新建任务"
       width="max-w-3xl"
+      :close-on-backdrop="false"
       confirm-text="开始采集"
       confirm-loading-text="提交中…"
       :confirm-loading="submitting"
@@ -554,7 +556,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import TabSwitch from '../../components/TabSwitch.vue'
 import {
@@ -727,20 +729,24 @@ const taskSummary = computed(() => {
   )
 })
 
-async function openCreateModal() {
+function openCreateModal() {
   if (openCreateModalFrame !== null) {
     window.cancelAnimationFrame(openCreateModalFrame)
     openCreateModalFrame = null
   }
+  showAdvanced.value = false
+  createModalOpen.value = true
+}
 
-  createModalOpen.value = false
-  await nextTick()
-
-  openCreateModalFrame = window.requestAnimationFrame(() => {
-    showAdvanced.value = false
-    createModalOpen.value = true
-    openCreateModalFrame = null
-  })
+function handleCreateTaskClick() {
+  openCreateModal()
+  // 如果状态被异常快速重置，给出可见反馈，便于定位问题
+  window.setTimeout(() => {
+    if (!createModalOpen.value) {
+      feedback.type = 'error'
+      feedback.message = '已触发新建任务，但窗口被立即关闭，请刷新页面后重试。'
+    }
+  }, 80)
 }
 
 function resetTaskForm() {

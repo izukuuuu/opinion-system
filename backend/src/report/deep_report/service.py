@@ -112,6 +112,7 @@ from .schemas import (
     TimelineBuildResult,
     UtilityAssessmentResult,
 )
+from ..workflow.tool_schemas import SchemaError, validate_basic_analysis_snapshot
 
 
 REPORT_CACHE_FILENAME = "report_payload.json"
@@ -3210,6 +3211,38 @@ def _build_lifecycle_middleware(
         if shared is not None and tool_name and parsed_payload:
             _update_tool_tracker(shared, tool_name, parsed_payload, raw_text)
         receipt = _build_tool_intelligence_receipt(tool_name, parsed_payload, shared) if tool_name and parsed_payload else {}
+
+        if tool_name and parsed_payload:
+            try:
+                if tool_name == "get_basic_analysis_snapshot":
+                    raw_snapshot = (
+                        parsed_payload.get("snapshot")
+                        if isinstance(parsed_payload.get("snapshot"), dict)
+                        else parsed_payload.get("result")
+                        if isinstance(parsed_payload.get("result"), dict)
+                        else {}
+                    )
+                    if isinstance(raw_snapshot, dict):
+                        validate_basic_analysis_snapshot(raw_snapshot)
+            except SchemaError as exc:
+                violation = {
+                    "tool_name": tool_name,
+                    "error": str(exc),
+                    "path": getattr(exc, "path", "") or "",
+                }
+                if shared is not None:
+                    shared.setdefault("contract_violations", []).append(violation)
+                _emit(
+                    event_callback,
+                    {
+                        "type": "contract.violation",
+                        "phase": default_phase,
+                        "agent": actor_name,
+                        "title": "产物结构契约异常",
+                        "message": f"{tool_name} 输出结构不符合契约：{str(exc)}",
+                        "payload": violation,
+                    },
+                )
 
         _emit(
             event_callback,
