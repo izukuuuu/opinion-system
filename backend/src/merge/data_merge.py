@@ -2,7 +2,7 @@
 TRS数据合并功能
 """
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from ..utils.setting.paths import bucket, ensure_bucket
@@ -48,6 +48,54 @@ def _infer_channel_from_filename(file_path: Path, keep_lookup: Dict[str, str]) -
     return _resolve_channel_name(file_path.stem, keep_lookup)
 
 
+def _collapse_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Merge duplicate column labels into a single column using first non-null value."""
+    if df is None or df.empty or not df.columns.duplicated().any():
+        return df
+
+    merged_columns: List[pd.Series] = []
+    merged_names: List[str] = []
+    seen: Set[str] = set()
+
+    for column_name in df.columns:
+        if column_name in seen:
+            continue
+        seen.add(column_name)
+
+        column_data = df.loc[:, column_name]
+        if isinstance(column_data, pd.Series):
+            merged_series = column_data
+        else:
+            merged_series = column_data.iloc[:, 0]
+            for index in range(1, column_data.shape[1]):
+                merged_series = merged_series.combine_first(column_data.iloc[:, index])
+
+        merged_columns.append(merged_series.rename(column_name))
+        merged_names.append(column_name)
+
+    collapsed = pd.concat(merged_columns, axis=1)
+    collapsed.columns = merged_names
+    return collapsed
+
+
+def _extract_column_series(df: pd.DataFrame, column_name: str) -> Optional[pd.Series]:
+    """Return a Series even when a duplicated column label resolves to a DataFrame."""
+    if column_name not in df.columns:
+        return None
+
+    column_data = df.loc[:, column_name]
+    if isinstance(column_data, pd.Series):
+        return column_data
+
+    if column_data.empty:
+        return None
+
+    series = column_data.iloc[:, 0]
+    for index in range(1, column_data.shape[1]):
+        series = series.combine_first(column_data.iloc[:, index])
+    return series
+
+
 def _split_dataframe_by_channel(
     df: pd.DataFrame,
     file_path: Path,
@@ -59,11 +107,14 @@ def _split_dataframe_by_channel(
     if df is None or df.empty:
         return channel_frames
 
-    channel_columns = ["channel", "渠道", "发布平台", "platform"]
-    channel_col = next((col for col in channel_columns if col in df.columns), None)
+    channel_columns = ["平台", "channel", "渠道", "发布平台", "platform"]
+    channel_series = next(
+        (_extract_column_series(df, col) for col in channel_columns if col in df.columns),
+        None,
+    )
 
-    if channel_col:
-        grouped = df.groupby(df[channel_col].astype(str).str.strip())
+    if channel_series is not None:
+        grouped = df.groupby(channel_series.fillna("").astype(str).str.strip())
         for raw_channel, group_df in grouped:
             channel_name = _resolve_channel_name(raw_channel, keep_lookup)
             if not channel_name:
@@ -122,18 +173,21 @@ def _iter_channel_frames(
                     continue
                 if field_alias_map:
                     df = df.rename(columns=field_alias_map)
+                df = _collapse_duplicate_columns(df)
                 yield channel_name, df
         elif suffix == ".csv":
             df = pd.read_csv(file_path, encoding="utf-8-sig")
-            if field_alias_map:
-                df = df.rename(columns=field_alias_map)
             for channel_name, channel_df in _split_dataframe_by_channel(df, file_path, keep_lookup, logger):
+                if field_alias_map:
+                    channel_df = channel_df.rename(columns=field_alias_map)
+                channel_df = _collapse_duplicate_columns(channel_df)
                 yield channel_name, channel_df
         elif suffix == ".jsonl":
             df = pd.read_json(file_path, lines=True)
-            if field_alias_map:
-                df = df.rename(columns=field_alias_map)
             for channel_name, channel_df in _split_dataframe_by_channel(df, file_path, keep_lookup, logger):
+                if field_alias_map:
+                    channel_df = channel_df.rename(columns=field_alias_map)
+                channel_df = _collapse_duplicate_columns(channel_df)
                 yield channel_name, channel_df
         else:
             log_error(logger, f"不支持的文件类型: {file_path.suffix}", "Merge")

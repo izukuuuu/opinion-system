@@ -64,3 +64,5 @@ scripts/
 
 # Logs
 *.log
+merge/frontend/.vite/
+frontend/.vite/

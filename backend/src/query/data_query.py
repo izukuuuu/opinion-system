@@ -74,24 +74,9 @@ MAX_TABLE_WORKERS = 6
 
 
 def _resolve_query_db_url() -> str:
-    """Prefer a dedicated direct Postgres admin connection for metadata queries."""
+    """Resolve the metadata query connection, preferring the active runtime DB."""
     db_config = settings.get("databases", {}) or {}
     connections = db_config.get("connections") if isinstance(db_config.get("connections"), list) else []
-
-    preferred_order = ["supabase_admin"]
-    for preferred_id in preferred_order:
-        for conn in connections:
-            if not isinstance(conn, dict):
-                continue
-            if str(conn.get("id") or "").strip() != preferred_id:
-                continue
-            url = str(conn.get("url") or "").strip()
-            if url:
-                try:
-                    parsed = make_url(url)
-                    return parsed.set(database="postgres").render_as_string(hide_password=False)
-                except Exception:
-                    return url
 
     active_url = ""
     active_id = str(db_config.get("active") or "").strip()
@@ -103,6 +88,16 @@ def _resolve_query_db_url() -> str:
             break
 
     active_url = active_url or str(db_config.get("db_url") or "").strip()
+    if not active_url:
+        for conn in connections:
+            if not isinstance(conn, dict):
+                continue
+            if str(conn.get("id") or "").strip() != "supabase_admin":
+                continue
+            active_url = str(conn.get("url") or "").strip()
+            if active_url:
+                break
+
     if not active_url:
         return ""
 
