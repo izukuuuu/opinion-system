@@ -107,7 +107,7 @@ def _split_dataframe_by_channel(
     if df is None or df.empty:
         return channel_frames
 
-    channel_columns = ["channel", "渠道", "发布平台", "platform"]
+    channel_columns = ["平台", "channel", "渠道", "发布平台", "platform"]
     channel_series = next(
         (_extract_column_series(df, col) for col in channel_columns if col in df.columns),
         None,
@@ -177,17 +177,17 @@ def _iter_channel_frames(
                 yield channel_name, df
         elif suffix == ".csv":
             df = pd.read_csv(file_path, encoding="utf-8-sig")
-            if field_alias_map:
-                df = df.rename(columns=field_alias_map)
-            df = _collapse_duplicate_columns(df)
             for channel_name, channel_df in _split_dataframe_by_channel(df, file_path, keep_lookup, logger):
+                if field_alias_map:
+                    channel_df = channel_df.rename(columns=field_alias_map)
+                channel_df = _collapse_duplicate_columns(channel_df)
                 yield channel_name, channel_df
         elif suffix == ".jsonl":
             df = pd.read_json(file_path, lines=True)
-            if field_alias_map:
-                df = df.rename(columns=field_alias_map)
-            df = _collapse_duplicate_columns(df)
             for channel_name, channel_df in _split_dataframe_by_channel(df, file_path, keep_lookup, logger):
+                if field_alias_map:
+                    channel_df = channel_df.rename(columns=field_alias_map)
+                channel_df = _collapse_duplicate_columns(channel_df)
                 yield channel_name, channel_df
         else:
             log_error(logger, f"不支持的文件类型: {file_path.suffix}", "Merge")
