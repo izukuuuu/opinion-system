@@ -12,7 +12,7 @@ from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_skip
 from ..utils.io.excel import read_jsonl, write_jsonl, sanitize_dataframe, get_standard_table_schema
 from ..utils.io.db import db_manager
-from sqlalchemy import inspect, text
+from sqlalchemy import DateTime, MetaData, String, Table, Text, Column, inspect, inspect, text
 from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
 try:  # Optional dependency; PyMySQL is used by default
@@ -422,36 +422,14 @@ def create_table_with_standard_schema(conn, table_name: str, topic: str, logger)
         bool: 是否成功
     """
     try:
-        dialect = (getattr(conn, "dialect", None) and conn.dialect.name) or ""
-
-        if dialect == "postgresql":
-            quoted_table = '"' + table_name.replace('"', '""') + '"'
-            column_defs = [
-                '"id" VARCHAR(64) PRIMARY KEY',
-                '"title" TEXT',
-                '"contents" TEXT',
-                '"platform" VARCHAR(50)',
-                '"author" TEXT',
-                '"published_at" TIMESTAMP',
-                '"url" TEXT',
-                '"region" VARCHAR(100)',
-                '"hit_words" TEXT',
-                '"polarity" VARCHAR(20)',
-                '"classification" VARCHAR(100)',
-            ]
-            create_sql = f"""
-            CREATE TABLE IF NOT EXISTS {quoted_table} (
-                {', '.join(column_defs)}
-            )
-            """
-        else:
-            schema = get_standard_table_schema()
-            column_defs = [f"`{col}` {mysql_type}" for col, mysql_type in schema.items()]
-            create_sql = f"""
-            CREATE TABLE IF NOT EXISTS `{table_name}` (
-                {', '.join(column_defs)}
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """
+        schema = get_standard_table_schema()
+        column_defs = [f"`{col}` {mysql_type}" for col, mysql_type in schema.items()]
+        
+        create_sql = f"""
+        CREATE TABLE IF NOT EXISTS `{table_name}` (
+            {', '.join(column_defs)}
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
         
         conn.execute(text(create_sql))
         log_success(logger, f"已创建表 {topic}.{table_name}（标准结构）", "Upload")
@@ -475,8 +453,12 @@ def table_exists(conn, table_name: str, topic: str) -> bool:
         bool: 表是否存在
     """
     try:
-        inspector = inspect(conn)
-        return inspector.has_table(table_name)
+        query = """
+        SELECT COUNT(*) FROM information_schema.tables
+        WHERE table_schema = :schema AND table_name = :table
+        """
+        result = conn.execute(text(query), {"schema": topic, "table": table_name})
+        return (result.scalar() or 0) > 0
     except Exception:
         return False
 
