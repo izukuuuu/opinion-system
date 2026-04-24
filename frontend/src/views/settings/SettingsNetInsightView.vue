@@ -231,6 +231,17 @@
           </div>
         </label>
       </div>
+
+      <AppCheckbox
+        v-model="form.defaultAllocateByPlatform"
+        class="w-full"
+        label-class="w-full gap-3 rounded-2xl border border-soft bg-base-soft px-4 py-3 text-sm text-secondary cursor-pointer select-none"
+      >
+        <div>
+          <span class="font-medium text-primary">默认按平台数据量分配配额</span>
+          <p class="mt-0.5 text-xs text-muted">多平台任务会先统计各平台可见条数，再按比例分配总抓取上限</p>
+        </div>
+      </AppCheckbox>
     </section>
 
     <div class="settings-action-row">
@@ -314,6 +325,7 @@ const form = reactive({
   defaultDays: 30,
   defaultTotalLimit: 500,
   defaultPlatforms: ['微博'],
+  defaultAllocateByPlatform: false,
 })
 
 async function fetchSettings() {
@@ -344,6 +356,7 @@ async function fetchSettings() {
     form.defaultPlatforms = Array.isArray(planner.default_platforms)
       ? planner.default_platforms.filter((p) => platformOptions.value.includes(p))
       : ['微博']
+    form.defaultAllocateByPlatform = Boolean(planner.default_allocate_by_platform)
   } catch (err) {
     feedback.type = 'error'
     feedback.message = err instanceof Error ? err.message : '读取 NetInsight 配置失败'
@@ -385,6 +398,7 @@ async function submit() {
         default_days: Number(form.defaultDays || 30),
         default_total_limit: Number(form.defaultTotalLimit || 500),
         default_platforms: form.defaultPlatforms,
+        default_allocate_by_platform: form.defaultAllocateByPlatform,
       }),
     })
     Object.assign(credentialsSummary, response?.data?.credentials || {})

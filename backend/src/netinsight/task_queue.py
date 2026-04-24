@@ -74,7 +74,8 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
             "page_size": _safe_int(payload.get("page_size"), 50, minimum=10),
             "sort": str(payload.get("sort") or "comments_desc").strip() or "comments_desc",
             "info_type": str(payload.get("info_type") or "2").strip() or "2",
-            "dedupe_by_content": bool(payload.get("dedupe_by_content", True)),
+            "dedupe_by_content": _safe_bool(payload.get("dedupe_by_content", True)),
+            "allocate_by_platform": _safe_bool(payload.get("allocate_by_platform", False)),
         },
         "planner": {
             "source": str(payload.get("planner_source") or "").strip() or "manual",
@@ -171,6 +172,7 @@ def retry_task(task_id: str) -> Dict[str, Any]:
         "sort": task.get("config", {}).get("sort"),
         "info_type": task.get("config", {}).get("info_type"),
         "dedupe_by_content": task.get("config", {}).get("dedupe_by_content", True),
+        "allocate_by_platform": task.get("config", {}).get("allocate_by_platform", False),
         "planner_source": "retry",
     }
     retried = create_task(next_payload)
@@ -606,6 +608,14 @@ def _safe_int(value: Any, default: int, *, minimum: int = 0) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, parsed)
+
+
+def _safe_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 __all__ = [

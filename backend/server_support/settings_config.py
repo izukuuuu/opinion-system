@@ -696,6 +696,15 @@ def register_settings_endpoints(app: Flask, project_manager: Any):
                 except (TypeError, ValueError):
                     return error(f"Field '{field}' must be an integer")
 
+        if "default_allocate_by_platform" in payload:
+            value = payload.get("default_allocate_by_platform")
+            if isinstance(value, bool):
+                planner["default_allocate_by_platform"] = value
+            elif isinstance(value, str):
+                planner["default_allocate_by_platform"] = value.strip().lower() in {"1", "true", "yes", "on"}
+            else:
+                planner["default_allocate_by_platform"] = bool(value)
+
         if "default_platforms" in payload:
             value = payload.get("default_platforms")
             if not isinstance(value, list):

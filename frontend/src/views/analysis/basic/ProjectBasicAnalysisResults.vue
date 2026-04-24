@@ -43,6 +43,7 @@
               <Teleport to="body">
                 <div
                   v-if="showTimeRange"
+                  ref="timeRangeDropdownRef"
                   class="fixed z-[9999] rounded-[1.5rem] border border-soft bg-surface p-4"
                   :style="timeRangeDropdownStyle"
                 >
@@ -369,6 +370,7 @@ const autoSelectedTopic = ref('')
 const activeSectionName = ref('')
 const showTimeRange = ref(false)
 const timeRangeRef = ref(null)
+const timeRangeDropdownRef = ref(null)
 const showManualInput = ref(false)
 const manualInputRef = ref(null)
 const isSectionEditMode = ref(false)
@@ -660,11 +662,22 @@ const handleManualSubmit = () => {
   showManualInput.value = false
 }
 
+const eventTargetsNode = (event, node) => {
+  if (!node || !event) return false
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : []
+  if (Array.isArray(path) && path.includes(node)) return true
+  const target = event.target
+  return Boolean(target && node.contains(target))
+}
+
 const handleClickOutside = (event) => {
-  if (manualInputRef.value && !manualInputRef.value.contains(event.target)) {
+  if (manualInputRef.value && !eventTargetsNode(event, manualInputRef.value)) {
     showManualInput.value = false
   }
-  if (timeRangeRef.value && !timeRangeRef.value.contains(event.target)) {
+  const clickedTimeRange =
+    eventTargetsNode(event, timeRangeRef.value) ||
+    eventTargetsNode(event, timeRangeDropdownRef.value)
+  if (!clickedTimeRange) {
     showTimeRange.value = false
   }
 }

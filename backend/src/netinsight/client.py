@@ -669,6 +669,17 @@ def _calculate_proportional_counts(keyword_counts: Dict[str, int], threshold: in
     return allocated
 
 
+def allocate_platform_limits(platform_totals: Dict[str, int], threshold: int) -> Dict[str, int]:
+    positive = {
+        str(platform).strip(): _safe_int(total, 0)
+        for platform, total in (platform_totals or {}).items()
+        if str(platform).strip() and _safe_int(total, 0) > 0
+    }
+    if not positive:
+        return {str(platform).strip(): 0 for platform in (platform_totals or {}) if str(platform).strip()}
+    return _calculate_proportional_counts(positive, threshold)
+
+
 def _resolve_sort(value: str) -> str:
     text = str(value or "").strip().lower()
     if text in {"hot", "热门"}:
@@ -706,5 +717,6 @@ __all__ = [
     "deduplicate_records",
     "login_and_capture",
     "normalize_record",
+    "allocate_platform_limits",
     "query_platform_counts",
 ]

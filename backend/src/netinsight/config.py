@@ -30,6 +30,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "default_days": 30,
         "default_total_limit": 500,
         "default_platforms": ["微博"],
+        "default_allocate_by_platform": False,
     },
 }
 
@@ -65,8 +66,8 @@ def load_netinsight_config() -> Dict[str, Any]:
     runtime = config.get("runtime")
     if not isinstance(runtime, dict):
         runtime = {}
-    runtime["headless"] = bool(runtime.get("headless", False))
-    runtime["no_proxy"] = bool(runtime.get("no_proxy", False))
+    runtime["headless"] = _safe_bool(runtime.get("headless", False))
+    runtime["no_proxy"] = _safe_bool(runtime.get("no_proxy", False))
     runtime["login_timeout_ms"] = _safe_int(runtime.get("login_timeout_ms"), 120000, minimum=10000)
     runtime["worker_idle_seconds"] = _safe_int(runtime.get("worker_idle_seconds"), 90, minimum=15)
     runtime["page_size"] = _safe_int(runtime.get("page_size"), 50, minimum=10)
@@ -80,6 +81,7 @@ def load_netinsight_config() -> Dict[str, Any]:
         planner = {}
     planner["default_days"] = _safe_int(planner.get("default_days"), 30, minimum=1)
     planner["default_total_limit"] = _safe_int(planner.get("default_total_limit"), 500, minimum=1)
+    planner["default_allocate_by_platform"] = _safe_bool(planner.get("default_allocate_by_platform", False))
     default_platforms = planner.get("default_platforms")
     if not isinstance(default_platforms, list):
         default_platforms = ["微博"]
@@ -137,6 +139,14 @@ def _safe_int(value: Any, default: int, *, minimum: int = 0) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, parsed)
+
+
+def _safe_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 __all__ = [
