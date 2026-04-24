@@ -10,16 +10,20 @@
     >
       <div
         v-if="modelValue"
+        ref="backdropRef"
         class="modal-backdrop fixed inset-0 z-[90] flex items-center justify-center px-4 py-6"
         role="dialog"
         aria-modal="true"
         :aria-label="title"
-        @click.self="handleBackdrop"
+        @click="handleBackdropClick"
       >
         <div
+          ref="panelRef"
           class="w-full overflow-hidden rounded-3xl bg-surface shadow-2xl"
           :class="[width, scrollable ? 'flex flex-col' : 'p-6']"
           :style="scrollable ? 'max-height: 82vh' : ''"
+          @click.stop
+          @pointerdown.stop
         >
           <header
             class="flex items-start justify-between gap-4 border-b border-soft"
@@ -86,7 +90,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { XMarkIcon } from '@heroicons/vue/24/outline'
 
 const props = defineProps({
@@ -154,6 +158,8 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'cancel', 'confirm'])
 const isClient = typeof window !== 'undefined'
+const backdropRef = ref(null)
+const panelRef = ref(null)
 let previousBodyOverflow = ''
 
 const confirmButtonClass = computed(() => {
@@ -175,9 +181,23 @@ const handleConfirm = () => {
   emit('confirm')
 }
 
+const eventTargetsNode = (event, node) => {
+  if (!node || !event) return false
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : []
+  if (Array.isArray(path) && path.includes(node)) return true
+  const target = event.target
+  return Boolean(target && node.contains(target))
+}
+
 const handleBackdrop = () => {
   if (!props.closeOnBackdrop) return
   handleCancel()
+}
+
+const handleBackdropClick = (event) => {
+  if (!props.closeOnBackdrop) return
+  if (eventTargetsNode(event, panelRef.value)) return
+  handleBackdrop()
 }
 
 const handleKeydown = (event) => {
