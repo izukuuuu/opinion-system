@@ -146,6 +146,61 @@ class ReportCliTests(unittest.TestCase):
         self.assertEqual(summary["repair_attempts"], 1)
         self.assertIn("artifact_semantic_status", summary)
 
+    def test_harness_flags_retrieval_success_without_persisted_evidence_cards(self) -> None:
+        tmp_dir = self._make_tmp_dir("retrieval-lineage")
+        ctx = TopicContext(identifier="demo-topic", project_identifier="demo-project", display_name="示例专题")
+        event_path = tmp_dir / "events.jsonl"
+
+        def _fake_run(_topic_identifier, _start, _end, **kwargs):
+            callback = kwargs.get("event_callback")
+            if callable(callback):
+                callback(
+                    {
+                        "type": "agent.memo",
+                        "phase": "interpret",
+                        "agent": "archive_evidence_organizer",
+                        "message": "已召回 12 张证据卡，覆盖 5 个平台。",
+                        "payload": {
+                            "tool_name": "retrieve_evidence_cards",
+                            "counts": {"matched_count": 27, "sampled_count": 12, "platform_count": 5, "cards_count": 12},
+                        },
+                    }
+                )
+            return {
+                "status": "failed",
+                "message": "探索阶段未通过 readiness gate，已阻断 compile。",
+                "thread_id": "thread-1",
+                "structured_payload": {},
+                "full_payload": {},
+                "exploration_bundle": {
+                    "gap_summary": [{"agent": "archive_evidence_organizer", "file": "evidence_cards.json", "reason": "empty"}],
+                    "artifact_semantic_status": {"evidence_cards.json": {"status": "empty"}},
+                    "readiness_gate_passed": False,
+                    "blocked_stage": "exploration_readiness",
+                },
+            }
+
+        with patch(
+            "src.report.cli._resolve_report_range",
+            return_value=(ctx, [], [], {"start": "2025-01-01", "end": "2025-01-31"}),
+        ), patch(
+            "src.report.cli.ensure_cache_dir_v2",
+            return_value=tmp_dir,
+        ), patch(
+            "src.report.cli.run_or_resume_deep_report_task",
+            side_effect=_fake_run,
+        ):
+            exit_code = report_cli.main(
+                ["run", "--topic", "示例专题", "--event-log", str(event_path), "--quiet-events", "--json"]
+            )
+
+        self.assertEqual(exit_code, 1)
+        summary = json.loads((tmp_dir / report_cli.DEFAULT_DEBUG_SUMMARY_FILENAME).read_text(encoding="utf-8"))
+        checks = {item["name"]: item for item in summary["harness_scorecard"]["checks"]}
+        self.assertEqual(checks["retrieval_lineage"]["status"], "fail")
+        self.assertEqual(checks["retrieval_lineage"]["reason"], "retrieval_result_not_persisted")
+        self.assertEqual(checks["retrieval_lineage"]["retrieval_counts"]["cards_count"], 12)
+
     def test_availability_outputs_current_default_range_only(self) -> None:
         ctx = TopicContext(identifier="demo-topic", project_identifier="demo-project", display_name="示例专题")
         stdout = io.StringIO()

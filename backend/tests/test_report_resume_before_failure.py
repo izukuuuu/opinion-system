@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
-import tempfile
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 from flask import Flask
 
@@ -20,14 +21,20 @@ from src.report.task_queue import cancel_task, create_task, get_task, resume_bef
 
 
 class ReportResumeBeforeFailureTests(unittest.TestCase):
+    def _make_tmp_root(self) -> Path:
+        base = Path(__file__).resolve().parents[1] / "data" / "_tmp_report_resume_tests"
+        base.mkdir(parents=True, exist_ok=True)
+        root = base / uuid4().hex
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
     def _task_queue_context(self) -> tuple[ExitStack, Path]:
-        temp_dir = tempfile.TemporaryDirectory()
-        root = Path(temp_dir.name)
+        root = self._make_tmp_root()
         stack = ExitStack()
         stack.enter_context(patch.object(task_queue_module, "STATE_ROOT", root / "_report"))
         stack.enter_context(patch.object(task_queue_module, "TASK_STATE_DIR", root / "_report" / "tasks"))
         stack.enter_context(patch.object(task_queue_module, "WORKER_STATUS_PATH", root / "_report" / "worker.json"))
-        stack.callback(temp_dir.cleanup)
+        stack.callback(lambda: shutil.rmtree(root, ignore_errors=True))
         return stack, root
 
     def _create_failed_task(self, cache_path: Path) -> dict:
@@ -120,6 +127,47 @@ class ReportResumeBeforeFailureTests(unittest.TestCase):
         self.assertEqual(payload["task"]["id"], source_task["id"])
         self.assertEqual(payload["task"]["status"], "queued")
 
+    def test_exploration_failure_resume_uses_checkpoint_resume_without_structured_cache(self) -> None:
+        stack, root = self._task_queue_context()
+        cache_path = root / REPORT_CACHE_FILENAME
+        with stack:
+            task = create_task(
+                {
+                    "topic": "示例专题",
+                    "topic_identifier": "demo-topic",
+                    "start": "2025-01-01",
+                    "end": "2025-01-31",
+                    "mode": "fast",
+                }
+            )
+            task_queue_module._update_task(
+                task["id"],
+                mutate=lambda current: current.update(
+                    {
+                        "status": "failed",
+                        "phase": "exploration",
+                        "message": "readiness gate failed",
+                        "current_actor": "exploration_subgraph",
+                        "last_diagnostic": {
+                            "failed_phase": "exploration",
+                            "failed_actor": "exploration_subgraph",
+                            "blocked_stage": "exploration_readiness",
+                        },
+                    }
+                ),
+            )
+            with patch.object(task_queue_module, "_structured_cache_path_for_task", return_value=cache_path):
+                failed = get_task(task["id"])
+                capability = failed["resume_capabilities"]["resume_before_failure"]
+                resumed = resume_before_failure_task(task["id"])
+
+        self.assertTrue(capability["enabled"])
+        self.assertEqual(capability["restart_phase"], "exploration")
+        self.assertEqual(capability["resume_kind"], "checkpoint_resume")
+        self.assertEqual(resumed["resume_kind"], "checkpoint_resume")
+        self.assertEqual(resumed["request"]["resume_context"]["kind"], "checkpoint_resume")
+        self.assertEqual(resumed["request"]["resume_context"]["source_failed_phase"], "exploration")
+
     def test_cancel_waiting_approval_task_marks_cancelled_and_clears_approvals(self) -> None:
         stack, _ = self._task_queue_context()
         with stack:
@@ -159,62 +207,62 @@ class ReportResumeBeforeFailureTests(unittest.TestCase):
         self.assertIn("人工复核阶段取消", cancelled["message"])
 
     def test_run_or_resume_deep_report_task_uses_source_structured_cache_for_failure_resume(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cache_dir = Path(temp_dir)
-            cache_path = cache_dir / REPORT_CACHE_FILENAME
-            thread_id = "report::demo-topic::2025-01-01::2025-01-31"
-            cache_path.write_text(
-                json.dumps(
-                    {
-                        "report_ir": {},
-                        "metadata": {
-                            "runtime_task_id": "task-source",
-                            "thread_id": thread_id,
-                        },
+        cache_dir = self._make_tmp_root()
+        self.addCleanup(lambda: shutil.rmtree(cache_dir, ignore_errors=True))
+        cache_path = cache_dir / REPORT_CACHE_FILENAME
+        thread_id = "report::demo-topic::2025-01-01::2025-01-31"
+        cache_path.write_text(
+            json.dumps(
+                {
+                    "report_ir": {},
+                    "metadata": {
+                        "runtime_task_id": "task-source",
+                        "thread_id": thread_id,
                     },
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        captured: dict = {}
+
+        def _fake_orchestrator(*, request, root_thread_id, invoke_deep_agent, run_compile, event_callback=None):
+            exploration = invoke_deep_agent(request)
+            captured["request"] = request
+            captured["exploration"] = exploration
+            return {
+                "status": "completed",
+                "message": "ok",
+                "approvals": [],
+                "structured_payload": exploration["structured_payload"],
+                "full_payload": {},
+                "exploration_bundle": exploration["exploration_bundle"],
+                "thread_id": request["thread_id"],
+            }
+
+        with patch("src.report.deep_report.service.ensure_cache_dir", return_value=cache_dir), patch(
+            "src.report.deep_report.service._run_deep_report_exploration_task"
+        ) as explore_mock, patch(
+            "src.report.deep_report.service.run_report_orchestrator_graph",
+            side_effect=_fake_orchestrator,
+        ):
+            result = run_or_resume_deep_report_task(
+                "demo-topic",
+                "2025-01-01",
+                "2025-01-31",
+                topic_label="示例专题",
+                mode="fast",
+                thread_id=thread_id,
+                task_id="task-child",
+                failure_resume_context={
+                    "kind": "resume_before_failure",
+                    "source_task_id": "task-source",
+                    "source_failed_phase": "compile",
+                    "source_failed_actor": "compile_subgraph",
+                    "source_thread_id": thread_id,
+                    "structured_cache_path": str(cache_path),
+                },
             )
-            captured: dict = {}
-
-            def _fake_orchestrator(*, request, root_thread_id, invoke_deep_agent, run_compile, event_callback=None):
-                exploration = invoke_deep_agent(request)
-                captured["request"] = request
-                captured["exploration"] = exploration
-                return {
-                    "status": "completed",
-                    "message": "ok",
-                    "approvals": [],
-                    "structured_payload": exploration["structured_payload"],
-                    "full_payload": {},
-                    "exploration_bundle": exploration["exploration_bundle"],
-                    "thread_id": request["thread_id"],
-                }
-
-            with patch("src.report.deep_report.service.ensure_cache_dir", return_value=cache_dir), patch(
-                "src.report.deep_report.service._run_deep_report_exploration_task"
-            ) as explore_mock, patch(
-                "src.report.deep_report.service.run_report_orchestrator_graph",
-                side_effect=_fake_orchestrator,
-            ):
-                result = run_or_resume_deep_report_task(
-                    "demo-topic",
-                    "2025-01-01",
-                    "2025-01-31",
-                    topic_label="示例专题",
-                    mode="fast",
-                    thread_id=thread_id,
-                    task_id="task-child",
-                    failure_resume_context={
-                        "kind": "resume_before_failure",
-                        "source_task_id": "task-source",
-                        "source_failed_phase": "compile",
-                        "source_failed_actor": "compile_subgraph",
-                        "source_thread_id": thread_id,
-                        "structured_cache_path": str(cache_path),
-                    },
-                )
 
         self.assertEqual(result["status"], "completed")
         self.assertFalse(explore_mock.called)

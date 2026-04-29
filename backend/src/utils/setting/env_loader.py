@@ -5,7 +5,7 @@
 
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 # 避免循环导入，在函数内部导入
 
 from .editor import load_config as load_settings_config
@@ -109,14 +109,28 @@ def _lookup_env_var(*names: str) -> Optional[str]:
     return None
 
 
+def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _load_llm_credentials() -> Dict[str, str]:
     """
     Load LLM credentials persisted via the settings editor.
     """
     try:
         config = load_settings_config("llm")
+        local_config = load_settings_config("llm.local")
     except Exception:
         return {}
+
+    if isinstance(config, dict) and isinstance(local_config, dict) and local_config:
+        config = _deep_merge_dict(config, local_config)
 
     credentials = config.get("credentials")
     if isinstance(credentials, dict):

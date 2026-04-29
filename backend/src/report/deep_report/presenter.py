@@ -473,6 +473,7 @@ def compile_markdown_artifacts(
         checkpointer_path=checkpointer_path,
         graph_thread_id=graph_thread_id,
         review_decision=review_decision,
+        allow_review_pending=allow_review_pending,
     )
     if str(compiled.get("status") or "").strip() == "interrupted":
         return compiled
@@ -492,8 +493,15 @@ def compile_markdown_artifacts(
             "utility_assessment": utility_assessment,
             "human_override_accepted": human_override_accepted,
             "review_decision": effective_review_decision_text,
+            "allow_review_pending": bool(allow_review_pending),
         },
     }
+    if allow_review_pending and not human_override_accepted:
+        markdown_conformance["requires_human_review"] = False
+        markdown_conformance["metadata"] = {
+            **dict(markdown_conformance.get("metadata") or {}),
+            "review_pending_bypassed": True,
+        }
     compiled["factual_conformance"] = markdown_conformance
     compiled["utility_assessment"] = utility_assessment
     compiled["review_required"] = bool(markdown_conformance.get("requires_human_review") or compiled.get("review_required"))

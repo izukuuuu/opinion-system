@@ -423,6 +423,55 @@ class ReportRuntimeSmokeTests(unittest.TestCase):
             )
         )
 
+    def test_checkpoint_resume_skips_prepare_and_passes_checkpoint_flag(self) -> None:
+        task = _sample_task(status="queued")
+        task["resume_kind"] = "checkpoint_resume"
+        task["request"]["resume_context"] = {
+            "kind": "checkpoint_resume",
+            "source_task_id": task["id"],
+            "source_failed_phase": "exploration",
+            "source_failed_actor": "exploration_subgraph",
+            "source_thread_id": task["thread_id"],
+        }
+        with ExitStack() as stack:
+            stack.enter_context(patch("src.report.worker.get_task", return_value=task))
+            analyze_mock = stack.enter_context(patch("src.report.worker.ensure_analyze_results"))
+            explain_mock = stack.enter_context(patch("src.report.worker.ensure_explain_results"))
+            runtime_mock = stack.enter_context(
+                patch(
+                    "src.report.worker.run_or_resume_deep_report_task",
+                    return_value={"status": "completed", "structured_payload": _structured_payload(), "full_payload": _full_payload()},
+                )
+            )
+            stack.enter_context(patch("src.report.worker._structured_digest_from_payload", return_value={"report_ir_summary": {}}))
+            stack.enter_context(patch("src.report.worker._trust_from_payload", return_value={}))
+            stack.enter_context(patch("src.report.worker._raise_if_cancelled", return_value=None))
+            stack.enter_context(patch("src.report.worker._maybe_update_fallback_todos", return_value=None))
+            stack.enter_context(patch("src.report.worker._has_rejected_approval", return_value=False))
+            stack.enter_context(patch("src.report.worker.threading.Thread", return_value=DummyThread()))
+            stack.enter_context(patch("src.report.worker.set_worker_pid"))
+            stack.enter_context(patch("src.report.worker.mark_agent_started"))
+            stack.enter_context(patch("src.report.worker.mark_task_progress"))
+            stack.enter_context(patch("src.report.worker.append_agent_memo"))
+            stack.enter_context(patch("src.report.worker.set_structured_result_digest"))
+            stack.enter_context(patch("src.report.worker.update_task_trust"))
+            stack.enter_context(patch("src.report.worker.mark_artifact_ready"))
+            stack.enter_context(patch("src.report.worker.mark_task_completed"))
+            stack.enter_context(patch("src.report.worker.build_artifacts_root", return_value=Path("f:/opinion-system/backend/data/_report/runtime")))
+            append_event_mock = stack.enter_context(patch("src.report.worker.append_event"))
+            _run_task("rp-smoke")
+
+        self.assertFalse(analyze_mock.called)
+        self.assertFalse(explain_mock.called)
+        self.assertTrue(runtime_mock.call_args.kwargs["checkpoint_resume"])
+        self.assertIsNone(runtime_mock.call_args.kwargs["failure_resume_context"])
+        self.assertTrue(
+            any(
+                call.kwargs.get("payload", {}).get("resume_from") == "checkpoint_resume"
+                for call in append_event_mock.call_args_list
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

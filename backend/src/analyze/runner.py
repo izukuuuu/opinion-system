@@ -233,6 +233,8 @@ def _generate_ai_summary(func_name: str, target: str, snapshot: str, logger) -> 
                 ],
                 task="analyze_summary",
                 max_tokens=400,
+                timeout=30,
+                max_retries=0,
             )
         )
         if isinstance(langchain_text, str) and langchain_text.strip():
@@ -303,6 +305,8 @@ def _generate_main_finding_text(topic: str, start: str, end: Optional[str], cont
                 ],
                 task="analyze_summary",
                 max_tokens=400,
+                timeout=30,
+                max_retries=0,
             )
         )
         if isinstance(langchain_text, str) and langchain_text.strip():

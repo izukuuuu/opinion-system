@@ -1,6 +1,7 @@
 """
 数据清洗功能
 """
+import json
 import re
 import pandas as pd
 from pathlib import Path
@@ -12,6 +13,61 @@ from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.logging.logging import setup_logger, log_success, log_error, log_module_start
 from ..utils.setting.settings import settings
 from ..utils.io.excel import read_jsonl, write_jsonl
+
+
+def sanitize_utf8_text(text: Any) -> str:
+    """
+    移除无法编码为 UTF-8 的非法字符。
+
+    Args:
+        text (Any): 原始值
+
+    Returns:
+        str: 移除非法字符后的文本
+    """
+    if pd.isna(text) or not text:
+        return ""
+    return str(text).encode("utf-8", errors="ignore").decode("utf-8")
+
+
+def sanitize_utf8_value(value: Any) -> Any:
+    """
+    递归清理对象中的非法 UTF-8 字符，保留原有数据结构。
+    """
+    if isinstance(value, str):
+        return sanitize_utf8_text(value)
+    if isinstance(value, list):
+        return [sanitize_utf8_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: sanitize_utf8_value(item) for key, item in value.items()}
+    return value
+
+
+def read_jsonl_with_utf8_fallback(file_path: Path) -> pd.DataFrame:
+    """
+    优先使用 pandas 读取；若因非法 Unicode 码点失败，则逐行回退读取。
+
+    Args:
+        file_path (Path): JSONL 文件路径
+
+    Returns:
+        pd.DataFrame: 读取后的数据框
+    """
+    try:
+        return read_jsonl(file_path)
+    except Exception as exc:
+        message = str(exc).lower()
+        if "surrogate" not in message and "unicode" not in message:
+            raise
+
+    records: List[Dict[str, Any]] = []
+    with Path(file_path).open("r", encoding="utf-8") as stream:
+        for line in stream:
+            payload = str(line or "").strip()
+            if not payload:
+                continue
+            records.append(sanitize_utf8_value(json.loads(payload)))
+    return pd.DataFrame.from_records(records)
 
 
 def parse_datetime(time_str: str, formats: List[str] = None) -> Optional[datetime]:
@@ -59,7 +115,7 @@ def clean_text_whitespace(text: str) -> str:
     """
     if pd.isna(text) or not text:
         return ""
-    text = str(text)
+    text = sanitize_utf8_text(text)
     # 将各种空白序列折叠为单个空格，并去首尾空白
     return re.sub(r'\s+', ' ', text).strip()
 
@@ -78,7 +134,7 @@ def normalize_region(region: str, fillna: str = "未知") -> str:
     if pd.isna(region) or not region:
         return fillna
     
-    region = str(region).strip()
+    region = sanitize_utf8_text(region).strip()
     
     # 省级映射
     province_map = {
@@ -148,7 +204,7 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
     for file_path in jsonl_files:
         channel_name = file_path.stem
         try:
-            df = read_jsonl(file_path)
+            df = read_jsonl_with_utf8_fallback(file_path)
             original_count = len(df)
         except Exception as e:
             log_error(logger, f"读取 {file_path.name} 失败：{e}", "Clean")
@@ -179,7 +235,7 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
         # 合并文本 -> contents（仅空白清理，不去除标点；缺失填"未知"；带标签前缀）
         for col in ['title', 'summary', 'ocr', 'content']:
             if col in df.columns:
-                df[col] = df[col].fillna("未知").astype(str)
+                df[col] = df[col].fillna("未知").apply(sanitize_utf8_text)
         pieces = [df[col] for col in ['title', 'summary', 'ocr', 'content'] if col in df.columns]
         if pieces:
             def _merge_with_labels(row):
@@ -272,7 +328,7 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
                 missing_cols.append(col)
             else:
                 # 将空字符串/NaN 填充为 "未知"
-                df[col] = df[col].replace('', '未知').fillna('未知')
+                df[col] = df[col].replace('', '未知').fillna('未知').apply(sanitize_utf8_text)
         
         # 数值列处理：统一保留互动指标，并兼容旧字段 likecount
         numeric_metric_defaults = {
@@ -287,6 +343,12 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
             else:
                 df[metric_name] = pd.to_numeric(df[metric_name], errors='coerce').fillna(default_value).astype(int)
         df['likecount'] = df['like_count']
+
+        for text_col in ['title', 'contents', 'platform', 'author', 'url', 'region', 'hit_words', 'polarity']:
+            if text_col in df.columns:
+                df[text_col] = df[text_col].apply(sanitize_utf8_text)
+                if text_col != 'contents':
+                    df[text_col] = df[text_col].replace('', '未知').fillna('未知')
 
         # 重编号（每表独立）
         df = df.reset_index(drop=True)

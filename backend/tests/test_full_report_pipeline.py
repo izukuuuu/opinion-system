@@ -718,6 +718,9 @@ class FullReportPipelineTests(unittest.TestCase):
         captured_initial_state = {}
 
         class FakeCompiledGraph:
+            def get_state(self, config):
+                return SimpleNamespace(values={})
+
             def stream(self, initial_state, **kwargs):
                 captured_initial_state.update(initial_state)
                 yield {
@@ -774,6 +777,70 @@ class FullReportPipelineTests(unittest.TestCase):
         self.assertNotIn("middleware_factory", captured_initial_state)
         self.assertNotIn("event_callback", captured_initial_state)
         self.assertNotIn("llm", captured_initial_state)
+
+    def test_exploration_deterministic_graph_checkpoint_resume_streams_none(self):
+        stream_inputs = []
+
+        class FakeCompiledGraph:
+            def get_state(self, config):
+                return SimpleNamespace(
+                    values={
+                        "status": "running",
+                        "message": "checkpointed",
+                        "files": {"state/existing.json": {"content": ["{}"]}},
+                        "gaps": [],
+                        "structured_payload": {},
+                    }
+                )
+
+            def stream(self, initial_state, **kwargs):
+                stream_inputs.append(initial_state)
+                yield {
+                    "type": "updates",
+                    "data": {
+                        "finalize_node": {
+                            "status": "completed",
+                            "message": "resumed",
+                            "files": {"state/new.json": {"content": ["{}"]}},
+                            "gaps": [],
+                            "structured_payload": {},
+                        }
+                    },
+                }
+
+        class FakeBuilder:
+            def compile(self, checkpointer=None):
+                return FakeCompiledGraph()
+
+        with patch(
+            "src.report.deep_report.exploration_deterministic_graph.build_exploration_deterministic_graph",
+            return_value=FakeBuilder(),
+        ), patch(
+            "src.report.deep_report.exploration_deterministic_graph.get_shared_report_checkpointer",
+            return_value=(None, SimpleNamespace(checkpoint_locator="explore.sqlite")),
+        ):
+            result = run_exploration_deterministic_graph(
+                request={
+                    "task_id": "task-123",
+                    "thread_id": "task-123:explore",
+                    "topic_identifier": "demo-topic",
+                    "topic_label": "示例专题",
+                    "start": "2025-01-01",
+                    "end": "2025-01-31",
+                    "mode": "fast",
+                },
+                skill_assets={},
+                middleware_factory=lambda _agent: [],
+                event_callback=lambda _event: None,
+                llm=object(),
+                initial_files={},
+                checkpoint_resume=True,
+            )
+
+        self.assertEqual(stream_inputs, [None])
+        self.assertEqual(result["status"], "completed")
+        self.assertIn("state/existing.json", result["files"])
+        self.assertIn("state/new.json", result["files"])
 
     def test_exploration_route_after_utility_accepts_nested_result_decision(self):
         layout = build_runtime_workspace_layout(

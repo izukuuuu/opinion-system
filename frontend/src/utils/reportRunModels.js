@@ -288,7 +288,8 @@ function artifactDisplayMeta(key) {
     repair_plan: { label: '修复计划', description: '针对问题内容的修复方案。' },
     graph_state: { label: '运行记录', description: '当前进度和调整次数。' },
     approval_records: { label: '确认记录', description: '人工审核的确认情况。' },
-    full_markdown: { label: '正式报告', description: '最终的分析报告文稿。' }
+    full_markdown: { label: '正式报告', description: '最终的分析报告文稿。' },
+    full_html: { label: 'HTML 报告', description: '按 Sona 模板生成的可交付网页报告。' }
   }
   return mapping[normalized] || { label: normalized || '产物', description: '当前产物。' }
 }
@@ -963,6 +964,12 @@ function buildArtifactCards(taskState) {
       label: '正式文稿',
       description: '由 Report IR 编译得到的正式 Markdown 文稿。',
       ready: Boolean(manifest.full_markdown?.status === 'ready')
+    },
+    {
+      key: 'full_html',
+      label: 'HTML 报告',
+      description: '由 Sona 模板线路生成的网页报告。',
+      ready: Boolean(manifest.full_html?.status === 'ready')
     }
   ]
 }
@@ -1073,9 +1080,9 @@ function buildArtifactObservability(taskState) {
     : (approvals.length ? approvalDecisionLabel(approvals[approvals.length - 1]?.decision) : '未触发')
   const phaseQueues = {
     interpret: ['conflict_map', 'mechanism_summary', 'utility_assessment', 'ir', 'structured_projection'],
-    write: ['draft_bundle_v2', 'validation_result', 'repair_plan', 'graph_state', 'full_markdown'],
-    review: ['validation_result', 'repair_plan', 'graph_state', 'approval_records', 'full_markdown'],
-    persist: ['approval_records', 'full_markdown']
+    write: ['draft_bundle_v2', 'validation_result', 'repair_plan', 'graph_state', 'full_markdown', 'full_html'],
+    review: ['validation_result', 'repair_plan', 'graph_state', 'approval_records', 'full_markdown', 'full_html'],
+    persist: ['approval_records', 'full_markdown', 'full_html']
   }
   const allEntries = Object.entries(manifest)
     .filter(([key]) => !['versions', 'runtime_log'].includes(String(key || '').trim()))
@@ -1087,10 +1094,10 @@ function buildArtifactObservability(taskState) {
       createdAt: new Date(String(record?.created_at || '').trim() || 0).getTime() || 0
     }))
   const latestReady = [...allEntries].filter((item) => item.ready).sort((a, b) => a.createdAt - b.createdAt).pop() || null
-  const phaseQueue = phaseQueues[String(taskState.phase || '').trim()] || ['structured_projection', 'ir', 'draft_bundle', 'full_markdown']
+  const phaseQueue = phaseQueues[String(taskState.phase || '').trim()] || ['structured_projection', 'ir', 'draft_bundle', 'full_markdown', 'full_html']
   const currentKey = phaseQueue.find((key) => String(manifest[normalizeArtifactKey(key)]?.status || '').trim() !== 'ready')
-    || (String(taskState.status || '').trim() === 'completed' ? 'full_markdown' : phaseQueue[phaseQueue.length - 1])
-  const items = [latestReady?.key, currentKey, 'full_markdown']
+    || (String(taskState.status || '').trim() === 'completed' ? 'full_html' : phaseQueue[phaseQueue.length - 1])
+  const items = [latestReady?.key, currentKey, 'full_markdown', 'full_html']
     .map((key) => normalizeArtifactKey(key))
     .filter((key, index, list) => key && list.indexOf(key) === index)
     .map((key) => {
@@ -1103,21 +1110,21 @@ function buildArtifactObservability(taskState) {
           ? '待确认'
           : (['queued', 'running', 'waiting_approval'].includes(String(taskState.status || '').trim()) ? '生成中' : '未开始')
       }
-      if (!ready && key === 'full_markdown' && String(taskState.status || '').trim() === 'completed') statusText = '已生成'
+      if (!ready && ['full_markdown', 'full_html'].includes(key) && String(taskState.status || '').trim() === 'completed') statusText = '已生成'
       return {
         key,
         label: meta.label,
         description: meta.description,
         ready,
         isCurrent: key === normalizeArtifactKey(currentKey),
-        isOutput: key === 'full_markdown',
+        isOutput: key === 'full_markdown' || key === 'full_html',
         statusText,
         createdAtLabel: formatTimestamp(record.created_at),
         sourceLabel: Array.isArray(record.source_artifact_ids) && record.source_artifact_ids.length
           ? record.source_artifact_ids.join('、')
           : (Array.isArray(record.parent_artifact_ids) && record.parent_artifact_ids.length ? record.parent_artifact_ids.join('、') : '当前主线'),
-        reviewState: key === 'approval_records' || key === 'full_markdown' ? approvalState : '',
-        fallbackState: fallbackCount > 0 && ['utility_assessment', 'draft_bundle', 'full_markdown'].includes(key) ? `已回退 ${fallbackCount} 次` : ''
+        reviewState: key === 'approval_records' || key === 'full_markdown' || key === 'full_html' ? approvalState : '',
+        fallbackState: fallbackCount > 0 && ['utility_assessment', 'draft_bundle', 'full_markdown', 'full_html'].includes(key) ? `已回退 ${fallbackCount} 次` : ''
       }
     })
   return {

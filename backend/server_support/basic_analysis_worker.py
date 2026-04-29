@@ -55,6 +55,17 @@ def _raise_if_cancelled(task_id: str) -> None:
         raise TaskCancelled("任务已按请求取消")
 
 
+def _friendly_analyze_failure_message(message: str) -> str:
+    text = str(message or "").strip()
+    if not text:
+        return "基础分析未生成有效结果"
+    if "未找到数据目录" in text or "未找到 fetch 目录" in text:
+        return "当前时间范围还没有可用于基础分析的数据缓存，请先完成数据拉取。"
+    if "未找到总体数据文件" in text:
+        return "当前时间范围的数据缓存不完整，缺少总体数据，请重新拉取数据后再运行基础分析。"
+    return text
+
+
 class ParallelWorker:
     """支持并行执行多个任务的 Worker。"""
 
@@ -152,7 +163,13 @@ class ParallelWorker:
             _raise_if_cancelled(task_id)
 
             if not success:
-                raise RuntimeError("基础分析未生成有效结果")
+                latest_task = get_task(task_id)
+                detail_message = str(
+                    latest_task.get("error")
+                    or latest_task.get("message")
+                    or ""
+                ).strip()
+                raise RuntimeError(_friendly_analyze_failure_message(detail_message))
 
             analyze_root = bucket("analyze", topic_identifier, date_range)
             mark_task_completed(

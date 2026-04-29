@@ -153,6 +153,7 @@ const {
   loadTopics,
   loadHistory,
   loadFullReport,
+  loadFullReportHtml,
   createReportTask,
   applyHistorySelection
 } = useReportGeneration()
@@ -207,9 +208,18 @@ const exportMarkdown = () => {
   downloadBlob(blob, `${reportTitle.value || 'ai-report'}.md`)
 }
 
-const exportHtml = () => {
+const exportHtml = async () => {
   if (!fullReport.value) return
-  const html = buildStandaloneAiReportHtml(fullReport.value, { lastLoaded: fullReportState.lastLoaded })
+  let html = ''
+  try {
+    html = await loadFullReportHtml({
+      topic: reportForm.topic,
+      start: reportForm.start,
+      end: reportForm.end
+    })
+  } catch {
+    html = buildStandaloneAiReportHtml(fullReport.value, { lastLoaded: fullReportState.lastLoaded })
+  }
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   downloadBlob(blob, `${reportTitle.value || 'ai-report'}.html`)
 }

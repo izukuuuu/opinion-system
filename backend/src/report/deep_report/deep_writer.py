@@ -460,6 +460,8 @@ def _ensure_string_content(response: Any) -> str:
         if isinstance(part, list):
             return "\n".join(_flatten_text_part(item, depth + 1) for item in part)
         if isinstance(part, dict):
+            if str(part.get("type") or "").strip().lower() in {"thinking", "reasoning", "signature"}:
+                return ""
             for key in ("text", "content", "value"):
                 if key in part:
                     return _flatten_text_part(part[key], depth + 1)
@@ -473,6 +475,10 @@ def _ensure_string_content(response: Any) -> str:
         if isinstance(content, list):
             return "\n".join(_flatten_text_part(item) for item in content)
         return str(content)
+    if isinstance(response, list):
+        return "\n".join(_flatten_text_part(item) for item in response)
+    if isinstance(response, dict):
+        return _flatten_text_part(response)
     return str(response)
 
 
@@ -566,6 +572,12 @@ def _normalize_section_markdown_body(raw: Any, *, title: str) -> str:
     text = _strip_code_fences(_ensure_string_content(raw))
     if not text:
         return ""
+    text = re.sub(
+        r"^\s*\{['\"]signature['\"]\s*:\s*['\"][^'\"]*['\"]\s*,\s*['\"]thinking['\"]\s*:\s*.*?['\"]type['\"]\s*:\s*['\"]thinking['\"]\s*\}\s*",
+        "",
+        text,
+        flags=re.S,
+    ).strip()
     lines = str(text).splitlines()
     if lines:
         first = str(lines[0] or "").strip()

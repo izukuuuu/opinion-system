@@ -4,19 +4,23 @@ import argparse
 import json
 import sys
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO
 
 from server_support.topic_context import TopicContext
 
 from .api import _resolve_report_range
-from .deep_report import AI_FULL_REPORT_CACHE_FILENAME, REPORT_CACHE_FILENAME, run_or_resume_deep_report_task
+from .deep_report import AI_FULL_REPORT_CACHE_FILENAME, AI_FULL_REPORT_HTML_FILENAME, REPORT_CACHE_FILENAME, run_or_resume_deep_report_task
 from .deep_report.deterministic import ensure_cache_dir_v2
 from .task_queue import get_task
 from .task_queue import _evaluate_resume_before_failure as evaluate_resume_before_failure
 
 DEFAULT_EVENT_LOG_FILENAME = "report_debug_events.jsonl"
 DEFAULT_DEBUG_SUMMARY_FILENAME = "report_debug_summary.json"
+DEFAULT_HARNESS_TRACE_FILENAME = "report_runtime_harness_trace.json"
+DEFAULT_HARNESS_SCORECARD_FILENAME = "report_runtime_harness_scorecard.json"
 
 
 def _json_default(value: Any) -> Any:
@@ -42,6 +46,10 @@ def _safe_stream_write(stream: TextIO, text: str) -> None:
 
 def _print_json(payload: Dict[str, Any], *, stream: TextIO) -> None:
     _safe_stream_write(stream, json.dumps(payload, ensure_ascii=False, default=_json_default) + "\n")
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(sep=" ")
 
 
 def _build_range_payload(
@@ -112,6 +120,190 @@ class EventRecorder:
             _print_json(normalized, stream=self.stream)
 
 
+@dataclass
+class ReportCliHarness:
+    """Sona-style runtime harness adapted to this report runtime."""
+
+    cache_dir: Path
+    request_payload: Dict[str, Any]
+    event_log_path: Path
+    events: List[Dict[str, Any]] = field(default_factory=list)
+
+    def record_runtime_event(self, event: Dict[str, Any]) -> None:
+        normalized = dict(event or {})
+        self.events.append(
+            {
+                "ts": _now_iso(),
+                "event_type": str(normalized.get("type") or "").strip() or "runtime.event",
+                "phase": str(normalized.get("phase") or "").strip(),
+                "agent": str(normalized.get("agent") or normalized.get("actor") or "").strip(),
+                "message": str(normalized.get("message") or "").strip(),
+                "payload": normalized.get("payload") if isinstance(normalized.get("payload"), dict) else {},
+            }
+        )
+
+    def _score_event_coverage(self) -> Dict[str, Any]:
+        phases = {str(event.get("phase") or "").strip() for event in self.events if str(event.get("phase") or "").strip()}
+        if not self.events:
+            return {"name": "runtime_event_coverage", "status": "warning", "reason": "no_runtime_events"}
+        expected = {"prepare", "interpret", "persist"}
+        covered = sorted(phases & expected)
+        if "persist" not in phases and "completed" not in phases:
+            return {
+                "name": "runtime_event_coverage",
+                "status": "warning",
+                "reason": "persist_phase_not_observed",
+                "covered_phases": covered,
+                "observed_phases": sorted(phases),
+            }
+        return {
+            "name": "runtime_event_coverage",
+            "status": "pass",
+            "reason": "runtime_events_observed",
+            "covered_phases": covered,
+            "observed_phases": sorted(phases),
+        }
+
+    def _score_artifact_outputs(self, summary: Dict[str, Any]) -> Dict[str, Any]:
+        markdown_path = Path(str(summary.get("full_report_cache_path") or ""))
+        html_path = Path(str(summary.get("full_html_cache_path") or ""))
+        missing: List[str] = []
+        if not bool(summary.get("has_markdown_output")) and not markdown_path.exists():
+            missing.append("full_markdown")
+        if not html_path.exists():
+            missing.append("full_html")
+        if missing:
+            status = "fail" if str(summary.get("status") or "").strip() in {"completed", "completed_with_warnings"} else "warning"
+            return {
+                "name": "artifact_outputs",
+                "status": status,
+                "reason": "missing_artifacts",
+                "missing": missing,
+                "full_markdown": str(markdown_path),
+                "full_html": str(html_path),
+            }
+        return {
+            "name": "artifact_outputs",
+            "status": "pass",
+            "reason": "expected_artifacts_ready",
+            "full_markdown": str(markdown_path),
+            "full_html": str(html_path),
+        }
+
+    def _score_breakpoint_state(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        approvals = result.get("approvals") if isinstance(result.get("approvals"), list) else []
+        unresolved = [
+            item
+            for item in approvals
+            if isinstance(item, dict) and str(item.get("status") or "pending").strip() not in {"resolved", "approved", "rejected"}
+        ]
+        status = str(result.get("status") or "").strip()
+        if status == "waiting_approval" or unresolved:
+            return {
+                "name": "breakpoint_state",
+                "status": "warning",
+                "reason": "human_review_breakpoint_pending",
+                "approval_count": len(approvals),
+                "pending_count": len(unresolved) or len(approvals),
+            }
+        return {
+            "name": "breakpoint_state",
+            "status": "pass",
+            "reason": "no_pending_human_review_breakpoint",
+            "approval_count": len(approvals),
+        }
+
+    def _score_retrieval_lineage(self, summary: Dict[str, Any]) -> Dict[str, Any]:
+        artifact_status = summary.get("artifact_semantic_status") if isinstance(summary.get("artifact_semantic_status"), dict) else {}
+        evidence_status = ""
+        evidence_record = artifact_status.get("evidence_cards.json") if isinstance(artifact_status.get("evidence_cards.json"), dict) else {}
+        if evidence_record:
+            evidence_status = str(evidence_record.get("status") or "").strip()
+        retrieval_counts: Dict[str, Any] = {}
+        retrieval_success = False
+        for event in self.events:
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            tool_name = str(payload.get("tool_name") or "").strip()
+            counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+            if tool_name == "retrieve_evidence_cards" or str(event.get("agent") or "").strip() == "archive_evidence_organizer":
+                cards_count = int(counts.get("cards_count") or 0) if isinstance(counts, dict) else 0
+                sampled_count = int(counts.get("sampled_count") or 0) if isinstance(counts, dict) else 0
+                if cards_count > 0 or sampled_count > 0:
+                    retrieval_success = True
+                    retrieval_counts = dict(counts)
+        if retrieval_success and evidence_status not in {"ready"}:
+            return {
+                "name": "retrieval_lineage",
+                "status": "fail",
+                "reason": "retrieval_result_not_persisted",
+                "evidence_cards_status": evidence_status or "missing",
+                "retrieval_counts": retrieval_counts,
+            }
+        if evidence_status == "ready":
+            return {
+                "name": "retrieval_lineage",
+                "status": "pass",
+                "reason": "evidence_cards_ready",
+                "evidence_cards_status": evidence_status,
+                "retrieval_counts": retrieval_counts,
+            }
+        if evidence_status in {"empty", "failed", "stale"}:
+            return {
+                "name": "retrieval_lineage",
+                "status": "warning",
+                "reason": "evidence_cards_not_ready",
+                "evidence_cards_status": evidence_status,
+            }
+        return {"name": "retrieval_lineage", "status": "warning", "reason": "retrieval_not_observed"}
+
+    def _score_compile_health(self, summary: Dict[str, Any]) -> Dict[str, Any]:
+        status = str(summary.get("status") or "").strip()
+        compile_quality = str(summary.get("compile_quality") or "").strip()
+        degraded = summary.get("degraded_sections") if isinstance(summary.get("degraded_sections"), list) else []
+        if status not in {"completed", "completed_with_warnings"}:
+            return {"name": "compile_health", "status": "fail", "reason": status or "runtime_not_completed"}
+        if degraded or compile_quality == "degraded":
+            return {
+                "name": "compile_health",
+                "status": "warning",
+                "reason": "compile_completed_with_degradation",
+                "compile_quality": compile_quality,
+                "degraded_sections": degraded,
+            }
+        return {"name": "compile_health", "status": "pass", "reason": "compile_completed", "compile_quality": compile_quality}
+
+    def finalize(self, *, result: Dict[str, Any], summary: Dict[str, Any]) -> Dict[str, Any]:
+        checks = [
+            self._score_event_coverage(),
+            self._score_artifact_outputs(summary),
+            self._score_retrieval_lineage(summary),
+            self._score_breakpoint_state(result),
+            self._score_compile_health(summary),
+        ]
+        failed = [item for item in checks if item.get("status") == "fail"]
+        warned = [item for item in checks if item.get("status") == "warning"]
+        status = "failed" if failed else ("warning" if warned else "passed")
+        trace_path = self.cache_dir / DEFAULT_HARNESS_TRACE_FILENAME
+        scorecard_path = self.cache_dir / DEFAULT_HARNESS_SCORECARD_FILENAME
+        payload = {
+            "task_id": str(self.request_payload.get("task_id") or "").strip(),
+            "thread_id": str(summary.get("thread_id") or "").strip(),
+            "created_at": _now_iso(),
+            "status": status,
+            "checks": checks,
+            "event_count": len(self.events),
+            "event_log_path": str(self.event_log_path),
+            "trace_path": str(trace_path),
+            "scorecard_path": str(scorecard_path),
+        }
+        trace_path.write_text(
+            json.dumps({"request": self.request_payload, "events": self.events}, ensure_ascii=False, indent=2, default=_json_default),
+            encoding="utf-8",
+        )
+        scorecard_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default), encoding="utf-8")
+        return payload
+
+
 def _resolved_identity_payload(ctx: TopicContext, *, start: str, end: str, mode: str) -> Dict[str, Any]:
     return {
         "topic_identifier": str(ctx.identifier or "").strip(),
@@ -163,6 +355,7 @@ def _summary_from_result(
         "cache_dir": str(cache_dir),
         "structured_cache_path": str(cache_dir / REPORT_CACHE_FILENAME),
         "full_report_cache_path": str(cache_dir / AI_FULL_REPORT_CACHE_FILENAME),
+        "full_html_cache_path": str(cache_dir / AI_FULL_REPORT_HTML_FILENAME),
         "workspace_root": str(metadata.get("workspace_root") or "").strip(),
         "state_root": str(metadata.get("state_root") or "").strip(),
         "event_log_path": str(event_log_path),
@@ -282,6 +475,12 @@ def _run_command(args: argparse.Namespace) -> int:
     failure_resume_context: Dict[str, Any] | None = None
     if isinstance(getattr(args, "failure_resume_context", None), dict):
         failure_resume_context = dict(args.failure_resume_context or {})
+    harness = ReportCliHarness(cache_dir=cache_dir, request_payload=request_payload, event_log_path=event_log_path)
+
+    def _record_event(event: Dict[str, Any]) -> None:
+        recorder(event)
+        harness.record_runtime_event(event)
+
     result = run_or_resume_deep_report_task(
         str(ctx.identifier or "").strip(),
         start,
@@ -294,7 +493,7 @@ def _run_command(args: argparse.Namespace) -> int:
         checkpoint_resume=bool(args.checkpoint_resume),
         skip_validation=bool(args.skip_validation),
         failure_resume_context=failure_resume_context,
-        event_callback=recorder,
+        event_callback=_record_event,
     )
     summary = _summary_from_result(
         result if isinstance(result, dict) else {},
@@ -303,6 +502,10 @@ def _run_command(args: argparse.Namespace) -> int:
         cache_dir=cache_dir,
         event_log_path=event_log_path,
     )
+    harness_scorecard = harness.finalize(result=result if isinstance(result, dict) else {}, summary=summary)
+    summary["harness_scorecard"] = harness_scorecard
+    summary["harness_trace_path"] = harness_scorecard.get("trace_path", "")
+    summary["harness_scorecard_path"] = harness_scorecard.get("scorecard_path", "")
     _write_summary(summary, output_path=summary_path)
     if bool(args.json):
         _safe_stream_write(sys.stdout, json.dumps(summary, ensure_ascii=False, indent=2, default=_json_default) + "\n")

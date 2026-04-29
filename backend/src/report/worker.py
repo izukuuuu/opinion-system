@@ -21,6 +21,7 @@ from server_support.topic_context import TopicContext  # type: ignore
 from src.project import get_project_manager  # type: ignore
 from src.report.deep_report import (  # type: ignore
     AI_FULL_REPORT_CACHE_FILENAME,
+    AI_FULL_REPORT_HTML_FILENAME,
     REPORT_CACHE_FILENAME,
     RUNTIME_CONTRACT_VERSION,
     ReportRuntimeFailure,
@@ -158,6 +159,7 @@ def _run_task(task_id: str) -> None:
     request = dict(task.get("request") or {})
     resume_context = request.get("resume_context") if isinstance(request.get("resume_context"), dict) else {}
     failure_resume_context = resume_context if str(resume_context.get("kind") or "").strip() == "resume_before_failure" else {}
+    is_checkpoint_resume = str(task.get("resume_kind") or resume_context.get("kind") or "").strip() == "checkpoint_resume"
     task_runtime_version = str(
         request.get("runtime_contract_version")
         or task.get("runtime_contract_version")
@@ -182,6 +184,7 @@ def _run_task(task_id: str) -> None:
     storage_topic = f"{project_identifier}-{topic_identifier}".strip("-") if project_identifier else topic_identifier
     cache_path = bucket("reports", storage_topic, folder) / REPORT_CACHE_FILENAME
     full_cache_path = bucket("reports", storage_topic, folder) / AI_FULL_REPORT_CACHE_FILENAME
+    full_html_path = bucket("reports", storage_topic, folder) / AI_FULL_REPORT_HTML_FILENAME
     LOGGER.warning(
         "report worker | task start | task=%s topic=%s start=%s end=%s mode=%s",
         task_id,
@@ -200,21 +203,22 @@ def _run_task(task_id: str) -> None:
     heartbeat.start()
     try:
         _raise_if_cancelled(task_id)
-        if failure_resume_context:
+        if failure_resume_context or is_checkpoint_resume:
+            resume_label = "checkpoint_resume" if is_checkpoint_resume and not failure_resume_context else "failure_before_compile"
             mark_task_progress(
                 task_id,
                 phase="planning",
                 percentage=PHASE_PERCENTAGE["compile"],
-                message="正在从失败前一步恢复，并重新进入正式编译链。",
+                message="正在从上次断点恢复，并重新进入报告运行链。",
             )
             append_event(
                 task_id,
                 event_type="phase.context",
                 phase="planning",
                 title="任务恢复中",
-                message="系统正在基于上一轮结构化结果，重新进入正式编译链。",
+                message="系统正在基于上次断点，恢复报告运行链。",
                 payload={
-                    "resume_from": "failure_before_compile",
+                    "resume_from": resume_label,
                     "source_task_id": str(failure_resume_context.get("source_task_id") or "").strip(),
                     "source_phase": str(failure_resume_context.get("source_failed_phase") or "").strip(),
                     "source_actor": str(failure_resume_context.get("source_failed_actor") or "").strip(),
@@ -303,7 +307,6 @@ def _run_task(task_id: str) -> None:
                 raise TaskCancelled("审批已拒绝，本次报告未继续写入正式结果。")
 
             resume_payload = _build_resume_payload_from_task(task)
-        is_checkpoint_resume = str(task.get("resume_kind") or "").strip() == "checkpoint_resume"
         if resume_payload is not None and task_runtime_version != RUNTIME_CONTRACT_VERSION:
             diagnostic = {
                 "category": "legacy_runtime_version",
@@ -422,6 +425,10 @@ def _run_task(task_id: str) -> None:
             raise RuntimeError("深度代理未产出结构化报告缓存。")
         if not isinstance(full_report_payload, dict) or not str(full_report_payload.get("markdown") or "").strip():
             raise RuntimeError("正式 Markdown 报告生成失败。")
+        manifest = full_report_payload.get("artifact_manifest") if isinstance(full_report_payload.get("artifact_manifest"), dict) else {}
+        full_html_record = manifest.get("full_html") if isinstance(manifest.get("full_html"), dict) else {}
+        if full_html_record and (str(full_html_record.get("status") or "").strip() != "ready" or not full_html_path.exists()):
+            raise RuntimeError("Sona HTML 报告生成失败。")
 
         mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="正在整理最终报告产物。")
         _maybe_update_fallback_todos(
@@ -437,6 +444,7 @@ def _run_task(task_id: str) -> None:
                 "report_cache_path": str(cache_path),
                 "report_title": str(((report_payload.get("task") or {}).get("topic_label")) or topic_label).strip(),
                 "full_report_cache_path": str(full_cache_path),
+                "full_html_cache_path": str(full_html_path),
                 "full_report_title": str(full_report_payload.get("title") or "").strip(),
                 "report_runtime_artifact": str(build_artifacts_root(task_id, get_data_root()) / "report.md"),
                 "artifact_manifest": (
@@ -458,6 +466,7 @@ def _run_task(task_id: str) -> None:
             "report_cache_path": str(cache_path),
             "report_title": str(((report_payload.get("task") or {}).get("topic_label")) or topic_label).strip(),
             "full_report_cache_path": str(full_cache_path),
+            "full_html_cache_path": str(full_html_path),
             "full_report_title": str(full_report_payload.get("title") or "").strip(),
             "artifact_manifest": (
                 full_report_payload.get("artifact_manifest")

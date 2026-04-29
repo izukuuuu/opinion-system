@@ -52,6 +52,22 @@ def _normalise_postgres_driver_url(url: str) -> str:
     return text
 
 
+def _to_sqlalchemy_postgres_url(url: str) -> str:
+    text = str(url or "").strip()
+    if text.startswith("postgresql://"):
+        return "postgresql+psycopg://" + text[len("postgresql://"):]
+    return text
+
+
+def _to_psycopg_postgres_dsn(url: str) -> str:
+    text = str(url or "").strip()
+    if text.startswith("postgresql+psycopg2://"):
+        return "postgresql://" + text[len("postgresql+psycopg2://"):]
+    if text.startswith("postgresql+psycopg://"):
+        return "postgresql://" + text[len("postgresql+psycopg://"):]
+    return text
+
+
 def _read_setting(path: str, default: Any = None) -> Any:
     try:
         settings.reload()
@@ -182,7 +198,7 @@ def _build_postgres_runtime_connection(*, purpose: str, locator_hint: str = "") 
     runtime_url = parsed.set(drivername="postgresql+psycopg", query=query)
     locator = str(locator_hint or f"postgres://{active.get('id') or 'active'}/{database_name or 'postgres'}?schema={schema_name}&purpose={purpose}").strip()
     redacted = runtime_url.render_as_string(hide_password=True)
-    dsn = runtime_url.render_as_string(hide_password=False)
+    dsn = _to_psycopg_postgres_dsn(runtime_url.render_as_string(hide_password=False))
     summary = {
         "connection_id": str(active.get("id") or "").strip(),
         "connection_name": str(active.get("name") or "").strip(),
@@ -198,7 +214,7 @@ def _build_postgres_runtime_connection(*, purpose: str, locator_hint: str = "") 
 
 
 def _ensure_postgres_schema(dsn: str, schema_name: str) -> None:
-    engine = create_engine(dsn, pool_pre_ping=True, connect_args={"connect_timeout": 10, "application_name": "opinion-system-report-runtime"})
+    engine = create_engine(_to_sqlalchemy_postgres_url(dsn), pool_pre_ping=True, connect_args={"connect_timeout": 10, "application_name": "opinion-system-report-runtime"})
     try:
         with engine.begin() as conn:
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name.replace(chr(34), "")}"'))

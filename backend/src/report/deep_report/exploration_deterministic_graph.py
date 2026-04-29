@@ -1352,6 +1352,7 @@ def run_exploration_deterministic_graph(
     runtime_backend: Any = None,
     common_context: Optional[Dict[str, Any]] = None,
     lifecycle_tracker: Optional[Dict[str, Any]] = None,
+    checkpoint_resume: bool = False,
 ) -> Dict[str, Any]:
     runtime_deps = _ExplorationRuntimeDeps(
         skill_assets=skill_assets if isinstance(skill_assets, dict) else {},
@@ -1408,17 +1409,42 @@ def run_exploration_deterministic_graph(
         "supplement_candidates": (common_context or {}).get("supplement_candidates") if isinstance((common_context or {}).get("supplement_candidates"), dict) else {},
         "skipped_agents": {},
     }
-    _emit_todo_update(
-        event_callback,
-        state=initial_state,
-        phase="prepare",
-        title="探索阶段清单已创建",
-        message="已建立 Tier 0-6 执行清单。",
-    )
+    checkpoint_state: Dict[str, Any] = {}
+    if checkpoint_resume:
+        try:
+            snapshot = graph.get_state(config)
+            values = getattr(snapshot, "values", None)
+            checkpoint_state = values if isinstance(values, dict) else {}
+        except Exception:
+            checkpoint_state = {}
 
-    final_state: Dict[str, Any] = {}
+    stream_input: Optional[ExplorationDeterministicState]
+    if checkpoint_resume and checkpoint_state:
+        stream_input = None
+        _emit_event(
+            event_callback,
+            {
+                "type": "graph.checkpoint_resume",
+                "phase": "exploration",
+                "agent": "exploration_subgraph",
+                "title": "探索图从 checkpoint 续跑",
+                "message": "已检测到同一 thread_id 的探索图 checkpoint，继续执行未完成路径。",
+                "payload": {"thread_id": thread_id, "task_id": task_id},
+            },
+        )
+    else:
+        stream_input = initial_state
+        _emit_todo_update(
+            event_callback,
+            state=initial_state,
+            phase="prepare",
+            title="探索阶段清单已创建",
+            message="已建立 Tier 0-6 执行清单。",
+        )
+
+    final_state: Dict[str, Any] = dict(checkpoint_state or {})
     for chunk in graph.stream(
-        initial_state,
+        stream_input,
         config=config,
         stream_mode="updates",
         version="v2",

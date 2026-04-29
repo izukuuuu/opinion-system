@@ -17,6 +17,7 @@ from src.report.deep_report.graph_runtime import (
     run_report_compilation_graph,
     validate_draft_bundle_v2,
 )
+from src.report.deep_report.deep_writer import _normalize_section_markdown_body
 from src.report.deep_report.deep_writer import DeepWriterError, SectionMarkdownResult
 from src.report.deep_report.schemas import DraftBundle, DraftBundleV2, DraftUnit, DraftUnitV2, FactualConformanceIssue, FactualConformanceResult, TraceRef, ValidationResultV2
 
@@ -148,6 +149,16 @@ class DeepReportGraphRuntimeTests(unittest.TestCase):
         self.assertIn("report_ir", payload)
         self.assertIn("task", payload)
         self.assertEqual(payload["task"]["topic_label"], "示例专题")
+
+    def test_section_markdown_normalization_strips_reasoning_blocks(self) -> None:
+        raw = [
+            {"type": "thinking", "thinking": "内部推理不应进入正文。", "signature": ""},
+            {"type": "text", "text": "## 事实断言\n\n这是正式正文。"},
+        ]
+
+        body = _normalize_section_markdown_body(raw, title="事实断言")
+
+        self.assertEqual(body, "这是正式正文。")
 
     def test_build_repair_plan_v2_recovers_missing_derived_from_from_candidate_trace_refs(self) -> None:
         bundle = DraftBundleV2(

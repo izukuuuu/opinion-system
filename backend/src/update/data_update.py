@@ -12,7 +12,7 @@ from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.logging.logging import setup_logger, log_module_start, log_success, log_error, log_skip
 from ..utils.io.excel import read_jsonl, write_jsonl, sanitize_dataframe, get_standard_table_schema
 from ..utils.io.db import db_manager
-from sqlalchemy import DateTime, MetaData, String, Table, Text, Column, inspect, inspect, text
+from sqlalchemy import DateTime, MetaData, String, Table, Text, Column, inspect, text
 from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
 try:  # Optional dependency; PyMySQL is used by default
@@ -24,6 +24,34 @@ except Exception:  # pragma: no cover - fallback when driver missing
 STANDARD_SCHEMA = get_standard_table_schema()
 STANDARD_COLUMNS = list(STANDARD_SCHEMA.keys())
 DIRECT_INGEST_CLASSIFICATION = "未筛选"
+
+
+def _quote_identifier(conn, identifier: str) -> str:
+    """Use the active SQLAlchemy dialect to quote identifiers safely."""
+    try:
+        preparer = getattr(conn.dialect, "identifier_preparer", None)
+        if preparer:
+            return preparer.quote(identifier)
+    except Exception:
+        pass
+    safe = str(identifier or "").replace('"', '""').replace("`", "``")
+    return f'"{safe}"'
+
+
+def _truncate_table(conn, table_name: str) -> None:
+    quoted_table = _quote_identifier(conn, table_name)
+    conn.execute(text(f"TRUNCATE TABLE {quoted_table}"))
+
+
+def _select_ids_sql(conn, table_name: str):
+    quoted_table = _quote_identifier(conn, table_name)
+    quoted_id = _quote_identifier(conn, "id")
+    return text(f"SELECT {quoted_id} FROM {quoted_table}")
+
+
+def _select_all_sql(conn, table_name: str):
+    quoted_table = _quote_identifier(conn, table_name)
+    return text(f"SELECT * FROM {quoted_table}")
 
 
 def _date_variants(date: str) -> List[str]:
@@ -332,7 +360,7 @@ def _rebuild_from_fetch(
                         continue
                 else:
                     try:
-                        conn.execute(text(f"TRUNCATE TABLE `{table_name}`"))
+                        _truncate_table(conn, table_name)
                         log_success(logger, f"已清空表 {table_name}（重建模式）", "Rebuild")
                     except Exception as trunc_exc:
                         log_error(logger, f"清空表 {table_name} 失败: {trunc_exc}", "Rebuild")
@@ -422,16 +450,23 @@ def create_table_with_standard_schema(conn, table_name: str, topic: str, logger)
         bool: 是否成功
     """
     try:
-        schema = get_standard_table_schema()
-        column_defs = [f"`{col}` {mysql_type}" for col, mysql_type in schema.items()]
-        
-        create_sql = f"""
-        CREATE TABLE IF NOT EXISTS `{table_name}` (
-            {', '.join(column_defs)}
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        
-        conn.execute(text(create_sql))
+        metadata = MetaData()
+        Table(
+            table_name,
+            metadata,
+            Column("id", String(64), primary_key=True),
+            Column("title", Text),
+            Column("contents", Text),
+            Column("platform", String(50)),
+            Column("author", Text),
+            Column("published_at", DateTime),
+            Column("url", Text),
+            Column("region", String(100)),
+            Column("hit_words", Text),
+            Column("polarity", String(20)),
+            Column("classification", String(100)),
+        )
+        metadata.create_all(bind=conn, checkfirst=True)
         log_success(logger, f"已创建表 {topic}.{table_name}（标准结构）", "Upload")
         return True
         
@@ -453,12 +488,7 @@ def table_exists(conn, table_name: str, topic: str) -> bool:
         bool: 表是否存在
     """
     try:
-        query = """
-        SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_schema = :schema AND table_name = :table
-        """
-        result = conn.execute(text(query), {"schema": topic, "table": table_name})
-        return (result.scalar() or 0) > 0
+        return inspect(conn).has_table(table_name)
     except Exception:
         return False
 
@@ -514,7 +544,8 @@ def dedup_database_tables(
 
         for table_name in targets:
             try:
-                df = pd.read_sql(f"SELECT * FROM `{table_name}`", con=engine)
+                with engine.connect() as conn:
+                    df = pd.read_sql(_select_all_sql(conn, table_name), con=conn)
                 if df.empty or "id" not in df.columns:
                     result["skipped"].append({"table": table_name, "reason": "无数据或缺少id列"})
                     log_skip(logger, f"{table_name} 无数据或缺少id列，跳过", "Dedup")
@@ -532,7 +563,7 @@ def dedup_database_tables(
 
                 # 重写：TRUNCATE + 批量插入去重后数据
                 with engine.begin() as conn:
-                    conn.execute(text(f"TRUNCATE TABLE `{table_name}`"))
+                    _truncate_table(conn, table_name)
                     df_dedup.to_sql(
                         table_name,
                         con=conn,
@@ -764,9 +795,11 @@ def upload_filtered_excels(
 
                         # 过滤数据库中已存在的ID，避免主键冲突
                         try:
-                            existing_ids_df = pd.read_sql(
-                                text(f"SELECT id FROM `{table_name}`"), con=engine
-                            )
+                            with engine.connect() as id_conn:
+                                existing_ids_df = pd.read_sql(
+                                    _select_ids_sql(id_conn, table_name),
+                                    con=id_conn,
+                                )
                             existing_ids = set(existing_ids_df["id"].astype(str).tolist())
                             if existing_ids:
                                 before_db = len(df)

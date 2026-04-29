@@ -11,6 +11,7 @@ from deepagents.backends.utils import create_file_data
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.report.deep_report.exploration_deterministic_graph import _ExplorationRuntimeDeps, _invoke_subagent_once
+from src.report.deep_report.service import _read_runtime_file, _runtime_workspace_layout_for, _update_tool_tracker
 
 
 class _FakeCheckpointerProfile:
@@ -82,6 +83,37 @@ class ExplorationRuntimeSyncTests(unittest.TestCase):
         files = result.get("files") if isinstance(result.get("files"), dict) else {}
         self.assertIn(target_path, files)
         self.assertIn(target_path, tracker.get("runtime_files", {}))
+
+    def test_tool_tracker_persists_retrieval_outputs_to_runtime_files(self) -> None:
+        layout = _runtime_workspace_layout_for(
+            topic_identifier="demo-topic",
+            project_identifier="demo",
+            start_text="2025-01-01",
+            end_text="2025-01-31",
+        )
+        tracker = {"runtime_files": {}, "workspace_layout": layout}
+
+        _update_tool_tracker(
+            tracker,
+            "get_corpus_coverage",
+            {"status": "ready", "matched_count": 3, "platform_count": 2},
+            "",
+        )
+        _update_tool_tracker(
+            tracker,
+            "retrieve_evidence_cards",
+            {"result": [{"evidence_id": "ev-1", "platform": "微博"}], "matched_count": 3, "platform_count": 2},
+            "",
+        )
+
+        files = tracker.get("runtime_files") if isinstance(tracker.get("runtime_files"), dict) else {}
+        coverage_path = layout.state_file("corpus_coverage.json")
+        evidence_path = layout.state_file("evidence_cards.json")
+        self.assertIn(coverage_path, files)
+        self.assertIn(evidence_path, files)
+        evidence_payload = json.loads(_read_runtime_file(files, evidence_path))
+        self.assertEqual(evidence_payload["status"], "ready")
+        self.assertEqual(evidence_payload["result"][0]["evidence_id"], "ev-1")
 
 
 if __name__ == "__main__":

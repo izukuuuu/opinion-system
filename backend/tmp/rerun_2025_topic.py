@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from src.topic.data_bertopic_qwen_v2 import run_topic_bertopic
+from src.topic.data_bertopic_llm import run_topic_bertopic
 
 print(f"[START] {datetime.now().isoformat()}")
 ok = run_topic_bertopic(

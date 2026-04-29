@@ -539,6 +539,9 @@ class ArtifactManifest(BaseModel):
     full_markdown: ArtifactRecord = Field(
         default_factory=lambda: ArtifactRecord(artifact_id="full_markdown", artifact_type="full_markdown")
     )
+    full_html: ArtifactRecord = Field(
+        default_factory=lambda: ArtifactRecord(artifact_id="full_html", artifact_type="full_html")
+    )
     runtime_log: ArtifactRecord = Field(default_factory=lambda: ArtifactRecord(artifact_id="runtime_log", artifact_type="runtime_log"))
     approval_records: ArtifactRecord = Field(
         default_factory=lambda: ArtifactRecord(artifact_id="approval_records", artifact_type="approval_records")

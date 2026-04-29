@@ -353,7 +353,7 @@
   background-color: rgb(var(--color-warning-100) / 1);
 }
 
-.modal-backdrop {
+.os-modal-backdrop {
   background:
     linear-gradient(
       180deg,

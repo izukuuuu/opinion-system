@@ -10,16 +10,18 @@
     >
       <div
         v-if="modelValue"
-        ref="backdropRef"
-        class="modal-backdrop fixed inset-0 z-[90] flex items-center justify-center px-4 py-6"
+        class="os-modal-backdrop fixed inset-0 z-[90] flex items-center justify-center px-4 py-6"
+        data-os-modal-root=""
         role="dialog"
         aria-modal="true"
         :aria-label="title"
+        @pointerdown="handleBackdropPointerdown"
         @click="handleBackdropClick"
       >
         <div
           ref="panelRef"
-          class="w-full overflow-hidden rounded-3xl bg-surface shadow-2xl"
+          class="os-modal-panel w-full overflow-hidden rounded-3xl bg-surface shadow-2xl"
+          data-os-modal-panel=""
           :class="[width, scrollable ? 'flex flex-col' : 'p-6']"
           :style="scrollable ? 'max-height: 82vh' : ''"
           @click.stop
@@ -158,8 +160,8 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'cancel', 'confirm'])
 const isClient = typeof window !== 'undefined'
-const backdropRef = ref(null)
 const panelRef = ref(null)
+const pointerDownStartedOutside = ref(false)
 let previousBodyOverflow = ''
 
 const confirmButtonClass = computed(() => {
@@ -194,9 +196,18 @@ const handleBackdrop = () => {
   handleCancel()
 }
 
+const handleBackdropPointerdown = (event) => {
+  pointerDownStartedOutside.value = !eventTargetsNode(event, panelRef.value)
+}
+
 const handleBackdropClick = (event) => {
   if (!props.closeOnBackdrop) return
-  if (eventTargetsNode(event, panelRef.value)) return
+  const clickedInsidePanel = eventTargetsNode(event, panelRef.value)
+  if (clickedInsidePanel || !pointerDownStartedOutside.value) {
+    pointerDownStartedOutside.value = false
+    return
+  }
+  pointerDownStartedOutside.value = false
   handleBackdrop()
 }
 
@@ -222,6 +233,9 @@ watch(
   () => props.modelValue,
   (open) => {
     syncBodyScrollLock(open)
+    if (!open) {
+      pointerDownStartedOutside.value = false
+    }
   },
   { immediate: true }
 )

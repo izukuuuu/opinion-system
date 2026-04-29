@@ -15,7 +15,7 @@ from server_support.topic_context import TopicContext, resolve_context
 from src.fetch.data_fetch import get_topic_available_date_range
 from src.project import get_project_manager
 
-from .deep_report import AI_FULL_REPORT_CACHE_FILENAME, REPORT_CACHE_FILENAME, generate_full_report_payload, generate_report_payload
+from .deep_report import AI_FULL_REPORT_CACHE_FILENAME, AI_FULL_REPORT_HTML_FILENAME, REPORT_CACHE_FILENAME, generate_full_report_payload, generate_report_payload
 from .deep_report.deterministic import ensure_cache_dir_v2
 from .runtime_infra import resolve_runtime_profile
 from .task_queue import (
@@ -162,6 +162,7 @@ def _task_summary_payload(
     )
     structured_ready = _artifact_ready(artifact_manifest, "structured_projection")
     full_ready = _artifact_ready(artifact_manifest, "full_markdown")
+    html_ready = _artifact_ready(artifact_manifest, "full_html")
     percentage = int((task_details or {}).get("percentage") or 0)
     stage_normalized = {
         "prepare": "planning",
@@ -285,6 +286,8 @@ def _task_summary_payload(
             "cache_path": str((cache_paths or {}).get("report_cache_path") or "").strip(),
             "full_cache_exists": full_ready,
             "full_cache_path": str((cache_paths or {}).get("full_report_cache_path") or "").strip(),
+            "html_cache_exists": html_ready,
+            "html_cache_path": str((cache_paths or {}).get("full_html_cache_path") or "").strip(),
             "artifact_manifest": artifact_manifest,
             "workspace_root": workspace_root,
             "state_root": state_root,
@@ -305,6 +308,7 @@ def _build_historical_progress_payload(ctx: TopicContext, start: str, end: Optio
     report_dir = ensure_cache_dir_v2(ctx.identifier, start, end, project_identifier=project_identifier)
     report_cache = report_dir / REPORT_CACHE_FILENAME
     full_cache = report_dir / AI_FULL_REPORT_CACHE_FILENAME
+    html_cache = report_dir / AI_FULL_REPORT_HTML_FILENAME
     structured_payload = _load_report_cache_payload(report_cache)
     full_payload = _load_report_cache_payload(full_cache)
     structured_meta = _extract_cache_meta(structured_payload)
@@ -364,6 +368,7 @@ def _build_historical_progress_payload(ctx: TopicContext, start: str, end: Optio
         cache_paths={
             "report_cache_path": str(report_cache) if structured_payload else "",
             "full_report_cache_path": str(full_cache) if full_payload else "",
+            "full_html_cache_path": str(html_cache) if html_cache.exists() else "",
         },
         task_details={
             "metadata": {
@@ -408,6 +413,7 @@ def _build_task_progress_payload(task: Dict[str, Any]) -> Dict[str, Any]:
         cache_paths={
             "report_cache_path": str(artifacts.get("report_cache_path") or "").strip(),
             "full_report_cache_path": str(artifacts.get("full_report_cache_path") or "").strip(),
+            "full_html_cache_path": str(artifacts.get("full_html_cache_path") or "").strip(),
         },
         worker_details={
             "worker_pid": task.get("worker_pid"),
@@ -529,6 +535,30 @@ def get_full_report_payload():
     except Exception as exc:
         return error(f"AI 完整报告生成失败: {str(exc)}", status_code=500)
     return success({"data": payload})
+
+
+@report_bp.get("/full/html")
+def get_full_report_html():
+    topic_param = str(request.args.get("topic") or "").strip()
+    project_param = str(request.args.get("project") or "").strip()
+    dataset_id = str(request.args.get("dataset_id") or "").strip()
+    start = str(request.args.get("start") or "").strip()
+    end = str(request.args.get("end") or "").strip() or start
+    if not start:
+        return error("Missing required field(s): start")
+    try:
+        ctx = _build_topic_context(topic_param, project_param, dataset_id)
+        project_identifier = str(getattr(ctx, "project_identifier", "") or "").strip()
+        cache_dir = ensure_cache_dir_v2(ctx.identifier, start, end, project_identifier=project_identifier)
+        html_cache = cache_dir / AI_FULL_REPORT_HTML_FILENAME
+        if not html_cache.exists():
+            return error("HTML 报告尚未生成，请先通过任务队列生成报告。", status_code=404)
+        html_text = html_cache.read_text(encoding="utf-8")
+        return Response(html_text, content_type="text/html; charset=utf-8")
+    except ValueError as exc:
+        return error(str(exc), status_code=404)
+    except Exception as exc:
+        return error(f"读取 HTML 报告失败: {str(exc)}", status_code=500)
 
 
 @report_bp.get("/availability")

@@ -311,6 +311,7 @@ export const useReportGeneration = () => {
     loadHistory,
     loadReport,
     loadFullReport,
+    loadFullReportHtml,
     regenerateReport,
     createReportTask,
     loadReportTask,
@@ -766,6 +767,23 @@ async function loadFullReport(rangeOverride = null, { regenerate = false } = {})
     fullReportState.loading = false
     fullReportState.regenerating = false
   }
+}
+
+async function loadFullReportHtml(rangeOverride = null) {
+  const resolvedRange = rangeOverride ? normalizeRange(rangeOverride) : normalizeRange(reportForm)
+  if (!hasCompleteRange(resolvedRange)) throw new Error('Topic / Start / End 为必填')
+  const params = new URLSearchParams({
+    topic: String(taskState?.topicIdentifier || resolvedRange.topic || '').trim(),
+    start: String(taskState?.start || resolvedRange.start || '').trim(),
+    end: String(taskState?.end || resolvedRange.end || resolvedRange.start || '').trim()
+  })
+  const apiBase = await ensureApiBase()
+  const response = await fetch(`${apiBase}/report/full/html?${params.toString()}`, { method: 'GET' })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(text || `HTML 报告读取失败: ${response.status}`)
+  }
+  return response.text()
 }
 
 async function regenerateReport() {

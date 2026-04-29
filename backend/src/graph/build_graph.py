@@ -15,7 +15,7 @@ from src.graph.sync_mysql_to_neo4j import sync_after_upload
 from src.graph.topic_sync import sync_bertopic_results
 from src.graph.event_clustering import cluster_and_link_events
 from src.graph.neo4j_client import get_driver, get_session
-from src.topic.data_bertopic_qwen_v2 import run_topic_bertopic
+from src.topic.data_bertopic_llm import run_topic_bertopic
 from src.utils.setting.paths import bucket
 from src.utils.logging.logging import setup_logger
 

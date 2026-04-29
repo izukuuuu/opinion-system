@@ -804,6 +804,12 @@ const invokeAnalyze = async (functions, options = {}) => {
     return
   }
 
+  const fetchReady = await ensureFetchReadyForRange({ topic, start, end })
+  if (!fetchReady) {
+    analyzeTaskState.error = analyzeTaskState.error || '数据准备失败，请先完成数据拉取后再运行分析。'
+    return
+  }
+
   analyzeSubmissionCount += 1
   syncAnalyzeRunningState()
   let hasSuccess = false

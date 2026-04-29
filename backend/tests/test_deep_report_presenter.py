@@ -292,3 +292,39 @@ class TestDeepReportPresenter(TestCase):
         self.assertFalse(compiled["factual_conformance"]["requires_human_review"])
         self.assertEqual(compiled["factual_conformance"]["metadata"]["review_decision"], "approve")
         self.assertTrue(compiled["factual_conformance"]["metadata"]["human_override_accepted"])
+
+    def test_compile_markdown_artifacts_bypasses_review_pending_for_noninteractive_generation(self) -> None:
+        bundle = sample_structured_payload()
+        manifest = build_artifact_manifest(
+            topic_identifier="demo-topic-review-pending",
+            thread_id="report::demo-topic-review-pending::2025-01-01::2025-01-31",
+            task_id="task-review-pending",
+            structured_path="structured.json",
+            draft_path="draft.json",
+            full_path="full.json",
+            ir_path="report_ir.json",
+            figure_artifacts=bundle["figure_artifacts"],
+        )
+        enriched = attach_report_ir(bundle, artifact_manifest=manifest, task_id="task-review-pending")
+        with patch(
+            "src.report.deep_report.presenter.run_report_compilation_graph",
+            return_value={
+                "factual_conformance": {
+                    "passed": False,
+                    "policy_version": "policy.v2",
+                    "stage": "final_markdown",
+                    "can_auto_recover": False,
+                    "requires_human_review": True,
+                    "issues": [{"issue_type": "semantic_boundary", "message": "needs review"}],
+                    "semantic_deltas": [],
+                    "metadata": {},
+                },
+                "review_required": False,
+                "markdown": "# 示例专题\n\n正式生成不应停在人工断点。",
+            },
+        ):
+            compiled = compile_markdown_artifacts(enriched, allow_review_pending=True)
+
+        self.assertFalse(compiled["review_required"])
+        self.assertFalse(compiled["factual_conformance"]["requires_human_review"])
+        self.assertTrue(compiled["factual_conformance"]["metadata"]["review_pending_bypassed"])

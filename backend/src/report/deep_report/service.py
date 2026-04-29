@@ -117,6 +117,7 @@ from .schemas import (
 REPORT_CACHE_FILENAME = "report_payload.json"
 REPORT_CACHE_VERSION = 3
 AI_FULL_REPORT_CACHE_FILENAME = "ai_full_report_payload.json"
+AI_FULL_REPORT_HTML_FILENAME = "ai_full_report.html"
 AI_FULL_REPORT_CACHE_VERSION = 11
 RUN_STATE_VERSION = "run-state.v1"
 RESUME_PAYLOAD_VERSION = "resume-payload.v1"
@@ -1381,6 +1382,7 @@ def _attach_ir_layers(
         mechanism_path=str(cache_dir / "mechanism_summary.json"),
         utility_path=str(cache_dir / "utility_assessment.json"),
         full_path=str(cache_dir / AI_FULL_REPORT_CACHE_FILENAME) if full_cache_exists else "",
+        full_html_path=str(cache_dir / AI_FULL_REPORT_HTML_FILENAME) if (cache_dir / AI_FULL_REPORT_HTML_FILENAME).exists() else "",
         runtime_path=str(runtime_path or "").strip(),
         ir_path=str(cache_dir / "report_ir.json"),
         figure_artifacts=payload.get("figure_artifacts") if isinstance(payload.get("figure_artifacts"), list) else [],
@@ -2652,6 +2654,8 @@ def _update_tool_tracker(shared: Dict[str, Any], tool_name: str, payload: Dict[s
         else:
             shared["coverage_state"] = "ready"
         shared["coverage_flags"] = sorted(flags)
+        if workspace_layout is not None:
+            _upsert_state_json_file(runtime_files, workspace_layout, "corpus_coverage.json", payload)
     elif tool_name == "retrieve_evidence_cards":
         cards = payload.get("result") if isinstance(payload.get("result"), list) else []
         effective_flags = set(flags)
@@ -2659,6 +2663,11 @@ def _update_tool_tracker(shared: Dict[str, Any], tool_name: str, payload: Dict[s
             effective_flags.add("no_cards")
         shared["evidence_state"] = "empty_evidence" if "no_cards" in effective_flags else "ready"
         shared["evidence_flags"] = sorted(effective_flags)
+        if workspace_layout is not None:
+            evidence_payload = dict(payload)
+            if "status" not in evidence_payload:
+                evidence_payload["status"] = "empty" if "no_cards" in effective_flags else "ready"
+            _upsert_state_json_file(runtime_files, workspace_layout, "evidence_cards.json", evidence_payload)
         if shared.get("coverage_state") == "empty_corpus" and "no_cards" in effective_flags and raw_text:
             shared["empty_evidence_result_text"] = raw_text
     elif tool_name == "verify_claim_v2":
@@ -4015,6 +4024,7 @@ def _run_deep_report_exploration_task(
     )
     cache_path = cache_dir / REPORT_CACHE_FILENAME
     full_cache_path = cache_dir / AI_FULL_REPORT_CACHE_FILENAME
+    full_html_path = cache_dir / AI_FULL_REPORT_HTML_FILENAME
     review_path = _semantic_review_path(cache_dir)
     runtime_artifact_path = build_artifacts_root(runtime_task_id, get_data_root()) / "report.md"
     common_context, runtime_files, runtime_backend, skill_assets, memory_paths = _prepare_runtime(
@@ -4343,6 +4353,24 @@ def _run_deep_report_exploration_task(
             raise ValueError(
                 str(structured_payload.get("structured_invalid_reason") or "StructuredReport producer admission gate rejected compile.")
             )
+        structured_payload.setdefault("task", {})
+        if isinstance(structured_payload.get("task"), dict):
+            structured_payload["task"] = {
+                **structured_payload["task"],
+                "runtime_task_id": runtime_task_id,
+                "artifact_paths": {
+                    "draft_bundle": str(draft_bundle_path),
+                    "draft_bundle_v2": str(draft_v2_path),
+                    "validation_result_v2": str(validation_path),
+                    "repair_plan_v2": str(repair_plan_path),
+                    "graph_state_v2": str(graph_state_path),
+                    "section_markdown_manifest": str(cache_dir / "section_markdown_manifest.json"),
+                    "section_trace_annotations": str(cache_dir / "section_trace_annotations.json"),
+                    "approval_records": str(review_path),
+                    "full_markdown": str(full_cache_path),
+                    "full_html": str(full_html_path),
+                },
+            }
         compiled = compile_markdown_artifacts(
             structured_payload,
             allow_review_pending=True,
@@ -4373,6 +4401,7 @@ def _run_deep_report_exploration_task(
             repair_plan_path=str(repair_plan_path),
             graph_state_path=str(graph_state_path),
             full_path=str(full_cache_path),
+            full_html_path=str(full_html_path),
             runtime_path=str(runtime_artifact_path),
             ir_path=str(cache_dir / "report_ir.json"),
             figure_artifacts=structured_payload.get("figure_artifacts") if isinstance(structured_payload.get("figure_artifacts"), list) else [],
@@ -4423,6 +4452,8 @@ def _run_deep_report_exploration_task(
         final_payload["validation_result_v2"] = compiled.get("validation_result_v2") if isinstance(compiled.get("validation_result_v2"), dict) else {}
         final_payload["repair_plan_v2"] = compiled.get("repair_plan_v2") if isinstance(compiled.get("repair_plan_v2"), dict) else {}
         final_payload["graph_state_v2"] = compiled.get("graph_state_v2") if isinstance(compiled.get("graph_state_v2"), dict) else {}
+        final_payload["html_artifact"] = compiled.get("html_artifact") if isinstance(compiled.get("html_artifact"), dict) else {}
+        final_payload["html_render_diagnostics"] = compiled.get("html_render_diagnostics") if isinstance(compiled.get("html_render_diagnostics"), dict) else {}
         final_payload["artifact_manifest"] = manifest.model_dump()
         _write_json(full_cache_path, final_payload)
         _emit(
@@ -4435,6 +4466,7 @@ def _run_deep_report_exploration_task(
                 "payload": {
                     "report_cache_path": str(cache_path),
                     "full_report_cache_path": str(full_cache_path),
+                    "full_html_cache_path": str(full_html_path),
                     "report_runtime_artifact": str(runtime_artifact_path),
                 },
             },
@@ -5102,6 +5134,7 @@ def run_or_resume_deep_report_task(
                 runtime_backend=runtime_backend,
                 common_context=common_context,
                 lifecycle_tracker=lifecycle_tracker,
+                checkpoint_resume=bool(checkpoint_resume),
             )
 
             structured_payload = deterministic_result.get("structured_payload") if isinstance(deterministic_result.get("structured_payload"), dict) else {}
@@ -5976,6 +6009,7 @@ def generate_full_report_payload(
         project_identifier=project_identifier_text,
     )
     cache_path = cache_dir / AI_FULL_REPORT_CACHE_FILENAME
+    html_path = cache_dir / AI_FULL_REPORT_HTML_FILENAME
     draft_path = cache_dir / "full_report_draft_bundle.json"
     draft_v2_path = cache_dir / "draft_bundle.v2.json"
     validation_path = cache_dir / "validation_result.v2.json"
@@ -6042,6 +6076,7 @@ def generate_full_report_payload(
                 "section_trace_annotations": str(cache_dir / "section_trace_annotations.json"),
                 "approval_records": str(review_path),
                 "full_markdown": str(cache_path),
+                "full_html": str(html_path),
             },
         }
     semantic_review = semantic_review_decision if isinstance(semantic_review_decision, dict) else {}
@@ -6091,6 +6126,7 @@ def generate_full_report_payload(
         repair_plan_path=str(repair_plan_path),
         graph_state_path=str(graph_state_path),
         full_path=str(cache_path) if not requires_review else "",
+        full_html_path=str(html_path) if not requires_review else "",
         approval_path=str(review_path) if requires_review or semantic_review else "",
         ir_path=str(cache_dir / "report_ir.json"),
         figure_artifacts=structured.get("figure_artifacts") if isinstance(structured.get("figure_artifacts"), list) else [],
@@ -6319,6 +6355,8 @@ def generate_full_report_payload(
     full_payload["review_feedback_rounds"] = list(compiled.get("review_feedback_rounds") or [])
     full_payload["rewrite_lineage"] = list(compiled.get("rewrite_lineage") or [])
     full_payload["commit_artifacts"] = list(compiled.get("commit_artifacts") or [])
+    full_payload["html_artifact"] = compiled.get("html_artifact") if isinstance(compiled.get("html_artifact"), dict) else {}
+    full_payload["html_render_diagnostics"] = compiled.get("html_render_diagnostics") if isinstance(compiled.get("html_render_diagnostics"), dict) else {}
     full_payload["meta"] = dict(full_payload.get("meta") or {})
     full_payload["meta"].update(
         {

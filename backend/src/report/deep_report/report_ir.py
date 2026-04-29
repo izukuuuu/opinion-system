@@ -264,6 +264,7 @@ def build_artifact_manifest(
     repair_plan_path: str = "",
     graph_state_path: str = "",
     full_path: str = "",
+    full_html_path: str = "",
     runtime_path: str = "",
     approval_path: str = "",
     ir_path: str = "",
@@ -323,6 +324,8 @@ def build_artifact_manifest(
     if str(graph_state_path or "").strip():
         _full_derived.insert(0, "graph_state")
     full_markdown = _record("full_markdown", "full_markdown", full_path, _full_derived)
+    _html_derived = ["full_markdown", *_full_derived]
+    full_html = _record("full_html", "full_html", full_html_path, _html_derived)
     runtime_log = _record("runtime_log", "runtime_log", runtime_path, [])
     approval_records = _record("approval_records", "approval_records", approval_path, ["runtime_log"])
     current_ready = [
@@ -342,6 +345,7 @@ def build_artifact_manifest(
             repair_plan,
             graph_state,
             full_markdown,
+            full_html,
             runtime_log,
             approval_records,
         ]
@@ -405,6 +409,7 @@ def build_artifact_manifest(
         repair_plan=repair_plan,
         graph_state=graph_state,
         full_markdown=full_markdown,
+        full_html=full_html,
         runtime_log=runtime_log,
         approval_records=approval_records,
         figures=[FigureArtifactRecord.model_validate(item) for item in merged_figures],

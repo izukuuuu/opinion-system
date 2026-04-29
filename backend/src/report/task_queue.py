@@ -28,7 +28,8 @@ STATE_ROOT = get_data_root() / "_report"
 TASK_STATE_DIR = STATE_ROOT / "tasks"
 WORKER_STATUS_PATH = STATE_ROOT / "worker.json"
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
-RESUME_BEFORE_FAILURE_PHASES = {"compile", "review", "persist"}
+RESUME_BEFORE_FAILURE_PHASES = {"exploration", "interpret", "compile", "review", "persist"}
+EXPLORATION_RESUME_PHASES = {"exploration", "interpret"}
 AGENT_LABELS = {
     "researcher": "Researcher",
     "interpreter": "Interpreter",
@@ -176,6 +177,7 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
             "report_cache_path": "",
             "report_title": "",
             "full_report_cache_path": "",
+            "full_html_cache_path": "",
             "full_report_title": "",
             "view": {
                 "topic": topic,
@@ -291,6 +293,7 @@ def _evaluate_resume_before_failure(task: Dict[str, Any]) -> Dict[str, Any]:
         "enabled": False,
         "reason": "",
         "restart_phase": "compile",
+        "resume_kind": "resume_before_failure",
         "source_phase": source_phase,
         "source_actor": source_actor,
         "structured_cache_path": str(structured_cache_path),
@@ -299,10 +302,15 @@ def _evaluate_resume_before_failure(task: Dict[str, Any]) -> Dict[str, Any]:
         result["reason"] = "当前任务状态不支持从失败前一步继续。"
         return result
     if source_phase not in RESUME_BEFORE_FAILURE_PHASES:
-        result["reason"] = "仅支持 compile、review 或 persist 失败后的恢复。"
+        result["reason"] = "仅支持 exploration、compile、review 或 persist 失败后的恢复。"
         return result
     if _current_runtime_version(task) != RUNTIME_CONTRACT_VERSION:
         result["reason"] = "旧 ABI 任务不能直接恢复到当前运行时。"
+        return result
+    if source_phase in EXPLORATION_RESUME_PHASES or source_actor in {"exploration_subgraph", "archive_evidence_organizer"}:
+        result["enabled"] = True
+        result["restart_phase"] = "exploration"
+        result["resume_kind"] = "checkpoint_resume"
         return result
     payload = _matching_structured_payload(
         source_task_id=str(task.get("id") or "").strip(),
@@ -322,6 +330,7 @@ def _public_resume_before_failure_capability(task: Dict[str, Any]) -> Dict[str, 
         "enabled": bool(evaluation.get("enabled")),
         "reason": str(evaluation.get("reason") or "").strip(),
         "restart_phase": str(evaluation.get("restart_phase") or "compile").strip() or "compile",
+        "resume_kind": str(evaluation.get("resume_kind") or "resume_before_failure").strip() or "resume_before_failure",
         "source_phase": str(evaluation.get("source_phase") or "").strip(),
         "source_actor": str(evaluation.get("source_actor") or "").strip(),
     }
@@ -338,8 +347,9 @@ def resume_before_failure_task(task_id: str) -> Dict[str, Any]:
     request.setdefault("start", task.get("start"))
     request.setdefault("end", task.get("end"))
     request.setdefault("mode", task.get("mode"))
+    resume_kind = str(evaluation.get("resume_kind") or "resume_before_failure").strip() or "resume_before_failure"
     request["resume_context"] = {
-        "kind": "resume_before_failure",
+        "kind": resume_kind,
         "source_task_id": str(task.get("id") or "").strip(),
         "source_failed_phase": str(evaluation.get("source_phase") or "").strip(),
         "source_failed_actor": str(evaluation.get("source_actor") or "").strip(),
@@ -366,7 +376,7 @@ def resume_before_failure_task(task_id: str) -> Dict[str, Any]:
                 "child_pid": 0,
                 "finished_at": "",
                 "request": request,
-                "resume_kind": "resume_before_failure",
+                "resume_kind": resume_kind,
                 "resume_source_task_id": str(task.get("id") or "").strip(),
                 "resume_source_phase": str(evaluation.get("source_phase") or "").strip(),
                 "resume_source_actor": str(evaluation.get("source_actor") or "").strip(),
@@ -383,6 +393,7 @@ def resume_before_failure_task(task_id: str) -> Dict[str, Any]:
                     "report_cache_path": "",
                     "report_title": "",
                     "full_report_cache_path": "",
+                    "full_html_cache_path": "",
                     "full_report_title": "",
                     "view": {
                         "topic": str(current.get("topic") or "").strip(),

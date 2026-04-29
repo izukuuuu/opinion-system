@@ -42,6 +42,7 @@ from .schemas import (
     ValidationFailure,
     ValidationResultV2,
 )
+from .sona_html_renderer import build_sona_html_artifact
 
 
 def _accumulate_or_reset(existing: List, update: Optional[List]) -> List:
@@ -80,6 +81,8 @@ class _GraphState(TypedDict, total=False):
     factual_conformance: Dict[str, Any]
     repair_plan_v2: Dict[str, Any]
     graph_state_v2: Dict[str, Any]
+    html_artifact: Dict[str, Any]
+    html_render_diagnostics: Dict[str, Any]
     markdown: str
     execution_phase: str
     rewrite_round: int
@@ -218,6 +221,14 @@ def _upsert_json_artifact(path_text: str, payload: Dict[str, Any]) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(__import__("json").dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _upsert_text_artifact(path_text: str, text: str) -> None:
+    path = Path(str(path_text or "").strip())
+    if not str(path):
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(text or ""), encoding="utf-8")
 
 
 def _artifact_paths_from_task(task: Dict[str, Any]) -> Dict[str, str]:
@@ -911,6 +922,7 @@ def run_report_compilation_graph(
     checkpointer_path: str = "",
     graph_thread_id: str = "",
     review_decision: Dict[str, Any] | None = None,
+    allow_review_pending: bool = False,
 ) -> Dict[str, Any]:
     if not isinstance(payload, dict) or not isinstance(payload.get("report_ir"), dict):
         raise ValueError("run_report_compilation_graph requires payload carrying ReportIR.")
@@ -1417,8 +1429,12 @@ def run_report_compilation_graph(
             next_phase = "auto_rewrite"
             finalization_mode = "auto_rewritten"
         elif requires_review or issue_count:
-            next_phase = "human_review"
-            finalization_mode = "approval_required"
+            if allow_review_pending:
+                next_phase = "finalize"
+                finalization_mode = "review_pending_bypassed"
+            else:
+                next_phase = "human_review"
+                finalization_mode = "approval_required"
         else:
             next_phase = "finalize"
             finalization_mode = "direct"
@@ -1434,7 +1450,13 @@ def run_report_compilation_graph(
                     node_name="semantic_gate_router",
                     phase="review" if next_phase in {"auto_rewrite", "human_review"} else "persist",
                     message="语义门禁已完成路由。",
-                    payload={"next_phase": next_phase, "issue_count": issue_count, "rewrite_round": rewrite_round, "rewrite_budget": rewrite_budget},
+                    payload={
+                        "next_phase": next_phase,
+                        "issue_count": issue_count,
+                        "rewrite_round": rewrite_round,
+                        "rewrite_budget": rewrite_budget,
+                        "allow_review_pending": bool(allow_review_pending),
+                    },
                 )
             ],
         }
@@ -1772,6 +1794,30 @@ def run_report_compilation_graph(
             ],
         }
 
+    def artifact_renderer(state: _GraphState) -> Dict[str, Any]:
+        html_artifact = build_sona_html_artifact(dict(state or {}))
+        diagnostics = {
+            "renderer_version": str(html_artifact.get("renderer_version") or ""),
+            "template": str(html_artifact.get("template") or ""),
+            "narrative_source": str(html_artifact.get("narrative_source") or ""),
+            "byte_length": int(html_artifact.get("byte_length") or 0),
+            "warnings": list(html_artifact.get("warnings") or []),
+            "input_digests": html_artifact.get("input_digests") if isinstance(html_artifact.get("input_digests"), dict) else {},
+        }
+        return {
+            "html_artifact": html_artifact,
+            "html_render_diagnostics": diagnostics,
+            "progress_events": [
+                _state_progress_event(
+                    event_type="compile.html.ready",
+                    node_name="artifact_renderer",
+                    phase="persist",
+                    message="Sona HTML 模板报告已生成，等待提交。",
+                    payload=diagnostics,
+                )
+            ],
+        }
+
     def commit_artifacts(state: _GraphState) -> Dict[str, Any]:
         validation = ValidationResultV2.model_validate(state.get("validation_result_v2") or {})
         draft_bundle_v2 = _draft_bundle_v2_from_any(state.get("report_ir") or {}, state.get("draft_bundle_v2") or {})
@@ -1780,6 +1826,7 @@ def run_report_compilation_graph(
         factual_dump = state.get("factual_conformance") if isinstance(state.get("factual_conformance"), dict) else {}
         task = state.get("task") if isinstance(state.get("task"), dict) else {}
         graph_state_v2 = state.get("graph_state_v2") if isinstance(state.get("graph_state_v2"), dict) else {}
+        html_artifact = state.get("html_artifact") if isinstance(state.get("html_artifact"), dict) else {}
         artifact_paths = _artifact_paths_from_task(task)
         task_id = str(task.get("runtime_task_id") or task.get("task_id") or compile_thread_id).strip()
         rewrite_round = int(state.get("rewrite_round") or 0)
@@ -1801,6 +1848,18 @@ def run_report_compilation_graph(
                 "rewrite_round": rewrite_round,
                 "finalization_mode": str(state.get("finalization_mode") or ""),
             },
+            "full_html": {
+                "html": str(html_artifact.get("html") or "").strip(),
+                "renderer_version": str(html_artifact.get("renderer_version") or ""),
+                "template": str(html_artifact.get("template") or ""),
+                "narrative_source": str(html_artifact.get("narrative_source") or ""),
+                "source_artifact_ids": list(html_artifact.get("source_artifact_ids") or []),
+                "input_digests": html_artifact.get("input_digests") if isinstance(html_artifact.get("input_digests"), dict) else {},
+                "byte_length": int(html_artifact.get("byte_length") or 0),
+                "warnings": list(html_artifact.get("warnings") or []),
+                "rewrite_round": rewrite_round,
+                "finalization_mode": str(state.get("finalization_mode") or ""),
+            },
         }
         schema_versions = {
             "draft_bundle": "draft-bundle.v1",
@@ -1812,6 +1871,7 @@ def run_report_compilation_graph(
             "section_trace_annotations": "section-trace-annotations.v1",
             "approval_records": "approval-records.v1",
             "full_markdown": "full-markdown.v1",
+            "full_html": "sona-html-artifact.v1",
         }
         records: List[CommitArtifactRecord] = []
         for artifact_type, payload_value in artifact_payloads.items():
@@ -1831,7 +1891,14 @@ def run_report_compilation_graph(
                 payload=payload_value if isinstance(payload_value, dict) else {},
             )
             records.append(record)
-            if record.path and isinstance(record.payload, dict):
+            if artifact_type == "full_html":
+                html_text = str(record.payload.get("html") or "").strip() if isinstance(record.payload, dict) else ""
+                if not html_text:
+                    raise ValueError("Sona HTML artifact renderer returned empty HTML.")
+                if record.path:
+                    _upsert_text_artifact(record.path, html_text)
+                record.payload = {key: value for key, value in record.payload.items() if key != "html"}
+            elif record.path and isinstance(record.payload, dict):
                 _upsert_json_artifact(record.path, record.payload)
         manifest_path = artifact_paths.get("section_markdown_manifest", "")
         if manifest_path:
@@ -1909,6 +1976,8 @@ def run_report_compilation_graph(
             "progress_events": list(state.get("progress_events") or []),
             "rewrite_lineage": list(state.get("rewrite_lineage") or []),
             "commit_artifacts": [record.model_dump() for record in records],
+            "html_artifact": {key: value for key, value in html_artifact.items() if key != "html"},
+            "html_render_diagnostics": state.get("html_render_diagnostics") if isinstance(state.get("html_render_diagnostics"), dict) else {},
         }
         return {
             "commit_pending": False,
@@ -1979,6 +2048,7 @@ def run_report_compilation_graph(
     builder.add_node("auto_rewrite_agent", _node("auto_rewrite_agent", auto_rewrite_agent))
     builder.add_node("semantic_review_interrupt", _node("semantic_review_interrupt", semantic_review_interrupt))
     builder.add_node("finalize_artifacts", _node("finalize_artifacts", finalize_artifacts))
+    builder.add_node("artifact_renderer", _node("artifact_renderer", artifact_renderer))
     builder.add_node("commit_artifacts", _node("commit_artifacts", commit_artifacts))
     builder.add_edge(START, "load_context")
     builder.add_edge("load_context", "template_brief")
@@ -2026,7 +2096,8 @@ def run_report_compilation_graph(
             "finalize_artifacts": "finalize_artifacts",
         },
     )
-    builder.add_edge("finalize_artifacts", "commit_artifacts")
+    builder.add_edge("finalize_artifacts", "artifact_renderer")
+    builder.add_edge("artifact_renderer", "commit_artifacts")
     builder.add_edge("commit_artifacts", END)
 
     initial_state = {
@@ -2061,6 +2132,8 @@ def run_report_compilation_graph(
         "progress_events": [],
         "rewrite_lineage": [],
         "commit_artifacts": [],
+        "html_artifact": {},
+        "html_render_diagnostics": {},
     }
     config = build_report_runnable_config(
         thread_id=compile_thread_id,

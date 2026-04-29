@@ -1,6 +1,6 @@
 """
 BERTopic 结果同步到 Neo4j。
-读取 data_bertopic_qwen_v2.py 生成的 JSON 文件，构建 Topic 及其与 Post 的关系。
+读取 BERTopic LLM 分析生成的 JSON 文件，构建 Topic 及其与 Post 的关系。
 遵循严格的节点约束：只使用 Topic 节点，不创建 TopicCluster/Keyword 节点。
 宏观话题作为高层级 Topic 存在。
 """
