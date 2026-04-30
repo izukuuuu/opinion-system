@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "langchain": {
+      "name": "LangChain",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=langchain",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "proactive-agent": {
+      "name": "Proactive Agent",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=proactive-agent",
+      "source": "skillhub",
+      "version": "3.1.0"
+    }
+  }
+}

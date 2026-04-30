@@ -1,0 +1,150 @@
+{
+  "case_id": "report_html_2025_tobacco",
+  "state": {
+    "task": {
+      "topic_label": "2025控烟舆情",
+      "topic_identifier": "2025-smoking-control",
+      "runtime_task_id": "mock-report-html-2025-tobacco"
+    },
+    "markdown": "# 2025控烟舆情\n\n2025 年控烟舆情围绕公共场所二手烟、电子烟监管、未成年人保护和交通枢纽控烟执行展开。讨论从个体劝阻体验扩散到公共治理责任，公众关注点集中在执法可见度、投诉闭环、场所管理和健康风险沟通。\n\n## 核心判断\n\n- 高铁站台、餐饮空间、校园周边是最容易触发讨论的场景。\n- 负面情绪主要来自被动吸烟、劝阻无效和投诉反馈慢。\n- 正向传播多来自无烟日科普、地方控烟行动和未成年人保护倡议。\n- 后续处置需要把控烟提示、巡查执法和投诉反馈做成闭环。",
+    "report_ir": {
+      "schema_version": "report-ir.v1",
+      "meta": {
+        "topic_label": "2025控烟舆情"
+      },
+      "findings": [
+        {
+          "id": "finding-1",
+          "claim": "交通枢纽控烟从环境秩序问题上升为公共健康治理问题。",
+          "trace_refs": ["ev-1", "ev-4"]
+        },
+        {
+          "id": "finding-2",
+          "claim": "电子烟与未成年人保护议题形成全年持续关注。",
+          "trace_refs": ["ev-2", "ev-3"]
+        }
+      ]
+    },
+    "draft_bundle_v2": {
+      "schema_version": "draft-bundle.v2",
+      "units": [
+        {
+          "unit_id": "u-1",
+          "section_id": "overview",
+          "unit_type": "finding",
+          "text": "控烟舆情呈现节日节点抬升、公共场所投诉驱动和未成年人保护持续化三条线。"
+        }
+      ]
+    },
+    "validation_result_v2": {
+      "schema_version": "validation-result.v2",
+      "status": "pass",
+      "issues": []
+    },
+    "graph_state_v2": {
+      "schema_version": "deep-report-graph.v3",
+      "current_node": "artifact_renderer",
+      "compile_quality": "healthy"
+    },
+    "section_markdown_manifest": {
+      "sections": [
+        { "section_id": "overview", "title": "总体态势" },
+        { "section_id": "timeline", "title": "演化脉络" },
+        { "section_id": "risk", "title": "风险研判" }
+      ]
+    },
+    "section_trace_annotations": [
+      { "section_id": "overview", "trace_refs": ["ev-1", "ev-2", "ev-3", "ev-4"] }
+    ],
+    "payload": {
+      "evidence_cards": {
+        "status": "ready",
+        "result": [
+          {
+            "evidence_id": "ev-1",
+            "title": "高铁站台控烟投诉升温",
+            "snippet": "旅客反映高铁站台二手烟明显，建议加强巡查和提示。",
+            "platform": "微博",
+            "province": "北京",
+            "author": "健康时报",
+            "published_at": "2025-03-18",
+            "sentiment": "负面",
+            "keywords": ["高铁站台", "二手烟", "控烟执法"]
+          },
+          {
+            "evidence_id": "ev-2",
+            "title": "校园周边电子烟营销引发担忧",
+            "snippet": "家长关注电子烟对未成年人的隐性营销和监管盲区。",
+            "platform": "新闻",
+            "province": "广东",
+            "author": "南方观察",
+            "published_at": "2025-04-12",
+            "sentiment": "负面",
+            "keywords": ["电子烟", "未成年人", "校园周边"]
+          },
+          {
+            "evidence_id": "ev-3",
+            "title": "世界无烟日前后科普传播增多",
+            "snippet": "多地围绕无烟日开展健康科普，戒烟服务和青少年保护获得支持。",
+            "platform": "政务",
+            "province": "上海",
+            "author": "地方政务",
+            "published_at": "2025-05-31",
+            "sentiment": "正面",
+            "keywords": ["无烟日", "戒烟服务", "健康科普"]
+          },
+          {
+            "evidence_id": "ev-4",
+            "title": "餐饮场所劝阻吸烟争议再起",
+            "snippet": "消费者劝阻吸烟后出现争执，讨论聚焦商户责任和执法响应。",
+            "platform": "短视频",
+            "province": "浙江",
+            "author": "民生观察",
+            "published_at": "2025-08-06",
+            "sentiment": "中性",
+            "keywords": ["餐厅吸烟", "劝阻", "投诉闭环"]
+          }
+        ]
+      },
+      "timeline_nodes": {
+        "status": "ready",
+        "result": [
+          { "time": "2025-03", "event": "高铁站台控烟投诉带动交通枢纽场景讨论。" },
+          { "time": "2025-04", "event": "校园周边电子烟议题进入家长和媒体视野。" },
+          { "time": "2025-05", "event": "世界无烟日前后科普声量抬升。" },
+          { "time": "2025-08", "event": "餐饮场所劝阻吸烟争议推动责任边界讨论。" }
+        ]
+      },
+      "metrics_bundle": {
+        "status": "ready",
+        "result": [
+          { "date": "2025-03", "value": 96 },
+          { "date": "2025-04", "value": 118 },
+          { "date": "2025-05", "value": 186 },
+          { "date": "2025-08", "value": 142 }
+        ]
+      },
+      "actor_positions": {
+        "status": "ready",
+        "result": [
+          { "actor_name": "旅客与消费者", "mentions": 22 },
+          { "actor_name": "家长群体", "mentions": 18 },
+          { "actor_name": "公共场所管理方", "mentions": 13 },
+          { "actor_name": "监管部门", "mentions": 11 }
+        ]
+      },
+      "event_analysis": {
+        "status": "ready",
+        "result": {
+          "summary": "控烟讨论由投诉触发，沿健康风险、责任边界和治理闭环扩散。",
+          "sentiment_summary": [
+            { "name": "负面", "value": 46 },
+            { "name": "中立", "value": 31 },
+            { "name": "正面", "value": 23 }
+          ],
+          "keywords": ["高铁站台", "二手烟", "电子烟", "未成年人", "无烟日", "餐厅吸烟", "投诉闭环", "控烟执法"]
+        }
+      }
+    }
+  }
+}

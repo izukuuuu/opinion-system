@@ -28,8 +28,8 @@ const TopicBertopicRun = () => import('../views/analysis/topic/TopicBertopicRun.
 const TopicBertopicResults = () => import('../views/analysis/topic/TopicBertopicResults.vue')
 const ReportGenerationLayout = () => import('../views/report-generation/ReportGenerationLayout.vue')
 const ReportGenerationRun = () => import('../views/report-generation/ReportGenerationRun.vue')
-const ReportGenerationView = () => import('../views/report-generation/ReportGenerationView.vue')
 const ReportGenerationAiView = () => import('../views/report-generation/ReportGenerationAiView.vue')
+const ReportGenerationHtmlView = () => import('../views/report-generation/ReportGenerationHtmlView.vue')
 const DatabaseOverviewView = () => import('../views/DatabaseOverviewView.vue')
 const DatabaseDatasetsView = () => import('../views/DatabaseDatasetsView.vue')
 const SettingsLayout = () => import('../views/settings/SettingsLayout.vue')
@@ -243,21 +243,21 @@ export const routes = [
         }
       },
       {
-        path: 'view',
-        name: 'report-generation-view',
-        component: ReportGenerationView,
-        meta: {
-          title: '报告解读 · 查看结果',
-          breadcrumb: '查看报告'
-        }
-      },
-      {
         path: 'ai',
         name: 'report-generation-ai',
         component: ReportGenerationAiView,
         meta: {
-          title: '报告解读 · AI 完整报告',
-          breadcrumb: 'AI 完整报告'
+          title: '报告解读 · Markdown 文稿',
+          breadcrumb: 'Markdown 文稿'
+        }
+      },
+      {
+        path: 'html',
+        name: 'report-generation-html',
+        component: ReportGenerationHtmlView,
+        meta: {
+          title: '报告解读 · HTML 报告',
+          breadcrumb: 'HTML 报告'
         }
       }
     ]

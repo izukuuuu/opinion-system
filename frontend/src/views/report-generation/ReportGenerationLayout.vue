@@ -27,7 +27,7 @@ import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import {
   DocumentDuplicateIcon,
-  ChartBarSquareIcon,
+  GlobeAltIcon,
   ChevronRightIcon,
   DocumentTextIcon,
   PlayCircleIcon
@@ -43,18 +43,18 @@ const steps = [
     description: '查看任务轨迹与当前产物'
   },
   {
-    key: 'view',
-    label: '语义报告',
-    to: { name: 'report-generation-view' },
-    icon: ChartBarSquareIcon,
-    description: '读取结构化报告'
-  },
-  {
     key: 'ai',
-    label: '正式文稿',
+    label: 'Markdown 文稿',
     to: { name: 'report-generation-ai' },
     icon: DocumentDuplicateIcon,
-    description: '查看舆情分析文稿'
+    description: '查看正式正文'
+  },
+  {
+    key: 'html',
+    label: 'HTML 报告',
+    to: { name: 'report-generation-html' },
+    icon: GlobeAltIcon,
+    description: '预览网页报告'
   }
 ]
 

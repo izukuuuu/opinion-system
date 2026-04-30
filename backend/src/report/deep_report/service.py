@@ -5337,6 +5337,7 @@ def run_or_resume_deep_report_task(
             "start": start_text,
             "end": end_text,
             "mode": mode,
+            "cache_dir": str(cache_dir),
             "root_thread_id": root_thread_id,
             "exploration_thread_id": exploration_thread_id,
             "compile_thread_id": compile_thread_id,

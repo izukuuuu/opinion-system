@@ -43,7 +43,8 @@ describe('reportRunModels', () => {
         structured_projection: { status: 'ready', created_at: '2026-04-10T10:01:00Z', policy_version: 'policy.v2' },
         utility_assessment: { status: 'pending' },
         approval_records: { status: 'ready' },
-        full_markdown: { status: 'pending' }
+        full_markdown: { status: 'pending' },
+        full_html: { status: 'ready' }
       },
       structuredResultDigest: { summary: '已有摘要', counts: { evidence: 6, citations: 4 }, utility_assessment: { decision: 'fallback_recompile' } },
       subagents: [
@@ -55,7 +56,7 @@ describe('reportRunModels', () => {
         { event_id: 2, type: 'agent.memo', ts: '2026-04-10T10:00:30Z', payload: { router_facets: [{ task_goal: 'overview', platform: 'all' }], dispatch_targets: ['retrieval_router', 'propagation_analyst'] } },
         { event_id: 3, type: 'approval.required', ts: '2026-04-10T10:00:45Z', payload: { approvals: [] } },
         { event_id: 4, type: 'phase.context', ts: '2026-04-10T10:00:50Z', payload: { resume_from: 'approval_resolution' } },
-        { event_id: 5, type: 'artifact.ready', ts: '2026-04-10T10:01:00Z', message: '结构化结果已生成' }
+        { event_id: 5, type: 'artifact.ready', ts: '2026-04-10T10:01:00Z', message: '报告底稿已生成' }
       ]
     })
 
@@ -65,8 +66,9 @@ describe('reportRunModels', () => {
     expect(vm.inspector.digestSummary).toBe('已有摘要')
     expect(vm.timelineEvents.length).toBeGreaterThan(1)
     expect(vm.agentDrawer[0].displayName).toBe('检索路由')
-    expect(vm.artifacts.find((item) => item.key === 'structured_projection')?.ready).toBe(true)
+    expect(vm.artifacts.find((item) => item.key === 'structured_projection')).toBeUndefined()
     expect(vm.artifacts.find((item) => item.key === 'approval_records')?.ready).toBe(true)
+    expect(vm.artifacts.find((item) => item.key === 'full_html')?.ready).toBe(true)
     expect(vm.graphObservability.currentActorLabel).toBe('证据整理')
     expect(vm.graphObservability.routerFacets[0]).toContain('overview')
     expect(vm.graphObservability.dispatchTargets).toContain('检索路由')

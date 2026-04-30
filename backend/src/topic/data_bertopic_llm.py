@@ -33,7 +33,8 @@ import jieba
 from bertopic import BERTopic
 from umap import UMAP
 from hdbscan import HDBSCAN
-from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.decomposition import TruncatedSVD
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 
 # 抑制jieba的日志输出
 jieba.setLogLevel(60)
@@ -68,24 +69,59 @@ from sentence_transformers import SentenceTransformer
 from huggingface_hub import snapshot_download
 from .config import load_bertopic_config
 
-def load_embedding_model(model_name: str, logger):
+def _repo_root() -> Path:
+    backend_root = get_project_root()
+    return backend_root.parent if backend_root.name.lower() == "backend" else backend_root
+
+
+def _resolve_model_cache_dir(value: Any = None) -> Path:
+    raw = str(value or "").strip()
+    if raw:
+        configured = Path(raw)
+        if not configured.is_absolute():
+            configured = _repo_root() / configured
+        return configured
+    return _repo_root() / "cache" / "models"
+
+
+def _is_sentence_transformer_dir(path: Path) -> bool:
+    return (
+        path.exists()
+        and path.is_dir()
+        and (
+            (path / "config_sentence_transformers.json").exists()
+            or (path / "modules.json").exists()
+            or (path / "config.json").exists()
+        )
+    )
+
+
+def load_embedding_model(
+    model_name: str,
+    logger,
+    *,
+    cache_dir: Optional[Path] = None,
+    allow_download: bool = True,
+):
     """加载嵌入模型，优先尝试本地，失败则尝试下载"""
-    # 尝试从本地加载
-    # 假设 models 目录在项目根目录下
-    project_root = get_project_root()
-    models_dir = project_root / "models"
-    
+    models_dir = cache_dir or _resolve_model_cache_dir()
     models_dir.mkdir(exist_ok=True)
+    hf_cache_dir = _repo_root() / "cache" / "huggingface"
+    hf_cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("HF_HOME", str(hf_cache_dir))
+    os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(hf_cache_dir / "sentence-transformers"))
     
     local_model_name = model_name.split('/')[-1]
     local_path = models_dir / local_model_name
+    legacy_path = get_project_root() / "models" / local_model_name
     
-    # 检查本地路径是否存在
-    if local_path.exists():
-        # 简单检查是否有关键文件，避免空目录
-        if (local_path / "config.json").exists() or (local_path / "pytorch_model.bin").exists():
-            log_success(logger, f"从本地加载模型: {local_path}", "TopicBertopic")
-            return SentenceTransformer(str(local_path))
+    for candidate in (local_path, legacy_path):
+        if _is_sentence_transformer_dir(candidate):
+            log_success(logger, f"从本地加载模型: {candidate}", "TopicBertopic")
+            return SentenceTransformer(str(candidate))
+
+    if not allow_download:
+        raise RuntimeError(f"本地模型不存在且未启用自动下载: {local_path}")
         
     # 尝试在线加载 (由于设置了 HF_ENDPOINT，应该走镜像)
     try:
@@ -95,7 +131,12 @@ def load_embedding_model(model_name: str, logger):
         
         # 为了稳定性，我们先尝试 snapshot_download 到我们的 models 目录
         log_success(logger, f"正在下载模型到: {local_path} ...", "TopicBertopic")
-        snapshot_download(repo_id=model_name, local_dir=local_path, local_dir_use_symlinks=False)
+        snapshot_download(
+            repo_id=model_name,
+            local_dir=local_path,
+            cache_dir=hf_cache_dir,
+            local_dir_use_symlinks=False,
+        )
         
         log_success(logger, "下载完成，加载模型...", "TopicBertopic")
         return SentenceTransformer(str(local_path))
@@ -107,6 +148,115 @@ def load_embedding_model(model_name: str, logger):
             return SentenceTransformer(model_name)
         except Exception as e2:
             raise RuntimeError(f"无法加载模型 {model_name}: {e2}") from e2
+
+
+def _load_embedding_model(logger):
+    """Load the configured BERTopic embedding model and return runtime metadata."""
+    config = load_bertopic_config()
+    embedding_config = config.get("embedding") if isinstance(config, dict) else {}
+    if not isinstance(embedding_config, dict):
+        embedding_config = {}
+    model_name = str(embedding_config.get("model_name") or "moka-ai/m3e-base").strip() or "moka-ai/m3e-base"
+    batch_size = _coerce_int(embedding_config.get("batch_size"), 32, minimum=1, maximum=512)
+    allow_download = _coerce_bool(embedding_config.get("allow_download"), False)
+    cache_dir = _resolve_model_cache_dir(embedding_config.get("cache_dir"))
+    model = load_embedding_model(
+        model_name,
+        logger,
+        cache_dir=cache_dir,
+        allow_download=allow_download,
+    )
+    return model, model_name, embedding_config, batch_size
+
+
+def _encode_text_embeddings(
+    texts: List[str],
+    embedding_model: SentenceTransformer,
+    *,
+    batch_size: int,
+    logger,
+    log_label: str,
+) -> np.ndarray:
+    """Encode texts into float32 embeddings with consistent empty-result handling."""
+    if not texts:
+        return np.empty((0, 0), dtype=np.float32)
+    try:
+        embeddings = embedding_model.encode(
+            texts,
+            batch_size=max(1, int(batch_size or 32)),
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        embeddings = np.asarray(embeddings, dtype=np.float32)
+        log_success(logger, f"{log_label}完成: {len(texts)}条", "TopicBertopic")
+        return embeddings
+    except Exception as exc:
+        log_error(logger, f"{log_label}失败: {exc}", "TopicBertopic")
+        return np.empty((0, 0), dtype=np.float32)
+
+
+def _encode_local_fallback_embeddings(texts: List[str], logger) -> np.ndarray:
+    """Build offline document embeddings when the configured model is unavailable."""
+    if not texts:
+        return np.empty((0, 0), dtype=np.float32)
+    try:
+        vectorizer = TfidfVectorizer(
+            analyzer="char",
+            ngram_range=(2, 4),
+            min_df=2 if len(texts) >= 50 else 1,
+            max_df=0.95,
+            max_features=2048,
+        )
+        matrix = vectorizer.fit_transform(texts)
+        if matrix.shape[0] == 0 or matrix.shape[1] == 0:
+            return np.empty((0, 0), dtype=np.float32)
+        n_components = min(128, matrix.shape[0] - 1, matrix.shape[1] - 1)
+        if n_components >= 2:
+            embeddings = TruncatedSVD(n_components=n_components, random_state=42).fit_transform(matrix)
+        else:
+            embeddings = matrix.toarray()
+        embeddings = np.asarray(embeddings, dtype=np.float32)
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        embeddings = embeddings / norms
+        log_skip(
+            logger,
+            f"已使用本地 TF-IDF/SVD 生成离线向量: {embeddings.shape[0]}条 x {embeddings.shape[1]}维",
+            "TopicBertopic",
+        )
+        return embeddings
+    except Exception as exc:
+        log_error(logger, f"本地离线向量生成失败: {exc}", "TopicBertopic")
+        return np.empty((0, 0), dtype=np.float32)
+
+
+def _apply_topic_relevance_prefilter(
+    raw_texts: List[str],
+    raw_embeddings: np.ndarray,
+    topic_label: str,
+    prompt_config: Optional[Dict[str, Any]],
+    embedding_model: Optional[SentenceTransformer],
+    *,
+    raw_dates: List[str],
+    batch_size: int,
+    logger,
+) -> Tuple[List[str], np.ndarray, List[str]]:
+    """Apply the optional relevance prefilter.
+
+    The current stable path keeps all records. The hook stays explicit so the
+    rest of the BERTopic pipeline can consume aligned texts, embeddings, and
+    dates without relying on globals.
+    """
+    enabled = _coerce_bool(
+        (prompt_config or {}).get("pre_filter_enabled"),
+        DEFAULT_PREFILTER_ENABLED,
+    )
+    if not enabled:
+        log_skip(logger, "专题相关性预过滤未启用", "TopicBertopic")
+        return raw_texts, raw_embeddings, raw_dates
+    log_success(logger, f"专题相关性预过滤保持 {len(raw_texts)} 条候选文本", "TopicBertopic")
+    return raw_texts, raw_embeddings, raw_dates
 
 # 配置常量
 TARGET_TOPICS = DEFAULT_TOPIC_BERTOPIC_TARGET_TOPICS  # 大模型合并后的目标主题数
@@ -329,6 +479,75 @@ def _extract_records_from_df(df: pd.DataFrame, logger, source: str) -> List[Tupl
             "TopicBertopic",
         )
     return deduped
+
+
+def _extract_records_with_metadata(df: pd.DataFrame, logger, source: str) -> List[Tuple[str, str, Dict[str, Any]]]:
+    """Extract deduped text records with date and lightweight document metadata."""
+    if df.empty:
+        return []
+
+    normalized = _normalize_contents_column(df, logger, source)
+    if normalized.empty or 'contents' not in normalized.columns:
+        return []
+
+    if 'id' not in normalized.columns and 'post_id' in normalized.columns:
+        normalized = normalized.copy()
+        normalized['id'] = normalized['post_id']
+    if 'channel' not in normalized.columns and 'platform' in normalized.columns:
+        normalized = normalized.copy()
+        normalized['channel'] = normalized['platform']
+    if 'id' not in normalized.columns:
+        normalized = normalized.copy()
+        normalized['id'] = range(len(normalized))
+    if 'channel' not in normalized.columns:
+        normalized = normalized.copy()
+        normalized['channel'] = source
+
+    date_columns = [col for col in DATE_FIELD_CANDIDATES if col in normalized.columns]
+    candidate_columns = ["contents", "id", "channel"] + date_columns
+    subset = normalized[candidate_columns]
+
+    record_map: Dict[str, Tuple[str, Dict[str, Any]]] = {}
+    ordered_texts: List[str] = []
+    duplicate_rows = 0
+
+    def _clean_id(value: Any) -> str:
+        if isinstance(value, (int, float)) and not pd.isna(value):
+            try:
+                return str(int(value))
+            except Exception:
+                return str(value)
+        return str(value or "").strip()
+
+    for row in subset.itertuples(index=False, name=None):
+        text = str(row[0] or "").strip()
+        if not text:
+            continue
+        date_text = ""
+        for raw_date in row[3:]:
+            date_text = _extract_date_text(raw_date)
+            if date_text:
+                break
+        metadata = {
+            "post_id": _clean_id(row[1]),
+            "channel": str(row[2] or source).strip() or source,
+        }
+        if text in record_map:
+            duplicate_rows += 1
+            existing_date, existing_meta = record_map[text]
+            record_map[text] = (_prefer_earlier_date(existing_date, date_text), existing_meta)
+            continue
+        ordered_texts.append(text)
+        record_map[text] = (date_text, metadata)
+
+    if duplicate_rows > 0:
+        log_success(
+            logger,
+            f"{source} 去重: {len(ordered_texts) + duplicate_rows} -> {len(ordered_texts)}",
+            "TopicBertopic",
+        )
+
+    return [(text, record_map[text][0], record_map[text][1]) for text in ordered_texts]
 
 
 def _coerce_int(value: Any, default: int, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
@@ -688,6 +907,107 @@ def _select_topics_for_recluster_with_metadata(
     }
 
 
+def _filter_recluster_topic_stats(
+    topic_stats: List[Dict[str, Any]],
+    topic_samples_by_id: Dict[int, List[str]],
+    *,
+    topic_name: str,
+    prompt_config: Optional[Dict[str, Any]],
+    logger,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Return topic stats eligible for LLM reclustering.
+
+    This conservative implementation keeps all BERTopic topics. Rule-based
+    dropping is handled later by the LLM reclustering stage.
+    """
+    return list(topic_stats or []), {"filtered": 0, "kept": len(topic_stats or [])}
+
+
+def _load_json_if_exists(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _build_temporal_payload(
+    topic_model: BERTopic,
+    vectorizer_texts: List[str],
+    topics: List[int],
+    raw_dates: List[str],
+    topic_stats: List[Dict[str, Any]],
+    topic_name: str,
+    start_date: str,
+    end_date: str,
+    logger,
+    *,
+    llm_cluster_payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build a daily topic trend payload from document topics and dates."""
+    if not topics:
+        return {}
+    topic_lookup = {
+        int(item.get("topic_id")): {
+            "topic_name": item.get("topic_name"),
+            "keywords": item.get("keywords") or [],
+        }
+        for item in (topic_stats or [])
+        if isinstance(item, dict) and item.get("topic_id") is not None
+    }
+    daily_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    topic_totals: Dict[str, int] = defaultdict(int)
+    undated_count = 0
+    for topic_id, raw_date in zip(topics, raw_dates):
+        try:
+            topic_id_int = int(topic_id)
+        except (TypeError, ValueError):
+            continue
+        if topic_id_int == -1:
+            continue
+        date_text = _extract_date_text(raw_date)
+        if not date_text:
+            undated_count += 1
+            continue
+        key = str(topic_id_int)
+        daily_counts[date_text][key] += 1
+        topic_totals[key] += 1
+
+    dates = sorted(daily_counts.keys())
+    series = []
+    for topic_key, total in sorted(topic_totals.items(), key=lambda item: item[1], reverse=True):
+        topic_id_int = int(topic_key)
+        meta = topic_lookup.get(topic_id_int, {})
+        points = [
+            {
+                "date": date_text,
+                "count": int(daily_counts[date_text].get(topic_key, 0)),
+            }
+            for date_text in dates
+        ]
+        series.append(
+            {
+                "topic_id": topic_id_int,
+                "topic_name": meta.get("topic_name") or f"Topic {topic_id_int}",
+                "keywords": meta.get("keywords") or [],
+                "total": int(total),
+                "points": points,
+            }
+        )
+
+    return {
+        "topic": topic_name,
+        "date_range": f"{start_date}_{end_date}",
+        "dates": dates,
+        "series": series,
+        "undated_count": int(undated_count),
+        "total_documents": len(vectorizer_texts),
+        "llm_clusters_available": bool(llm_cluster_payload),
+    }
+
+
 def _resolve_effective_topic_sample_size(requested_sample_size: int, selected_topic_count: int) -> int:
     sample_size = max(1, int(requested_sample_size))
     if selected_topic_count >= 120:
@@ -774,7 +1094,7 @@ def _ensure_fetch_data(topic: str, start_date: str, end_date: str, logger, bucke
     return bool(success)
 
 
-def _load_and_merge_data(fetch_dir: Path, logger) -> List[Tuple[str, str]]:
+def _load_and_merge_data(fetch_dir: Path, logger) -> List[Tuple[str, str, Dict[str, Any]]]:
     """
     从fetch目录读取所有数据并合并，保留文本与日期
     优先读取总体.jsonl，其次合并各渠道数据
@@ -809,21 +1129,14 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> List[Tuple[str, str]]:
                             break
                     else:
                         log_error(logger, "未找到内容字段", "TopicBertopic")
-                        return pd.DataFrame()
+                        return []
 
                 if 'id' not in df.columns and 'post_id' in df.columns:
                     df['id'] = df['post_id']
                 if 'channel' not in df.columns and 'platform' in df.columns:
                     df['channel'] = df['platform']
 
-                # 去重
-                before_count = len(df)
-                df = df.drop_duplicates(subset=['contents'], keep='last')
-                after_count = len(df)
-                if before_count != after_count:
-                    log_success(logger, f"去重: {before_count} -> {after_count}", "TopicBertopic")
-
-                return df
+                return _extract_records_with_metadata(df, logger, "总体数据")
         except Exception as e:
             log_error(logger, f"读取总体数据失败: {e}", "TopicBertopic")
 
@@ -835,22 +1148,23 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> List[Tuple[str, str]]:
 
     log_success(logger, f"找到{len(jsonl_files)}个渠道文件，开始合并", "TopicBertopic")
 
-    merged_records: List[Tuple[str, str]] = []
+    merged_records: List[Tuple[str, str, Dict[str, Any]]] = []
     record_index: Dict[str, int] = {}
 
-    def _append_unique(items: Iterable[Tuple[str, str]]) -> int:
+    def _append_unique(items: Iterable[Tuple[str, str, Dict[str, Any]]]) -> int:
         appended = 0
-        for text, date_text in items:
+        for text, date_text, metadata in items:
             if text in record_index:
                 idx = record_index[text]
-                existing_text, existing_date = merged_records[idx]
+                existing_text, existing_date, existing_metadata = merged_records[idx]
                 merged_records[idx] = (
                     existing_text,
                     _prefer_earlier_date(existing_date, date_text),
+                    existing_metadata,
                 )
                 continue
             record_index[text] = len(merged_records)
-            merged_records.append((text, date_text))
+            merged_records.append((text, date_text, metadata))
             appended += 1
         return appended
 
@@ -883,7 +1197,7 @@ def _load_and_merge_data(fetch_dir: Path, logger) -> List[Tuple[str, str]]:
                 if 'channel' not in df.columns:
                     df['channel'] = file_path.stem
 
-                all_data.append(df)
+                appended = _append_unique(_extract_records_with_metadata(df, logger, file_path.stem))
                 log_success(logger, f"读取: {file_path.name} - {len(df)}条", "TopicBertopic")
         except Exception as e:
             log_error(logger, f"读取失败 {file_path.name}: {e}", "TopicBertopic")
@@ -916,7 +1230,7 @@ def _load_dict_file(file_path: Path, logger) -> set:
         return set()
 
 
-def _preprocess_text(texts: List[str], user_words: set, stop_words: set, logger) -> Tuple[List[str], List[int]]:
+def _preprocess_text(texts: List[str], user_words: set, stop_words: set, logger, total_count: Optional[int] = None) -> Tuple[List[str], List[int]]:
     """文本预处理和分词，返回 (处理后的文本列表, 对应的原始索引列表)"""
     # 添加用户词典
     for word in user_words:
@@ -1105,7 +1419,10 @@ def _append_drop_instruction(prompt: str, focus_topic: str, drop_rule_prompt: st
 
 
 def _run_bertopic(
-    texts: List[str],
+    raw_texts: List[str],
+    vectorizer_texts: List[str],
+    raw_embeddings: np.ndarray,
+    raw_dates: List[str],
     topic_name: str,
     start_date: str,
     end_date: str,
@@ -1179,9 +1496,6 @@ def _run_bertopic(
             "TopicBertopic",
         )
 
-        if embedding_model is None:
-            log_error(logger, "未提供嵌入模型实例", "TopicBertopic")
-            return False
         if raw_embeddings.size == 0:
             log_error(logger, "未提供可用文档嵌入", "TopicBertopic")
             return False
@@ -1943,76 +2257,38 @@ def run_topic_bertopic(
 
         # 加载和预处理数据
         _emit_progress("prepare", 24, "正在读取待分析文本。", current_step="load_texts")
-        texts = _load_and_merge_data(paths["fetch_dir"], logger)
-        if not texts:
+        records = _load_and_merge_data(paths["fetch_dir"], logger)
+        if not records:
             log_error(logger, "没有可用的数据", "TopicBertopic")
             return False
 
-        # 提取文本内容和元数据
-        # 确保 id 和 channel 列存在，如果不存在给默认值
-        if 'id' not in df.columns:
-            if 'post_id' in df.columns:
-                df['id'] = df['post_id']
-            else:
-                df['id'] = range(len(df))
-        if 'channel' not in df.columns:
-            if 'platform' in df.columns:
-                df['channel'] = df['platform']
-            else:
-                df['channel'] = 'unknown'
-            
-        # 同时提取 contents, id, channel，并过滤空内容
-        raw_data = df[['contents', 'id', 'channel']].dropna(subset=['contents'])
-        
-        # 修复 id 列：如果是 float，转为 int 再转 str；如果是字符串，直接使用
-        def clean_id(val):
-            if isinstance(val, (int, float)):
-                try:
-                    return str(int(val))
-                except:
-                    return str(val)
-            return str(val).strip()
-                
-        raw_data['id'] = raw_data['id'].apply(clean_id)
-        
-        texts = raw_data['contents'].tolist()
-        ids = raw_data['id'].tolist()
-        channels = raw_data['channel'].tolist()
-        
-        raw_metadata = [{"post_id": pid, "channel": ch} for pid, ch in zip(ids, channels)]
+        raw_texts = [text for text, _, _ in records]
+        raw_dates = [date_text for _, date_text, _ in records]
+        raw_metadata = [metadata for _, _, metadata in records]
+        text_count = len(raw_texts)
 
-        if not texts:
+        if not raw_texts:
             log_error(logger, "没有有效的文本内容", "TopicBertopic")
             return False
 
         log_success(logger, f"加载文本数据: {text_count}条", "TopicBertopic")
         _emit_progress("prepare", 34, f"已读取 {text_count} 条文本，正在标准化内容。", current_step="normalize", text_count=text_count)
 
-        raw_texts, raw_dates = _normalise_raw_texts(
-            texts,
-            logger,
-            total_count=text_count,
-        )
-        del texts
-        gc.collect()
-        if not raw_texts:
-            log_error(logger, "原文清洗后没有有效内容", "TopicBertopic")
-            return False
-
         _emit_progress("embed", 44, "正在生成文本向量。", current_step="embed", text_count=len(raw_texts))
+        embedding_model = None
+        embedding_batch_size = 32
         try:
             embedding_model, _, _, embedding_batch_size = _load_embedding_model(logger)
+            raw_embeddings = _encode_text_embeddings(
+                raw_texts,
+                embedding_model,
+                batch_size=embedding_batch_size,
+                logger=logger,
+                log_label="原文语义嵌入",
+            )
         except Exception as exc:
-            log_error(logger, f"加载本地嵌入模型失败: {exc}", "TopicBertopic")
-            return False
-
-        raw_embeddings = _encode_text_embeddings(
-            raw_texts,
-            embedding_model,
-            batch_size=embedding_batch_size,
-            logger=logger,
-            log_label="原文语义嵌入",
-        )
+            log_error(logger, f"加载本地嵌入模型失败，改用离线向量: {exc}", "TopicBertopic")
+            raw_embeddings = _encode_local_fallback_embeddings(raw_texts, logger)
         if raw_embeddings.size == 0:
             log_error(logger, "原文嵌入生成失败", "TopicBertopic")
             return False
@@ -2033,18 +2309,25 @@ def run_topic_bertopic(
             return False
 
         # 文本预处理
-        processed_texts, valid_indices = _preprocess_text(texts, user_words, stop_words, logger)
+        processed_texts, valid_indices = _preprocess_text(
+            raw_texts,
+            user_words,
+            stop_words,
+            logger,
+            total_count=len(raw_texts),
+        )
         
         if not processed_texts:
             log_error(logger, "文本预处理后没有有效内容", "TopicBertopic")
             return False
             
-        # 根据预处理结果筛选 metadata
+        # 根据预处理结果同步筛选原文、日期、嵌入与 metadata
+        model_raw_texts = [raw_texts[i] for i in valid_indices]
+        model_raw_dates = [raw_dates[i] for i in valid_indices]
         final_metadata = [raw_metadata[i] for i in valid_indices]
-        if len(kept_indices) != len(raw_texts):
-            raw_texts = [raw_texts[idx] for idx in kept_indices]
-            raw_dates = [raw_dates[idx] for idx in kept_indices]
-            raw_embeddings = np.asarray(raw_embeddings[kept_indices], dtype=np.float32)
+        model_embeddings = np.asarray(raw_embeddings[valid_indices], dtype=np.float32)
+        del raw_embeddings
+        gc.collect()
 
         # 确保输出目录存在
         output_dir = paths["out_analyze"]
@@ -2052,8 +2335,10 @@ def run_topic_bertopic(
 
         # 运行BERTopic分析
         success = _run_bertopic(
-            raw_texts,
+            model_raw_texts,
             processed_texts,
+            model_embeddings,
+            model_raw_dates,
             topic_label,
             start_date,
             end_date,
@@ -2062,6 +2347,8 @@ def run_topic_bertopic(
             metadata=final_metadata, # 传入 metadata
             prompt_config=prompt_config,
             run_params=run_params,
+            embedding_model=embedding_model,
+            progress_callback=progress_callback,
         )
 
         if success:

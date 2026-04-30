@@ -220,6 +220,272 @@ class ReportCliTests(unittest.TestCase):
         self.assertEqual(payload["range"]["start"], "2025-02-01")
         self.assertEqual(payload["topic_identifier"], "demo-topic")
 
+    def test_render_html_fixture_writes_replayable_html_and_scorecard(self) -> None:
+        tmp_dir = self._make_tmp_dir("render-html-fixture")
+        fixture_path = Path(__file__).resolve().parent / "fixtures" / "report_html_2025_tobacco.json"
+        output_path = tmp_dir / "ai_full_report.html"
+        stdout = io.StringIO()
+
+        with redirect_stdout(stdout):
+            exit_code = report_cli.main(
+                [
+                    "render-html-fixture",
+                    "--fixture",
+                    str(fixture_path),
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(output_path.exists())
+        html = output_path.read_text(encoding="utf-8")
+        self.assertIn("echarts.init", html)
+        self.assertIn("keywordCloud", html)
+        self.assertNotIn("证据不足", html)
+        summary = json.loads(stdout.getvalue())
+        self.assertEqual(summary["scorecard"]["status"], "passed")
+        self.assertGreaterEqual(summary["report_data_summary"]["keyword_count"], 6)
+
+    def test_render_html_cache_can_overlay_exploration_artifacts(self) -> None:
+        tmp_dir = self._make_tmp_dir("render-html-cache-overlay")
+        cache_dir = tmp_dir / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / report_cli.AI_FULL_REPORT_CACHE_FILENAME).write_text(
+            json.dumps(
+                {
+                    "task": {"topic_label": "2025控烟舆情"},
+                    "markdown": "# 2025控烟舆情\n\n基础文稿。",
+                    "timeline": [],
+                    "citations": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (cache_dir / report_cli.REPORT_CACHE_FILENAME).write_text("{}", encoding="utf-8")
+        overlay_path = Path(__file__).resolve().parent / "fixtures" / "report_html_exploration_overlay_highspeed_smoking.json"
+        output_path = tmp_dir / "probe.html"
+        stdout = io.StringIO()
+
+        with redirect_stdout(stdout):
+            exit_code = report_cli.main(
+                [
+                    "render-html-cache",
+                    "--cache-dir",
+                    str(cache_dir),
+                    "--exploration-overlay",
+                    str(overlay_path),
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        html = output_path.read_text(encoding="utf-8")
+        self.assertIn("高铁站台控烟", html)
+        self.assertIn("12306回应", html)
+        self.assertIn("旅客与通勤人群", html)
+        summary = json.loads(stdout.getvalue())
+        self.assertEqual(summary["scorecard"]["status"], "passed")
+        self.assertEqual(summary["report_data_summary"]["timeline_count"], 2)
+
+    def test_probe_html_llm_graph_checkpoints_eval_gates_and_resumes(self) -> None:
+        tmp_dir = self._make_tmp_dir("probe-html-llm-graph")
+        cache_dir = tmp_dir / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / report_cli.AI_FULL_REPORT_CACHE_FILENAME).write_text(
+            json.dumps(
+                {
+                    "task": {"topic_label": "2025控烟舆情"},
+                    "markdown": "# 2025控烟舆情\n\n高铁站台控烟议题升温。",
+                    "timeline": [],
+                    "citations": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (cache_dir / report_cli.REPORT_CACHE_FILENAME).write_text("{}", encoding="utf-8")
+        output_path = tmp_dir / "llm-probe.html"
+        thread_id = "probe-html-llm-test-thread"
+        stdout = io.StringIO()
+
+        class FakeLlm:
+            def invoke(self, _messages):
+                return type(
+                    "FakeResponse",
+                    (),
+                    {
+                        "content": json.dumps(
+                            {
+                                "payload": {
+                                    "evidence_cards": {
+                                        "status": "ready",
+                                        "result": [
+                                            {
+                                                "title": "高铁站台控烟回应引发讨论",
+                                                "snippet": "公众追问站台禁烟边界。",
+                                                "published_at": "2025-08-21",
+                                                "sentiment": "负面",
+                                                "keywords": ["高铁站台控烟", "站台禁烟"],
+                                            }
+                                        ],
+                                    },
+                                    "timeline_nodes": {
+                                        "status": "ready",
+                                        "result": [{"time": "2025-08-21", "event": "高铁站台控烟回应引发讨论。"}],
+                                    },
+                                    "metrics_bundle": {"status": "ready", "result": [{"date": "2025-08-21", "value": 300}]},
+                                    "actor_positions": {"status": "ready", "result": [{"actor_name": "旅客群体", "mentions": 9}]},
+                                    "event_analysis": {
+                                        "status": "ready",
+                                        "result": {
+                                            "summary": "规则适用边界成为核心争点。",
+                                            "sentiment_summary": {"negative": 7, "neutral": 3, "positive": 1},
+                                            "keywords": ["高铁站台控烟", "站台禁烟"],
+                                        },
+                                    },
+                                }
+                            },
+                            ensure_ascii=False,
+                        )
+                    },
+                )()
+
+        with patch("src.report.cli.build_langchain_chat_model", return_value=(FakeLlm(), {"provider": "fake", "model": "fake-chat", "model_role": "report"})):
+            with redirect_stdout(stdout):
+                exit_code = report_cli.main(
+                    [
+                        "probe-html-llm-graph",
+                        "--cache-dir",
+                        str(cache_dir),
+                        "--output",
+                        str(output_path),
+                        "--thread-id",
+                        thread_id,
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        summary = json.loads(stdout.getvalue())
+        self.assertEqual(summary["status"], "interrupted")
+        self.assertEqual(summary["thread_id"], thread_id)
+        self.assertIn("eval_gate_after_llm", summary["next"])
+        self.assertFalse(output_path.exists())
+        self.assertTrue((cache_dir / "llm_exploration.scorecard.json").exists())
+
+        inspect_stdout = io.StringIO()
+        with redirect_stdout(inspect_stdout):
+            inspect_exit = report_cli.main(
+                [
+                    "inspect-state",
+                    "--runtime",
+                    "probe",
+                    "--thread-id",
+                    thread_id,
+                    "--cache-dir",
+                    str(cache_dir),
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ]
+            )
+        self.assertEqual(inspect_exit, 0)
+        inspect_summary = json.loads(inspect_stdout.getvalue())
+        self.assertEqual(inspect_summary["snapshot"]["values"]["stage"], "llm_exploration")
+        self.assertTrue(inspect_summary["snapshot"]["interrupts"])
+
+        history_stdout = io.StringIO()
+        with redirect_stdout(history_stdout):
+            history_exit = report_cli.main(
+                [
+                    "history",
+                    "--runtime",
+                    "probe",
+                    "--thread-id",
+                    thread_id,
+                    "--cache-dir",
+                    str(cache_dir),
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ]
+            )
+        self.assertEqual(history_exit, 0)
+        history_summary = json.loads(history_stdout.getvalue())
+        self.assertGreaterEqual(history_summary["count"], 2)
+
+        eval_stdout = io.StringIO()
+        with redirect_stdout(eval_stdout):
+            eval_exit = report_cli.main(
+                [
+                    "eval-stage",
+                    "--runtime",
+                    "probe",
+                    "--thread-id",
+                    thread_id,
+                    "--cache-dir",
+                    str(cache_dir),
+                    "--stage",
+                    "llm_exploration",
+                    "--json",
+                ]
+            )
+        self.assertEqual(eval_exit, 0)
+        self.assertEqual(json.loads(eval_stdout.getvalue())["status"], "passed")
+
+        resume_stdout = io.StringIO()
+        with redirect_stdout(resume_stdout):
+            resume_exit = report_cli.main(
+                [
+                    "continue",
+                    "--runtime",
+                    "probe",
+                    "--thread-id",
+                    thread_id,
+                    "--cache-dir",
+                    str(cache_dir),
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(resume_exit, 0)
+        resume_summary = json.loads(resume_stdout.getvalue())
+        self.assertEqual(resume_summary["status"], "interrupted")
+        self.assertIn("eval_gate_after_render", resume_summary["next"])
+        html = output_path.read_text(encoding="utf-8")
+        self.assertIn("高铁站台控烟", html)
+        self.assertIn("旅客群体", html)
+        self.assertTrue((cache_dir / "render_html.scorecard.json").exists())
+
+        final_stdout = io.StringIO()
+        with redirect_stdout(final_stdout):
+            final_exit = report_cli.main(
+                [
+                    "resume",
+                    "--runtime",
+                    "probe",
+                    "--thread-id",
+                    thread_id,
+                    "--decision",
+                    "continue",
+                    "--cache-dir",
+                    str(cache_dir),
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ]
+            )
+        self.assertEqual(final_exit, 0)
+        final_summary = json.loads(final_stdout.getvalue())
+        self.assertEqual(final_summary["status"], "completed")
+
     def test_replay_task_can_build_failure_resume_context(self) -> None:
         tmp_dir = self._make_tmp_dir("replay-task")
         event_path = tmp_dir / "events.jsonl"

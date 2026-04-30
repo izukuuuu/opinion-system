@@ -19,7 +19,9 @@ DEFAULT_BERTOPIC_CONFIG = {
     "embedding": {
         "model_name": "moka-ai/m3e-base",
         "device": "auto",
-        "batch_size": 32
+        "batch_size": 32,
+        "allow_download": False,
+        "cache_dir": "cache/models"
     },
     "custom_filters": [
         {"category": "明星八卦", "description": "包含明星、网红、娱乐圈等与专题无关的八卦内容"},

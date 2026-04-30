@@ -3,8 +3,8 @@
     <section class="card-surface space-y-5 p-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="space-y-1">
-          <h2 class="text-xl font-semibold text-primary">正式文稿</h2>
-          <p class="text-sm text-secondary">这里展示舆情分析 Markdown 文稿，语义底稿和运行信息保留在其它视图查看。</p>
+          <h2 class="text-xl font-semibold text-primary">Markdown 文稿</h2>
+          <p class="text-sm text-secondary">这里展示正式 Markdown 文稿。</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="topicsState.loading"
@@ -63,7 +63,7 @@
           <button type="button" class="btn-secondary inline-flex items-center gap-2"
             :disabled="fullReportState.loading || fullReportState.regenerating" @click="handleLoad">
             <ArrowPathIcon class="h-4 w-4" :class="fullReportState.loading ? 'animate-spin' : ''" />
-            {{ fullReportState.loading ? '读取中…' : '读取 AI 报告' }}
+            {{ fullReportState.loading ? '读取中…' : '读取 Markdown' }}
           </button>
           <button type="button" class="btn-secondary inline-flex items-center gap-2"
             :disabled="fullReportState.loading || fullReportState.regenerating" @click="handleRegenerate">
@@ -116,7 +116,7 @@
     </section>
 
     <section v-else class="card-surface p-6 text-sm text-muted">
-      请先选择专题和时间范围，然后读取正式文稿。
+      请先选择专题和时间范围，然后读取 Markdown 文稿。
     </section>
   </div>
 </template>
@@ -355,4 +355,5 @@ onBeforeUnmount(() => {
   font-family: "Cascadia Code", "Consolas", monospace;
   font-size: 0.84em;
 }
+
 </style>

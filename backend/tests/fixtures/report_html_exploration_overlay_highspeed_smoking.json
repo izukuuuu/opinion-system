@@ -1,0 +1,79 @@
+{
+  "case_id": "report_html_exploration_overlay_highspeed_smoking",
+  "payload": {
+    "evidence_cards": {
+      "status": "ready",
+      "result": [
+        {
+          "evidence_id": "probe-ev-1",
+          "title": "高铁站台控烟回应引发集中讨论",
+          "snippet": "12306 对站台吸烟规则的回应触发公众对统一禁烟标准和地方差异的讨论。",
+          "platform": "微博",
+          "province": "上海市",
+          "author": "高铁站台控烟观察",
+          "published_at": "2025-08-21",
+          "sentiment": "负面",
+          "keywords": ["高铁站台控烟", "12306回应", "统一禁烟标准"]
+        },
+        {
+          "evidence_id": "probe-ev-2",
+          "title": "旅客建议候车区与站台执行一致禁烟提示",
+          "snippet": "旅客认为站台、候车区和列车之间规则不一致会削弱控烟执行正当性。",
+          "platform": "新闻",
+          "province": "北京市",
+          "author": "交通治理评论",
+          "published_at": "2025-08-22",
+          "sentiment": "中立",
+          "keywords": ["候车区禁烟", "执行一致性", "控烟提示"]
+        }
+      ]
+    },
+    "timeline_nodes": {
+      "status": "ready",
+      "result": [
+        {
+          "time": "2025-08-21",
+          "event": "高铁站台控烟回应触发规则适用争议，公众追问站台、候车区和列车禁烟边界。"
+        },
+        {
+          "time": "2025-08-22",
+          "event": "媒体与评论账号开始把站台禁烟争议转向统一标准和跨部门解释协调。"
+        }
+      ]
+    },
+    "metrics_bundle": {
+      "status": "ready",
+      "result": [
+        { "date": "2025-08-21", "value": 2800 },
+        { "date": "2025-08-22", "value": 2100 },
+        { "date": "2025-08-23", "value": 980 }
+      ]
+    },
+    "actor_positions": {
+      "status": "ready",
+      "result": [
+        { "actor_name": "旅客与通勤人群", "mentions": 31 },
+        { "actor_name": "铁路客服与站方", "mentions": 18 },
+        { "actor_name": "地方控烟倡议者", "mentions": 13 }
+      ]
+    },
+    "event_analysis": {
+      "status": "ready",
+      "result": {
+        "summary": "探索插片聚焦高铁站台控烟规则边界，主要风险是解释不一致放大执行正当性质疑。",
+        "sentiment_summary": {
+          "negative": 42,
+          "neutral": 35,
+          "positive": 8
+        },
+        "keywords": [
+          { "name": "高铁站台控烟", "value": 88 },
+          { "name": "12306回应", "value": 64 },
+          { "name": "统一禁烟标准", "value": 57 },
+          { "name": "候车区禁烟", "value": 39 },
+          { "name": "执行一致性", "value": 34 }
+        ]
+      }
+    }
+  }
+}

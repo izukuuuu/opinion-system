@@ -326,7 +326,7 @@ def _run_task(task_id: str) -> None:
             )
             raise ReportRuntimeFailure("旧 ABI 任务不能直接 resume 到当前运行时。", diagnostic)
         if resume_payload is None:
-            mark_task_progress(task_id, phase="interpret", percentage=PHASE_PERCENTAGE["interpret"], message="总控代理正在调度子代理并生成结构化结果。")
+            mark_task_progress(task_id, phase="interpret", percentage=PHASE_PERCENTAGE["interpret"], message="总控代理正在调度子代理并整理报告底稿。")
         else:
             mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="审批已处理，正在恢复正式写入流程。")
             try:
@@ -377,7 +377,7 @@ def _run_task(task_id: str) -> None:
                 )
             mark_artifact_ready(
                 task_id,
-                message="结构化结果已生成，正式文稿触发语义边界审查，等待人工确认。",
+                message="报告底稿已生成，正式文稿触发语义边界审查，等待人工确认。",
                 payload={
                     "report_cache_path": str(cache_path) if structured_payload else "",
                     "report_title": str(((structured_payload.get("task") or {}).get("topic_label")) or topic_label).strip() if structured_payload else "",
@@ -412,34 +412,34 @@ def _run_task(task_id: str) -> None:
                 task_id,
                 trust=_trust_from_payload(report_payload),
                 phase="structure",
-                message="已根据结构化结果更新置信信息。",
+                message="已根据报告底稿更新置信信息。",
             )
             _maybe_update_fallback_todos(
                 task_id,
                 stage="review",
                 phase="structure",
-                message="结构化结果已生成，正在进入正式编译。",
+                message="报告底稿已生成，正在进入正式编译。",
             )
         _raise_if_cancelled(task_id)
         if not report_payload:
-            raise RuntimeError("深度代理未产出结构化报告缓存。")
+            raise RuntimeError("深度代理未产出报告底稿缓存。")
         if not isinstance(full_report_payload, dict) or not str(full_report_payload.get("markdown") or "").strip():
             raise RuntimeError("正式 Markdown 报告生成失败。")
         manifest = full_report_payload.get("artifact_manifest") if isinstance(full_report_payload.get("artifact_manifest"), dict) else {}
         full_html_record = manifest.get("full_html") if isinstance(manifest.get("full_html"), dict) else {}
         if full_html_record and (str(full_html_record.get("status") or "").strip() != "ready" or not full_html_path.exists()):
-            raise RuntimeError("Sona HTML 报告生成失败。")
+            raise RuntimeError("HTML 报告生成失败。")
 
         mark_task_progress(task_id, phase="persist", percentage=PHASE_PERCENTAGE["persist"], message="正在整理最终报告产物。")
         _maybe_update_fallback_todos(
             task_id,
             stage="completed",
             phase="persist",
-            message="结构化结果、正式文稿和校验结果均已完成。",
+            message="报告底稿、正式文稿和校验结果均已完成。",
         )
         mark_artifact_ready(
             task_id,
-            message="结构化报告与 AI 完整报告缓存已写入。",
+            message="报告底稿、Markdown 文稿与 HTML 报告缓存已写入。",
             payload={
                 "report_cache_path": str(cache_path),
                 "report_title": str(((report_payload.get("task") or {}).get("topic_label")) or topic_label).strip(),
@@ -677,9 +677,9 @@ def _failure_message(exc: Exception, diagnostic: Dict[str, Any]) -> str:
         return "模型连接失败：当前环境无法访问上游模型服务。"
     closure_stage = str(diagnostic.get("closure_stage") or "").strip()
     if closure_stage == "fallback_synthesis_failed":
-        return "总控未保存结构化结果，服务端补写失败。"
+        return "总控未保存报告底稿，服务端补写失败。"
     if closure_stage == "structured_validation_failed":
-        return "结构化结果已生成，但字段校验未通过。"
+        return "报告底稿已生成，但字段校验未通过。"
     if closure_stage == "agent_save_missing":
         return "总控未调用结构化保存，系统已尝试自动补写。"
     if closure_stage == "tool_round_limit_reached":

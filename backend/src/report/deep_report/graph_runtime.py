@@ -42,7 +42,7 @@ from .schemas import (
     ValidationFailure,
     ValidationResultV2,
 )
-from .sona_html_renderer import build_sona_html_artifact
+from .html_report_renderer import build_html_report_artifact
 
 
 def _accumulate_or_reset(existing: List, update: Optional[List]) -> List:
@@ -1795,7 +1795,7 @@ def run_report_compilation_graph(
         }
 
     def artifact_renderer(state: _GraphState) -> Dict[str, Any]:
-        html_artifact = build_sona_html_artifact(dict(state or {}))
+        html_artifact = build_html_report_artifact(dict(state or {}))
         diagnostics = {
             "renderer_version": str(html_artifact.get("renderer_version") or ""),
             "template": str(html_artifact.get("template") or ""),
@@ -1812,7 +1812,7 @@ def run_report_compilation_graph(
                     event_type="compile.html.ready",
                     node_name="artifact_renderer",
                     phase="persist",
-                    message="Sona HTML 模板报告已生成，等待提交。",
+                    message="HTML 报告已生成，等待提交。",
                     payload=diagnostics,
                 )
             ],
@@ -1871,7 +1871,7 @@ def run_report_compilation_graph(
             "section_trace_annotations": "section-trace-annotations.v1",
             "approval_records": "approval-records.v1",
             "full_markdown": "full-markdown.v1",
-            "full_html": "sona-html-artifact.v1",
+            "full_html": "html-report-artifact.v1",
         }
         records: List[CommitArtifactRecord] = []
         for artifact_type, payload_value in artifact_payloads.items():
@@ -1894,7 +1894,7 @@ def run_report_compilation_graph(
             if artifact_type == "full_html":
                 html_text = str(record.payload.get("html") or "").strip() if isinstance(record.payload, dict) else ""
                 if not html_text:
-                    raise ValueError("Sona HTML artifact renderer returned empty HTML.")
+                    raise ValueError("HTML report artifact renderer returned empty HTML.")
                 if record.path:
                     _upsert_text_artifact(record.path, html_text)
                 record.payload = {key: value for key, value in record.payload.items() if key != "html"}

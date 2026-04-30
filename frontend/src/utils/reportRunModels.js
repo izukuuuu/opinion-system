@@ -1,8 +1,8 @@
 const PLAN_STEP_DESCRIPTIONS = {
   scope: '确认专题、时间范围、模式和可直接复用的已有结果。',
   research: '并行推进检索、证据、时间线、立场和传播分析。',
-  synthesis: '总控代理汇总并行结果，整理结构化报告对象。',
-  writing: '输出结构化结论，并整理正式文稿草稿。',
+  synthesis: '总控代理汇总并行结果，整理报告底稿。',
+  writing: '输出核心结论，并整理正式文稿草稿。',
   validation: '检查证据覆盖、结论边界和表达风险。',
   persist: '处理人工确认，并写入最终结果。'
 }
@@ -14,7 +14,7 @@ const TIER_STEP_DESCRIPTIONS = {
   'tier-3': '补齐事件分析、断言冲突与关系图谱。',
   'tier-4': '整理议题框架、传播机制与风险信号。',
   'tier-5': '进行效用裁决，决定是否进入文稿草拟。',
-  'tier-6': '草拟章节材料，并交付结构化结果。'
+  'tier-6': '草拟章节材料，并交付报告底稿。'
 }
 
 export const RESEARCH_SUBAGENT_IDS = [
@@ -277,7 +277,7 @@ function normalizeArtifactKey(key) {
 function artifactDisplayMeta(key) {
   const normalized = normalizeArtifactKey(key)
   const mapping = {
-    structured_projection: { label: '语义报告', description: '结构化的分析结果。' },
+    structured_projection: { label: '分析底稿', description: '报告生成使用的内部底稿。' },
     ir: { label: '分析中枢', description: '核心证据与结论的汇总。' },
     conflict_map: { label: '争议图谱', description: '各方的立场和争议点。' },
     mechanism_summary: { label: '传播分析', description: '舆情传播路径和触发因素。' },
@@ -289,7 +289,7 @@ function artifactDisplayMeta(key) {
     graph_state: { label: '运行记录', description: '当前进度和调整次数。' },
     approval_records: { label: '确认记录', description: '人工审核的确认情况。' },
     full_markdown: { label: '正式报告', description: '最终的分析报告文稿。' },
-    full_html: { label: 'HTML 报告', description: '按 Sona 模板生成的可交付网页报告。' }
+    full_html: { label: 'HTML 报告', description: '按报告模板生成的可交付网页报告。' }
   }
   return mapping[normalized] || { label: normalized || '产物', description: '当前产物。' }
 }
@@ -320,7 +320,7 @@ function toolDisplayName(toolName) {
     build_timeline: '整理时间线',
     build_entity_graph: '分析主体关系',
     run_volume_analysis: '分析传播规模',
-    save_structured_report: '保存结构化结果',
+    save_structured_report: '保存报告底稿',
     write_final_report: '写入正式文稿',
     overwrite_report_cache: '更新结果缓存',
     graph_interrupt: '语义边界确认'
@@ -677,7 +677,7 @@ function summarizeToolResultPreview(toolName, rawPreview) {
     const sectionId = extractJsonField(text, 'section_id')
     return sectionId ? `已组装 ${sectionId} 章节材料包。` : '已组装章节材料包。'
   }
-  if (toolName === 'save_structured_report') return '结构化结果已保存。'
+  if (toolName === 'save_structured_report') return '报告底稿已保存。'
   return sanitizeEventPreview(text)
 }
 
@@ -714,7 +714,7 @@ function failureHeadlineFromStage(stage) {
 }
 
 function failureMessageFromStage(stage) {
-  if (stage === 'agent_save_missing') return '调研节点已经跑完，但这轮没有整理出最终结构化结果。'
+  if (stage === 'agent_save_missing') return '调研节点已经跑完，但这轮没有整理出可用报告底稿。'
   if (stage === 'fallback_synthesis_failed') return '系统尝试根据中间结果自动整理结论，但没有整理成功。'
   if (stage === 'structured_validation_failed') return '结果对象已经生成，但关键字段还不完整，暂时不能继续写稿。'
   if (stage === 'tool_round_limit_reached') return '本轮调用次数超过当前上限，任务先停在这里。'
@@ -832,7 +832,7 @@ function deriveStageCards(taskState, agents) {
       status: hasStructuredResult || ['write', 'review', 'persist', 'completed'].includes(phase)
         ? 'completed'
         : (phase === 'interpret' && researchStarted ? (failed ? 'failed' : 'running') : 'pending'),
-      detail: hasStructuredResult ? '结构化结果已生成' : '等待总控汇总'
+      detail: hasStructuredResult ? '报告底稿已生成' : '等待总控汇总'
     },
     {
       id: 'writing',
@@ -912,12 +912,6 @@ function buildArtifactCards(taskState) {
     : {}
   return [
     {
-      key: 'structured_projection',
-      label: '语义报告',
-      description: '由 Report IR 派生的结构化投影视图。',
-      ready: Boolean(manifest.structured_projection?.status === 'ready')
-    },
-    {
       key: 'report_ir',
       label: 'Report IR',
       description: '本次任务的语义中枢与证据编译结果。',
@@ -968,7 +962,7 @@ function buildArtifactCards(taskState) {
     {
       key: 'full_html',
       label: 'HTML 报告',
-      description: '由 Sona 模板线路生成的网页报告。',
+      description: '由报告模板线路生成的网页报告。',
       ready: Boolean(manifest.full_html?.status === 'ready')
     }
   ]
@@ -1044,7 +1038,7 @@ function buildGraphObservability(taskState, timelineEvents) {
   else if (currentActor === 'report_coordinator' && routerFacets.length && String(taskState.phase || '').trim() === 'interpret') currentNodeLabel = '路由与汇总'
   let nextStep = ''
   if (String(taskState.status || '').trim() === 'waiting_approval') nextStep = '等待人工处理后恢复正式写入。'
-  else if (String(taskState.status || '').trim() === 'completed') nextStep = '本轮任务已完成，可直接查看语义报告和正式文稿。'
+  else if (String(taskState.status || '').trim() === 'completed') nextStep = '本轮任务已完成，可直接查看 Markdown 文稿和 HTML 报告。'
   else if (String(taskState.status || '').trim() === 'failed') nextStep = latestTransition?.nextStep || '先查看失败详情，再决定是否重跑。'
   else nextStep = sanitizeRuntimeMessage(latestGraphEvent?.message) || latestTransition?.nextStep || String(taskState.reportIrSummary?.utility_assessment?.next_action || taskState.structuredResultDigest?.utility_assessment?.next_action || '').trim() || currentOperation || '等待下一步调度。'
   return {
@@ -1079,7 +1073,7 @@ function buildArtifactObservability(taskState) {
     ? '待处理'
     : (approvals.length ? approvalDecisionLabel(approvals[approvals.length - 1]?.decision) : '未触发')
   const phaseQueues = {
-    interpret: ['conflict_map', 'mechanism_summary', 'utility_assessment', 'ir', 'structured_projection'],
+    interpret: ['conflict_map', 'mechanism_summary', 'utility_assessment', 'ir'],
     write: ['draft_bundle_v2', 'validation_result', 'repair_plan', 'graph_state', 'full_markdown', 'full_html'],
     review: ['validation_result', 'repair_plan', 'graph_state', 'approval_records', 'full_markdown', 'full_html'],
     persist: ['approval_records', 'full_markdown', 'full_html']
@@ -1556,7 +1550,7 @@ export function buildDebugEvent(event = {}) {
 
   if (type === 'task.completed') {
     model.title = '任务已完成'
-    model.message = '结构化结果和正式文稿已经就绪。'
+    model.message = 'Markdown 文稿和 HTML 报告已经就绪。'
     return model
   }
 
@@ -1687,7 +1681,7 @@ export function buildRunConsoleViewModel(taskState = {}) {
     subline: !taskState.id
       ? '创建任务后，页面会切换为单次 run 控制台。'
       : (taskState.status === 'completed'
-          ? '语义报告和正式文稿都已写好。'
+          ? 'Markdown 文稿和 HTML 报告都已写好。'
           : (taskState.status === 'waiting_approval'
               ? '任务暂停等待你确认后继续。'
               : `当前阶段：${phaseLabel(taskState.phase)}`)),

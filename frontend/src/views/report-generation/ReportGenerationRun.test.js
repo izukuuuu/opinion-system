@@ -116,16 +116,17 @@ describe('ReportGenerationRun', () => {
     mockState.threadId = ''
     mockState.artifactManifest = {
       structured_projection: { status: 'ready' },
-      full_markdown: { status: 'ready' }
+      full_markdown: { status: 'ready' },
+      full_html: { status: 'ready' }
     }
     const wrapper = shallowMount(ReportGenerationRun, mountOptions)
 
     const buttons = wrapper.findAll('button')
-    const resultButton = buttons.find((item) => item.text().includes('语义报告'))
-    const fullButton = buttons.find((item) => item.text().includes('正式文稿'))
+    const markdownButton = buttons.find((item) => item.text().includes('Markdown 文稿'))
+    const htmlButton = buttons.find((item) => item.text().includes('HTML 报告'))
 
-    expect(resultButton.attributes('disabled')).toBeUndefined()
-    expect(fullButton.attributes('disabled')).toBeUndefined()
+    expect(markdownButton.attributes('disabled')).toBeUndefined()
+    expect(htmlButton.attributes('disabled')).toBeUndefined()
 
     mockState.threadId = 'thread-1'
     mockState.artifactManifest = {}
@@ -151,11 +152,11 @@ describe('ReportGenerationRun', () => {
     const wrapper = shallowMount(ReportGenerationRun, mountOptions)
 
     const buttons = wrapper.findAll('button')
-    const resultButton = buttons.find((item) => item.text().includes('语义报告'))
-    const fullButton = buttons.find((item) => item.text().includes('正式文稿'))
+    const markdownButton = buttons.find((item) => item.text().includes('Markdown 文稿'))
+    const htmlButton = buttons.find((item) => item.text().includes('HTML 报告'))
 
-    expect(resultButton.attributes('disabled')).toBeDefined()
-    expect(fullButton.attributes('disabled')).toBeDefined()
+    expect(markdownButton.attributes('disabled')).toBeDefined()
+    expect(htmlButton.attributes('disabled')).toBeDefined()
   })
 
   it('surfaces typed approval requirements in the run header', () => {

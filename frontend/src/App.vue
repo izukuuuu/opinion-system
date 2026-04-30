@@ -331,7 +331,7 @@ const navigationGroups = [
         label: '报告解读',
         description: '运行报告与查看结果',
         to: { name: 'report-generation-run' },
-        match: ['report-generation-run', 'report-generation-view', 'report-generation-ai'],
+        match: ['report-generation-run', 'report-generation-ai', 'report-generation-html'],
         icon: DocumentTextIcon
       }
     ]

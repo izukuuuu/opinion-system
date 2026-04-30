@@ -177,6 +177,7 @@ const historyState = reactive({
 const analysisHistory = ref([])
 
 let initialized = false
+let availabilityRequestId = 0
 
 const clampPromptTopicCount = (value) => {
   const parsed = Number.parseInt(String(value ?? ''), 10)
@@ -412,7 +413,11 @@ function initializeStore() {
 
   watch(
     () => form.topic,
-    (newTopic) => {
+    (newTopic, oldTopic) => {
+      if (newTopic !== oldTopic) {
+        form.startDate = ''
+        form.endDate = ''
+      }
       if (newTopic) {
         loadAvailableRange()
         loadBertopicPrompt(newTopic)
@@ -451,6 +456,7 @@ function initializeStore() {
 }
 
 const clearAvailableRange = () => {
+  availabilityRequestId += 1
   availableRange.start = ''
   availableRange.end = ''
   availableRange.error = ''
@@ -499,6 +505,8 @@ const loadTopics = async (onlyWithData = false) => {
     // 如果没有选中的专题，自动选择第一个
     if (!form.topic && topicsState.options.length > 0) {
       form.topic = topicsState.options[0].bucket
+    } else if (form.topic) {
+      loadAvailableRange()
     }
   } catch (error) {
     topicsState.error = error instanceof Error ? error.message : '加载专题列表失败'
@@ -509,24 +517,35 @@ const loadTopics = async (onlyWithData = false) => {
 }
 
 const loadAvailableRange = async () => {
-  if (!form.topic) {
+  const topic = String(form.topic || '').trim()
+  const project = String(form.project || '').trim()
+  if (!topic) {
     clearAvailableRange()
     return
   }
 
+  const requestId = ++availabilityRequestId
   availableRange.loading = true
   availableRange.error = ''
   availableRange.start = ''
   availableRange.end = ''
+  form.startDate = ''
+  form.endDate = ''
+
+  const isStaleRequest = () => (
+    requestId !== availabilityRequestId ||
+    topic !== String(form.topic || '').trim() ||
+    project !== String(form.project || '').trim()
+  )
 
   try {
     // 使用基础分析相同的API检查数据可用性
-    const params = new URLSearchParams({ topic: form.topic })
-    const project = (form.project || '').trim()
+    const params = new URLSearchParams({ topic })
     if (project) {
       params.set('project', project)
     }
     const response = await callApi(`/api/fetch/availability?${params.toString()}`, { method: 'GET' })
+    if (isStaleRequest()) return
 
     const data = response?.data
     if (data && data.range) {
@@ -540,10 +559,10 @@ const loadAvailableRange = async () => {
       }
     }
   } catch (error) {
+    if (isStaleRequest()) return
     // 如果基础API失败，尝试使用BERTopic专用的API
     try {
-      const fallbackParams = new URLSearchParams({ topic: form.topic })
-      const project = (form.project || '').trim()
+      const fallbackParams = new URLSearchParams({ topic })
       if (project) {
         fallbackParams.set('project', project)
       }
@@ -551,6 +570,7 @@ const loadAvailableRange = async () => {
         `/api/topic/bertopic/availability?${fallbackParams.toString()}`,
         { method: 'GET' }
       )
+      if (isStaleRequest()) return
 
       const data = response?.data
       if (data) {
@@ -577,10 +597,13 @@ const loadAvailableRange = async () => {
         }
       }
     } catch (fallbackError) {
+      if (isStaleRequest()) return
       availableRange.error = fallbackError instanceof Error ? fallbackError.message : '获取数据范围失败'
     }
   } finally {
-    availableRange.loading = false
+    if (!isStaleRequest()) {
+      availableRange.loading = false
+    }
   }
 }
 

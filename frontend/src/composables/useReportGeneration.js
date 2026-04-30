@@ -711,7 +711,7 @@ async function loadReport(rangeOverride = null) {
     analysisData.value = null
     const message = error instanceof Error ? error.message : String(error)
     reportState.error = message.includes('未找到分析结果目录')
-      ? '当前专题暂无基础分析结果，请前往运行页补跑后再查看语义报告。'
+      ? '当前专题暂无基础分析结果，请前往运行页补跑后再查看报告文稿。'
       : message
     await loadProgress(apiRange, { silent: true })
     return null

@@ -2,7 +2,9 @@
   "embedding": {
     "model_name": "moka-ai/m3e-base",
     "device": "auto",
-    "batch_size": 32
+    "batch_size": 32,
+    "allow_download": false,
+    "cache_dir": "cache/models"
   },
   "custom_filters": [
     {

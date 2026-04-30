@@ -127,13 +127,13 @@
               <ExclamationTriangleIcon class="h-4 w-4" />{{ hasPendingApprovals ? `需要介入 (${pendingApprovalCount})` :
               '查看失败详情' }}
             </button>
-            <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="!canOpenResults"
-              @click="goToResultsPage">
-              <DocumentTextIcon class="h-4 w-4" />语义报告
-            </button>
             <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="!canOpenAiResults"
               @click="goToAiResultsPage">
-              <DocumentDuplicateIcon class="h-4 w-4" />正式文稿
+              <DocumentDuplicateIcon class="h-4 w-4" />Markdown 文稿
+            </button>
+            <button type="button" class="btn-secondary inline-flex items-center gap-2" :disabled="!canOpenHtmlResults"
+              @click="goToHtmlResultsPage">
+              <GlobeAltIcon class="h-4 w-4" />HTML 报告
             </button>
           </div>
         </div>
@@ -577,7 +577,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowPathIcon, ClockIcon, DocumentDuplicateIcon, DocumentTextIcon, ExclamationTriangleIcon, SparklesIcon, StopIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, ClockIcon, DocumentDuplicateIcon, ExclamationTriangleIcon, GlobeAltIcon, SparklesIcon, StopIcon } from '@heroicons/vue/24/outline'
 import AppSelect from '../../components/AppSelect.vue'
 import TabSwitch from '../../components/TabSwitch.vue'
 import { useReportGeneration } from '../../composables/useReportGeneration'
@@ -619,8 +619,8 @@ const resumeBeforeFailureCapability = computed(() => (
     : {}
 ))
 const canResumeBeforeFailure = computed(() => Boolean(taskState.id && ['failed', 'cancelled'].includes(taskState.status) && resumeBeforeFailureCapability.value?.enabled))
-const canOpenResults = computed(() => Boolean(taskState.artifactManifest?.structured_projection?.status === 'ready'))
 const canOpenAiResults = computed(() => Boolean(taskState.artifactManifest?.full_markdown?.status === 'ready'))
+const canOpenHtmlResults = computed(() => Boolean(taskState.artifactManifest?.full_html?.status === 'ready'))
 const topicSelectOptions = computed(() => topicOptions.value.map((option) => ({ value: option, label: option })))
 const historySelectOptions = computed(() => reportHistory.value.map((record) => ({ value: record.id, label: `${record.start} → ${record.end}` })))
 const modeSelectOptions = [{ value: 'fast', label: '快速' }, { value: 'research', label: '深入（本地档案）' }]
@@ -679,7 +679,7 @@ async function handleSkipValidation() {
   }
 }
 async function handleSelectHistory(historyId) { if (historyId) await applyHistorySelection(historyId, { shouldLoad: false }) }
-function goToResultsPage() { if (canOpenResults.value) router.push({ name: 'report-generation-view' }) }
 function goToAiResultsPage() { if (canOpenAiResults.value) router.push({ name: 'report-generation-ai' }) }
+function goToHtmlResultsPage() { if (canOpenHtmlResults.value) router.push({ name: 'report-generation-html' }) }
 </script>
 
