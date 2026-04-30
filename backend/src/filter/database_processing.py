@@ -82,6 +82,29 @@ def load_publisher_fuzzy_patterns(topic: str) -> Dict[str, Any]:
     }
 
 
+def load_shared_text_clean_terms(topic: str) -> Dict[str, Any]:
+    payload = load_topic_bertopic_prompt_config(topic)
+    raw_values = payload.get("project_text_clean_stopwords", [])
+    if not isinstance(raw_values, list):
+        raw_values = [raw_values]
+
+    terms: List[Dict[str, str]] = []
+    seen = set()
+    for raw_value in raw_values:
+        raw = str(raw_value or "").strip()
+        normalised = _normalise_match_text(raw)
+        if not raw or not normalised or normalised in seen:
+            continue
+        seen.add(normalised)
+        terms.append({"raw": raw, "match": normalised})
+
+    return {
+        "terms": terms,
+        "path": str(payload.get("path") or ""),
+        "topic": str(payload.get("topic") or topic).strip() or topic,
+    }
+
+
 def _quote_identifier(dialect_name: str, name: str) -> str:
     if _is_mysql_dialect(dialect_name):
         return f"`{name.replace('`', '``')}`"
@@ -563,6 +586,21 @@ def _build_match_condition(
     return " OR ".join(clauses) if clauses else "1=0", params
 
 
+def _build_replace_expr(
+    dialect_name: str,
+    column_name: str,
+    terms: Sequence[Dict[str, str]],
+) -> tuple[str, Dict[str, Any]]:
+    quoted = _quote_identifier(dialect_name, column_name)
+    expr = quoted
+    params: Dict[str, Any] = {}
+    for idx, term in enumerate(terms):
+        param_name = f"clean_{column_name}_{idx}"
+        params[param_name] = str((term or {}).get("raw") or "")
+        expr = f"REPLACE({expr}, :{param_name}, '')"
+    return f"CASE WHEN {quoted} IS NULL THEN NULL ELSE {expr} END", params
+
+
 def _build_author_match_condition(
     dialect_name: str,
     column_name: str,
@@ -676,6 +714,161 @@ def _delete_ids(conn, dialect_name: str, table_name: str, ids: Sequence[Any]) ->
         result = conn.execute(delete_stmt, {"ids": batch})
         deleted += int(result.rowcount or len(batch))
     return deleted
+
+
+def run_database_text_clean(
+    topic: str,
+    database: str,
+    *,
+    tables: Optional[Sequence[str]] = None,
+    logger=None,
+) -> Dict[str, Any]:
+    target_database = str(database or "").strip()
+    if not target_database:
+        return {"status": "error", "message": "Missing required field(s): database"}
+
+    if logger is None:
+        logger = setup_logger(topic, "textclean")
+    log_module_start(logger, "DatabaseTextClean")
+
+    terms_payload = load_shared_text_clean_terms(topic)
+    term_items = list(terms_payload.get("terms") or [])
+    match_terms = [str(item.get("match") or "") for item in term_items if str(item.get("match") or "")]
+
+    engine = None
+    try:
+        engine = db_manager.get_engine_for_database(target_database)
+        with engine.begin() as conn:
+            dialect_name = conn.dialect.name
+            inspector = inspect(conn)
+            available_tables = sorted(inspector.get_table_names())
+            if not available_tables:
+                return {
+                    "status": "error",
+                    "message": f"数据库 {target_database} 中没有可处理的数据表",
+                }
+
+            table_names, missing_tables = _coerce_tables(available_tables, tables)
+            if not table_names:
+                return {
+                    "status": "error",
+                    "message": "指定的数据表不存在",
+                    "missing_tables": missing_tables,
+                }
+
+            report_tables: List[Dict[str, Any]] = []
+            total_matched_rows = 0
+            total_updated_rows = 0
+            total_updated_fields = 0
+
+            for table_name in table_names:
+                column_names = {
+                    str(column.get("name") or "").strip()
+                    for column in inspector.get_columns(table_name)
+                }
+                target_columns = [
+                    column_name
+                    for column_name in ("title", "contents", "hit_words")
+                    if column_name in column_names
+                ]
+                if not term_items or not target_columns:
+                    report_tables.append(
+                        {
+                            "table": table_name,
+                            "status": "ok",
+                            "reason": "当前未配置项目词表或目标表缺少可清洗文本列",
+                            "matched_rows": 0,
+                            "updated_rows": 0,
+                            "updated_fields": 0,
+                            "target_columns": target_columns,
+                        }
+                    )
+                    continue
+
+                where_clause, match_params = _build_match_condition(dialect_name, target_columns, match_terms)
+                quoted_table = _quote_identifier(dialect_name, table_name)
+                count_sql = text(f"SELECT COUNT(*) AS matched_rows FROM {quoted_table} WHERE {where_clause}")
+                matched_rows = int(
+                    (conn.execute(count_sql, match_params).mappings().first() or {}).get("matched_rows") or 0
+                )
+
+                updated_rows = 0
+                updated_fields = 0
+                if matched_rows:
+                    assignments: List[str] = []
+                    replace_params: Dict[str, Any] = {}
+                    for column_name in target_columns:
+                        replace_expr, column_params = _build_replace_expr(dialect_name, column_name, term_items)
+                        assignments.append(f"{_quote_identifier(dialect_name, column_name)} = {replace_expr}")
+                        replace_params.update(column_params)
+                    update_sql = text(
+                        f"UPDATE {quoted_table} SET {', '.join(assignments)} WHERE {where_clause}"
+                    )
+                    result = conn.execute(update_sql, {**match_params, **replace_params})
+                    updated_rows = int(result.rowcount or matched_rows)
+                    updated_fields = updated_rows * len(target_columns)
+
+                total_matched_rows += matched_rows
+                total_updated_rows += updated_rows
+                total_updated_fields += updated_fields
+                report_tables.append(
+                    {
+                        "table": table_name,
+                        "status": "ok",
+                        "target_columns": target_columns,
+                        "matched_rows": matched_rows,
+                        "updated_rows": updated_rows,
+                        "updated_fields": updated_fields,
+                    }
+                )
+                log_success(
+                    logger,
+                    f"{target_database}.{table_name} 文本清洗完成 | 命中:{matched_rows}, 更新:{updated_rows}",
+                    "DatabaseTextClean",
+                )
+
+    except Exception as exc:
+        detail = f"数据库文本清洗失败: {exc}"
+        log_error(logger, detail, "DatabaseTextClean")
+        return {"status": "error", "message": detail}
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+
+    report_dir = ensure_bucket("results", topic, POSTCLEAN_REPORT_DIR)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    report_path = report_dir / f"{_safe_name(target_database, 'database')}_textclean_{timestamp}.json"
+    report_payload = {
+        "topic": topic,
+        "database": target_database,
+        "generated_at": _utc_now(),
+        "source": "database-textclean",
+        "terms_count": len(term_items),
+        "terms_path": terms_payload.get("path") or "",
+        "matched_rows": total_matched_rows,
+        "updated_rows": total_updated_rows,
+        "updated_fields": total_updated_fields,
+        "missing_tables": missing_tables,
+        "tables": report_tables,
+    }
+    _write_json(report_path, report_payload)
+
+    return {
+        "status": "ok",
+        "topic": topic,
+        "database": target_database,
+        "terms_count": len(term_items),
+        "matched_rows": total_matched_rows,
+        "updated_rows": total_updated_rows,
+        "updated_fields": total_updated_fields,
+        "missing_tables": missing_tables,
+        "tables": report_tables,
+        "report_path": get_relative_path(report_path),
+        "message": f"文本清洗完成，共更新 {total_updated_rows} 条记录。",
+    }
 
 
 def list_postclean_publishers(
@@ -1471,8 +1664,10 @@ def run_database_deduplicate(
 __all__ = [
     "list_database_deduplicate_snapshots",
     "list_postclean_publishers",
+    "load_shared_text_clean_terms",
     "load_shared_publisher_blacklist",
     "restore_database_snapshot",
     "run_database_deduplicate",
     "run_database_postclean",
+    "run_database_text_clean",
 ]

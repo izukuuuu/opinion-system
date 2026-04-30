@@ -2303,6 +2303,83 @@ def database_postclean_endpoint():
     }), 202
 
 
+@app.post("/api/database/textclean")
+def database_textclean_endpoint():
+    payload = request.get_json(silent=True) or {}
+    topic = str(payload.get("topic") or "").strip()
+    project = str(payload.get("project") or "").strip()
+    dataset_id = str(payload.get("dataset_id") or "").strip()
+    database = str(payload.get("database") or "").strip()
+    raw_tables = payload.get("tables")
+
+    if not any([topic, project, dataset_id]):
+        return jsonify({"status": "error", "message": "Missing required field(s): topic/project/dataset_id"}), 400
+    if not database:
+        return jsonify({"status": "error", "message": "Missing required field(s): database"}), 400
+
+    try:
+        topic_identifier, display_name, log_project, _ = resolve_topic_identifier(
+            {
+                "topic": topic,
+                "project": project,
+                "dataset_id": dataset_id,
+            },
+            PROJECT_MANAGER,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    tables: Optional[List[str]] = None
+    if isinstance(raw_tables, list):
+        tables = [str(item).strip() for item in raw_tables if str(item or "").strip()]
+
+    try:
+        from src.filter import run_database_text_clean  # type: ignore
+
+        result = run_database_text_clean(topic_identifier, database, tables=tables)
+        ok = evaluate_success(result)
+        serialised = serialise_result(result)
+        _log_with_context(
+            "database-textclean",
+            ok,
+            {
+                "project": log_project,
+                "params": {
+                    "database": database,
+                    "tables": tables or [],
+                    "source": "api",
+                    "topic": display_name,
+                    "bucket": topic_identifier,
+                },
+            },
+        )
+        if ok and isinstance(serialised, dict):
+            updated_rows = int(serialised.get("updated_rows") or 0)
+            if updated_rows > 0:
+                serialised["follow_up"] = _enqueue_fetch_refresh_job(
+                    topic_identifier=topic_identifier,
+                    database=database,
+                    log_project=log_project,
+                    display_name=display_name,
+                )
+            else:
+                serialised["follow_up"] = {
+                    "status": "skipped",
+                    "message": "本次文本清洗未更新记录，未触发本地缓存刷新。",
+                    "ranges": [],
+                }
+        status_code = 200 if ok else 500
+        return jsonify({
+            "status": "ok" if ok else "error",
+            "operation": "database-textclean",
+            "data": serialised,
+            "fetch_refresh_worker": load_fetch_refresh_worker_status(),
+        }), status_code
+    except Exception as exc:  # pragma: no cover
+        LOGGER.exception("Database text clean failed for %s@%s", topic_identifier, database)
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
 @app.post("/api/database/postclean/publishers/task")
 def database_postclean_publishers_task_endpoint():
     payload = request.get_json(silent=True) or {}

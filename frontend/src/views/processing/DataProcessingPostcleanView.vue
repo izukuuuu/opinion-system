@@ -6,7 +6,7 @@
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Post Clean</p>
           <h2 class="mt-2 text-xl font-semibold text-primary">数据库后清洗</h2>
           <p class="mt-2 text-sm text-secondary">
-            统一管理项目排除词与发布者黑名单。执行后清洗时，命中排除词或命中黑名单的发布者都会被删除；若有删除，会自动同步本地缓存。
+            统一管理后清洗规则和文本清洗词表。后清洗会删除命中记录；文本清洗会把命中词替换为空，并在更新后同步本地缓存。
           </p>
         </div>
         <button
@@ -76,7 +76,7 @@
           </div>
         </div>
 
-        <div class="space-y-4 rounded-3xl border border-rose-200 bg-rose-50/50 p-5">
+        <div class="space-y-4 rounded-3xl border border-soft bg-surface-muted/60 p-5">
           <div class="rounded-2xl border border-soft bg-white px-4 py-3">
             <p class="text-xs text-muted">当前范围</p>
             <p class="mt-1 text-sm font-semibold text-primary">{{ currentProjectName || '未选择项目' }}</p>
@@ -85,30 +85,59 @@
             </p>
           </div>
 
-          <div class="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm text-rose-700">
-            <p class="font-semibold">危险操作</p>
-            <p class="mt-1 text-xs leading-relaxed">执行后会直接删除数据库记录，不进入回收站；只有命中记录时才会继续触发本地缓存刷新。</p>
-          </div>
-
           <div class="rounded-2xl border border-soft bg-white px-4 py-3">
-            <p class="text-xs text-muted">任务状态</p>
-            <p class="mt-1 text-sm font-semibold text-primary">{{ statusLabel }}</p>
-            <p class="mt-1 text-xs text-secondary">{{ postcleanState.message || '等待执行。' }}</p>
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-sm font-semibold text-primary">完整清洗</p>
+                <p class="mt-1 text-xs leading-relaxed text-secondary">先替换文本清洗词，再执行删除后清洗。</p>
+              </div>
+              <span class="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">推荐</span>
+            </div>
+            <button
+              type="button"
+              class="btn-primary mt-4 inline-flex w-full items-center justify-center gap-2"
+              :disabled="!canRun || operationRunning || sharedPromptState.saving"
+              @click="runFullClean"
+            >
+              <SparklesIcon class="h-4 w-4" />
+              {{ fullCleanState.running ? '完整清洗中…' : '执行完整清洗' }}
+            </button>
+            <p class="mt-2 text-xs text-secondary">{{ fullCleanState.message || '适合按当前项目规则一次完成清理。' }}</p>
           </div>
 
-          <button
-            type="button"
-            class="btn-primary inline-flex w-full items-center justify-center gap-2"
-            :disabled="!canRun || postcleanState.running || sharedPromptState.saving"
-            @click="runPostclean"
-          >
-            <SparklesIcon class="h-4 w-4" />
-            {{ postcleanState.running ? '后清洗执行中…' : '执行数据库后清洗' }}
-          </button>
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="rounded-2xl border border-soft bg-white px-4 py-3">
+              <p class="text-sm font-semibold text-primary">仅文本清洗</p>
+              <p class="mt-1 text-xs text-secondary">{{ textCleanStatusLabel }}</p>
+              <p class="mt-1 text-xs text-secondary">{{ textCleanState.message || '命中词会替换为空。' }}</p>
+              <button
+                type="button"
+                class="btn-secondary mt-3 inline-flex w-full items-center justify-center gap-2"
+                :disabled="!canRun || operationRunning || sharedPromptState.saving"
+                @click="runTextClean"
+              >
+                执行文本清洗
+              </button>
+            </div>
+
+            <div class="rounded-2xl border border-rose-200 bg-white px-4 py-3">
+              <p class="text-sm font-semibold text-rose-700">仅删除后清洗</p>
+              <p class="mt-1 text-xs text-secondary">{{ statusLabel }}</p>
+              <p class="mt-1 text-xs text-secondary">{{ postcleanState.message || '命中记录会被删除。' }}</p>
+              <button
+                type="button"
+                class="btn-secondary mt-3 inline-flex w-full items-center justify-center gap-2"
+                :disabled="!canRun || operationRunning || sharedPromptState.saving"
+                @click="runPostclean"
+              >
+                执行删除后清洗
+              </button>
+            </div>
+          </div>
 
           <div class="rounded-2xl border border-soft bg-white px-4 py-4">
             <div class="flex items-center justify-between gap-3 text-xs text-secondary">
-              <span>整体进度</span>
+              <span>删除后清洗进度</span>
               <span>{{ postcleanState.progress.percentage }}%</span>
             </div>
             <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -124,7 +153,7 @@
     </section>
 
     <section class="card-surface space-y-5 p-6">
-      <div class="grid gap-5 xl:grid-cols-3">
+      <div class="grid gap-5 xl:grid-cols-2">
         <div class="flex min-h-[24rem] flex-col space-y-3 rounded-3xl border border-soft bg-surface-muted/60 p-5">
           <div class="flex items-center justify-between gap-3">
             <div>
@@ -146,6 +175,31 @@
               @click="openStopwordModal"
             >
               打开排除词弹窗
+            </button>
+          </div>
+        </div>
+
+        <div class="flex min-h-[24rem] flex-col space-y-3 rounded-3xl border border-soft bg-surface-muted/60 p-5">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-base font-semibold text-primary">文本清洗词表</h3>
+              <p class="mt-1 text-sm text-secondary">每行一个词；执行文本清洗时会从标题、正文和命中词中替换为空。</p>
+            </div>
+            <span class="shrink-0 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">{{ textCleanStopwordList.length }} 项</span>
+          </div>
+          <textarea
+            v-model="sharedPromptState.projectTextCleanStopwordsText"
+            class="input min-h-0 flex-1 resize-y"
+            placeholder="每行一个文本清洗词"
+          />
+          <div class="flex justify-end pt-1">
+            <button
+              type="button"
+              class="btn-primary inline-flex items-center gap-2"
+              :disabled="!currentProjectName"
+              @click="openTextCleanStopwordModal"
+            >
+              打开文本清洗词弹窗
             </button>
           </div>
         </div>
@@ -290,6 +344,33 @@
         </div>
       </div>
       <p v-else class="text-sm text-secondary">尚未执行数据库后清洗。</p>
+
+      <div v-if="textCleanResult" class="rounded-3xl border border-soft bg-surface-muted/60 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 class="text-sm font-semibold text-primary">文本清洗结果</h4>
+            <p class="mt-1 text-xs text-secondary">
+              更新 {{ formatInteger(textCleanResult.updated_rows || 0) }} 条记录，命中 {{ formatInteger(textCleanResult.matched_rows || 0) }} 条。
+            </p>
+          </div>
+          <span class="text-xs text-secondary">{{ (textCleanResult.tables || []).length }} 项</span>
+        </div>
+        <div v-if="(textCleanResult.tables || []).length" class="mt-4 grid gap-2 md:grid-cols-2">
+          <div
+            v-for="table in textCleanResult.tables"
+            :key="`text-clean-${table.table}`"
+            class="rounded-2xl border border-soft bg-white px-4 py-3"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-sm font-semibold text-primary">{{ table.table }}</p>
+              <span class="text-xs text-secondary">{{ formatInteger(table.updated_rows || 0) }} 条</span>
+            </div>
+            <p class="mt-1 text-xs text-secondary">
+              命中 {{ formatInteger(table.matched_rows || 0) }} 条 · 字段 {{ (table.target_columns || []).join(' / ') || '—' }}
+            </p>
+          </div>
+        </div>
+      </div>
 
       <div class="rounded-2xl border border-soft bg-slate-950 px-4 py-4">
         <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Task Log</p>
@@ -471,8 +552,8 @@
 
     <AppModal
       v-model="stopwordModalOpen"
-      title="项目排除词设置"
-      description="左侧查看系统整理的高频词建议，右侧维护项目排除词。修改后会同步到当前页面，保存共享配置后正式生效。"
+      :title="stopwordModalTitle"
+      :description="stopwordModalDescription"
       width="max-w-6xl"
       :show-footer="false"
       scrollable
@@ -586,21 +667,21 @@
                   :key="`suggestion-${item.term}`"
                   type="button"
                   class="flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition disabled:cursor-default"
-                  :class="isNoiseTermSelected(item.term)
+                  :class="isActiveTermSelected(item.term)
                     ? 'border-rose-200 bg-rose-50/70'
                     : 'border-soft bg-white hover:border-brand-soft hover:bg-brand-50/60'"
-                  :disabled="isNoiseTermSelected(item.term)"
-                  @click="appendNoiseTerm(item.term)"
+                  :disabled="isActiveTermSelected(item.term)"
+                  @click="appendActiveTerm(item.term)"
                 >
                   <div>
-                    <p class="text-sm font-semibold" :class="isNoiseTermSelected(item.term) ? 'text-rose-700' : 'text-primary'">{{ item.term }}</p>
-                    <p class="mt-1 text-xs" :class="isNoiseTermSelected(item.term) ? 'text-rose-500' : 'text-secondary'">文档频次 {{ item.doc_count }} · 总词频 {{ item.total_count }}</p>
+                    <p class="text-sm font-semibold" :class="isActiveTermSelected(item.term) ? 'text-rose-700' : 'text-primary'">{{ item.term }}</p>
+                    <p class="mt-1 text-xs" :class="isActiveTermSelected(item.term) ? 'text-rose-500' : 'text-secondary'">文档频次 {{ item.doc_count }} · 总词频 {{ item.total_count }}</p>
                   </div>
                   <span
                     class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
-                    :class="isNoiseTermSelected(item.term) ? 'bg-rose-100 text-rose-600' : 'bg-brand-50 text-brand-600'"
+                    :class="isActiveTermSelected(item.term) ? 'bg-rose-100 text-rose-600' : 'bg-brand-50 text-brand-600'"
                   >
-                    {{ isNoiseTermSelected(item.term) ? '已排除' : '追加' }}
+                    {{ isActiveTermSelected(item.term) ? activeTermSelectedLabel : '追加' }}
                   </span>
                 </button>
               </div>
@@ -613,32 +694,32 @@
           <div class="rounded-3xl border border-soft bg-surface-muted/60 p-5">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">项目排除词</p>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">{{ activeTermPanelTitle }}</p>
                 <p class="mt-2 text-sm text-secondary">支持换行、空格、逗号（，）或分号（；）分隔。</p>
               </div>
             </div>
 
             <div class="mt-4 flex gap-2">
-              <input v-model.trim="manualNoiseTerm" type="text" class="input flex-1" placeholder="输入一个词后回车或点击追加" @keydown.enter.prevent="appendManualNoiseTerm" />
-              <button type="button" class="btn-secondary" @click="appendManualNoiseTerm">追加</button>
+              <input v-model.trim="manualNoiseTerm" type="text" class="input flex-1" placeholder="输入一个词后回车或点击追加" @keydown.enter.prevent="appendManualActiveTerm" />
+              <button type="button" class="btn-secondary" @click="appendManualActiveTerm">追加</button>
             </div>
 
             <textarea
-              v-model="sharedPromptState.projectStopwordsText"
+              v-model="activeStopwordText"
               rows="12"
               class="input mt-4 min-h-[14rem] resize-y"
-              placeholder="例如：油烟机 抽油烟机 厨电 方太 老板电器 ..."
+              :placeholder="activeTermPlaceholder"
             />
 
             <div class="mt-4 rounded-2xl border border-soft bg-white p-4">
               <div class="flex items-center justify-between gap-3">
                 <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">已解析词条</p>
-                <span class="text-xs text-secondary">{{ stopwordList.length }} 个</span>
+                <span class="text-xs text-secondary">{{ activeStopwordList.length }} 个</span>
               </div>
-              <div v-if="stopwordList.length" class="mt-3 flex max-h-52 flex-wrap gap-2 overflow-y-auto">
+              <div v-if="activeStopwordList.length" class="mt-3 flex max-h-52 flex-wrap gap-2 overflow-y-auto">
                 <div
-                  v-for="term in stopwordList"
-                  :key="`modal-noise-term-${term}`"
+                  v-for="term in activeStopwordList"
+                  :key="`modal-${stopwordModalMode}-${term}`"
                   class="inline-flex items-center gap-1 rounded-full bg-brand-50 py-1 pl-3 pr-1 text-xs font-medium text-brand-700"
                 >
                   <span>{{ term }}</span>
@@ -646,13 +727,13 @@
                     type="button"
                     class="inline-flex h-5 w-5 items-center justify-center rounded-full text-brand-600 transition hover:bg-brand-100 hover:text-brand-700"
                     :aria-label="`移除 ${term}`"
-                    @click="removeNoiseTerm(term)"
+                    @click="removeActiveTerm(term)"
                   >
                     <XMarkIcon class="h-3 w-3" />
                   </button>
                 </div>
               </div>
-              <p v-else class="mt-3 text-sm text-secondary">当前还没有排除词，可以手动输入，也可以从左侧建议里点选追加。</p>
+              <p v-else class="mt-3 text-sm text-secondary">{{ activeTermEmptyMessage }}</p>
             </div>
             <p v-if="sharedPromptState.error" class="mt-3 text-xs text-danger">{{ sharedPromptState.error }}</p>
             <p v-else-if="sharedPromptState.success" class="mt-3 text-xs text-emerald-600">{{ sharedPromptState.success }}</p>
@@ -731,6 +812,7 @@ const pollTimer = ref(null)
 const stopwordSuggestionTimer = ref(null)
 const publisherDetectionTimer = ref(null)
 const stopwordModalOpen = ref(false)
+const stopwordModalMode = ref('delete')
 const publisherModalOpen = ref(false)
 const manualNoiseTerm = ref('')
 const stopwordSuggestionStage = ref('post')
@@ -747,6 +829,7 @@ const sharedPromptState = reactive({
   error: '',
   success: '',
   projectStopwordsText: '',
+  projectTextCleanStopwordsText: '',
   publisherBlacklistText: '',
   publisherFuzzyPatternsText: ''
 })
@@ -794,13 +877,34 @@ const postcleanState = reactive({
   fetchRefreshWorker: null
 })
 
+const textCleanState = reactive({
+  running: false,
+  success: null,
+  message: '',
+  result: null,
+  fetchRefreshWorker: null
+})
+
+const fullCleanState = reactive({
+  running: false,
+  message: ''
+})
+
 const stopwordList = computed(() => splitStopwordText(sharedPromptState.projectStopwordsText))
-const stopwordSet = computed(() => new Set(stopwordList.value))
+const textCleanStopwordList = computed(() => splitStopwordText(sharedPromptState.projectTextCleanStopwordsText))
 const blacklistList = computed(() => splitBlacklistText(sharedPromptState.publisherBlacklistText))
 const fuzzyPatternList = computed(() => splitBlacklistText(sharedPromptState.publisherFuzzyPatternsText))
 const canRun = computed(() => Boolean(currentProjectName.value && selectedDatabase.value))
 const canInspectPublishers = computed(() => Boolean(currentProjectName.value && selectedDatabase.value))
+const operationRunning = computed(() => Boolean(fullCleanState.running || textCleanState.running || postcleanState.running))
 const postcleanResult = computed(() => postcleanState.result && typeof postcleanState.result === 'object' ? postcleanState.result : null)
+const textCleanResult = computed(() => textCleanState.result && typeof textCleanState.result === 'object' ? textCleanState.result : null)
+const textCleanStatusLabel = computed(() => {
+  if (textCleanState.running) return '正在执行'
+  if (textCleanState.success === true) return '已完成'
+  if (textCleanState.success === false) return '执行失败'
+  return '待执行'
+})
 const statusLabel = computed(() => {
   if (postcleanState.running) return '正在执行'
   if (postcleanState.success === true) {
@@ -810,6 +914,48 @@ const statusLabel = computed(() => {
   if (postcleanState.success === false) return '执行失败'
   return '待执行'
 })
+const activeStopwordText = computed({
+  get: () => (
+    stopwordModalMode.value === 'text'
+      ? sharedPromptState.projectTextCleanStopwordsText
+      : sharedPromptState.projectStopwordsText
+  ),
+  set: (value) => {
+    if (stopwordModalMode.value === 'text') {
+      sharedPromptState.projectTextCleanStopwordsText = value
+    } else {
+      sharedPromptState.projectStopwordsText = value
+    }
+  }
+})
+const activeStopwordList = computed(() => (
+  stopwordModalMode.value === 'text' ? textCleanStopwordList.value : stopwordList.value
+))
+const activeStopwordSet = computed(() => new Set(activeStopwordList.value))
+const stopwordModalTitle = computed(() => (
+  stopwordModalMode.value === 'text' ? '文本清洗词设置' : '项目排除词设置'
+))
+const stopwordModalDescription = computed(() => (
+  stopwordModalMode.value === 'text'
+    ? '左侧查看系统整理的高频词建议，右侧维护文本清洗词表。修改后会同步到当前页面，保存共享配置后正式生效。'
+    : '左侧查看系统整理的高频词建议，右侧维护项目排除词。修改后会同步到当前页面，保存共享配置后正式生效。'
+))
+const activeTermPanelTitle = computed(() => (
+  stopwordModalMode.value === 'text' ? '文本清洗词表' : '项目排除词'
+))
+const activeTermPlaceholder = computed(() => (
+  stopwordModalMode.value === 'text'
+    ? '例如：品牌名 规格词 营销词 ...'
+    : '例如：油烟机 抽油烟机 厨电 方太 老板电器 ...'
+))
+const activeTermSelectedLabel = computed(() => (
+  stopwordModalMode.value === 'text' ? '已加入' : '已排除'
+))
+const activeTermEmptyMessage = computed(() => (
+  stopwordModalMode.value === 'text'
+    ? '当前还没有文本清洗词，可以手动输入，也可以从左侧建议里点选追加。'
+    : '当前还没有排除词，可以手动输入，也可以从左侧建议里点选追加。'
+))
 const fetchRefreshWorkerRunning = computed(() => {
   const worker = postcleanState.fetchRefreshWorker
   return worker && (worker.status === 'running' || worker.running === true)
@@ -1034,9 +1180,13 @@ watch([currentProjectName, selectedDatasetId, selectedDatabase], async ([project
     stopPolling()
     stopPublisherDetectionPolling()
     resetPostcleanState()
+    resetTextCleanState()
+    resetFullCleanState()
     resetPublisherDetectionState()
     return
   }
+  resetTextCleanState()
+  resetFullCleanState()
   await loadPostcleanStatus({
     project: projectName,
     datasetId,
@@ -1052,6 +1202,8 @@ watch(
   () => selectedTables.value.join('|'),
   async () => {
     if (!currentProjectName.value || !selectedDatabase.value) return
+    resetTextCleanState()
+    resetFullCleanState()
     await loadPostcleanStatus({
       project: currentProjectName.value,
       datasetId: selectedDatasetId.value,
@@ -1126,6 +1278,7 @@ function resetSharedPromptState() {
   sharedPromptState.error = ''
   sharedPromptState.success = ''
   sharedPromptState.projectStopwordsText = ''
+  sharedPromptState.projectTextCleanStopwordsText = ''
   sharedPromptState.publisherBlacklistText = ''
   sharedPromptState.publisherFuzzyPatternsText = ''
 }
@@ -1145,6 +1298,13 @@ function openPublisherModal() {
 }
 
 function openStopwordModal() {
+  stopwordModalMode.value = 'delete'
+  stopwordSuggestionStage.value = 'post'
+  stopwordModalOpen.value = true
+}
+
+function openTextCleanStopwordModal() {
+  stopwordModalMode.value = 'text'
   stopwordSuggestionStage.value = 'post'
   stopwordModalOpen.value = true
 }
@@ -1189,6 +1349,7 @@ async function loadSharedPromptConfig() {
     const response = await callApi(`/api/topic/bertopic/prompt?${params.toString()}`)
     const payload = response?.data || {}
     sharedPromptState.projectStopwordsText = splitStopwordText(payload.project_stopwords_text || payload.project_stopwords || '').join('\n')
+    sharedPromptState.projectTextCleanStopwordsText = splitStopwordText(payload.project_text_clean_stopwords_text || payload.project_text_clean_stopwords || '').join('\n')
     sharedPromptState.publisherBlacklistText = splitBlacklistText(payload.publisher_blacklist_text || payload.publisher_blacklist || '').join('\n')
     sharedPromptState.publisherFuzzyPatternsText = splitBlacklistText(payload.publisher_fuzzy_patterns_text || payload.publisher_fuzzy_patterns || '').join('\n')
   } catch (error) {
@@ -1212,12 +1373,14 @@ async function saveSharedPromptConfig({ silent = false } = {}) {
         project: currentProjectName.value,
         dataset_id: selectedDatasetId.value || undefined,
         project_stopwords: sharedPromptState.projectStopwordsText,
+        project_text_clean_stopwords: sharedPromptState.projectTextCleanStopwordsText,
         publisher_blacklist: sharedPromptState.publisherBlacklistText,
         publisher_fuzzy_patterns: sharedPromptState.publisherFuzzyPatternsText
       })
     })
     const payload = response?.data || {}
     sharedPromptState.projectStopwordsText = splitStopwordText(payload.project_stopwords_text || sharedPromptState.projectStopwordsText).join('\n')
+    sharedPromptState.projectTextCleanStopwordsText = splitStopwordText(payload.project_text_clean_stopwords_text || sharedPromptState.projectTextCleanStopwordsText).join('\n')
     sharedPromptState.publisherBlacklistText = splitBlacklistText(payload.publisher_blacklist_text || sharedPromptState.publisherBlacklistText).join('\n')
     sharedPromptState.publisherFuzzyPatternsText = splitBlacklistText(payload.publisher_fuzzy_patterns_text || sharedPromptState.publisherFuzzyPatternsText).join('\n')
     if (!silent) {
@@ -1248,23 +1411,23 @@ async function toggleBlacklist(publisher) {
   }
 }
 
-function isNoiseTermSelected(term) {
-  return stopwordSet.value.has(String(term || '').trim())
+function isActiveTermSelected(term) {
+  return activeStopwordSet.value.has(String(term || '').trim())
 }
 
-function appendNoiseTerm(term) {
-  const nextTerms = splitStopwordText(`${sharedPromptState.projectStopwordsText}\n${term}`)
-  sharedPromptState.projectStopwordsText = nextTerms.join('\n')
+function appendActiveTerm(term) {
+  const nextTerms = splitStopwordText(`${activeStopwordText.value}\n${term}`)
+  activeStopwordText.value = nextTerms.join('\n')
 }
 
-function removeNoiseTerm(term) {
-  sharedPromptState.projectStopwordsText = stopwordList.value.filter((item) => item !== term).join('\n')
+function removeActiveTerm(term) {
+  activeStopwordText.value = activeStopwordList.value.filter((item) => item !== term).join('\n')
 }
 
-function appendManualNoiseTerm() {
+function appendManualActiveTerm() {
   const value = String(manualNoiseTerm.value || '').trim()
   if (!value) return
-  appendNoiseTerm(value)
+  appendActiveTerm(value)
   manualNoiseTerm.value = ''
 }
 
@@ -1478,12 +1641,29 @@ function resetPostcleanState() {
   }
 }
 
-async function runPostclean() {
-  if (!canRun.value) return
-  const confirmed = window.confirm(`将对数据库 ${selectedDatabase.value} 执行后清洗硬删除，是否继续？`)
-  if (!confirmed) return
-  const saved = await saveSharedPromptConfig({ silent: true })
-  if (!saved) return
+function resetTextCleanState() {
+  textCleanState.running = false
+  textCleanState.success = null
+  textCleanState.message = ''
+  textCleanState.result = null
+  textCleanState.fetchRefreshWorker = null
+}
+
+function resetFullCleanState() {
+  fullCleanState.running = false
+  fullCleanState.message = ''
+}
+
+async function runPostclean({ confirm = true, save = true } = {}) {
+  if (!canRun.value) return false
+  if (confirm) {
+    const confirmed = window.confirm(`将对数据库 ${selectedDatabase.value} 执行删除后清洗，命中记录会被删除，是否继续？`)
+    if (!confirmed) return false
+  }
+  if (save) {
+    const saved = await saveSharedPromptConfig({ silent: true })
+    if (!saved) return false
+  }
   postcleanState.success = null
   postcleanState.message = ''
   try {
@@ -1500,9 +1680,78 @@ async function runPostclean() {
     postcleanState.running = true
     postcleanState.message = response?.data?.message || '数据库后清洗任务已提交。'
     startPolling()
+    return true
   } catch (error) {
     postcleanState.success = false
     postcleanState.message = error instanceof Error ? error.message : '启动数据库后清洗失败'
+    return false
+  }
+}
+
+async function runTextClean({ confirm = true, save = true } = {}) {
+  if (!canRun.value) return false
+  if (confirm) {
+    const confirmed = window.confirm(`将对数据库 ${selectedDatabase.value} 执行文本清洗，并把命中词替换为空，是否继续？`)
+    if (!confirmed) return false
+  }
+  if (save) {
+    const saved = await saveSharedPromptConfig({ silent: true })
+    if (!saved) return false
+  }
+  textCleanState.running = true
+  textCleanState.success = null
+  textCleanState.message = '正在执行文本清洗。'
+  textCleanState.result = null
+  try {
+    const response = await callApi('/api/database/textclean', {
+      method: 'POST',
+      body: JSON.stringify({
+        project: currentProjectName.value,
+        dataset_id: selectedDatasetId.value || undefined,
+        database: selectedDatabase.value,
+        tables: selectedTables.value.length ? selectedTables.value : undefined
+      })
+    })
+    const payload = response?.data || {}
+    textCleanState.result = payload
+    textCleanState.fetchRefreshWorker = response?.fetch_refresh_worker || null
+    textCleanState.success = true
+    const updatedRows = Number(payload.updated_rows || 0)
+    const followUpMessage = String(payload.follow_up?.message || '').trim()
+    textCleanState.message = followUpMessage
+      ? `文本清洗完成，更新 ${formatInteger(updatedRows)} 条记录。${followUpMessage}`
+      : `文本清洗完成，更新 ${formatInteger(updatedRows)} 条记录。`
+    return true
+  } catch (error) {
+    textCleanState.success = false
+    textCleanState.message = error instanceof Error ? error.message : '执行文本清洗失败'
+    return false
+  } finally {
+    textCleanState.running = false
+  }
+}
+
+async function runFullClean() {
+  if (!canRun.value || operationRunning.value) return
+  const confirmed = window.confirm(`将对数据库 ${selectedDatabase.value} 先执行文本清洗，再提交删除后清洗，是否继续？`)
+  if (!confirmed) return
+  const saved = await saveSharedPromptConfig({ silent: true })
+  if (!saved) return
+  fullCleanState.running = true
+  fullCleanState.message = '正在执行文本清洗。'
+  try {
+    const textOk = await runTextClean({ confirm: false, save: false })
+    if (!textOk) {
+      fullCleanState.message = textCleanState.message || '文本清洗未完成。'
+      return
+    }
+    fullCleanState.message = '文本清洗完成，正在提交删除后清洗。'
+    const postOk = await runPostclean({ confirm: false, save: false })
+    fullCleanState.message = postOk
+      ? '完整清洗已提交，删除后清洗会在后台继续执行。'
+      : (postcleanState.message || '删除后清洗提交失败。')
+  } finally {
+    fullCleanState.running = false
   }
 }
 

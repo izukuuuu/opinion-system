@@ -673,6 +673,14 @@ def save_topic_bertopic_prompt():
         if project_stopwords is None:
             project_stopwords = payload.get("projectStopwordsText")
 
+        project_text_clean_stopwords = payload.get("project_text_clean_stopwords")
+        if project_text_clean_stopwords is None:
+            project_text_clean_stopwords = payload.get("projectTextCleanStopwords")
+        if project_text_clean_stopwords is None:
+            project_text_clean_stopwords = payload.get("project_text_clean_stopwords_text")
+        if project_text_clean_stopwords is None:
+            project_text_clean_stopwords = payload.get("projectTextCleanStopwordsText")
+
         publisher_blacklist = payload.get("publisher_blacklist")
         if publisher_blacklist is None:
             publisher_blacklist = payload.get("publisherBlacklist")
@@ -718,6 +726,7 @@ def save_topic_bertopic_prompt():
             pre_filter_query_hint=str(pre_filter_query_hint or ""),
             pre_filter_negative_hint=str(pre_filter_negative_hint or ""),
             project_stopwords=project_stopwords,
+            project_text_clean_stopwords=project_text_clean_stopwords,
             publisher_blacklist=publisher_blacklist,
             publisher_fuzzy_patterns=publisher_fuzzy_patterns,
             recluster_topic_limit=recluster_topic_limit,

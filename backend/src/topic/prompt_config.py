@@ -33,6 +33,7 @@ DEFAULT_PREFILTER_MAX_DROP_RATIO = 0.35
 DEFAULT_PREFILTER_QUERY_HINT = ""
 DEFAULT_PREFILTER_NEGATIVE_HINT = ""
 DEFAULT_PROJECT_STOPWORDS: list[str] = []
+DEFAULT_PROJECT_TEXT_CLEAN_STOPWORDS: list[str] = []
 DEFAULT_PUBLISHER_BLACKLIST: list[str] = []
 DEFAULT_PUBLISHER_FUZZY_PATTERNS: list[str] = ["橱窗", "好物", "旗舰"]
 DEFAULT_GLOBAL_FILTERS = ["明星八卦", "广告推广", "抽奖转发", "求职招聘"]
@@ -215,6 +216,9 @@ def _default_payload(topic: str, path: Path, exists: bool = False) -> Dict[str, 
         "project_stopwords": list(DEFAULT_PROJECT_STOPWORDS),
         "project_stopwords_text": "",
         "project_stopwords_line_count": 0,
+        "project_text_clean_stopwords": list(DEFAULT_PROJECT_TEXT_CLEAN_STOPWORDS),
+        "project_text_clean_stopwords_text": "",
+        "project_text_clean_stopwords_line_count": 0,
         "publisher_blacklist": list(DEFAULT_PUBLISHER_BLACKLIST),
         "publisher_blacklist_text": "",
         "publisher_blacklist_line_count": 0,
@@ -377,6 +381,9 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
             "project_stopwords": _normalise_text_lines(
                 settings.get("project_stopwords", DEFAULT_PROJECT_STOPWORDS)
             ),
+            "project_text_clean_stopwords": _normalise_text_lines(
+                settings.get("project_text_clean_stopwords", DEFAULT_PROJECT_TEXT_CLEAN_STOPWORDS)
+            ),
             "publisher_blacklist": _normalise_text_lines(
                 settings.get("publisher_blacklist", DEFAULT_PUBLISHER_BLACKLIST)
             ),
@@ -425,6 +432,8 @@ def load_topic_bertopic_prompt_config(topic: str) -> Dict[str, Any]:
     )
     payload["project_stopwords_text"] = _join_text_lines(payload.get("project_stopwords", []))
     payload["project_stopwords_line_count"] = len(payload.get("project_stopwords", []))
+    payload["project_text_clean_stopwords_text"] = _join_text_lines(payload.get("project_text_clean_stopwords", []))
+    payload["project_text_clean_stopwords_line_count"] = len(payload.get("project_text_clean_stopwords", []))
     payload["publisher_blacklist_text"] = _join_text_lines(payload.get("publisher_blacklist", []))
     payload["publisher_blacklist_line_count"] = len(payload.get("publisher_blacklist", []))
     payload["publisher_fuzzy_patterns_text"] = _join_text_lines(payload.get("publisher_fuzzy_patterns", []))
@@ -453,6 +462,7 @@ def persist_topic_bertopic_prompt_config(
     pre_filter_query_hint: str = "",
     pre_filter_negative_hint: str = "",
     project_stopwords: Any = None,
+    project_text_clean_stopwords: Any = None,
     publisher_blacklist: Any = None,
     publisher_fuzzy_patterns: Any = None,
     recluster_topic_limit: Any = None,
@@ -510,6 +520,12 @@ def persist_topic_bertopic_prompt_config(
         final_project_stopwords = _normalise_text_lines(existing_payload.get("project_stopwords", DEFAULT_PROJECT_STOPWORDS))
     else:
         final_project_stopwords = _normalise_text_lines(project_stopwords)
+    if project_text_clean_stopwords is None:
+        final_project_text_clean_stopwords = _normalise_text_lines(
+            existing_payload.get("project_text_clean_stopwords", DEFAULT_PROJECT_TEXT_CLEAN_STOPWORDS)
+        )
+    else:
+        final_project_text_clean_stopwords = _normalise_text_lines(project_text_clean_stopwords)
     if publisher_blacklist is None:
         final_publisher_blacklist = _normalise_text_lines(
             existing_payload.get("publisher_blacklist", DEFAULT_PUBLISHER_BLACKLIST)
@@ -559,6 +575,7 @@ def persist_topic_bertopic_prompt_config(
             "pre_filter_query_hint": final_pre_filter_query_hint,
             "pre_filter_negative_hint": final_pre_filter_negative_hint,
             "project_stopwords": final_project_stopwords,
+            "project_text_clean_stopwords": final_project_text_clean_stopwords,
             "publisher_blacklist": final_publisher_blacklist,
             "publisher_fuzzy_patterns": final_publisher_fuzzy_patterns,
             "use_multi_agent": True,

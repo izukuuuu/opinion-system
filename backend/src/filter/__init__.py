@@ -8,6 +8,7 @@ from .database_processing import (
     restore_database_snapshot,
     run_database_deduplicate,
     run_database_postclean,
+    run_database_text_clean,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "run_keyword_preclean",
     "run_database_deduplicate",
     "run_database_postclean",
+    "run_database_text_clean",
 ]
