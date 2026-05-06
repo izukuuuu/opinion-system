@@ -838,6 +838,13 @@ const stopwordSuggestionTopK = computed(() => {
   const parsed = Number.parseInt(String(stopwordSuggestionCustomTopK.value || '').trim(), 10)
   return Number.isInteger(parsed) && parsed >= 20 ? parsed : STOPWORD_SUGGESTION_DEFAULT_TOP_K
 })
+function formatStopwordArchiveLayer(layer) {
+  const value = String(layer || '').toLowerCase()
+  if (value === 'filter') return '筛选结果'
+  if (value === 'clean') return '预处理结果'
+  if (value === 'fetch') return '原始数据'
+  return ''
+}
 const stopwordSuggestionArchiveOptions = computed(() => {
   const priorities = stopwordSuggestionStage.value === 'pre'
     ? ['clean', 'fetch']
@@ -858,10 +865,15 @@ const stopwordSuggestionArchiveOptions = computed(() => {
   })
   return Array.from(merged.values())
     .sort((a, b) => a.rank - b.rank || String(b.value).localeCompare(String(a.value)))
-    .map((item) => ({
-      value: item.value,
-      label: `${item.value} · ${Array.from(new Set(item.labels)).join(' / ')}`
-    }))
+    .map((item) => {
+      const labels = Array.from(new Set(item.labels))
+        .map(formatStopwordArchiveLayer)
+        .filter(Boolean)
+      return {
+        value: item.value,
+        label: labels.length ? `${item.value} · ${labels.join('、')}` : item.value
+      }
+    })
 })
 const stopwordSuggestionTask = computed(() => (
   stopwordSuggestionState.task && typeof stopwordSuggestionState.task === 'object'

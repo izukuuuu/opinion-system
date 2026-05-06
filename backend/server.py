@@ -191,7 +191,8 @@ def _resolve_stopword_suggestion_inputs(
     dataset_id_param: str,
     date_param: str,
     stage_param: str,
-) -> Tuple[str, str, str]:
+    purpose_param: str = "",
+) -> Tuple[str, str, str, str]:
     if not topic_param and not project_param and not dataset_id_param:
         raise ValueError("Missing required field(s): topic/project/dataset_id")
 
@@ -205,9 +206,10 @@ def _resolve_stopword_suggestion_inputs(
 
     topic_identifier, _, _, _ = resolve_topic_identifier(resolution_payload, PROJECT_MANAGER)
     stage = stage_param if stage_param in {"pre", "post"} else "pre"
+    purpose = purpose_param if purpose_param in {"delete", "text_clean"} else "delete"
     date_value = str(date_param or "").strip()
     if date_value:
-        return topic_identifier, date_value, stage
+        return topic_identifier, date_value, stage, purpose
 
     priorities = ("clean", "fetch") if stage == "pre" else ("filter", "clean", "fetch")
     for layer in priorities:
@@ -215,7 +217,7 @@ def _resolve_stopword_suggestion_inputs(
         for archive in archives:
             candidate = str((archive or {}).get("date") or "").strip()
             if candidate:
-                return topic_identifier, candidate, stage
+                return topic_identifier, candidate, stage, purpose
 
     raise ValueError("未找到可用的数据存档，请先拉取数据或完成预处理。")
 
@@ -1639,14 +1641,16 @@ def get_filter_stopword_suggestions():
     dataset_id_param = str(request.args.get("dataset_id", "") or "").strip()
     date_param = str(request.args.get("date", "") or "").strip()
     stage_param = str(request.args.get("stage", "") or "").strip().lower()
+    purpose_param = str(request.args.get("purpose", request.args.get("mode", "")) or "").strip().lower()
 
     try:
-        topic_identifier, resolved_date, stage = _resolve_stopword_suggestion_inputs(
+        topic_identifier, resolved_date, stage, purpose = _resolve_stopword_suggestion_inputs(
             topic_param,
             project_param,
             dataset_id_param,
             date_param,
             stage_param,
+            purpose_param,
         )
     except ValueError as exc:
         return error(str(exc))
@@ -1655,6 +1659,7 @@ def get_filter_stopword_suggestions():
         topic_identifier,
         resolved_date,
         stage=stage,
+        purpose=purpose,
     )
     return success({"data": payload})
 
@@ -1667,16 +1672,18 @@ def create_filter_stopword_suggestion_task():
     dataset_id_param = str(payload.get("dataset_id") or "").strip()
     date_param = str(payload.get("date") or "").strip()
     stage_param = str(payload.get("stage") or "").strip().lower()
+    purpose_param = str(payload.get("purpose", payload.get("mode", "")) or "").strip().lower()
     force_value = payload.get("force")
     top_k_value = payload.get("top_k", payload.get("limit", 100))
 
     try:
-        topic_identifier, resolved_date, stage = _resolve_stopword_suggestion_inputs(
+        topic_identifier, resolved_date, stage, purpose = _resolve_stopword_suggestion_inputs(
             topic_param,
             project_param,
             dataset_id_param,
             date_param,
             stage_param,
+            purpose_param,
         )
     except ValueError as exc:
         return error(str(exc))
@@ -1688,6 +1695,7 @@ def create_filter_stopword_suggestion_task():
             resolved_date,
             top_k=int(top_k_value or 100),
             stage=stage,
+            purpose=purpose,
             force=force,
         )
     except Exception as exc:
@@ -1698,6 +1706,7 @@ def create_filter_stopword_suggestion_task():
         "topic_identifier": topic_identifier,
         "date": resolved_date,
         "stage": stage,
+        "purpose": purpose,
         "task": task,
     }
     return success({"data": response_payload}, status_code=202)

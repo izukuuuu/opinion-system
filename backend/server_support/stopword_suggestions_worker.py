@@ -34,6 +34,7 @@ def _run_task(task_id: str) -> None:
     topic_identifier = str(task.get("topic_identifier") or "").strip()
     date = str(task.get("date") or "").strip()
     stage = str(task.get("stage") or "pre").strip().lower() or "pre"
+    purpose = str(task.get("purpose") or "delete").strip().lower() or "delete"
     top_k = int(task.get("top_k") or 100)
 
     def _progress_callback(phase: str, percentage: int, message: str, summary: dict) -> None:
@@ -51,6 +52,7 @@ def _run_task(task_id: str) -> None:
         date,
         top_k=top_k,
         stage=stage,
+        purpose=purpose,
         progress_callback=_progress_callback,
     )
 

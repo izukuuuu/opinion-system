@@ -180,9 +180,15 @@ def _split_terms(text: str) -> List[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def _load_excluded_terms(topic_identifier: str) -> set[str]:
+def _normalise_purpose(value: Any) -> str:
+    purpose = str(value or "").strip().lower()
+    return purpose if purpose in {"delete", "text_clean"} else "delete"
+
+
+def _load_excluded_terms(topic_identifier: str, *, purpose: str = "delete") -> set[str]:
     prompt_payload = load_topic_bertopic_prompt_config(topic_identifier)
-    prompt_terms = prompt_payload.get("project_stopwords") or []
+    prompt_key = "project_text_clean_stopwords" if _normalise_purpose(purpose) == "text_clean" else "project_stopwords"
+    prompt_terms = prompt_payload.get(prompt_key) or []
     global_payload = load_bertopic_stopwords()
     global_terms = _split_terms(str(global_payload.get("content") or ""))
     excluded = {_normalise_term(term) for term in prompt_terms}
@@ -286,6 +292,7 @@ def create_task(
     *,
     top_k: int = DEFAULT_TOP_K,
     stage: str = "pre",
+    purpose: str = "delete",
 ) -> Dict[str, Any]:
     now = _utc_now()
     task = {
@@ -293,6 +300,7 @@ def create_task(
         "topic_identifier": str(topic_identifier or "").strip(),
         "date": str(date or "").strip(),
         "stage": str(stage or "pre").strip().lower() or "pre",
+        "purpose": _normalise_purpose(purpose),
         "source_layer": "",
         "status": "queued",
         "phase": "queued",
@@ -332,6 +340,7 @@ def find_latest_task(
     date: str,
     *,
     stage: str = "pre",
+    purpose: str = "delete",
     statuses: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     desired_statuses = set(statuses or [])
@@ -342,6 +351,8 @@ def find_latest_task(
         if str(task.get("date") or "") != date:
             continue
         if str(task.get("stage") or "pre") != str(stage or "pre"):
+            continue
+        if _normalise_purpose(task.get("purpose")) != _normalise_purpose(purpose):
             continue
         if desired_statuses and str(task.get("status") or "") not in desired_statuses:
             continue
@@ -358,22 +369,23 @@ def create_or_reuse_task(
     *,
     top_k: int = DEFAULT_TOP_K,
     stage: str = "pre",
+    purpose: str = "delete",
     force: bool = False,
 ) -> Dict[str, Any]:
-    running_task = find_latest_task(topic_identifier, date, stage=stage, statuses=["queued", "running"])
+    running_task = find_latest_task(topic_identifier, date, stage=stage, purpose=purpose, statuses=["queued", "running"])
     if running_task:
         return running_task
     if not force:
-        completed_task = find_latest_task(topic_identifier, date, stage=stage, statuses=["completed"])
+        completed_task = find_latest_task(topic_identifier, date, stage=stage, purpose=purpose, statuses=["completed"])
         if completed_task:
             return completed_task
-    task = create_task(topic_identifier, date, top_k=top_k, stage=stage)
+    task = create_task(topic_identifier, date, top_k=top_k, stage=stage, purpose=purpose)
     ensure_worker_running()
     return task
 
 
-def get_latest_task(topic_identifier: str, date: str, *, stage: str = "pre") -> Optional[Dict[str, Any]]:
-    return find_latest_task(topic_identifier, date, stage=stage)
+def get_latest_task(topic_identifier: str, date: str, *, stage: str = "pre", purpose: str = "delete") -> Optional[Dict[str, Any]]:
+    return find_latest_task(topic_identifier, date, stage=stage, purpose=purpose)
 
 
 def reserve_next_task() -> Optional[Dict[str, Any]]:
@@ -501,12 +513,14 @@ def _reconcile_orphaned_running_tasks(worker_status: Dict[str, Any]) -> None:
         )
 
 
-def build_status_payload(topic_identifier: str, date: str, *, stage: str = "pre") -> Dict[str, Any]:
-    task = get_latest_task(topic_identifier, date, stage=stage)
+def build_status_payload(topic_identifier: str, date: str, *, stage: str = "pre", purpose: str = "delete") -> Dict[str, Any]:
+    purpose = _normalise_purpose(purpose)
+    task = get_latest_task(topic_identifier, date, stage=stage, purpose=purpose)
     return {
         "topic_identifier": topic_identifier,
         "date": date,
         "stage": stage,
+        "purpose": purpose,
         "task": task,
         "worker": load_worker_status(),
     }
@@ -533,13 +547,15 @@ def analyse_archive_terms(
     *,
     top_k: int = DEFAULT_TOP_K,
     stage: str = "pre",
+    purpose: str = "delete",
     progress_callback=None,
 ) -> Dict[str, Any]:
     source_layer, files = _pick_source_layer(topic_identifier, date, stage)
     if not files:
         raise FileNotFoundError("未找到可用的数据源文件")
 
-    excluded_terms = _load_excluded_terms(topic_identifier)
+    purpose = _normalise_purpose(purpose)
+    excluded_terms = _load_excluded_terms(topic_identifier, purpose=purpose)
     total_docs = 0
     for file_path in files:
         with file_path.open("r", encoding="utf-8") as handle:
@@ -610,6 +626,7 @@ def analyse_archive_terms(
             "distinct_terms": len(doc_counter),
             "excluded_terms": len(excluded_terms),
             "source_layer": source_layer,
+            "purpose": purpose,
         },
         "result": {
             "terms": _build_top_terms(doc_counter, total_counter, total_docs=processed_docs, top_k=top_k),
