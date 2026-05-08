@@ -1,0 +1,233 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1456" height="1086" viewBox="0 0 1456 1086">
+  <defs>
+    <linearGradient id="blueFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f4f9ff"/>
+      <stop offset="1" stop-color="#edf6ff"/>
+    </linearGradient>
+    <linearGradient id="greenFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fbfffb"/>
+      <stop offset="1" stop-color="#f1fff3"/>
+    </linearGradient>
+    <linearGradient id="orangeFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fffdf9"/>
+      <stop offset="1" stop-color="#fff4ea"/>
+    </linearGradient>
+    <linearGradient id="purpleFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fffdff"/>
+      <stop offset="1" stop-color="#f9f7ff"/>
+    </linearGradient>
+    <linearGradient id="cyanFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fbfeff"/>
+      <stop offset="1" stop-color="#effbff"/>
+    </linearGradient>
+    <linearGradient id="redFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fffdfd"/>
+      <stop offset="1" stop-color="#fff4f4"/>
+    </linearGradient>
+    <linearGradient id="slateFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fbfdff"/>
+      <stop offset="1" stop-color="#f3f7fb"/>
+    </linearGradient>
+    <filter id="softShadow" x="-4%" y="-12%" width="108%" height="130%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.8" flood-color="#2b425c" flood-opacity=".11"/>
+    </filter>
+    <marker id="arrowDown" viewBox="0 0 10 10" refX="8.8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M1 1 L9 5 L1 9 Z" fill="#243955"/>
+    </marker>
+    <marker id="arrowUpDash" viewBox="0 0 10 10" refX="8.8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M1 1 L9 5 L1 9 Z" fill="#243955"/>
+    </marker>
+
+    <symbol id="hi-computer" viewBox="0 0 24 24">
+      <path d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"/>
+    </symbol>
+    <symbol id="hi-cloud" viewBox="0 0 24 24">
+      <path d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z"/>
+    </symbol>
+    <symbol id="hi-circle-stack" viewBox="0 0 24 24">
+      <path d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/>
+    </symbol>
+    <symbol id="hi-cpu" viewBox="0 0 24 24">
+      <path d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25Zm.75-12h9v9h-9v-9Z"/>
+    </symbol>
+    <symbol id="hi-magnifying" viewBox="0 0 24 24">
+      <path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/>
+    </symbol>
+    <symbol id="hi-document" viewBox="0 0 24 24">
+      <path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/>
+    </symbol>
+    <symbol id="hi-server" viewBox="0 0 24 24">
+      <path d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a4.5 4.5 0 0 1 .9-2.7L5.737 5.1a3.375 3.375 0 0 1 2.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 0 1 .9 2.7m0 0a3 3 0 0 1-3 3m0 3h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Z"/>
+    </symbol>
+
+    <style>
+      .page { fill: #fff; }
+      .layer { stroke-width: 2; filter: url(#softShadow); }
+      .blueLayer { fill: url(#blueFill); stroke: #3b7fd3; }
+      .greenLayer { fill: url(#greenFill); stroke: #4e9461; }
+      .orangeLayer { fill: url(#orangeFill); stroke: #ff7c2e; }
+      .purpleLayer { fill: url(#purpleFill); stroke: #8375c1; }
+      .cyanLayer { fill: url(#cyanFill); stroke: #2696a8; }
+      .redLayer { fill: url(#redFill); stroke: #ff434b; }
+      .slateLayer { fill: url(#slateFill); stroke: #66758e; }
+      .pill { fill: rgba(255,255,255,.76); stroke-width: 1.4; }
+      .pillBlue { stroke: #3b7fd3; }
+      .pillGreen { stroke: #4e9461; }
+      .pillOrange { stroke: #ff7c2e; }
+      .pillPurple { stroke: #8375c1; }
+      .pillCyan { stroke: #2696a8; }
+      .pillRed { stroke: #ff434b; }
+      .pillSlate { stroke: #66758e; }
+      .flow { fill: none; stroke: #243955; stroke-width: 3.4; marker-end: url(#arrowDown); }
+      .support { fill: none; stroke: #243955; stroke-width: 2.3; stroke-dasharray: 8 7; marker-end: url(#arrowUpDash); }
+      text { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif; fill: #151515; }
+      .layerTitle { font-size: 29px; font-weight: 800; }
+      .itemText { font-size: 24px; font-weight: 600; }
+      .hero { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+      .blueIcon { color: #0f5fa8; }
+      .greenIcon { color: #177342; }
+      .orangeIcon { color: #d95f00; }
+      .purpleIcon { color: #6452a4; }
+      .cyanIcon { color: #087184; }
+      .redIcon { color: #d93036; }
+      .slateIcon { color: #243955; }
+    </style>
+  </defs>
+
+  <rect class="page" width="1456" height="1086"/>
+
+  <!-- 主流程箭头在层框下方绘制 -->
+  <path class="flow" d="M728 148V189"/>
+  <path class="flow" d="M728 297V338"/>
+  <path class="flow" d="M728 454V493"/>
+  <path class="flow" d="M728 602V643"/>
+  <path class="flow" d="M728 747V787"/>
+
+  <!-- 基础支撑层向报告生成层提供虚线支撑 -->
+  <path class="support" d="M222 952V895"/>
+  <path class="support" d="M432 952V895"/>
+  <path class="support" d="M640 952V895"/>
+  <path class="support" d="M818 952V895"/>
+  <path class="support" d="M973 952V895"/>
+  <path class="support" d="M1138 952V895"/>
+  <path class="support" d="M1308 952V895"/>
+
+  <!-- 前端交互层 -->
+  <g>
+    <rect class="layer blueLayer" x="40" y="27" width="1376" height="122" rx="22"/>
+    <use href="#hi-computer" class="hero blueIcon" x="68" y="56" width="70" height="70"/>
+    <text class="layerTitle" x="164" y="102" fill="#0f5fa8">前端交互层</text>
+    <rect class="pill pillBlue" x="380" y="61" width="154" height="57" rx="8"/>
+    <rect class="pill pillBlue" x="561" y="61" width="153" height="57" rx="8"/>
+    <rect class="pill pillBlue" x="742" y="61" width="151" height="57" rx="8"/>
+    <rect class="pill pillBlue" x="919" y="61" width="146" height="57" rx="8"/>
+    <rect class="pill pillBlue" x="1090" y="61" width="145" height="57" rx="8"/>
+    <rect class="pill pillBlue" x="1262" y="61" width="136" height="57" rx="8"/>
+    <text class="itemText" x="457" y="98" text-anchor="middle">专题创建</text>
+    <text class="itemText" x="637.5" y="98" text-anchor="middle">数据管理</text>
+    <text class="itemText" x="817.5" y="98" text-anchor="middle">数据处理</text>
+    <text class="itemText" x="992" y="98" text-anchor="middle">分析任务</text>
+    <text class="itemText" x="1162.5" y="98" text-anchor="middle">检索配置</text>
+    <text class="itemText" x="1330" y="98" text-anchor="middle">报告生成</text>
+  </g>
+
+  <!-- 后端服务层 -->
+  <g>
+    <rect class="layer greenLayer" x="40" y="192" width="1376" height="105" rx="20"/>
+    <use href="#hi-cloud" class="hero greenIcon" x="66" y="210" width="72" height="72"/>
+    <text class="layerTitle" x="164" y="259" fill="#177342">后端服务层</text>
+    <rect class="pill pillGreen" x="397" y="218" width="203" height="57" rx="8"/>
+    <rect class="pill pillGreen" x="645" y="218" width="203" height="57" rx="8"/>
+    <rect class="pill pillGreen" x="888" y="218" width="181" height="57" rx="8"/>
+    <rect class="pill pillGreen" x="1103" y="218" width="176" height="57" rx="8"/>
+    <text class="itemText" x="498.5" y="255" text-anchor="middle">API接口</text>
+    <text class="itemText" x="746.5" y="255" text-anchor="middle">任务调度</text>
+    <text class="itemText" x="978.5" y="255" text-anchor="middle">状态管理</text>
+    <text class="itemText" x="1191" y="255" text-anchor="middle">日志返回</text>
+  </g>
+
+  <!-- 数据处理层 -->
+  <g>
+    <rect class="layer orangeLayer" x="40" y="343" width="1376" height="110" rx="20"/>
+    <use href="#hi-circle-stack" class="hero orangeIcon" x="69" y="365" width="67" height="67"/>
+    <text class="layerTitle" x="164" y="411" fill="#d95f00">数据处理层</text>
+    <rect class="pill pillOrange" x="357" y="373" width="150" height="53" rx="8"/>
+    <rect class="pill pillOrange" x="534" y="373" width="150" height="53" rx="8"/>
+    <rect class="pill pillOrange" x="711" y="373" width="116" height="53" rx="8"/>
+    <rect class="pill pillOrange" x="856" y="373" width="151" height="53" rx="8"/>
+    <rect class="pill pillOrange" x="1038" y="374" width="186" height="53" rx="8"/>
+    <rect class="pill pillOrange" x="1253" y="374" width="140" height="53" rx="8"/>
+    <text class="itemText" x="432" y="409" text-anchor="middle">数据获取</text>
+    <text class="itemText" x="609" y="409" text-anchor="middle">数据合并</text>
+    <text class="itemText" x="769" y="409" text-anchor="middle">去重</text>
+    <text class="itemText" x="931.5" y="409" text-anchor="middle">文本清洗</text>
+    <text class="itemText" x="1131" y="410" text-anchor="middle">关键词预清洗</text>
+    <text class="itemText" x="1323" y="410" text-anchor="middle">智能过滤</text>
+  </g>
+
+  <!-- 分析辅助层 -->
+  <g>
+    <rect class="layer purpleLayer" x="40" y="496" width="1376" height="106" rx="20"/>
+    <use href="#hi-cpu" class="hero purpleIcon" x="69" y="517" width="67" height="67"/>
+    <text class="layerTitle" x="164" y="562" fill="#6452a4">分析辅助层</text>
+    <rect class="pill pillPurple" x="376" y="523" width="207" height="57" rx="8"/>
+    <rect class="pill pillPurple" x="629" y="524" width="207" height="57" rx="8"/>
+    <rect class="pill pillPurple" x="881" y="524" width="207" height="57" rx="8"/>
+    <rect class="pill pillPurple" x="1138" y="524" width="200" height="57" rx="8"/>
+    <text class="itemText" x="479.5" y="560" text-anchor="middle">基础指标</text>
+    <text class="itemText" x="732.5" y="560" text-anchor="middle">主题语义</text>
+    <text class="itemText" x="984.5" y="560" text-anchor="middle">主体标注</text>
+    <text class="itemText" x="1238" y="560" text-anchor="middle">深度研判</text>
+  </g>
+
+  <!-- 检索增强层 -->
+  <g>
+    <rect class="layer cyanLayer" x="40" y="649" width="1376" height="96" rx="18"/>
+    <use href="#hi-magnifying" class="hero cyanIcon" x="70" y="670" width="66" height="66"/>
+    <text class="layerTitle" x="164" y="711" fill="#087184">检索增强层</text>
+    <rect class="pill pillCyan" x="373" y="674" width="218" height="53" rx="8"/>
+    <rect class="pill pillCyan" x="635" y="674" width="222" height="53" rx="8"/>
+    <rect class="pill pillCyan" x="897" y="674" width="208" height="53" rx="8"/>
+    <rect class="pill pillCyan" x="1144" y="674" width="200" height="53" rx="8"/>
+    <text class="itemText" x="482" y="710" text-anchor="middle">原始记录检索</text>
+    <text class="itemText" x="746" y="710" text-anchor="middle">TagRAG</text>
+    <text class="itemText" x="1001" y="710" text-anchor="middle">GraphRAG</text>
+    <text class="itemText" x="1244" y="710" text-anchor="middle">RouterRAG</text>
+  </g>
+
+  <!-- 报告生成层 -->
+  <g>
+    <rect class="layer redLayer" x="40" y="786" width="1376" height="103" rx="18"/>
+    <use href="#hi-document" class="hero redIcon" x="72" y="806" width="64" height="64"/>
+    <text class="layerTitle" x="159" y="849" fill="#d93036">报告生成层</text>
+    <rect class="pill pillRed" x="343" y="815" width="218" height="49" rx="8"/>
+    <rect class="pill pillRed" x="590" y="815" width="294" height="49" rx="8"/>
+    <rect class="pill pillRed" x="910" y="815" width="134" height="49" rx="8"/>
+    <rect class="pill pillRed" x="1076" y="815" width="134" height="49" rx="8"/>
+    <rect class="pill pillRed" x="1242" y="815" width="151" height="49" rx="8"/>
+    <text class="itemText" x="452" y="849" text-anchor="middle">LangGraph根编排</text>
+    <text class="itemText" x="737" y="849" text-anchor="middle">DeepAgents多智能体探索</text>
+    <text class="itemText" x="977" y="849" text-anchor="middle">结果归并</text>
+    <text class="itemText" x="1143" y="849" text-anchor="middle">报告写作</text>
+    <text class="itemText" x="1317.5" y="849" text-anchor="middle">HTML渲染</text>
+  </g>
+
+  <!-- 基础支撑层 -->
+  <g>
+    <rect class="layer slateLayer" x="40" y="952" width="1376" height="102" rx="18"/>
+    <use href="#hi-server" class="hero slateIcon" x="72" y="976" width="64" height="64"/>
+    <text class="layerTitle" x="164" y="1018" fill="#243955">基础支撑层</text>
+    <rect class="pill pillSlate" x="351" y="979" width="164" height="51" rx="8"/>
+    <rect class="pill pillSlate" x="546" y="980" width="152" height="51" rx="8"/>
+    <rect class="pill pillSlate" x="732" y="981" width="144" height="51" rx="8"/>
+    <rect class="pill pillSlate" x="904" y="981" width="146" height="51" rx="8"/>
+    <rect class="pill pillSlate" x="1077" y="981" width="137" height="51" rx="8"/>
+    <rect class="pill pillSlate" x="1243" y="981" width="138" height="51" rx="8"/>
+    <text class="itemText" x="433" y="1014" text-anchor="middle">专题上下文</text>
+    <text class="itemText" x="622" y="1015" text-anchor="middle">数据归档</text>
+    <text class="itemText" x="804" y="1016" text-anchor="middle">模型配置</text>
+    <text class="itemText" x="977" y="1016" text-anchor="middle">RAG配置</text>
+    <text class="itemText" x="1145.5" y="1016" text-anchor="middle">任务队列</text>
+    <text class="itemText" x="1312" y="1016" text-anchor="middle">日志追踪</text>
+  </g>
+</svg>

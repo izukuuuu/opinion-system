@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "humanizer-zh": {
+      "name": "humanizer-zh",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=humanizer-zh",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "humanizer-academic-zh": {
+      "name": "Humanizer Academic ZH",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=humanizer-academic-zh",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "academic-writing": {
+      "name": "academic-writing",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=academic-writing",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "research-paper-writer": {
+      "name": "Research Paper Writer",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=research-paper-writer",
+      "source": "skillhub",
+      "version": "0.1.0"
+    }
+  }
+}

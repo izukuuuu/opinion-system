@@ -1,0 +1,277 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1456" height="1086" viewBox="0 0 1456 1086">
+  <defs>
+    <linearGradient id="greenFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fbfffb"/>
+      <stop offset="1" stop-color="#f4fff1"/>
+    </linearGradient>
+    <linearGradient id="goldFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fffdf7"/>
+      <stop offset="1" stop-color="#fff8e6"/>
+    </linearGradient>
+    <linearGradient id="purpleFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fffefe"/>
+      <stop offset="1" stop-color="#fbf8ff"/>
+    </linearGradient>
+    <linearGradient id="blueFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f4fbff"/>
+      <stop offset="1" stop-color="#edf7ff"/>
+    </linearGradient>
+    <linearGradient id="orangeFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fffdfb"/>
+      <stop offset="1" stop-color="#fff4ec"/>
+    </linearGradient>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#334960" flood-opacity=".12"/>
+    </filter>
+    <marker id="arrowBlack" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M1 1 L9 5 L1 9 Z" fill="#111"/>
+    </marker>
+    <marker id="arrowDash" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M1 1 L9 5 L1 9 Z" fill="#456ca8"/>
+    </marker>
+
+    <symbol id="hi-clipboard" viewBox="0 0 24 24">
+      <path d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H6A2.25 2.25 0 0 0 3.75 10.5v9A2.25 2.25 0 0 0 6 21.75h9A2.25 2.25 0 0 0 17.25 19.5v-9A2.25 2.25 0 0 0 15 8.25H8.25Z"/>
+    </symbol>
+    <symbol id="hi-document-plus" viewBox="0 0 24 24">
+      <path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m3.75 14.25v-6m3 3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/>
+    </symbol>
+    <symbol id="hi-share" viewBox="0 0 24 24">
+      <path d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z"/>
+    </symbol>
+    <symbol id="hi-crosshair" viewBox="0 0 24 24">
+      <path d="M12 3v3.75m0 10.5V21m9-9h-3.75M6.75 12H3m14.25 0A5.25 5.25 0 1 1 6.75 12a5.25 5.25 0 0 1 10.5 0Z"/>
+    </symbol>
+    <symbol id="hi-circle-stack" viewBox="0 0 24 24">
+      <path d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/>
+    </symbol>
+    <symbol id="hi-magnifying-glass" viewBox="0 0 24 24">
+      <path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/>
+    </symbol>
+    <symbol id="hi-arrow-path" viewBox="0 0 24 24">
+      <path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/>
+    </symbol>
+    <symbol id="hi-document-duplicate" viewBox="0 0 24 24">
+      <path d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375A1.125 1.125 0 0 1 8.25 16.125v-9.25m12 9.25v-1.875a3.375 3.375 0 0 0-3.375-3.375H15a1.125 1.125 0 0 1-1.125-1.125V7.875A3.375 3.375 0 0 0 10.5 4.5H8.25"/>
+    </symbol>
+    <symbol id="hi-arrow-trending-up" viewBox="0 0 24 24">
+      <path d="m2.25 18 9-9 4.5 4.5L21.75 6m0 0h-5.25m5.25 0v5.25"/>
+    </symbol>
+    <symbol id="hi-clock" viewBox="0 0 24 24">
+      <path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
+    </symbol>
+    <symbol id="hi-users" viewBox="0 0 24 24">
+      <path d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z"/>
+    </symbol>
+    <symbol id="hi-signal" viewBox="0 0 24 24">
+      <path d="M9.348 14.652a3.75 3.75 0 0 1 0-5.304m5.304 0a3.75 3.75 0 0 1 0 5.304m-7.425 2.121a6.75 6.75 0 0 1 0-9.546m9.546 0a6.75 6.75 0 0 1 0 9.546M5.106 18.894c-3.808-3.807-3.808-9.98 0-13.788m13.788 0c3.808 3.807 3.808 9.98 0 13.788M12 12h.008v.008H12V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/>
+    </symbol>
+    <symbol id="hi-exclamation-triangle" viewBox="0 0 24 24">
+      <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
+    </symbol>
+    <symbol id="hi-pencil" viewBox="0 0 24 24">
+      <path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"/>
+    </symbol>
+    <symbol id="hi-chart-pie" viewBox="0 0 24 24">
+      <path d="M10.5 6a7.5 7.5 0 1 0 7.5 7.5h-7.5V6Z"/>
+      <path d="M13.5 10.5H21A7.5 7.5 0 0 0 13.5 3v7.5Z"/>
+    </symbol>
+    <symbol id="hi-code-bracket" viewBox="0 0 24 24">
+      <path d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5"/>
+    </symbol>
+
+    <style>
+      .page { fill: #fff; }
+      .card { stroke-width: 1.5; filter: url(#softShadow); }
+      .green { fill: url(#greenFill); stroke: #6d9259; }
+      .gold { fill: url(#goldFill); stroke: #b49a4f; }
+      .purple { fill: url(#purpleFill); stroke: #7f718b; }
+      .blue { fill: url(#blueFill); stroke: #5a7c98; }
+      .orange { fill: url(#orangeFill); stroke: #b28a69; }
+      .agent { fill: url(#blueFill); stroke: #314557; stroke-width: 2; filter: url(#softShadow); }
+      .inner { fill: rgba(255,255,255,.74); stroke: #5c6b78; stroke-width: 1.5; }
+      .support { fill: #fff; stroke: #5571a0; stroke-width: 1.5; stroke-dasharray: 8 6; }
+      .mainLine { fill: none; stroke: #111; stroke-width: 2.3; marker-end: url(#arrowBlack); }
+      .dashLine { fill: none; stroke: #456ca8; stroke-width: 2.2; stroke-dasharray: 8 7; marker-end: url(#arrowDash); }
+      .legendLine { fill: none; stroke: #111; stroke-width: 2.5; marker-end: url(#arrowBlack); }
+      .legendDash { fill: none; stroke: #456ca8; stroke-width: 2.2; stroke-dasharray: 8 7; marker-end: url(#arrowDash); }
+      text { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif; fill: #111; }
+      .stepTitle { font-size: 18px; font-weight: 700; }
+      .agentTitle { font-size: 19px; font-weight: 700; }
+      .agentItem { font-size: 18px; font-weight: 700; }
+      .note { font-size: 15px; font-weight: 600; }
+      .legendText { font-size: 16px; font-weight: 600; }
+      .hero { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+      .heroBlack { color: #111; }
+    </style>
+  </defs>
+
+  <rect class="page" width="1456" height="1086"/>
+
+  <!-- 主流程实线箭头，先画在卡片底层 -->
+  <path class="mainLine" d="M155 423H184"/>
+  <path class="mainLine" d="M304 423H337"/>
+  <path class="mainLine" d="M464 423H497"/>
+  <path class="mainLine" d="M616 423H646"/>
+  <path class="mainLine" d="M766 423H796"/>
+  <path class="mainLine" d="M1023 423H1054"/>
+  <path class="mainLine" d="M1162 423H1191"/>
+  <path class="mainLine" d="M1293 423H1322"/>
+
+  <!-- 1-5 -->
+  <g>
+    <rect class="card green" x="27" y="323" width="128" height="210" rx="6"/>
+    <text class="stepTitle" x="91" y="367" text-anchor="middle">
+      <tspan x="91" y="367">1. 输入议题</tspan>
+      <tspan x="91" y="392">与时间范围</tspan>
+    </text>
+    <use href="#hi-clipboard" class="hero heroBlack" x="62" y="436" width="58" height="58"/>
+  </g>
+
+  <g>
+    <rect class="card gold" x="186" y="323" width="118" height="210" rx="6"/>
+    <text class="stepTitle" x="245" y="367" text-anchor="middle">
+      <tspan x="245" y="367">2. 创建</tspan>
+      <tspan x="245" y="392">报告任务</tspan>
+    </text>
+    <use href="#hi-document-plus" class="hero heroBlack" x="217" y="440" width="58" height="58"/>
+  </g>
+
+  <g>
+    <rect class="card purple" x="338" y="323" width="126" height="210" rx="6"/>
+    <text class="stepTitle" x="401" y="367" text-anchor="middle">
+      <tspan x="401" y="367">3. LangGraph</tspan>
+      <tspan x="401" y="392">根编排图</tspan>
+    </text>
+    <use href="#hi-share" class="hero heroBlack" x="372" y="440" width="58" height="58"/>
+  </g>
+
+  <g>
+    <rect class="card blue" x="497" y="323" width="119" height="210" rx="6"/>
+    <text class="stepTitle" x="556.5" y="367" text-anchor="middle">
+      <tspan x="556.5" y="367">4. 任务范围</tspan>
+      <tspan x="556.5" y="392">解析</tspan>
+    </text>
+    <use href="#hi-crosshair" class="hero heroBlack" x="528" y="440" width="58" height="58"/>
+    <text class="note" x="556.5" y="568" text-anchor="middle">
+      <tspan x="556.5" y="568">专题、时间范围、</tspan>
+      <tspan x="556.5" y="590">任务标识、运行模式</tspan>
+    </text>
+  </g>
+
+  <g>
+    <rect class="card blue" x="646" y="323" width="120" height="210" rx="6"/>
+    <text class="stepTitle" x="706" y="367" text-anchor="middle">
+      <tspan x="706" y="367">5. 检索资料</tspan>
+      <tspan x="706" y="392">准备</tspan>
+    </text>
+    <use href="#hi-circle-stack" class="hero heroBlack" x="674" y="438" width="58" height="58"/>
+    <use href="#hi-magnifying-glass" class="hero heroBlack" x="711" y="469" width="34" height="34"/>
+    <text class="note" x="706" y="568" text-anchor="middle">
+      <tspan x="706" y="568">整理数据范围与</tspan>
+      <tspan x="706" y="590">证据入口</tspan>
+    </text>
+  </g>
+
+  <!-- DeepAgents -->
+  <g>
+    <rect class="agent" x="797" y="135" width="226" height="558" rx="8"/>
+    <text class="agentTitle" x="910" y="165" text-anchor="middle">
+      <tspan x="910" y="165">6. DeepAgents</tspan>
+      <tspan x="910" y="191">多智能体探索分析</tspan>
+    </text>
+
+    <g>
+      <rect class="inner" x="815" y="209" width="190" height="47" rx="4"/>
+      <use href="#hi-arrow-path" class="hero heroBlack" x="829" y="218" width="29" height="29"/>
+      <text class="agentItem" x="922" y="240" text-anchor="middle">检索路由</text>
+    </g>
+    <g>
+      <rect class="inner" x="815" y="270" width="190" height="47" rx="4"/>
+      <use href="#hi-document-duplicate" class="hero heroBlack" x="829" y="279" width="29" height="29"/>
+      <text class="agentItem" x="922" y="301" text-anchor="middle">证据整理</text>
+    </g>
+    <g>
+      <rect class="inner" x="815" y="330" width="190" height="47" rx="4"/>
+      <use href="#hi-arrow-trending-up" class="hero heroBlack" x="829" y="339" width="29" height="29"/>
+      <text class="agentItem" x="922" y="362" text-anchor="middle">主题演化</text>
+    </g>
+    <g>
+      <rect class="inner" x="815" y="391" width="190" height="47" rx="4"/>
+      <use href="#hi-clock" class="hero heroBlack" x="829" y="400" width="29" height="29"/>
+      <text class="agentItem" x="922" y="423" text-anchor="middle">时间线</text>
+    </g>
+    <g>
+      <rect class="inner" x="815" y="449" width="190" height="47" rx="4"/>
+      <use href="#hi-users" class="hero heroBlack" x="829" y="458" width="29" height="29"/>
+      <text class="agentItem" x="922" y="481" text-anchor="middle">主体立场</text>
+    </g>
+    <g>
+      <rect class="inner" x="815" y="508" width="190" height="47" rx="4"/>
+      <use href="#hi-share" class="hero heroBlack" x="829" y="517" width="29" height="29"/>
+      <text class="agentItem" x="922" y="540" text-anchor="middle">传播机制</text>
+    </g>
+    <g>
+      <rect class="inner" x="815" y="568" width="190" height="47" rx="4"/>
+      <use href="#hi-exclamation-triangle" class="hero heroBlack" x="829" y="577" width="29" height="29"/>
+      <text class="agentItem" x="922" y="600" text-anchor="middle">风险研判</text>
+    </g>
+    <g>
+      <rect class="inner" x="815" y="627" width="190" height="47" rx="4"/>
+      <use href="#hi-pencil" class="hero heroBlack" x="829" y="636" width="29" height="29"/>
+      <text class="agentItem" x="922" y="659" text-anchor="middle">写作</text>
+    </g>
+  </g>
+
+  <!-- 7-9 -->
+  <g>
+    <rect class="card orange" x="1054" y="323" width="108" height="210" rx="6"/>
+    <text class="stepTitle" x="1108" y="367" text-anchor="middle">
+      <tspan x="1108" y="367">7. 分析结果</tspan>
+      <tspan x="1108" y="392">归并</tspan>
+    </text>
+    <use href="#hi-chart-pie" class="hero heroBlack" x="1079" y="441" width="58" height="58"/>
+  </g>
+
+  <g>
+    <rect class="card gold" x="1191" y="323" width="102" height="210" rx="6"/>
+    <text class="stepTitle" x="1242" y="367" text-anchor="middle">8. 报告写作</text>
+    <use href="#hi-pencil" class="hero heroBlack" x="1214" y="439" width="58" height="58"/>
+    <text class="note" x="1242" y="568" text-anchor="middle">
+      <tspan x="1242" y="568">生成 Markdown</tspan>
+      <tspan x="1242" y="590">正文</tspan>
+    </text>
+  </g>
+
+  <g>
+    <rect class="card green" x="1323" y="323" width="102" height="210" rx="6"/>
+    <text class="stepTitle" x="1374" y="367" text-anchor="middle">
+      <tspan x="1374" y="367">9. HTML</tspan>
+      <tspan x="1374" y="392">渲染</tspan>
+    </text>
+    <use href="#hi-code-bracket" class="hero heroBlack" x="1345" y="439" width="58" height="58"/>
+    <text class="note" x="1374" y="568" text-anchor="middle">
+      <tspan x="1374" y="568">整合正文、图表与</tspan>
+      <tspan x="1374" y="590">结构化信息</tspan>
+    </text>
+  </g>
+
+  <!-- 支撑工具虚线箭头 -->
+  <path class="dashLine" d="M789 774L839 695"/>
+  <path class="dashLine" d="M1021 774L975 695"/>
+  <g>
+    <rect class="support" x="692" y="773" width="196" height="73" rx="10"/>
+    <text class="note" x="790" y="803" text-anchor="middle">
+      <tspan x="790" y="803">Tool：函数调用接口</tspan>
+      <tspan x="790" y="827">检索、读取、构建、写入</tspan>
+    </text>
+  </g>
+  <g>
+    <rect class="support" x="930" y="773" width="186" height="73" rx="10"/>
+    <text class="note" x="1023" y="803" text-anchor="middle">
+      <tspan x="1023" y="803">Skill：任务规则约束</tspan>
+      <tspan x="1023" y="827">分析方法、写作约束</tspan>
+    </text>
+  </g>
+
+</svg>

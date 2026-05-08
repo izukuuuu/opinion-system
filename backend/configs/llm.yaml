@@ -35,8 +35,8 @@ langchain:
     runtime:
       model:
         provider: anthropic
-        model: glm-5
-        base_url: https://coding.dashscope.aliyuncs.com/apps/anthropic
+        model: MiniMax-M2.7
+        base_url: https://api.minimaxi.com/anthropic
         temperature: 0.2
         max_tokens: 18000
         timeout: 420.0
