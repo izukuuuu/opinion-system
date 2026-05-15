@@ -1,3 +1,30 @@
 {
-    "git.ignoreLimitWarning": true
+    "git.ignoreLimitWarning": true,
+    "python.defaultInterpreterPath": "F:\\opinion-system\\.venv\\Scripts\\python.exe",
+    "python.analysis.extraPaths": [
+        "F:\\opinion-system\\backend",
+        "F:\\opinion-system\\backend\\src"
+    ],
+    "python.analysis.exclude": [
+        "**/__pycache__",
+        "**/.pytest_cache",
+        "**/.tmp_pytest",
+        "**/tmp_test",
+        "backend/data/_tmp",
+        "backend/data/_tmp_report_resume_tests"
+    ],
+    "files.watcherExclude": {
+        "**/.pytest_cache/**": true,
+        "**/.tmp_pytest/**": true,
+        "**/tmp_test/**": true,
+        "**/backend/data/_tmp/**": true,
+        "**/backend/data/_tmp_report_resume_tests/**": true
+    },
+    "search.exclude": {
+        "**/.pytest_cache": true,
+        "**/.tmp_pytest": true,
+        "**/tmp_test": true,
+        "**/backend/data/_tmp": true,
+        "**/backend/data/_tmp_report_resume_tests": true
+    }
 }

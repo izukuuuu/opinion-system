@@ -70,3 +70,17 @@ packages = ["src"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.json", "*.md"]
+
+[tool.pyrefly]
+project-includes = ["backend", "run.py"]
+project-excludes = [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/.tmp_pytest",
+    "**/tmp_test",
+    "backend/data/_tmp",
+    "backend/data/_tmp_report_resume_tests",
+]
+search-path = ["backend"]
+python-interpreter-path = ".venv/Scripts/python.exe"
+python-version = "3.11"
