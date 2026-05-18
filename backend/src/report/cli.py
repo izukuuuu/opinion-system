@@ -24,6 +24,7 @@ from .deep_report.html_report_renderer import build_html_report_artifact
 from .runtime_infra import build_report_runnable_config, build_runtime_diagnostics, get_shared_report_checkpointer
 from .task_queue import get_task
 from .task_queue import _evaluate_resume_before_failure as evaluate_resume_before_failure
+from .workflow.telemetry import append_ndjson_log, resolve_telemetry_path
 from ..utils.ai import build_langchain_chat_model
 
 DEFAULT_EVENT_LOG_FILENAME = "report_debug_events.jsonl"
@@ -313,12 +314,22 @@ class EventRecorder:
         self.emit_stdout = bool(emit_stdout)
         self.stream = stream or sys.stderr
         self.events: List[Dict[str, Any]] = []
+        self.telemetry_path = resolve_telemetry_path(default_dir=self.event_log_path.parent)
 
     def __call__(self, event: Dict[str, Any]) -> None:
         normalized = dict(event or {})
         self.events.append(normalized)
         with self.event_log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(normalized, ensure_ascii=False, default=_json_default) + "\n")
+        if self.telemetry_path is not None:
+            append_ndjson_log(
+                self.telemetry_path,
+                normalized,
+                envelope={
+                    "source": "report.cli",
+                    "event_log_path": str(self.event_log_path),
+                },
+            )
         if self.emit_stdout:
             _print_json(normalized, stream=self.stream)
 

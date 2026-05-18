@@ -1584,6 +1584,8 @@ function buildTimelineEvents(events = []) {
     'interrupt.human_review',
     'artifact.ready',
     'artifact.updated',
+    'scorecard.ready',
+    'contract.violation',
     'approval.required',
     'approval.resolved',
     'task.failed',
@@ -1604,6 +1606,29 @@ function buildTimelineEvents(events = []) {
     .map(buildDebugEvent)
     .slice(-12)
     .reverse()
+}
+
+function buildScorecardObservability(taskState = {}) {
+  const artifacts = taskState.artifacts && typeof taskState.artifacts === 'object' ? taskState.artifacts : {}
+  const digest = artifacts.scorecard_digest && typeof artifacts.scorecard_digest === 'object' ? artifacts.scorecard_digest : {}
+  const has = Boolean(Object.keys(digest).length)
+  const runtimeSeconds = Number(digest.runtime_seconds ?? NaN)
+  const runtimeLabel = Number.isFinite(runtimeSeconds) ? `${Math.round(runtimeSeconds)}s` : '--'
+  const errorCount = Number(digest.error_count || 0)
+  const eventCount = Number(digest.event_count || 0)
+  const phaseCounts = digest.by_phase && typeof digest.by_phase === 'object' ? digest.by_phase : {}
+  const topPhases = Object.entries(phaseCounts)
+    .map(([key, value]) => ({ key, count: Number(value || 0) }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3)
+  return {
+    available: has,
+    runtimeLabel,
+    eventCount,
+    errorCount,
+    status: String(digest.status || '').trim(),
+    topPhases
+  }
 }
 
 /**
@@ -1663,6 +1688,7 @@ export function buildRunConsoleViewModel(taskState = {}) {
   const todoObservability = buildTodoObservability(taskState)
   const subagentTodoObservability = buildSubagentTodoObservability(taskState)
   const artifactObservability = buildArtifactObservability(taskState)
+  const scorecardObservability = buildScorecardObservability(taskState)
   const decisionObservability = buildDecisionObservability(taskState, approvals)
   const approvalObservability = buildApprovalObservability(taskState, approvals)
   const runtimeDiagnostics = resolveRuntimeDiagnostics(taskState, approvals)
@@ -1718,6 +1744,7 @@ export function buildRunConsoleViewModel(taskState = {}) {
     todoObservability,
     subagentTodoObservability,
     artifactObservability,
+    scorecardObservability,
     decisionObservability,
     approvalObservability,
     runtimeDiagnostics,

@@ -80,8 +80,8 @@ export const routes = [
         name: 'topic-create-upload',
         component: TopicUploadStep,
         meta: {
-          title: '新建专题 · 上传原始数据',
-          breadcrumb: '上传原始数据'
+          title: '新建专题·入库',
+          breadcrumb: '入库'
         }
       },
       {
