@@ -725,6 +725,24 @@ watch(selectedProjectName, (newVal) => {
     resetDatasetState()
   }
 }, { immediate: true })
+
+watch(
+  () => selectedDatasetIds.value.slice(),
+  (nextIds, previousIds) => {
+    const nextKey = nextIds.join('\u0001')
+    const previousKey = Array.isArray(previousIds) ? previousIds.join('\u0001') : ''
+    if (nextKey === previousKey) return
+
+    archiveSelection.cleanDate = ''
+    if (mergeDateSuggestion.value) {
+      archiveSelection.mergeDate = mergeDateSuggestion.value
+    }
+    if (currentProjectName.value) {
+      fetchProjectArchives({ force: true })
+    }
+  },
+  { flush: 'post' }
+)
 </script>
 
 <style scoped>

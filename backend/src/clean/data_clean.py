@@ -6,13 +6,52 @@ import re
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, Iterable, List, Any, Optional, Set
 from dateutil import parser
 import pytz
 from ..utils.setting.paths import bucket, ensure_bucket
 from ..utils.logging.logging import setup_logger, log_success, log_error, log_module_start
 from ..utils.setting.settings import settings
 from ..utils.io.excel import read_jsonl, write_jsonl
+
+
+def _normalise_dataset_ids(dataset_ids: Optional[Iterable[Any]]) -> List[str]:
+    if not dataset_ids:
+        return []
+    cleaned: List[str] = []
+    seen: Set[str] = set()
+    for value in dataset_ids:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    return cleaned
+
+
+def _clear_generated_outputs(clean_dir: Path) -> None:
+    for path in clean_dir.glob("*.jsonl"):
+        try:
+            path.unlink()
+        except OSError:
+            continue
+    manifest_path = clean_dir / "_clean_manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest_path.unlink()
+        except OSError:
+            pass
+
+
+def _load_merge_manifest(merge_dir: Path) -> Dict[str, Any]:
+    manifest_path = merge_dir / "_merge_manifest.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def sanitize_utf8_text(text: Any) -> str:
@@ -158,7 +197,7 @@ def normalize_region(region: str, fillna: str = "未知") -> str:
     return region if region else fillna
 
 
-def run_clean(topic: str, date: str, logger=None) -> bool:
+def run_clean(topic: str, date: str, logger=None, dataset_ids: Optional[Iterable[Any]] = None) -> bool:
     """
     运行清洗流水线（直接读取 merge/<topic>/<date> 下各渠道 JSONL）
     
@@ -187,15 +226,29 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
 
     merge_dir = bucket("merge", topic, date)
     clean_dir = ensure_bucket("clean", topic, date)
+    selected_dataset_ids = _normalise_dataset_ids(dataset_ids)
 
     channel_config = settings.get_channel_config()
     field_alias = channel_config.get('field_alias', {})
     region_config = channel_config.get('region', {})
 
     jsonl_files = sorted(merge_dir.glob("*.jsonl"))
+    merge_manifest = _load_merge_manifest(merge_dir)
+    if selected_dataset_ids and merge_manifest:
+        manifest_dataset_ids = _normalise_dataset_ids(merge_manifest.get("dataset_ids"))
+        if manifest_dataset_ids and set(manifest_dataset_ids) == set(selected_dataset_ids):
+            manifest_channels = {
+                str(channel or "").strip()
+                for channel in merge_manifest.get("channels", [])
+                if str(channel or "").strip()
+            }
+            if manifest_channels:
+                jsonl_files = [path for path in jsonl_files if path.stem in manifest_channels]
     if not jsonl_files:
         log_error(logger, f"未在 {merge_dir} 找到任何渠道 JSONL 文件", "Clean")
         return False
+
+    _clear_generated_outputs(clean_dir)
 
     date_digits = date.replace('-', '')
     total_rows = 0
@@ -369,5 +422,23 @@ def run_clean(topic: str, date: str, logger=None) -> bool:
         except Exception as e:
             log_error(logger, f"保存 {out_file.name} 失败：{e}", "Clean")
             continue
+
+    if success_files > 0:
+        manifest = {
+            "stage": "clean",
+            "topic": topic,
+            "date": date,
+            "dataset_ids": selected_dataset_ids,
+            "source_channels": [path.stem for path in jsonl_files],
+            "total_rows": total_rows,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+        }
+        try:
+            (clean_dir / "_clean_manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            log_error(logger, "写入 Clean 清单失败", "Clean")
 
     return success_files > 0

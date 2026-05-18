@@ -733,6 +733,9 @@ import {
   DocumentTextIcon,
   KeyIcon,
 } from '@heroicons/vue/24/outline'
+import anthropicIcon from '@lobehub/icons-static-svg/icons/anthropic.svg?url'
+import openaiIcon from '@lobehub/icons-static-svg/icons/openai.svg?url'
+import qwenIcon from '@lobehub/icons-static-svg/icons/qwen-color.svg?url'
 import { useApiBase } from '../../composables/useApiBase'
 import AppSelect from '../../components/AppSelect.vue'
 
@@ -743,15 +746,15 @@ const buildApiUrl = async (path) => {
 }
 
 const providerOptions = [
-  { label: '阿里通义千问（DashScope）', value: 'qwen' },
-  { label: 'OpenAI / 兼容 API', value: 'openai' },
-  { label: 'Anthropic 兼容', value: 'anthropic' }
+  { label: '阿里通义千问（DashScope）', value: 'qwen', icon: qwenIcon },
+  { label: 'OpenAI / 兼容 API', value: 'openai', icon: openaiIcon },
+  { label: 'Anthropic 兼容', value: 'anthropic', icon: anthropicIcon }
 ]
 
 const langchainBaseUrlOptions = [
-  { value: 'dashscope', label: '阿里云 DashScope' },
-  { value: 'openai', label: 'OpenAI 官方' },
-  { value: 'anthropic', label: 'Anthropic 兼容' },
+  { value: 'dashscope', label: '阿里云 DashScope', icon: qwenIcon },
+  { value: 'openai', label: 'OpenAI 官方', icon: openaiIcon },
+  { value: 'anthropic', label: 'Anthropic 兼容', icon: anthropicIcon },
   { value: 'custom', label: '自定义兼容接口' }
 ]
 

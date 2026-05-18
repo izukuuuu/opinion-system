@@ -4,7 +4,7 @@
  *
  * 使用方式:
  * <AppSelect
- *   :options="[{ value: 'a', label: '选项A' }, ...]"
+ *   :options="[{ value: 'a', label: '选项A', icon: '/icon.svg' }, ...]"
  *   :value="selectedValue"
  *   @change="selectedValue = $event"
  *   placeholder="请选择"
@@ -22,7 +22,7 @@ const props = defineProps({
   options: {
     type: Array,
     required: true
-    // [{ value: string, label: string, disabled?: boolean }]
+    // [{ value: string, label: string, icon?: string, disabled?: boolean }]
   },
   value: {
     type: String,
@@ -306,8 +306,15 @@ watch(() => isOpen.value, async (open) => {
       @click="toggleDropdown"
       @keydown="handleKeydown"
     >
-      <span :class="{ 'app-select-placeholder': !selectedOption }">
-        {{ displayLabel }}
+      <span class="app-select-value" :class="{ 'app-select-placeholder': !selectedOption }">
+        <img
+          v-if="selectedOption?.icon"
+          :src="selectedOption.icon"
+          alt=""
+          class="app-select-option-icon"
+          aria-hidden="true"
+        />
+        <span class="app-select-label">{{ displayLabel }}</span>
       </span>
       <div class="app-select-icons">
         <XMarkIcon
@@ -360,7 +367,16 @@ watch(() => isOpen.value, async (open) => {
               @click="selectOption(option)"
               @mouseenter="selectedIndex = idx"
             >
-              {{ option.label }}
+              <span class="app-select-value">
+                <img
+                  v-if="option.icon"
+                  :src="option.icon"
+                  alt=""
+                  class="app-select-option-icon"
+                  aria-hidden="true"
+                />
+                <span class="app-select-label">{{ option.label }}</span>
+              </span>
             </button>
 
             <div v-if="!filteredOptions.length" class="app-select-empty">

@@ -942,6 +942,7 @@ from src.netinsight import create_task as create_netinsight_task
 from src.netinsight import delete_task as delete_netinsight_task
 from src.netinsight import ensure_worker_running as ensure_netinsight_worker
 from src.netinsight import get_task as get_netinsight_task
+from src.netinsight import import_task_output_to_project as import_netinsight_task_output_to_project
 from src.netinsight import list_tasks as list_netinsight_tasks
 from src.netinsight import load_worker_status as load_netinsight_worker_status
 from src.netinsight import plan_task_from_brief
@@ -1002,7 +1003,28 @@ def _load_json_file(path: Path) -> Any:
             return fh.read()
 
 
-def _run_data_pipeline(topic: str, date: str, *, project: Optional[str] = None, topic_label: Optional[str] = None) -> Dict[str, Any]:
+def _normalise_dataset_ids(value: Any) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    cleaned: List[str] = []
+    seen = set()
+    for item in value:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    return cleaned
+
+
+def _run_data_pipeline(
+    topic: str,
+    date: str,
+    *,
+    project: Optional[str] = None,
+    topic_label: Optional[str] = None,
+    dataset_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Run Merge → Clean sequentially.
 
@@ -1041,7 +1063,10 @@ def _run_data_pipeline(topic: str, date: str, *, project: Optional[str] = None, 
     steps: List[Dict[str, Any]] = []
 
     for name, func in pipeline_steps:
-        result = func(topic, date)
+        if name in {"merge", "clean"}:
+            result = func(topic, date, dataset_ids=dataset_ids)
+        else:
+            result = func(topic, date)
         success = evaluate_success(result)
         steps.append({
             "operation": name,
@@ -1844,6 +1869,7 @@ def filter_status_stream():
 @app.post("/api/merge")
 def merge_endpoint():
     payload = request.get_json(silent=True) or {}
+    dataset_ids = _normalise_dataset_ids(payload.get("dataset_ids"))
     try:
         topic_identifier, date, display_name, log_project = prepare_pipeline_args(payload, PROJECT_MANAGER)
     except ValueError as exc:
@@ -1856,6 +1882,7 @@ def merge_endpoint():
         run_merge,
         topic_identifier,
         date,
+        dataset_ids=dataset_ids,
         log_context={
             "project": log_project,
             "params": {
@@ -1863,6 +1890,7 @@ def merge_endpoint():
                 "source": "api",
                 "topic": display_name,
                 "bucket": topic_identifier,
+                "dataset_ids": dataset_ids,
             },
         },
     )
@@ -1872,6 +1900,7 @@ def merge_endpoint():
 @app.post("/api/clean")
 def clean_endpoint():
     payload = request.get_json(silent=True) or {}
+    dataset_ids = _normalise_dataset_ids(payload.get("dataset_ids"))
     try:
         topic_identifier, date, display_name, log_project = prepare_pipeline_args(
             payload,
@@ -1893,6 +1922,7 @@ def clean_endpoint():
         run_clean,
         topic_identifier,
         resolved_date,
+        dataset_ids=dataset_ids,
         log_context={
             "project": log_project,
             "params": {
@@ -1900,6 +1930,7 @@ def clean_endpoint():
                 "source": "api",
                 "topic": display_name,
                 "bucket": topic_identifier,
+                "dataset_ids": dataset_ids,
             },
         },
     )
@@ -2150,6 +2181,7 @@ def upload_rebuild_fetch_status_endpoint():
 @app.post("/api/pipeline")
 def pipeline_endpoint():
     payload = request.get_json(silent=True) or {}
+    dataset_ids = _normalise_dataset_ids(payload.get("dataset_ids"))
     try:
         topic_identifier, date, display_name, log_project = prepare_pipeline_args(payload, PROJECT_MANAGER)
     except ValueError as exc:
@@ -2162,6 +2194,7 @@ def pipeline_endpoint():
         date,
         project=log_project,
         topic_label=display_name,
+        dataset_ids=dataset_ids,
         log_context={
             "project": log_project,
             "params": {
@@ -2169,6 +2202,7 @@ def pipeline_endpoint():
                 "source": "api",
                 "topic": display_name,
                 "bucket": topic_identifier,
+                "dataset_ids": dataset_ids,
             },
         },
     )
@@ -3269,6 +3303,21 @@ def netinsight_retry_task(task_id: str):
     return success({"data": {"task": task, "worker": worker}}, status_code=201)
 
 
+@app.post("/api/netinsight/tasks/<string:task_id>/import-to-project")
+def netinsight_import_task_to_project(task_id: str):
+    payload = request.get_json(silent=True) or {}
+    project = str(payload.get("project") or "").strip()
+    force = bool(payload.get("force", False))
+    try:
+        imported = import_netinsight_task_output_to_project(task_id, project=project, force=force)
+        task = get_netinsight_task(task_id)
+    except LookupError as exc:
+        return error(str(exc), 404)
+    except Exception as exc:
+        return error(str(exc), 400)
+    return success({"data": {"project_import": imported, "task": task}})
+
+
 @app.delete("/api/netinsight/tasks/<string:task_id>")
 def netinsight_delete_task(task_id: str):
     try:
@@ -3658,6 +3707,7 @@ def root():
         "/api/report/regenerate",
         "/api/netinsight/tasks",
         "/api/netinsight/tasks/<task_id>/files/<kind>",
+        "/api/netinsight/tasks/<task_id>/import-to-project",
         "/api/netinsight/worker",
         "/api/projects",
         "/api/projects/<name>",

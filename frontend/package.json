@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
+    "@lobehub/icons-static-svg": "^1.90.0",
     "@tanstack/vue-table": "^8.21.3",
     "@vueuse/core": "^14.2.1",
     "deep-chat": "^2.4.2",

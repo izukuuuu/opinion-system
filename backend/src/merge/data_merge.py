@@ -1,8 +1,10 @@
 """
 TRS数据合并功能
 """
+import json
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import pandas as pd
 from ..utils.setting.paths import bucket, ensure_bucket
@@ -22,6 +24,35 @@ def _normalise_keep_channels(channels: List[str]) -> Dict[str, str]:
             continue
         lookup[cleaned.lower()] = cleaned
     return lookup
+
+
+def _normalise_dataset_ids(dataset_ids: Optional[Iterable[Any]]) -> List[str]:
+    """Return cleaned dataset ids for scoping a merge run."""
+    if not dataset_ids:
+        return []
+    cleaned: List[str] = []
+    seen: Set[str] = set()
+    for value in dataset_ids:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    return cleaned
+
+
+def _clear_generated_outputs(merge_dir: Path) -> None:
+    for path in merge_dir.glob("*.jsonl"):
+        try:
+            path.unlink()
+        except OSError:
+            continue
+    manifest_path = merge_dir / "_merge_manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest_path.unlink()
+        except OSError:
+            pass
 
 
 def _resolve_channel_name(raw: str, keep_lookup: Dict[str, str]) -> Optional[str]:
@@ -195,7 +226,7 @@ def _iter_channel_frames(
         log_error(logger, f"处理文件失败: {file_path.name} - {e}", "Merge")
 
 
-def merge_trs_data(topic: str, date: str, logger=None) -> bool:
+def merge_trs_data(topic: str, date: str, logger=None, dataset_ids: Optional[Iterable[Any]] = None) -> bool:
     """
     合并TRS原始表（支持Excel/CSV/JSONL）并输出JSONL
     
@@ -229,18 +260,26 @@ def merge_trs_data(topic: str, date: str, logger=None) -> bool:
     merge_dir = ensure_bucket("merge", topic, date)
 
     # 4. 收集所有支持的原始文件（大小写不敏感）
+    selected_dataset_ids = _normalise_dataset_ids(dataset_ids)
     supported_suffixes = {".xlsx", ".xls", ".csv", ".jsonl"}
     source_files = sorted(
         path
         for path in raw_dir.iterdir()
         if path.is_file() and path.suffix.lower() in supported_suffixes
     )
+    if selected_dataset_ids:
+        source_files = [
+            path for path in source_files
+            if any(dataset_id in path.name for dataset_id in selected_dataset_ids)
+        ]
     if not source_files:
         available_files = sorted(path.name for path in raw_dir.iterdir() if path.is_file())
         hint = "目录为空"
         if available_files:
             preview = ", ".join(available_files[:10])
             hint = f"当前目录文件: {preview}"
+        if selected_dataset_ids:
+            hint = f"未匹配当前数据集: {', '.join(selected_dataset_ids)}；{hint}"
         log_error(logger, f"未找到可用的 Excel/CSV/JSONL 文件（{hint}）", "Merge")
         return False
 
@@ -258,7 +297,10 @@ def merge_trs_data(topic: str, date: str, logger=None) -> bool:
         log_error(logger, "未收集到任何渠道数据，可能渠道名称未在 keep 配置中", "Merge")
         return False
 
+    _clear_generated_outputs(merge_dir)
+
     # 6. 合并并保存数据
+    written_channels: List[str] = []
     for channel, data_list in channel_data.items():
         if not data_list:
             continue
@@ -280,6 +322,7 @@ def merge_trs_data(topic: str, date: str, logger=None) -> bool:
             write_jsonl(merged_df, output_file)
 
             success_count += 1
+            written_channels.append(channel)
             log_success(logger, f"成功保存: {channel} -- 共{len(merged_df)}条", "Merge")
 
         except Exception as e:
@@ -287,12 +330,28 @@ def merge_trs_data(topic: str, date: str, logger=None) -> bool:
             continue
 
     if success_count > 0:
+        manifest = {
+            "stage": "merge",
+            "topic": topic,
+            "date": date,
+            "dataset_ids": selected_dataset_ids,
+            "source_files": [path.name for path in source_files],
+            "channels": sorted(written_channels),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            (merge_dir / "_merge_manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            log_error(logger, "写入 Merge 清单失败", "Merge")
         return True
     log_error(logger, "合并失败: 没有成功处理任何渠道", "Merge")
     return False
 
 
-def run_merge(topic: str, date: str, logger=None):
+def run_merge(topic: str, date: str, logger=None, dataset_ids: Optional[Iterable[Any]] = None):
     """
     运行TRS数据合并
     
@@ -310,7 +369,7 @@ def run_merge(topic: str, date: str, logger=None):
     log_module_start(logger, "Merge")
 
     try:
-        result = merge_trs_data(topic, date, logger)
+        result = merge_trs_data(topic, date, logger, dataset_ids=dataset_ids)
         if result:
             return True
         else:

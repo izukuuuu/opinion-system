@@ -9,6 +9,7 @@ from .task_queue import create_task
 from .task_queue import delete_task
 from .task_queue import ensure_worker_running
 from .task_queue import get_task
+from .task_queue import import_task_output_to_project
 from .task_queue import list_tasks
 from .task_queue import load_worker_status
 from .task_queue import read_login_state
@@ -24,6 +25,7 @@ __all__ = [
     "delete_task",
     "ensure_worker_running",
     "get_task",
+    "import_task_output_to_project",
     "list_tasks",
     "load_netinsight_config",
     "load_worker_status",

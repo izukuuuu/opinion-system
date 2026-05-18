@@ -29,6 +29,27 @@ PLATFORM_OPTIONS = [
     "Facebook",
 ]
 
+DOMESTIC_PLATFORMS = [
+    "微博",
+    "新闻APP",
+    "新闻网站",
+    "视频",
+    "自媒体号",
+    "论坛",
+    "微信",
+    "电子报",
+]
+
+FOREIGN_PLATFORMS = [
+    "境外新闻",
+    "Facebook",
+    "Twitter",
+]
+
+GLOBAL_PLATFORMS = DOMESTIC_PLATFORMS + FOREIGN_PLATFORMS
+
+SCOPE_OPTIONS = {"domestic", "foreign", "global"}
+
 PLATFORM_ALIASES = {
     "全部": ["全部平台", "全平台", "所有平台", "全部"],
     "新闻网站": ["新闻网站", "门户", "媒体", "新闻", "网站"],
@@ -113,13 +134,18 @@ def plan_task_from_brief(brief: str) -> Dict[str, Any]:
     else:
         heuristic["planner_source"] = "heuristic"
 
+    scope = _normalise_scope(heuristic.get("scope")) or _infer_scope(brief)
+    heuristic["scope"] = scope
+
     heuristic["keywords"] = normalize_keywords(heuristic.get("keywords"))
     if not heuristic["keywords"]:
         heuristic["keywords"] = _heuristic_keywords(brief)
 
     heuristic["platforms"] = normalize_platforms(heuristic.get("platforms"))
+    if heuristic["platforms"] == ["全部"]:
+        heuristic["platforms"] = default_platforms_for_scope(scope)
     if not heuristic["platforms"]:
-        heuristic["platforms"] = list(planner_cfg.get("default_platforms") or ["微博"])
+        heuristic["platforms"] = default_platforms_for_scope(scope)
 
     start_date, end_date = _normalise_dates(
         heuristic.get("start_date"),
@@ -158,10 +184,12 @@ def _heuristic_plan(
 ) -> Dict[str, Any]:
     keywords = _heuristic_keywords(brief)
     platforms = _heuristic_platforms(brief, planner_cfg)
+    scope = _infer_scope(brief)
     start_date, end_date = _heuristic_dates(brief, int(planner_cfg.get("default_days") or 30))
     return {
         "title": _default_title(brief, keywords),
         "summary": str(brief or "").strip(),
+        "scope": scope,
         "keywords": keywords,
         "platforms": platforms,
         "start_date": start_date,
@@ -185,9 +213,10 @@ def _llm_plan(brief: str) -> Optional[Dict[str, Any]]:
         "你是 NetInsight 采集任务规划器。"
         "请把用户的自然语言需求整理为 JSON，不要输出任何额外解释。"
         "JSON 字段固定为："
-        '{"title":"","summary":"","keywords":[],"platforms":[],"start_date":"","end_date":"","total_limit":500,'
+        '{"title":"","summary":"","scope":"domestic","keywords":[],"platforms":[],"start_date":"","end_date":"","total_limit":500,'
         '"page_size":50,"sort":"comments_desc","info_type":"2","dedupe_by_content":true}.'
         "关键词要尽量短，适合直接在 NetInsight 里检索。日期必须是 YYYY-MM-DD。"
+        "scope 只能是 domestic、foreign 或 global：国内范围用 domestic，国外/境外范围用 foreign，全球/中外/海内外范围用 global。"
         "如无法判断平台，留空数组。"
     )
     user_prompt = f"今天是 {today}。请为下面的需求生成 NetInsight 采集建议：\n{text}"
@@ -253,6 +282,9 @@ def _heuristic_keywords(brief: str) -> List[str]:
 
 def _heuristic_platforms(brief: str, planner_cfg: Dict[str, Any]) -> List[str]:
     text = str(brief or "").strip().lower()
+    scope = _infer_scope(brief)
+    if scope in {"foreign", "global"}:
+        return default_platforms_for_scope(scope)
     matched: List[str] = []
     for canonical, aliases in PLATFORM_ALIASES.items():
         if canonical == "全部":
@@ -261,7 +293,57 @@ def _heuristic_platforms(brief: str, planner_cfg: Dict[str, Any]) -> List[str]:
             matched.append(canonical)
     if matched:
         return matched
+    if scope in SCOPE_OPTIONS:
+        return default_platforms_for_scope(scope)
     return list(planner_cfg.get("default_platforms") or ["微博"])
+
+
+def default_platforms_for_scope(scope: str) -> List[str]:
+    normalized = _normalise_scope(scope) or "domestic"
+    if normalized == "foreign":
+        return list(FOREIGN_PLATFORMS)
+    if normalized == "global":
+        return list(GLOBAL_PLATFORMS)
+    return list(DOMESTIC_PLATFORMS)
+
+
+def _normalise_scope(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    aliases = {
+        "domestic": "domestic",
+        "china": "domestic",
+        "cn": "domestic",
+        "国内": "domestic",
+        "中国": "domestic",
+        "foreign": "foreign",
+        "overseas": "foreign",
+        "international": "foreign",
+        "abroad": "foreign",
+        "国外": "foreign",
+        "境外": "foreign",
+        "海外": "foreign",
+        "global": "global",
+        "worldwide": "global",
+        "全球": "global",
+        "全网": "global",
+        "中外": "global",
+        "海内外": "global",
+    }
+    return aliases.get(text, "")
+
+
+def _infer_scope(brief: str) -> str:
+    text = str(brief or "").strip().lower()
+    global_markers = ("全球", "全网", "中外", "国内外", "境内外", "海内外", "全球范围", "worldwide", "global")
+    foreign_markers = ("国外", "境外", "海外", "外媒", "国际", "facebook", "twitter", "推特", "脸书", "foreign", "overseas")
+    domestic_markers = ("国内", "中国", "境内", "微博", "微信", "公众号", "新闻app", "新闻网站")
+    if any(marker in text for marker in global_markers):
+        return "global"
+    if any(marker in text for marker in foreign_markers):
+        return "foreign"
+    if any(marker in text for marker in domestic_markers):
+        return "domestic"
+    return "domestic"
 
 
 def _heuristic_dates(brief: str, default_days: int) -> tuple[str, str]:
@@ -400,9 +482,13 @@ def _safe_int(value: Any, default: int, *, minimum: int = 0) -> int:
 
 
 __all__ = [
+    "DOMESTIC_PLATFORMS",
+    "FOREIGN_PLATFORMS",
+    "GLOBAL_PLATFORMS",
     "normalize_keywords",
     "normalize_platforms",
     "PLATFORM_OPTIONS",
     "PLATFORM_ALIASES",
+    "default_platforms_for_scope",
     "plan_task_from_brief",
 ]

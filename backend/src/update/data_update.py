@@ -279,9 +279,9 @@ def _rebuild_from_fetch(
     """
     from ..utils.setting.paths import bucket as get_bucket
 
-    target_database = (dataset_name or topic).strip()
+    target_database = db_manager.normalise_database_name((dataset_name or topic).strip())
     if not target_database:
-        target_database = topic
+        target_database = db_manager.normalise_database_name(topic)
 
     result: Dict[str, Any] = {
         "status": "error",
@@ -510,21 +510,22 @@ def dedup_database_tables(
     Returns:
         Dict 包含每张表的处理结果
     """
+    target_database = db_manager.normalise_database_name(database)
     result: Dict[str, Any] = {
-        "database": database,
+        "database": target_database,
         "cleaned": [],
         "skipped": [],
         "failed": [],
     }
 
-    if not db_manager.ensure_database(database):
+    if not db_manager.ensure_database(target_database):
         result["status"] = "error"
-        result["message"] = f"无法连接数据库 {database}"
+        result["message"] = f"无法连接数据库 {target_database}"
         log_error(logger, result["message"], "Dedup")
         return result
 
     try:
-        engine = db_manager.get_engine_for_database(database)
+        engine = db_manager.get_engine_for_database(target_database)
     except Exception as exc:
         result["status"] = "error"
         result["message"] = f"获取引擎失败: {exc}"
@@ -644,9 +645,9 @@ def upload_filtered_excels(
     # 1. 定位文件
     resolved_filter_date, filter_dir, jsonl_files = _resolve_layer_jsonl_files("filter", topic, date)
 
-    target_database = (dataset_name or topic).strip()
+    target_database = db_manager.normalise_database_name((dataset_name or topic).strip())
     if not target_database:
-        target_database = topic
+        target_database = db_manager.normalise_database_name(topic)
     response: Dict[str, Any] = {
         "filter_dir": str(filter_dir),
         "topic": topic,

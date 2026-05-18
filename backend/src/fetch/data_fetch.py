@@ -165,8 +165,8 @@ def _normalise_db_topic(topic: str) -> str:
     text = str(topic or "").strip()
     match = _PROJECT_ID_PATTERN.match(text)
     if match:
-        return match.group(3).strip() or text
-    return text
+        text = match.group(3).strip() or text
+    return DatabaseManager.normalise_database_name(text)
 
 
 def _format_date(value: Optional[date]) -> Optional[str]:

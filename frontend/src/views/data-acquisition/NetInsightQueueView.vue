@@ -578,21 +578,12 @@ import AppCheckbox from '../../components/AppCheckbox.vue'
 import AppSelect from '../../components/AppSelect.vue'
 import { useActiveProject } from '../../composables/useActiveProject'
 import { useApiBase } from '../../composables/useApiBase'
-
-const platformOptions = [
-  '全部',
-  '新闻网站',
-  '新闻APP',
-  '视频',
-  '微博',
-  '微信',
-  '自媒体号',
-  '论坛',
-  '电子报',
-  '境外新闻',
-  'Twitter',
-  'Facebook',
-]
+import {
+  PLATFORM_OPTIONS as platformOptions,
+  formatDateInput,
+  normalizePlatformsForSubmit,
+  parseKeywords,
+} from '../../composables/useNetInsightTaskForm'
 
 // Select options
 const sortOptions = [
@@ -1049,19 +1040,6 @@ function progressFillClass(status) {
   }[status] || 'bg-slate-500'
 }
 
-function parseKeywords(text) {
-  return String(text || '')
-    .split(/[\n,，;；、]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function normalizePlatformsForSubmit(values) {
-  const list = Array.isArray(values) ? values.map((item) => String(item).trim()).filter(Boolean) : []
-  if (list.includes('全部')) return ['全部']
-  return list
-}
-
 function taskHasFile(task, filename) {
   const files = Array.isArray(task?.output?.files) ? task.output.files : []
   if (!files.length) return Boolean(task?.output?.dir && task?.status === 'completed')
@@ -1071,13 +1049,6 @@ function taskHasFile(task, filename) {
 function buildTaskFileUrl(taskId, kind) {
   const base = String(backendBase.value || '').replace(/\/+$/, '')
   return `${base}/api/netinsight/tasks/${encodeURIComponent(taskId)}/files/${encodeURIComponent(kind)}`
-}
-
-function formatDateInput(value) {
-  const year = value.getFullYear()
-  const month = String(value.getMonth() + 1).padStart(2, '0')
-  const day = String(value.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
 }
 
 function formatTimestamp(value) {

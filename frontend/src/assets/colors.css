@@ -595,6 +595,32 @@
   color: var(--color-text-muted);
 }
 
+.app-select-value {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-select-trigger > .app-select-value,
+.app-select-option > .app-select-value {
+  flex: 1 1 auto;
+}
+
+.app-select-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-select-option-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
 .app-select-icons {
   display: flex;
   align-items: center;
@@ -709,7 +735,8 @@
 }
 
 .app-select-option {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
   padding: 0.4rem 0.75rem;
   border-radius: var(--app-select-option-radius, 0.875rem);

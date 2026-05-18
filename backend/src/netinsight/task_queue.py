@@ -28,6 +28,12 @@ OUTPUT_FILE_NAMES = {
     "jsonl": "records.jsonl",
     "meta": "meta.json",
 }
+PROJECT_IMPORT_COLUMN_MAPPING = {
+    "date": "发布时间",
+    "title": "标题",
+    "content": "内容",
+    "author": "作者",
+}
 
 
 def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -76,6 +82,7 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
             "info_type": str(payload.get("info_type") or "2").strip() or "2",
             "dedupe_by_content": _safe_bool(payload.get("dedupe_by_content", True)),
             "allocate_by_platform": _safe_bool(payload.get("allocate_by_platform", False)),
+            "auto_import_project": _safe_bool(payload.get("auto_import_project", False)),
         },
         "planner": {
             "source": str(payload.get("planner_source") or "").strip() or "manual",
@@ -99,6 +106,12 @@ def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
             "record_count": 0,
             "deduplicated_count": 0,
             "removed_duplicates": 0,
+            "project_import": {
+                "status": "pending" if project_name and _safe_bool(payload.get("auto_import_project", False)) else "disabled",
+                "project": project_name,
+                "dataset_id": "",
+                "message": "",
+            },
         },
         "error": "",
         "events": [],
@@ -173,6 +186,7 @@ def retry_task(task_id: str) -> Dict[str, Any]:
         "info_type": task.get("config", {}).get("info_type"),
         "dedupe_by_content": task.get("config", {}).get("dedupe_by_content", True),
         "allocate_by_platform": task.get("config", {}).get("allocate_by_platform", False),
+        "auto_import_project": task.get("config", {}).get("auto_import_project", False),
         "planner_source": "retry",
     }
     retried = create_task(next_payload)
@@ -436,6 +450,103 @@ def resolve_task_output_file(task_id: str, file_kind: str) -> Path:
     if not candidate.exists() or not candidate.is_file():
         raise LookupError("请求的输出文件尚未生成")
     return candidate
+
+
+def import_task_output_to_project(task_id: str, *, project: str = "", force: bool = False) -> Dict[str, Any]:
+    task = get_task(task_id)
+    output = task.get("output", {}) if isinstance(task.get("output"), dict) else {}
+    existing = output.get("project_import") if isinstance(output.get("project_import"), dict) else {}
+    if not force and existing.get("status") == "completed" and existing.get("dataset_id"):
+        return existing
+
+    project_name = str(project or task.get("project") or "").strip()
+    if not project_name:
+        payload = _mark_project_import_failed(task_id, "请选择要传输到的专题")
+        raise ValueError(payload.get("message") or "请选择要传输到的专题")
+
+    if str(task.get("status") or "") != "completed":
+        payload = _mark_project_import_failed(task_id, "采集任务完成后才能传输到专题")
+        raise ValueError(payload.get("message") or "采集任务完成后才能传输到专题")
+
+    try:
+        csv_path = resolve_task_output_file(task_id, "csv")
+        from werkzeug.datastructures import FileStorage
+        from ..project import store_uploaded_dataset
+
+        with csv_path.open("rb") as stream:
+            upload = FileStorage(
+                stream=stream,
+                filename=f"{task_id}-records.csv",
+                content_type="text/csv",
+            )
+            dataset = store_uploaded_dataset(
+                project_name,
+                upload,
+                column_mapping=PROJECT_IMPORT_COLUMN_MAPPING,
+                topic_label=project_name,
+            )
+    except Exception as exc:
+        payload = _mark_project_import_failed(task_id, str(exc) or "采集结果传输失败")
+        raise RuntimeError(payload.get("message") or str(exc)) from exc
+
+    payload = {
+        "status": "completed",
+        "project": project_name,
+        "dataset_id": str(dataset.get("id") or ""),
+        "dataset": dataset,
+        "message": "采集结果已传输到专题",
+        "imported_at": _utc_now(),
+    }
+
+    def _mutate(current: Dict[str, Any]) -> None:
+        current_output = current.setdefault("output", {})
+        current_output["project_import"] = payload
+        _append_event(current, "success", payload["message"])
+
+    _update_task(task_id, _mutate)
+
+    try:
+        get_project_manager().log_operation(
+            project_name,
+            "import_dataset",
+            params={
+                "dataset_id": dataset.get("id"),
+                "filename": dataset.get("display_name"),
+                "rows": dataset.get("rows"),
+                "columns": dataset.get("column_count"),
+                "column_mapping": dataset.get("column_mapping"),
+                "topic_label": dataset.get("topic_label"),
+                "source": "netinsight",
+                "task_id": task_id,
+            },
+            success=True,
+        )
+    except Exception:
+        pass
+
+    return payload
+
+
+def _mark_project_import_failed(task_id: str, message: str) -> Dict[str, Any]:
+    payload = {
+        "status": "failed",
+        "project": "",
+        "dataset_id": "",
+        "message": str(message or "采集结果传输失败"),
+        "imported_at": _utc_now(),
+    }
+
+    def _mutate(current: Dict[str, Any]) -> None:
+        current_output = current.setdefault("output", {})
+        previous = current_output.get("project_import") if isinstance(current_output.get("project_import"), dict) else {}
+        payload["project"] = str(previous.get("project") or current.get("project") or "")
+        current_output["project_import"] = dict(payload)
+        _append_event(current, "error", payload["message"])
+
+    updated = _update_task(task_id, _mutate)
+    next_output = updated.get("output", {}) if isinstance(updated.get("output"), dict) else {}
+    result = next_output.get("project_import") if isinstance(next_output.get("project_import"), dict) else payload
+    return result
 
 
 def task_state_path(task_id: str) -> Path:

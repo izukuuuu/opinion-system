@@ -32,6 +32,7 @@ from src.netinsight.task_queue import (  # type: ignore
     mark_task_completed,
     mark_task_failed,
     mark_task_progress,
+    import_task_output_to_project,
     output_dir_for_task,
     read_session_state,
     reserve_next_task,
@@ -362,6 +363,11 @@ def _run_task(task_id: str) -> None:
         output,
         f"采集完成，导出 {len(deduped_records)} 条记录",
     )
+    if bool(config.get("auto_import_project")) and str(task.get("project") or "").strip():
+        try:
+            import_task_output_to_project(task_id)
+        except Exception:
+            LOGGER.exception("NetInsight auto project import failed for task %s", task_id)
 
 
 def _load_cached_context(task_id: str, username: str) -> RequestContext | None:

@@ -215,6 +215,206 @@
       </section>
     </div>
 
+    <section class="card-surface p-8">
+      <div class="grid gap-8 xl:grid-cols-[minmax(260px,360px),1fr] xl:items-start">
+        <aside class="space-y-3">
+          <p class="text-xs font-bold uppercase tracking-wider text-secondary">Online Acquisition</p>
+          <h2 class="text-xl font-bold text-primary">在线采集</h2>
+          <p class="text-sm leading-6 text-secondary">
+            创建采集任务后，完成的数据会自动传输到当前专题。
+          </p>
+          <div v-if="canUpload" class="rounded-3xl border border-brand-100 bg-brand-50/50 p-4 text-xs text-secondary">
+            当前专题：<span class="font-bold text-primary">{{ topicName }}</span>
+          </div>
+          <button
+            v-if="canUpload && !settingsState.credentials.configured"
+            type="button"
+            class="rounded-full border border-amber-200 px-4 py-2 text-xs font-bold text-amber-700 transition hover:bg-amber-50"
+            @click="goNetInsightSettings"
+          >
+            前往采集设置
+          </button>
+        </aside>
+
+        <div v-if="canUpload" class="space-y-6">
+          <div
+            v-if="acquisitionFeedback.message || !settingsState.credentials.configured"
+            class="rounded-2xl border px-4 py-3 text-sm"
+            :class="acquisitionFeedback.type === 'error' || !settingsState.credentials.configured
+              ? 'border-rose-200 bg-rose-50 text-rose-700'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700'"
+          >
+            {{ !settingsState.credentials.configured ? '还没有完成采集账号设置，任务暂时无法运行。' : acquisitionFeedback.message }}
+          </div>
+
+          <form class="space-y-5" @submit.prevent="submitAcquisitionTask">
+            <div class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <label class="space-y-2">
+                <span class="block text-sm font-bold text-primary">任务说明</span>
+                <textarea
+                  v-model.trim="acquisitionForm.brief"
+                  rows="5"
+                  class="form-textarea resize-none"
+                  placeholder="描述采集对象、范围和重点议题"
+                  @input="acquisitionBriefTouched = true"
+                ></textarea>
+              </label>
+              <div class="space-y-4 rounded-3xl border border-gray-200 bg-base-soft/50 p-4">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-sm font-bold text-primary">推荐配置</span>
+                  <button
+                    type="button"
+                    class="rounded-full border border-brand-200 px-4 py-2 text-xs font-bold text-brand-700 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="acquisitionPlanning || !acquisitionForm.brief.trim()"
+                    @click="planAcquisitionTask(true)"
+                  >
+                    {{ acquisitionPlanning ? '生成中...' : '智能推荐' }}
+                  </button>
+                </div>
+                <div class="grid gap-2 sm:grid-cols-3">
+                  <button
+                    v-for="scope in scopeOptions"
+                    :key="scope.value"
+                    type="button"
+                    class="rounded-full border px-3 py-2 text-xs font-bold transition"
+                    :class="acquisitionForm.scope === scope.value
+                      ? 'border-brand-500 bg-brand-600 text-white'
+                      : 'border-gray-200 bg-white text-secondary hover:bg-base-soft'"
+                    @click="setAcquisitionScope(scope.value)"
+                  >
+                    {{ scope.label }}
+                  </button>
+                </div>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <label class="space-y-2">
+                    <span class="block text-xs font-semibold text-primary/80">开始日期</span>
+                    <input v-model="acquisitionForm.startDate" type="date" class="input" />
+                  </label>
+                  <label class="space-y-2">
+                    <span class="block text-xs font-semibold text-primary/80">结束日期</span>
+                    <input v-model="acquisitionForm.endDate" type="date" class="input" />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-[1fr_1.2fr]">
+              <label class="space-y-2">
+                <span class="block text-sm font-bold text-primary">关键词</span>
+                <textarea
+                  v-model.trim="acquisitionForm.keywordsText"
+                  rows="6"
+                  class="form-textarea resize-none"
+                  placeholder="可按行输入，也可用逗号分隔"
+                ></textarea>
+              </label>
+              <div class="space-y-3">
+                <p class="text-sm font-bold text-primary">采集平台</p>
+                <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <AppCheckbox
+                    v-for="option in acquisitionPlatformOptions"
+                    :key="option"
+                    v-model="acquisitionForm.platforms"
+                    :value="option"
+                    class="rounded-2xl border border-gray-200 bg-white px-3 py-2"
+                    label-class="gap-2 text-sm text-secondary"
+                    input-class="shadow-none"
+                  >
+                    {{ option }}
+                  </AppCheckbox>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-4">
+              <label class="space-y-2">
+                <span class="block text-xs font-semibold text-primary/80">最多采集条数</span>
+                <input v-model.number="acquisitionForm.totalLimit" type="number" min="1" class="input" />
+              </label>
+              <label class="space-y-2">
+                <span class="block text-xs font-semibold text-primary/80">每批请求数</span>
+                <input v-model.number="acquisitionForm.pageSize" type="number" min="10" class="input" />
+              </label>
+              <label class="flex items-end">
+                <AppCheckbox
+                  v-model="acquisitionForm.dedupeByContent"
+                  label-class="gap-2 text-sm text-secondary"
+                  input-class="shadow-none"
+                >
+                  自动过滤重复内容
+                </AppCheckbox>
+              </label>
+              <div class="flex items-end justify-end">
+                <button
+                  type="submit"
+                  class="rounded-full bg-brand-600 px-6 py-3 text-sm font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-brand-300"
+                  :disabled="acquisitionSubmitting || !canSubmitAcquisition || !settingsState.credentials.configured"
+                >
+                  {{ acquisitionSubmitting ? '提交中...' : '开始采集并传输' }}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <div v-if="acquisitionTasks.length" class="space-y-3 rounded-3xl border border-gray-200 bg-white p-4">
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-sm font-bold text-primary">当前专题采集任务</p>
+              <button
+                type="button"
+                class="rounded-full px-3 py-1.5 text-xs font-bold text-brand-700 hover:bg-brand-50"
+                :disabled="acquisitionLoading"
+                @click="fetchAcquisitionTasks"
+              >
+                {{ acquisitionLoading ? '刷新中...' : '刷新' }}
+              </button>
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="task in acquisitionTasks.slice(0, 5)"
+                :key="task.id"
+                class="rounded-2xl border border-gray-100 bg-base-soft/40 p-3"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-bold text-primary">{{ task.title || task.id }}</p>
+                    <p class="mt-1 text-xs text-secondary">{{ acquisitionTaskSummary(task) }}</p>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="rounded-full px-3 py-1 text-xs font-bold" :class="acquisitionTaskStatusClass(task.status)">
+                      {{ acquisitionTaskStatusLabel(task.status) }}
+                    </span>
+                    <button
+                      v-if="canImportAcquisitionTask(task)"
+                      type="button"
+                      class="rounded-full border border-brand-200 px-3 py-1.5 text-xs font-bold text-brand-700 hover:bg-brand-50"
+                      :disabled="acquisitionImportingTaskId === task.id"
+                      @click="importAcquisitionTask(task)"
+                    >
+                      {{ acquisitionImportingTaskId === task.id ? '传输中...' : '传输到专题' }}
+                    </button>
+                  </div>
+                </div>
+                <div class="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+                  <div
+                    class="h-full rounded-full bg-brand-500 transition-all duration-500"
+                    :style="{ width: `${Math.max(0, Math.min(100, Number(task.progress?.percentage || 0)))}%` }"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="flex min-h-[220px] flex-col items-center justify-center rounded-[2rem] border-2 border-dashed border-gray-200 bg-base-soft/30 p-8 text-center">
+          <div class="mb-4 rounded-full bg-gray-50 p-4">
+            <CloudArrowUpIcon class="h-8 w-8 text-gray-300" />
+          </div>
+          <p class="font-medium text-secondary">等待创建专题</p>
+          <p class="mt-1 text-xs text-muted">专题创建后即可配置在线采集任务</p>
+        </div>
+      </div>
+    </section>
+
     <transition name="fade" mode="out-in">
       <section v-if="latestDataset" key="dataset-column-setup" class="card-surface p-8">
         <div class="grid gap-8 xl:grid-cols-[minmax(260px,360px),1fr] xl:items-start">
@@ -283,13 +483,21 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { CloudArrowUpIcon, DocumentArrowUpIcon, TagIcon } from '@heroicons/vue/24/outline'
+import AppCheckbox from '../../components/AppCheckbox.vue'
 import AppSelect from '../../components/AppSelect.vue'
 import { useApiBase } from '../../composables/useApiBase'
+import {
+  PLATFORM_OPTIONS,
+  SCOPE_OPTIONS,
+  useNetInsightTaskForm,
+} from '../../composables/useNetInsightTaskForm'
 import { useTopicCreationProject } from '../../composables/useTopicCreationProject'
 
-const { ensureApiBase } = useApiBase()
+const router = useRouter()
+const { ensureApiBase, callApi } = useApiBase()
 const { setSelectedProjectName, refreshProjects } = useTopicCreationProject()
 
 const topicName = ref('')
@@ -323,6 +531,29 @@ const columnMappingForm = reactive({
 const mappingSaving = ref(false)
 const mappingError = ref('')
 const mappingSuccess = ref('')
+const acquisition = useNetInsightTaskForm()
+const acquisitionForm = acquisition.form
+const acquisitionPlatformOptions = PLATFORM_OPTIONS.filter((item) => item !== '全部')
+const scopeOptions = SCOPE_OPTIONS
+const acquisitionPlanning = ref(false)
+const acquisitionSubmitting = ref(false)
+const acquisitionLoading = ref(false)
+const acquisitionTasks = ref([])
+const acquisitionImportingTaskId = ref('')
+const acquisitionBriefTouched = ref(false)
+const acquisitionFeedback = reactive({
+  type: '',
+  message: ''
+})
+const settingsState = reactive({
+  credentials: {
+    configured: false
+  },
+  runtime: {},
+  planner: {}
+})
+const loginState = ref({ status: 'idle' })
+const acquisitionRefreshTimer = ref(null)
 
 const suggestedTags = Object.freeze([
   '舆情监测',
@@ -339,6 +570,7 @@ const buildApiUrl = async (path) => {
 }
 
 const canUpload = computed(() => Boolean(createSuccess.value))
+const canSubmitAcquisition = computed(() => canUpload.value && acquisition.canSubmit.value)
 
 const uploadHelper = computed(() => {
   if (uploading.value) return ''
@@ -411,6 +643,17 @@ const descriptionPayload = computed(() => {
     return `${prefix}\n\n${body}`
   }
   return prefix || body
+})
+
+const acquisitionBriefDefault = computed(() => {
+  const parts = []
+  if (topicName.value.trim()) {
+    parts.push(`专题：${topicName.value.trim()}`)
+  }
+  if (descriptionPayload.value.trim()) {
+    parts.push(descriptionPayload.value.trim())
+  }
+  return parts.join('\n\n')
 })
 
 const toggleTag = (tag) => {
@@ -563,6 +806,20 @@ watch(topicName, (current, previous) => {
   if (current !== previous && createSuccess.value) {
     createSuccess.value = ''
   }
+  if (current !== previous) {
+    acquisitionTasks.value = []
+    uploadedDatasets.value = []
+    acquisitionFeedback.message = ''
+  }
+})
+
+onMounted(async () => {
+  await Promise.all([fetchNetInsightSettings(), fetchNetInsightLoginState()])
+  acquisition.resetForm(settingsState)
+})
+
+onBeforeUnmount(() => {
+  stopAcquisitionRefreshLoop()
 })
 
 const createTopic = async () => {
@@ -596,11 +853,227 @@ const createTopic = async () => {
     setSelectedProjectName(createdProjectName)
     await refreshProjects()
     createSuccess.value = '专题创建成功，可以继续上传数据。'
+    prepareAcquisitionDefaults()
+    await planAcquisitionTask(false)
+    await fetchAcquisitionTasks()
   } catch (err) {
     createError.value = err instanceof Error ? err.message : '专题创建失败'
   } finally {
     creating.value = false
   }
+}
+
+const prepareAcquisitionDefaults = () => {
+  if (!topicName.value.trim()) return
+  acquisition.resetForm(settingsState, {
+    title: `${topicName.value.trim()} 数据采集`,
+    project: topicName.value.trim(),
+    brief: acquisitionBriefTouched.value && acquisitionForm.brief.trim()
+      ? acquisitionForm.brief
+      : acquisitionBriefDefault.value,
+  })
+}
+
+const fetchNetInsightSettings = async () => {
+  try {
+    const response = await callApi('/api/settings/netinsight', { method: 'GET' })
+    const payload = response?.data || {}
+    Object.assign(settingsState.credentials, payload.credentials || {})
+    settingsState.runtime = payload.runtime || {}
+    settingsState.planner = payload.planner || {}
+  } catch {
+    settingsState.credentials.configured = false
+  }
+}
+
+const fetchNetInsightLoginState = async () => {
+  try {
+    const response = await callApi('/api/netinsight/login', { method: 'GET' })
+    loginState.value = response?.data || { status: 'idle' }
+  } catch {
+    loginState.value = { status: 'idle' }
+  }
+}
+
+const planAcquisitionTask = async (forceApply = true) => {
+  if (!canUpload.value || acquisitionPlanning.value) return
+  if (!acquisitionForm.brief.trim()) {
+    acquisitionForm.brief = acquisitionBriefDefault.value
+  }
+  if (!acquisitionForm.brief.trim()) return
+
+  acquisitionPlanning.value = true
+  acquisitionFeedback.type = ''
+  acquisitionFeedback.message = ''
+  try {
+    const response = await callApi('/api/netinsight/tasks/plan', {
+      method: 'POST',
+      body: JSON.stringify({ brief: acquisitionForm.brief })
+    })
+    const plan = response?.data || {}
+    if (forceApply || !acquisitionForm.keywordsText.trim()) {
+      acquisition.applyPlan(plan)
+      acquisitionForm.project = topicName.value.trim()
+    }
+    acquisitionFeedback.type = 'success'
+    acquisitionFeedback.message = '已生成推荐配置，可继续手动调整。'
+  } catch (err) {
+    acquisitionFeedback.type = 'error'
+    acquisitionFeedback.message = err instanceof Error ? err.message : '智能推荐失败'
+  } finally {
+    acquisitionPlanning.value = false
+  }
+}
+
+const setAcquisitionScope = (scope) => {
+  acquisition.setScope(scope)
+}
+
+const submitAcquisitionTask = async () => {
+  if (!canSubmitAcquisition.value || acquisitionSubmitting.value) return
+  acquisitionSubmitting.value = true
+  acquisitionFeedback.type = ''
+  acquisitionFeedback.message = ''
+  try {
+    const payload = acquisition.buildPayload({
+      title: acquisitionForm.title || `${topicName.value.trim()} 数据采集`,
+      project: topicName.value.trim(),
+      auto_import_project: true,
+    })
+    const response = await callApi('/api/netinsight/tasks', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+    const task = response?.data?.task
+    if (task?.id) {
+      acquisitionTasks.value = [task, ...acquisitionTasks.value.filter((item) => item.id !== task.id)]
+    }
+    acquisitionFeedback.type = 'success'
+    acquisitionFeedback.message = '采集任务已提交，完成后会自动传输到当前专题。'
+    startAcquisitionRefreshLoop()
+    await fetchAcquisitionTasks()
+  } catch (err) {
+    acquisitionFeedback.type = 'error'
+    acquisitionFeedback.message = err instanceof Error ? err.message : '采集任务提交失败'
+  } finally {
+    acquisitionSubmitting.value = false
+  }
+}
+
+const fetchAcquisitionTasks = async () => {
+  if (!topicName.value.trim()) return
+  acquisitionLoading.value = true
+  try {
+    const response = await callApi(
+      `/api/netinsight/tasks?project=${encodeURIComponent(topicName.value.trim())}&limit=20`,
+      { method: 'GET' }
+    )
+    const payload = response?.data || {}
+    acquisitionTasks.value = Array.isArray(payload.tasks) ? payload.tasks : []
+    syncImportedDatasetsFromTasks()
+  } catch (err) {
+    acquisitionFeedback.type = 'error'
+    acquisitionFeedback.message = err instanceof Error ? err.message : '读取采集任务失败'
+  } finally {
+    acquisitionLoading.value = false
+  }
+}
+
+const importAcquisitionTask = async (task) => {
+  if (!task?.id || acquisitionImportingTaskId.value) return
+  acquisitionImportingTaskId.value = task.id
+  acquisitionFeedback.type = ''
+  acquisitionFeedback.message = ''
+  try {
+    const response = await callApi(`/api/netinsight/tasks/${encodeURIComponent(task.id)}/import-to-project`, {
+      method: 'POST',
+      body: JSON.stringify({ project: topicName.value.trim(), force: true })
+    })
+    const updatedTask = response?.data?.task
+    if (updatedTask?.id) {
+      acquisitionTasks.value = acquisitionTasks.value.map((item) => item.id === updatedTask.id ? updatedTask : item)
+    }
+    syncImportedDatasetsFromTasks()
+    acquisitionFeedback.type = 'success'
+    acquisitionFeedback.message = '采集结果已传输到当前专题。'
+  } catch (err) {
+    acquisitionFeedback.type = 'error'
+    acquisitionFeedback.message = err instanceof Error ? err.message : '采集结果传输失败'
+  } finally {
+    acquisitionImportingTaskId.value = ''
+  }
+}
+
+const syncImportedDatasetsFromTasks = () => {
+  const existingIds = new Set(uploadedDatasets.value.map((dataset) => dataset?.id).filter(Boolean))
+  const imported = []
+  acquisitionTasks.value.forEach((task) => {
+    const projectImport = task?.output?.project_import
+    const dataset = projectImport?.status === 'completed' ? normaliseDatasetPayload(projectImport.dataset) : null
+    if (dataset?.id && !existingIds.has(dataset.id)) {
+      existingIds.add(dataset.id)
+      imported.push(dataset)
+    }
+  })
+  if (imported.length) {
+    uploadedDatasets.value = [...uploadedDatasets.value, ...imported]
+    const latestProjectName = imported[imported.length - 1]?.project || topicName.value.trim()
+    if (latestProjectName) {
+      setSelectedProjectName(latestProjectName)
+      void refreshProjects()
+    }
+  }
+}
+
+const acquisitionTaskStatusLabel = (status) => ({
+  queued: '排队中',
+  running: '执行中',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消'
+}[status] || '未知')
+
+const acquisitionTaskStatusClass = (status) => ({
+  queued: 'bg-gray-100 text-secondary',
+  running: 'bg-brand-50 text-brand-700',
+  completed: 'bg-emerald-50 text-emerald-700',
+  failed: 'bg-rose-50 text-rose-700',
+  cancelled: 'bg-amber-50 text-amber-700'
+}[status] || 'bg-gray-100 text-secondary')
+
+const acquisitionTaskSummary = (task) => {
+  const count = Number(task?.output?.project_import?.dataset?.rows || task?.output?.deduplicated_count || task?.progress?.deduped_total || 0)
+  const importStatus = task?.output?.project_import?.status
+  if (importStatus === 'completed') return `已传输 ${count} 条数据，可继续设置字段映射。`
+  if (importStatus === 'failed') return task?.output?.project_import?.message || '采集完成，传输失败，可手动重试。'
+  return task?.progress?.message || '等待任务进度更新。'
+}
+
+const canImportAcquisitionTask = (task) => {
+  if (task?.status !== 'completed') return false
+  const importStatus = task?.output?.project_import?.status
+  return importStatus !== 'completed'
+}
+
+const startAcquisitionRefreshLoop = () => {
+  stopAcquisitionRefreshLoop()
+  acquisitionRefreshTimer.value = window.setInterval(() => {
+    const hasActive = acquisitionTasks.value.some((task) => ['queued', 'running'].includes(task.status))
+    if (hasActive) {
+      void fetchAcquisitionTasks()
+    }
+  }, 5000)
+}
+
+const stopAcquisitionRefreshLoop = () => {
+  if (acquisitionRefreshTimer.value) {
+    window.clearInterval(acquisitionRefreshTimer.value)
+    acquisitionRefreshTimer.value = null
+  }
+}
+
+const goNetInsightSettings = () => {
+  router.push({ name: 'settings-netinsight' })
 }
 
 const selectedFileSummary = computed(() => {

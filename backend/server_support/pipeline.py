@@ -26,6 +26,7 @@ from typing import Any, Dict, Tuple
 
 from .dataset_files import (
     ensure_raw_dataset_availability,
+    resolve_dataset_payload,
 )
 from .topic_context import TopicContext, context_to_tuple, resolve_context
 
@@ -58,7 +59,19 @@ def prepare_pipeline_args(
     if not date and not allow_missing_date:
         raise ValueError("Missing required field(s): date")
     if date:
-        ensure_raw_dataset_availability(topic_identifier, date, dataset_meta)
+        project_name = str(payload.get("project") or dataset_meta.get("project") or "").strip()
+        dataset_ids_raw = payload.get("dataset_ids")
+        dataset_ids = dataset_ids_raw if isinstance(dataset_ids_raw, list) else []
+        staged_ids = set()
+        for dataset_id in dataset_ids:
+            dataset_id_text = str(dataset_id or "").strip()
+            if not dataset_id_text or dataset_id_text in staged_ids:
+                continue
+            staged_ids.add(dataset_id_text)
+            selected_meta = resolve_dataset_payload(project_name, dataset_id_text)
+            ensure_raw_dataset_availability(topic_identifier, date, selected_meta)
+        if not staged_ids:
+            ensure_raw_dataset_availability(topic_identifier, date, dataset_meta)
     return topic_identifier, date, display_name or topic_identifier, log_project or topic_identifier
 
 

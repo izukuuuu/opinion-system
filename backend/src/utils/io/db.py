@@ -3,6 +3,9 @@
 """
 import os
 import pandas as pd
+import hashlib
+import re
+import unicodedata
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
@@ -13,6 +16,56 @@ from ..logging.logging import setup_logger, log_success, log_error, log_module_s
 
 class DatabaseManager:
     """数据库管理类"""
+
+    _DATABASE_NAME_MAX_BYTES = 63
+    _DATABASE_NAME_DROP_RE = re.compile(r'[\x00-\x1f\x7f`"\'“”‘’「」『』《》〈〉（）()\[\]{}【】]')
+    _DATABASE_NAME_SEPARATOR_RE = re.compile(r"[\\/?%*:|<>;=]+")
+    _DATABASE_NAME_WHITESPACE_RE = re.compile(r"\s+")
+    _DATABASE_NAME_DASH_RE = re.compile(r"-{2,}")
+
+    @classmethod
+    def normalise_database_name(cls, database_name: str) -> str:
+        """
+        Convert a user-facing project title into a stable physical database name.
+
+        PostgreSQL database names are identifiers with a 63-byte limit. The UI can
+        pass titles containing quote marks or other punctuation, so all database
+        entry points must use the same normalisation before CREATE/CONNECT/DROP.
+        """
+        raw = str(database_name or "").strip()
+        digest = hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:8]
+        text = unicodedata.normalize("NFKC", raw)
+        text = cls._DATABASE_NAME_DROP_RE.sub("", text)
+        text = cls._DATABASE_NAME_SEPARATOR_RE.sub("-", text)
+        text = cls._DATABASE_NAME_WHITESPACE_RE.sub("-", text)
+        text = cls._DATABASE_NAME_DASH_RE.sub("-", text).strip("-._ ")
+        if not text:
+            text = f"opinion_data_{digest}"
+        return cls._truncate_database_name(text, digest)
+
+    @classmethod
+    def _truncate_database_name(cls, value: str, digest: str) -> str:
+        encoded = value.encode("utf-8")
+        if len(encoded) <= cls._DATABASE_NAME_MAX_BYTES:
+            return value
+
+        suffix = f"-{digest}"
+        budget = cls._DATABASE_NAME_MAX_BYTES - len(suffix.encode("utf-8"))
+        kept = []
+        used = 0
+        for char in value:
+            size = len(char.encode("utf-8"))
+            if used + size > budget:
+                break
+            kept.append(char)
+            used += size
+        prefix = "".join(kept).strip("-._ ") or "db"
+        return f"{prefix}{suffix}"
+
+    @classmethod
+    def _quote_database_identifier(cls, database_name: str) -> str:
+        safe = cls.normalise_database_name(database_name).replace('"', '""')
+        return f'"{safe}"'
 
     @staticmethod
     def _normalise_postgres_driver_url(url: Optional[str]) -> Optional[str]:
@@ -134,7 +187,7 @@ class DatabaseManager:
             Engine: 指向指定数据库的引擎
         """
         base_url = make_url(self.db_url)
-        db_url = base_url.set(database=database_name)
+        db_url = base_url.set(database=self.normalise_database_name(database_name))
         return self._create_engine(db_url)
 
     def ensure_database(self, database_name: str) -> bool:
@@ -160,7 +213,7 @@ class DatabaseManager:
             # especially for Postgres which cannot CREATE DATABASE in a transaction block
             engine = self._create_engine(base_url, isolation_level="AUTOCOMMIT")
             
-            database_name_sanitized = database_name.replace("`", "").replace('"', "")
+            database_name_sanitized = self.normalise_database_name(database_name)
             dialect_name = engine.dialect.name
 
             with engine.connect() as conn:
@@ -169,11 +222,17 @@ class DatabaseManager:
                 exists = False
                 if dialect_name == 'postgresql':
                     # Postgres check
-                    result = conn.execute(text(f"SELECT 1 FROM pg_database WHERE datname = '{database_name_sanitized}'"))
+                    result = conn.execute(
+                        text("SELECT 1 FROM pg_database WHERE datname = :database_name"),
+                        {"database_name": database_name_sanitized},
+                    )
                     exists = result.scalar() == 1
                 elif dialect_name == 'mysql':
                     # MySQL check
-                    result = conn.execute(text(f"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '{database_name_sanitized}'"))
+                    result = conn.execute(
+                        text("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = :database_name"),
+                        {"database_name": database_name_sanitized},
+                    )
                     exists = bool(result.scalar())
                 else:
                     # Fallback check
@@ -185,7 +244,7 @@ class DatabaseManager:
 
                 if not exists:
                     if dialect_name == 'postgresql':
-                         conn.execute(text(f'CREATE DATABASE "{database_name_sanitized}"'))
+                         conn.execute(text(f"CREATE DATABASE {self._quote_database_identifier(database_name_sanitized)}"))
                     elif dialect_name == 'mysql':
                         conn.execute(text(
                             f"CREATE DATABASE IF NOT EXISTS `{database_name_sanitized}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
@@ -219,7 +278,7 @@ class DatabaseManager:
                 base_url = base_url.set(database=None)
             engine = self._create_engine(base_url, isolation_level="AUTOCOMMIT")
             
-            database_name_sanitized = database_name.replace("`", "").replace('"', "")
+            database_name_sanitized = self.normalise_database_name(database_name)
             dialect_name = engine.dialect.name
 
             with engine.connect() as conn:
@@ -227,20 +286,23 @@ class DatabaseManager:
                     # Postgres requires forcing disconnection of other users before dropping
                     try:
                          # 1. Disallow new connections to avoid race condition
-                         conn.execute(text(f"UPDATE pg_database SET datallowconn = 'false' WHERE datname = '{database_name_sanitized}'"))
+                         conn.execute(
+                             text("UPDATE pg_database SET datallowconn = 'false' WHERE datname = :database_name"),
+                             {"database_name": database_name_sanitized},
+                         )
                          
                          # 2. Terminate existing connections
-                         conn.execute(text(f"""
+                         conn.execute(text("""
                             SELECT pg_terminate_backend(pid) 
                             FROM pg_stat_activity 
-                            WHERE datname = '{database_name_sanitized}'
+                            WHERE datname = :database_name
                             AND pid <> pg_backend_pid()
-                         """))
+                         """), {"database_name": database_name_sanitized})
                     except Exception as e:
                         print(f"DEBUG: Terminate connections failed/ignored: {e}")
                         pass 
                     
-                    conn.execute(text(f'DROP DATABASE IF EXISTS "{database_name_sanitized}"'))
+                    conn.execute(text(f"DROP DATABASE IF EXISTS {self._quote_database_identifier(database_name_sanitized)}"))
                 elif dialect_name == 'mysql':
                     conn.execute(text(f"DROP DATABASE IF EXISTS `{database_name_sanitized}`"))
                 else:
